@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
   AlertDialog,
@@ -287,10 +287,14 @@ export default function DesktopAdminTab({
   const [resourcePayloadText, setResourcePayloadText] = useState(JSON.stringify(emptyResourceForm().payload, null, 2));
   const [updateFile, setUpdateFile] = useState<File | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{ kind: 'resource' | 'backup'; id: string } | null>(null);
+  const [resourceDraftVersion, setResourceDraftVersion] = useState(0);
+  const resourceDeleteOrigin = useRef<HTMLButtonElement | null>(null);
+  const resourceContainer = useRef<HTMLDivElement | null>(null);
+  const resourcePayload = useMemo(() => safeJsonParse(resourcePayloadText) ?? resourceForm.payload, [resourcePayloadText, resourceForm.payload]);
 
   const cardClass = `${softClass} rounded-xl border ${isDark ? 'border-white/10' : 'border-gray-200'}`;
-  const buttonGhost = `rounded-lg px-3 py-2 text-xs font-medium transition-colors ${isDark ? 'bg-white/5 hover:bg-white/10 text-white/75' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'}`;
-  const buttonPrimary = `rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${accentBgClass} ${accentTextOnBgClass} ${accentHoverBgClass}`;
+  const buttonGhost = `inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center whitespace-nowrap rounded-lg px-3 py-2 text-xs font-medium transition-colors ${isDark ? 'bg-white/5 hover:bg-white/10 text-white/75' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'}`;
+  const buttonPrimary = `inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center whitespace-nowrap rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${accentBgClass} ${accentTextOnBgClass} ${accentHoverBgClass}`;
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -532,8 +536,8 @@ export default function DesktopAdminTab({
   ];
 
   return (
-    <div className="h-full overflow-y-auto p-6">
-      <div className="flex items-start justify-between gap-4 mb-5">
+    <div ref={resourceContainer} tabIndex={-1} className="h-full overflow-y-auto p-4 sm:p-6 [overflow-wrap:anywhere] [&_.grid>*]:min-w-0 [&_svg]:shrink-0 max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11 max-md:[&_input:not([type=checkbox])]:min-h-11 max-md:[&_input:not([type=checkbox])]:text-base max-md:[&_select]:min-h-11 max-md:[&_select]:text-base max-md:[&_textarea]:text-base">
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-5">
         <div>
           <h1 className={`text-xl font-bold ${textPrimary}`}>本地无界管理</h1>
           <p className={`text-sm ${textSecondary}`}>把旧云端管理系统的桌面更新、备份、连接信息和资源中心合并到云端无界工作台。</p>
@@ -549,7 +553,7 @@ export default function DesktopAdminTab({
           <button
             key={item.key}
             onClick={() => setSection(item.key)}
-            className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${section === item.key ? `${accentBgClass} ${accentTextOnBgClass}` : `${textSecondary} ${isDark ? 'hover:bg-white/5' : 'hover:bg-white'}`}`}
+            className={`flex min-h-11 min-w-11 shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${section === item.key ? `${accentBgClass} ${accentTextOnBgClass}` : `${textSecondary} ${isDark ? 'hover:bg-white/5' : 'hover:bg-white'}`}`}
           >
             <item.icon size={14} />
             {item.label}
@@ -582,7 +586,7 @@ export default function DesktopAdminTab({
             <h2 className={`font-semibold mb-3 ${textPrimary}`}>最近设备</h2>
             <ListEmpty show={devices.length === 0} text="暂无本地实例连接" textSecondary={textSecondary} />
             {devices.slice(0, 6).map((item, idx) => (
-              <div key={String(item.id || idx)} className="flex items-center justify-between py-2 text-xs border-b border-white/5 last:border-0">
+              <div key={String(item.id || idx)} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 py-2 text-xs border-b border-white/5 last:border-0">
                 <div className={textPrimary}>{String(item.device_id || item.deviceId || item.id || 'unknown')}</div>
                 <div className={textSecondary}>{formatTime(item.last_seen_at)}</div>
               </div>
@@ -592,15 +596,15 @@ export default function DesktopAdminTab({
             <h2 className={`font-semibold mb-3 ${textPrimary}`}>最近备份</h2>
             <ListEmpty show={backups.length === 0} text="暂无备份" textSecondary={textSecondary} />
             {backups.slice(0, 6).map(item => (
-              <div key={item.id} className="flex items-center justify-between py-2 text-xs border-b border-white/5 last:border-0">
-                <div className={`${textPrimary} truncate`}>{item.originalFilename || item.filename}</div>
+              <div key={item.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 py-2 text-xs border-b border-white/5 last:border-0">
+                <div className={`${textPrimary} truncate max-md:whitespace-normal max-md:overflow-visible`}>{item.originalFilename || item.filename}</div>
                 <div className={textSecondary}>{formatBytes(item.size)}</div>
               </div>
             ))}
           </div>
           <div className={`${cardClass} p-4`}>
             <h2 className={`font-semibold mb-3 ${textPrimary}`}>连接配置</h2>
-            <pre className={`max-h-40 overflow-auto rounded-lg p-3 text-xs leading-6 ${isDark ? 'bg-black/40 text-white/80' : 'bg-white text-gray-700'}`}>{desktopEnvText}</pre>
+            <pre className={`max-h-40 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] rounded-lg p-3 text-xs leading-6 ${isDark ? 'bg-black/40 text-white/80' : 'bg-white text-gray-700'}`}>{desktopEnvText}</pre>
           </div>
         </div>
       )}
@@ -615,7 +619,7 @@ export default function DesktopAdminTab({
           </div>
 
           <div className={`${cardClass} p-5`}>
-            <div className="flex items-center justify-between gap-3 mb-5">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
               <div>
                 <h2 className={`font-semibold ${textPrimary}`}>发布更新</h2>
                 <p className={`text-xs mt-1 ${textSecondary}`}>支持填写 CDN 下载地址，也支持直接上传 exe/msi/zip 更新包并生成云端下载地址。</p>
@@ -687,7 +691,7 @@ export default function DesktopAdminTab({
 
       {section === 'connection' && (
         <div className={`${cardClass} p-5`}>
-          <div className="flex items-center justify-between gap-3 mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
             <div>
               <h2 className={`font-semibold ${textPrimary}`}>runtime.env 配置</h2>
               <p className={`text-xs mt-1 ${textSecondary}`}>添加到桌面端 desktop/config/runtime.env 或安装后的配置文件即可连接云端。</p>
@@ -702,13 +706,13 @@ export default function DesktopAdminTab({
       {section === 'resources' && (
         <div className="space-y-5">
           <div className={`${cardClass} p-5`}>
-            <div className="flex items-center justify-between gap-3 mb-5">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
               <div>
                 <h2 className={`font-semibold ${textPrimary}`}>{resourceForm.id ? '编辑公共资源' : '新增公共资源'}</h2>
                 <p className={`text-xs mt-1 ${textSecondary}`}>不同资源类型会显示不同录入字段；素材、模板、品牌和案例图库支持上传缩略图。</p>
               </div>
               <div className="flex gap-2">
-                <button className={buttonGhost} onClick={() => resetResourceForm(resourceForm.type)}>清空</button>
+                <button className={buttonGhost} onClick={() => { setResourceDraftVersion(value => value + 1); resetResourceForm(resourceForm.type); }}>清空</button>
                 <button className={buttonPrimary} onClick={() => void saveResource()} disabled={savingResource}><Save size={13} className="inline mr-1" />{savingResource ? '保存中...' : '保存资源'}</button>
               </div>
             </div>
@@ -723,9 +727,9 @@ export default function DesktopAdminTab({
               {resourceForm.thumbnailUrl && <div className="md:col-span-2 flex items-center gap-3"><img src={resourceForm.thumbnailUrl} alt="" className="h-20 w-28 rounded-lg object-cover border border-white/10" /><button className={buttonGhost} onClick={() => setResourceForm(prev => ({ ...prev, thumbnailUrl: '' }))}>移除缩略图</button></div>}
               {resourceForm.type === 'material' && <Field label="上传素材文件" className="md:col-span-2"><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} type="file" onChange={e => void handleAssetFile(e.target.files?.[0])} /></Field>}
               <Field label={resourceMeta(resourceForm.type).contentLabel} className="md:col-span-2"><textarea className={`w-full h-28 px-3 py-2 rounded-lg border text-sm ${inputClass} resize-y`} value={resourceForm.content} onChange={e => setResourceForm(prev => ({ ...prev, content: e.target.value }))} placeholder={resourceMeta(resourceForm.type).contentPlaceholder} /></Field>
-              {resourceForm.type === 'ecom-template' && <><Field label="模板 ID"><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} onChange={e => updatePayloadField('id', e.target.value)} placeholder="white-bg-main" /></Field><Field label="画面比例"><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} onChange={e => updatePayloadField('aspectRatio', e.target.value)} placeholder="1:1" /></Field></>}
-              {resourceForm.type === 'brand-template' && <><Field label="主色"><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} type="color" onChange={e => updatePayloadField('primaryColor', e.target.value)} defaultValue="#d4af37" /></Field><Field label="辅助色"><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} type="color" onChange={e => updatePayloadField('secondaryColor', e.target.value)} defaultValue="#111111" /></Field></>}
-              {resourceForm.type === 'agent-template' && <><Field label="最大轮次"><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} type="number" min={1} max={10} onChange={e => updatePayloadField('maxRounds', Number(e.target.value || 5))} defaultValue={5} /></Field><Field label="默认工具，逗号分隔"><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} onChange={e => updatePayloadField('tools', e.target.value.split(',').map(v => v.trim()).filter(Boolean))} /></Field></>}
+              {resourceForm.type === 'ecom-template' && <><Field label="模板 ID"><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} value={typeof resourcePayload.id === 'string' ? resourcePayload.id : ''} onChange={e => updatePayloadField('id', e.target.value)} placeholder="white-bg-main" /></Field><Field label="画面比例"><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} value={typeof resourcePayload.aspectRatio === 'string' ? resourcePayload.aspectRatio : ''} onChange={e => updatePayloadField('aspectRatio', e.target.value)} placeholder="1:1" /></Field></>}
+              {resourceForm.type === 'brand-template' && <><Field label="主色"><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} type="color" value={typeof resourcePayload.primaryColor === 'string' && /^#[0-9a-f]{6}$/i.test(resourcePayload.primaryColor) ? resourcePayload.primaryColor : '#d4af37'} onChange={e => updatePayloadField('primaryColor', e.target.value)} /></Field><Field label="辅助色"><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} type="color" value={typeof resourcePayload.secondaryColor === 'string' && /^#[0-9a-f]{6}$/i.test(resourcePayload.secondaryColor) ? resourcePayload.secondaryColor : '#111111'} onChange={e => updatePayloadField('secondaryColor', e.target.value)} /></Field></>}
+              {resourceForm.type === 'agent-template' && <><Field label="最大轮次"><input className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} type="number" min={1} max={10} value={typeof resourcePayload.maxRounds === 'number' && Number.isFinite(resourcePayload.maxRounds) ? resourcePayload.maxRounds : 5} onChange={e => updatePayloadField('maxRounds', Number(e.target.value || 5))} /></Field><Field label="默认工具，逗号分隔"><ResourceToolsInput key={`${resourceForm.id || 'new'}:${resourceDraftVersion}`} className={`w-full h-10 px-3 rounded-lg border text-sm ${inputClass}`} tools={resourcePayload.tools} onChange={e => updatePayloadField('tools', e.target.value.split(',').map(v => v.trim()).filter(Boolean))} /></Field></>}
               {(resourceForm.type === 'workflow-template' || resourceForm.type === 'favorite-preset' || resourceForm.type === 'font-gallery') && <div className={`md:col-span-2 rounded-lg border p-3 text-sm ${isDark ? 'border-white/10 bg-black/20 text-white/60' : 'border-gray-200 bg-white text-gray-500'}`}>{resourceForm.type === 'workflow-template' && '请在高级 JSON 中填写 nodes、edges、version 等工作流结构。'}{resourceForm.type === 'favorite-preset' && '请在高级 JSON 中填写 targetTool 与 settings，用户端会作为管理员预设调用。'}{resourceForm.type === 'font-gallery' && '请上传案例缩略图，并在高级 JSON 中填写 style、fontMood、referenceUrl 等字段。'}</div>}
               <Field label="高级 JSON 参数" className="md:col-span-2"><textarea className={`w-full h-32 px-3 py-2 rounded-lg border text-sm font-mono ${inputClass} resize-y`} value={resourcePayloadText} onChange={e => setResourcePayloadText(e.target.value)} /></Field>
               <label className={`flex items-center gap-2 rounded-lg border px-3 py-3 text-sm ${isDark ? 'border-white/10 bg-black/20' : 'border-gray-200 bg-white'} ${textPrimary}`}><input type="checkbox" checked={resourceForm.enabled} onChange={e => setResourceForm(prev => ({ ...prev, enabled: e.target.checked }))} />启用资源</label>
@@ -733,14 +737,14 @@ export default function DesktopAdminTab({
             </div>
           </div>
 
-          <DataCard title="公共资源列表" cardClass={cardClass} textPrimary={textPrimary} action={<div className="relative"><Search size={14} className={`absolute left-3 top-3 ${textSecondary}`} /><input className={`h-10 w-64 rounded-lg border pl-9 pr-3 text-sm ${inputClass}`} placeholder="搜索资源" value={resourceSearch} onChange={e => setResourceSearch(e.target.value)} /></div>}>
+          <DataCard title="公共资源列表" cardClass={cardClass} textPrimary={textPrimary} action={<div className="relative w-full sm:w-auto"><Search size={14} className={`absolute left-3 top-3 ${textSecondary}`} /><input className={`h-10 w-full sm:w-64 max-w-full rounded-lg border pl-9 pr-3 text-sm ${inputClass}`} placeholder="搜索资源" value={resourceSearch} onChange={e => setResourceSearch(e.target.value)} /></div>}>
             <Table headers={['资源', '类型 / 分类', '状态', '操作']}>
               {filteredResources.map(item => (
                 <tr key={item.id}>
                   <td><div className="flex items-center gap-3">{item.thumbnailUrl ? <img src={item.thumbnailUrl} alt="" className="h-11 w-14 rounded object-cover" /> : <div className="h-11 w-14 rounded bg-black/20" />}<div><div className={`font-medium ${textPrimary}`}>{item.name}</div><div className={`text-xs ${textSecondary}`}>{item.description || item.id}</div></div></div></td>
                   <td><div>{resourceMeta(item.type).label}</div><div className={`text-xs ${textSecondary}`}>{item.category || '-'}</div></td>
                   <td>{item.enabled ? <span className="inline-flex items-center gap-1 text-emerald-400"><CheckCircle2 size={13} />启用</span> : <span className={textSecondary}>停用</span>}</td>
-                  <td><div className="flex gap-2"><button className={buttonGhost} onClick={() => editResource(item)}>编辑</button><button className="rounded-lg px-3 py-2 text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20" onClick={() => setPendingDelete({ kind: 'resource', id: item.id })}>删除</button></div></td>
+                  <td><div className="flex gap-2"><button className={buttonGhost} onClick={() => { setResourceDraftVersion(value => value + 1); editResource(item); }}>编辑</button><button className="rounded-lg px-3 py-2 text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20" onClick={event => { resourceDeleteOrigin.current = event.currentTarget; setPendingDelete({ kind: 'resource', id: item.id }); }}>删除</button></div></td>
                 </tr>
               ))}
               {filteredResources.length === 0 && <EmptyRow colSpan={4} text="暂无公共资源" textSecondary={textSecondary} />}
@@ -750,7 +754,7 @@ export default function DesktopAdminTab({
       )}
 
       {section === 'records' && (
-        <DataCard title="本地生成记录" cardClass={cardClass} textPrimary={textPrimary} action={<input className={`h-10 w-72 rounded-lg border px-3 text-sm ${inputClass}`} placeholder="搜索提示词、模型、用户或设备" value={recordSearch} onChange={e => setRecordSearch(e.target.value)} />}>
+        <DataCard title="本地生成记录" cardClass={cardClass} textPrimary={textPrimary} action={<input className={`h-10 w-full sm:w-72 max-w-full rounded-lg border px-3 text-sm ${inputClass}`} placeholder="搜索提示词、模型、用户或设备" value={recordSearch} onChange={e => setRecordSearch(e.target.value)} />}>
           <Table headers={['缩略图', '提示词 / 模型', '用户 / 设备', '时间']}>
             {filteredRecords.map((item, idx) => (
               <tr key={String(item.id || idx)}>
@@ -766,7 +770,13 @@ export default function DesktopAdminTab({
       )}
 
       <AlertDialog open={Boolean(pendingDelete)} onOpenChange={open => { if (!open) setPendingDelete(null); }}>
-        <AlertDialogContent>
+        <AlertDialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto [&_button]:min-h-11 [&_button]:min-w-11 [&_[data-slot=alert-dialog-header]]:shrink-0 [&_[data-slot=alert-dialog-footer]]:shrink-0" onCloseAutoFocus={event => {
+          const origin = resourceDeleteOrigin.current;
+          if (!origin) return;
+          resourceDeleteOrigin.current = null;
+          event.preventDefault();
+          (origin.isConnected ? origin : resourceContainer.current)?.focus();
+        }}>
           <AlertDialogHeader>
             <AlertDialogTitle>确认删除</AlertDialogTitle>
             <AlertDialogDescription>
@@ -785,6 +795,16 @@ export default function DesktopAdminTab({
   );
 }
 
+// Keep unfinished comma-separated input intact while synchronizing JSON edits.
+function ResourceToolsInput({ tools, onChange, className }: { tools: unknown; onChange: React.ChangeEventHandler<HTMLInputElement>; className: string }): React.JSX.Element {
+  const values = useMemo(() => Array.isArray(tools) ? tools.filter((tool): tool is string => typeof tool === 'string') : [], [tools]);
+  const [draft, setDraft] = useState(() => values.join(', '));
+  useEffect(() => {
+    setDraft(current => JSON.stringify(current.split(',').map(value => value.trim()).filter(Boolean)) === JSON.stringify(values) ? current : values.join(', '));
+  }, [values]);
+  return <input className={className} value={draft} onChange={event => { setDraft(event.target.value); onChange(event); }} />;
+}
+
 function Field({ label, children, className = '' }: { label: string; children: React.ReactNode; className?: string }) {
   return (
     <label className={`block ${className}`}>
@@ -797,7 +817,7 @@ function Field({ label, children, className = '' }: { label: string; children: R
 function DataCard({ title, action, children, cardClass, textPrimary }: { title: string; action?: React.ReactNode; children: React.ReactNode; cardClass: string; textPrimary: string }) {
   return (
     <div className={`${cardClass} p-5`}>
-      <div className="mb-4 flex items-center justify-between gap-3">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h2 className={`font-semibold ${textPrimary}`}>{title}</h2>
         {action}
       </div>
@@ -808,7 +828,7 @@ function DataCard({ title, action, children, cardClass, textPrimary }: { title: 
 
 function Table({ headers, children }: { headers: string[]; children: React.ReactNode }) {
   return (
-    <div className="overflow-auto">
+    <div role="region" aria-label="本地无界数据表，可横向滚动" tabIndex={0} className="min-w-0 max-w-full overflow-auto">
       <table className="w-full min-w-[760px] text-sm">
         <thead>
           <tr className="border-b border-white/10 text-left text-xs text-zinc-500">

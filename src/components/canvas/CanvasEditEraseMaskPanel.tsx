@@ -5,6 +5,19 @@
 /* M7-0 机械拆出自 infinite-canvas.tsx 的擦除/蒙版编辑面板块。零行为变化，仅迁移渲染 JSX。 */
 
 import * as React from 'react';
+import { createPortal } from 'react-dom';
+
+function subscribeEditViewport(notify: () => void): () => void {
+  window.addEventListener('resize', notify);
+  return () => window.removeEventListener('resize', notify);
+}
+function getEditViewportSnapshot(): string {
+  return window.innerWidth + 'x' + window.innerHeight;
+}
+function getServerEditViewportSnapshot(): string {
+  return '';
+}
+
 import { Eraser, Maximize2, Minus, Paintbrush, Plus, RotateCcw, Trash2, Wand2, X } from 'lucide-react';
 import type { CanvasImage, EditMode } from '@/components/infinite-canvas';
 import { getCanvasEditImageSource } from '@/lib/canvas-edit-image-source';
@@ -85,7 +98,19 @@ export function CanvasEditEraseMaskPanel(props: CanvasEditEraseMaskPanelProps) {
     setEditSourceLoadState,
     bindEditCanvasWheelElement,
   } = props;
-  return (
+  const viewport = React.useSyncExternalStore(
+    subscribeEditViewport, getEditViewportSnapshot, getServerEditViewportSnapshot,
+  );
+  const [viewportWidth, viewportHeight] = viewport.split('x').map(Number);
+  const isMobilePanel = viewportWidth > 0 && viewportWidth < 768;
+  const touchPointerRef = React.useRef<number | null>(null);
+  React.useEffect(() => () => {
+    if (touchPointerRef.current === null) return;
+    touchPointerRef.current = null;
+    isDrawingRef.current = false;
+    currentStrokeRef.current = [];
+  }, [editMode, editImageId, isDrawingRef, currentStrokeRef]);
+  const panel = (
     <>
 {/* ====== ERASE/MASK FLOATING WINDOW ====== */}
         {(editMode === 'erase' || editMode === 'mask') && (() => {
@@ -95,23 +120,54 @@ export function CanvasEditEraseMaskPanel(props: CanvasEditEraseMaskPanelProps) {
           const imgOrigH = editImg.originalHeight || Math.round(editImg.height);
           const isErase = editMode === 'erase';
           // Window dimensions
-          const winW = Math.min(900, typeof window !== 'undefined' ? window.innerWidth - 80 : 900);
-          const winH = Math.min(600, typeof window !== 'undefined' ? window.innerHeight - 120 : 600);
-          // Canvas area (left) takes ~70% of window
-          const canvasAreaW = Math.round(winW * 0.7);
-          const sidebarW = winW - canvasAreaW;
-          // Calculate image fit in canvas area
-          const fitScale = Math.min((canvasAreaW - 40) / imgOrigW, (winH - 80) / imgOrigH, 1) * editCanvasZoom;
+          const winW = isMobilePanel ? Math.max(0, viewportWidth - 24)
+            : Math.min(900, typeof window !== 'undefined' ? window.innerWidth - 80 : 900);
+          const winH = isMobilePanel ? Math.max(0, viewportHeight - 24)
+            : Math.min(600, typeof window !== 'undefined' ? window.innerHeight - 120 : 600);
+          const canvasAreaW = isMobilePanel ? winW : Math.round(winW * 0.7);
+          const canvasAreaH = isMobilePanel ? Math.max(112, Math.min(240, Math.round(winH * 0.36))) : winH;
+          const sidebarW = isMobilePanel ? winW : winW - canvasAreaW;
+          // Keep the desktop fit unchanged; mobile fits within its separate drawing section.
+          const fitScale = Math.min((canvasAreaW - (isMobilePanel ? 24 : 40)) / imgOrigW,
+            (isMobilePanel ? canvasAreaH - 24 : winH - 80) / imgOrigH, 1) * editCanvasZoom;
           const displayW = imgOrigW * fitScale;
           const displayH = imgOrigH * fitScale;
           const canvasCenterX = (canvasAreaW - displayW) / 2 + editCanvasPan.x;
-          const canvasCenterY = (winH - displayH) / 2 + editCanvasPan.y;
+          const canvasCenterY = (canvasAreaH - displayH) / 2 + editCanvasPan.y;
+          const touchPoint = (event: React.PointerEvent<HTMLDivElement>): StrokePoint => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            return {
+              x: Math.max(0, Math.min(imgOrigW, (event.clientX - rect.left) / Math.max(rect.width, 1) * imgOrigW)),
+              y: Math.max(0, Math.min(imgOrigH, (event.clientY - rect.top) / Math.max(rect.height, 1) * imgOrigH)),
+              reverse: event.shiftKey || editBrushMode === 'eraser',
+            };
+          };
+          const finishTouchStroke = (event: React.PointerEvent<HTMLDivElement>, commit: boolean): void => {
+            if (event.pointerType === 'mouse') return;
+            event.preventDefault();
+            event.stopPropagation();
+            if (touchPointerRef.current !== event.pointerId) return;
+            touchPointerRef.current = null;
+            isDrawingRef.current = false;
+            const stroke = currentStrokeRef.current;
+            if (commit && stroke.length > 0) {
+              setEditStrokes(previous => [...previous, stroke]);
+              setStrokesVersion(version => version + 1);
+            }
+            currentStrokeRef.current = [];
+            setCurrentStroke([]);
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+              event.currentTarget.releasePointerCapture(event.pointerId);
+            }
+          };
+
 
           return (
             <div
               data-floating-panel={isErase ? 'erase' : 'mask'}
               className="fixed inset-0 z-[200] flex items-center justify-center motion-reduce:transition-none"
               style={{ cursor: 'default' }}
+              onPointerLeave={(event) => { if (event.pointerType !== 'mouse') event.stopPropagation(); }}
               onMouseDown={(e) => e.stopPropagation()}
               onMouseMove={(e) => e.stopPropagation()}
               onMouseUp={(e) => e.stopPropagation()}
@@ -122,30 +178,30 @@ export function CanvasEditEraseMaskPanel(props: CanvasEditEraseMaskPanelProps) {
               <div className="absolute inset-0 bg-black/40" onClick={exitEditMode} />
               {/* Window */}
               <div
-                className={`relative rounded-2xl border shadow-2xl overflow-hidden ${isMonochrome ? 'bg-gray-100 border-gray-300' : 'bg-[#1a1a1a] border-[#444]'}`}
+                className={`relative rounded-2xl border shadow-2xl overflow-hidden max-md:flex max-md:flex-col max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11 max-md:[&_input]:!min-h-11 ${isMonochrome ? 'bg-gray-100 border-gray-300' : 'bg-[#1a1a1a] border-[#444]'}`}
                 style={{ width: winW, height: winH, cursor: 'default' }}
               >
                 {/* Title bar */}
                 <div className={`flex items-center justify-between px-4 py-2.5 border-b ${isMonochrome ? 'border-gray-200 bg-white' : 'border-[#444] bg-[#222]'}`}>
-                  <div className="flex items-center gap-2">
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
                     {isErase ? <Paintbrush size={14} className={isMonochrome ? 'text-blue-500' : 'text-gold'} /> : <Wand2 size={14} className={isMonochrome ? 'text-blue-500' : 'text-gold'} />}
                     <span className={`text-sm font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>
                       {isErase ? '擦除' : '蒙版修图'}
                     </span>
-                    <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/70'}`}>
-                      涂抹区域后点击&apos;开始修复&apos; · Shift+左键擦除涂抹
+                    <span className={`text-xs max-md:basis-full max-md:leading-5 ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/70'}`}>
+                      {isMobilePanel ? '涂抹目标区域，可切换橡皮擦' : <>涂抹区域后点击&apos;开始修复&apos; · Shift+左键擦除涂抹</>}
                     </span>
                   </div>
-                  <button onClick={exitEditMode} className={`p-1 rounded-lg transition-colors ${isMonochrome ? 'text-blue-500 hover:text-blue-700 hover:bg-blue-50' : 'text-gold-muted/70 hover:text-white hover:bg-[#282828]/85'}`}>
+                  <button aria-label={isErase ? '关闭擦除' : '关闭蒙版修图'} onClick={exitEditMode} className={`p-1 rounded-lg transition-colors ${isMonochrome ? 'text-blue-500 hover:text-blue-700 hover:bg-blue-50' : 'text-gold-muted/70 hover:text-white hover:bg-[#282828]/85'}`}>
                     <X size={16} />
                   </button>
                 </div>
 
-                <div className="flex" style={{ height: winH - 44 }}>
+                <div className="flex max-md:min-h-0 max-md:flex-1 max-md:flex-col max-md:overflow-y-auto max-md:overscroll-contain max-md:touch-pan-y" style={{ height: isMobilePanel ? undefined : winH - 44 }}>
                   {/* Left: Canvas area with checkered bg */}
                   <div
-                    className={`relative overflow-hidden ${isMonochrome ? 'bg-gray-200' : 'bg-[#0d0d0d]'}`}
-                    style={{ width: canvasAreaW, cursor: 'default' }}
+                    className={`relative overflow-hidden max-md:shrink-0 ${isMonochrome ? 'bg-gray-200' : 'bg-[#0d0d0d]'}`}
+                    style={{ width: canvasAreaW, ...(isMobilePanel ? { height: canvasAreaH } : {}), cursor: 'default' }}
                     onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
                     ref={bindEditCanvasWheelElement}
                   >
@@ -261,7 +317,49 @@ export function CanvasEditEraseMaskPanel(props: CanvasEditEraseMaskPanelProps) {
                         style={{
                           cursor: editSourceLoadState === 'loaded' ? 'crosshair' : 'not-allowed',
                           pointerEvents: editSourceLoadState === 'loaded' ? 'auto' : 'none',
+                          touchAction: 'none',
                         }}
+                        onPointerDown={(event) => {
+                          if (event.pointerType === 'mouse') return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          if (touchPointerRef.current !== null || editSourceLoadState !== 'loaded' || isEditProcessing) return;
+                          touchPointerRef.current = event.pointerId;
+                          const first = touchPoint(event);
+                          currentStrokeRef.current = [first];
+                          setCurrentStroke([first]);
+                          isDrawingRef.current = true;
+                          isAltErasingRef.current = first.reverse;
+                          event.currentTarget.setPointerCapture(event.pointerId);
+                        }}
+                        onPointerMove={(event) => {
+                          if (touchPointerRef.current !== event.pointerId) return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          const point = touchPoint(event);
+                          const points = currentStrokeRef.current;
+                          const last = points[points.length - 1];
+                          if (last) {
+                            const distance = Math.hypot(point.x - last.x, point.y - last.y);
+                            const step = Math.max(1, brushSize / fitScale / 4);
+                            if (distance > step) {
+                              const count = Math.ceil(distance / step);
+                              for (let index = 1; index <= count; index++) {
+                                const fraction = index / count;
+                                points.push({
+                                  x: last.x + (point.x - last.x) * fraction,
+                                  y: last.y + (point.y - last.y) * fraction,
+                                  reverse: point.reverse,
+                                });
+                              }
+                            }
+                          }
+                          points.push(point);
+                          setCurrentStroke([...points]);
+                        }}
+                        onPointerUp={(event) => finishTouchStroke(event, true)}
+                        onPointerCancel={(event) => finishTouchStroke(event, false)}
+                        onLostPointerCapture={(event) => finishTouchStroke(event, false)}
                         onMouseDown={(e) => {
                           e.stopPropagation();
                           e.preventDefault();
@@ -355,15 +453,15 @@ export function CanvasEditEraseMaskPanel(props: CanvasEditEraseMaskPanelProps) {
                     </div>
                     {/* Zoom controls overlay */}
                     <div className={`absolute bottom-3 left-3 flex items-center gap-1 px-2 py-1 rounded-lg text-xs ${isMonochrome ? 'bg-white/80 text-gray-600' : 'bg-[#2a2a2a] text-[#999]'}`} style={{ cursor: 'default' }}>
-                      <button onClick={(e) => { e.stopPropagation(); setEditCanvasZoom(z => Math.max(0.25, z / 1.2)); }} className="p-0.5 hover:text-gold"><Minus size={12} /></button>
+                      <button aria-label="缩小编辑视图" onClick={(e) => { e.stopPropagation(); setEditCanvasZoom(z => Math.max(0.25, z / 1.2)); }} className="p-0.5 hover:text-gold"><Minus size={12} /></button>
                       <span className="w-10 text-center tabular-nums">{Math.round(editCanvasZoom * 100)}%</span>
-                      <button onClick={(e) => { e.stopPropagation(); setEditCanvasZoom(z => Math.min(5, z * 1.2)); }} className="p-0.5 hover:text-gold"><Plus size={12} /></button>
-                      <button onClick={(e) => { e.stopPropagation(); setEditCanvasZoom(1); setEditCanvasPan({ x: 0, y: 0 }); }} className="p-0.5 hover:text-gold"><Maximize2 size={12} /></button>
+                      <button aria-label="放大编辑视图" onClick={(e) => { e.stopPropagation(); setEditCanvasZoom(z => Math.min(5, z * 1.2)); }} className="p-0.5 hover:text-gold"><Plus size={12} /></button>
+                      <button aria-label="重置编辑视图" onClick={(e) => { e.stopPropagation(); setEditCanvasZoom(1); setEditCanvasPan({ x: 0, y: 0 }); }} className="p-0.5 hover:text-gold"><Maximize2 size={12} /></button>
                     </div>
                     </div>
 
                   {/* Right: Sidebar controls */}
-                  <div className={`flex flex-col border-l ${isMonochrome ? 'border-gray-200 bg-white' : 'border-[#444] bg-[#1e1e1e]'}`} style={{ width: sidebarW }}>
+                  <div className={`flex flex-col border-l max-md:shrink-0 max-md:border-l-0 max-md:border-t ${isMonochrome ? 'border-gray-200 bg-white' : 'border-[#444] bg-[#1e1e1e]'}`} style={{ width: sidebarW }}>
                     {/* Brush mode toggle */}
                     <div className="px-3 pt-3 pb-2">
                       <div className="flex gap-1">
@@ -404,6 +502,7 @@ export function CanvasEditEraseMaskPanel(props: CanvasEditEraseMaskPanelProps) {
                       </div>
                       <input
                         type="range"
+                        aria-label="画笔大小"
                         min="5"
                         max="200"
                         value={brushSize}
@@ -496,11 +595,12 @@ export function CanvasEditEraseMaskPanel(props: CanvasEditEraseMaskPanelProps) {
                       <div className="px-3 py-2">
                         <span className={`text-xs mb-1 block ${isMonochrome ? 'text-gray-500' : 'text-gold-muted'}`}>修复提示词 (可选)</span>
                         <textarea
+                          aria-label="修复提示词"
                           value={maskKeyword}
                           onChange={(e) => setMaskKeyword(e.target.value)}
                           placeholder="描述修复内容..."
                           rows={3}
-                          className={`w-full px-2.5 py-2 text-xs rounded-xl border resize-none ${
+                          className={`w-full px-2.5 py-2 text-xs max-md:text-base rounded-xl border resize-none ${
                             isMonochrome
                               ? 'bg-gray-50 border-gray-200 text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gold/30'
                               : 'bg-background/90 border-border text-white placeholder:text-gold-muted/50 focus:outline-none focus:ring-2 focus:ring-gold/30'
@@ -533,4 +633,5 @@ export function CanvasEditEraseMaskPanel(props: CanvasEditEraseMaskPanelProps) {
         })()}
     </>
   );
+  return isMobilePanel ? createPortal(panel, document.body) : panel;
 }

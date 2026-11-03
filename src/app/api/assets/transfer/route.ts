@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import { NextRequest, NextResponse } from 'next/server';
+import { readExpectedActor } from '@/lib/expected-actor-header';
 
 import {
   AssetServiceError,
@@ -132,6 +133,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const actorUserId = await resolveActorUserId(request);
   if (!actorUserId) {
     return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+  }
+  const expectedActor = readExpectedActor(request.headers);
+  if (expectedActor.status === 'invalid') return NextResponse.json({ error: 'ASSET_REQUEST_INVALID' }, { status: 400 });
+  if (expectedActor.status === 'present' && expectedActor.actorId !== actorUserId) {
+    return NextResponse.json({ error: 'ACTOR_SCOPE_CHANGED' }, { status: 409 });
   }
   let rawBody: unknown;
   try {

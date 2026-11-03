@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect, type PointerEvent } from 'react';
+import { useState, useRef, useCallback, useEffect, useId, type PointerEvent } from 'react';
 import { X, Settings, Sparkles, Square, GripVertical, Minus, Maximize2 } from 'lucide-react';
 
 /* ================================================================
@@ -146,6 +146,7 @@ function toDisplayDirection(direction: BrandIpDirection, index: number): Display
 
 /* ── Component ──────────────────────────────────────────────────── */
 export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps) {
+  const formId = useId();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Stage & project state
@@ -839,17 +840,18 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
             )}
           </div>
           <div className="bi-top-actions">
-            <button className="bi-icon-button" onClick={() => setShowProjectList(s => !s)} title="项目列表">
+            <button className="bi-icon-button" onClick={() => setShowProjectList(s => !s)} title="项目列表" aria-label="品牌IP项目列表">
               <Sparkles style={{ width: 15, height: 15 }} />
             </button>
             <button
               className="bi-icon-button"
               onClick={() => setIsMinimized(current => !current)}
               title={isMinimized ? '恢复窗口' : '最小化窗口'}
+              aria-label={isMinimized ? '恢复品牌IP窗口' : '最小化品牌IP窗口'}
             >
               {isMinimized ? <Maximize2 style={{ width: 15, height: 15 }} /> : <Minus style={{ width: 16, height: 16 }} />}
             </button>
-            <button className="bi-icon-button" onClick={onClose} title="关闭">
+            <button className="bi-icon-button" onClick={onClose} title="关闭" aria-label="关闭品牌IP窗口">
               <X style={{ width: 16, height: 16 }} />
             </button>
           </div>
@@ -915,6 +917,8 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
                 <button
                   key={s.num}
                   className={`${i === activeStage ? 'active' : ''} ${i < activeStage ? 'done' : ''}`}
+                  disabled={i > activeStage}
+                  aria-current={i === activeStage ? 'step' : undefined}
                   onClick={() => i <= activeStage && setActiveStage(i)}
                   style={{ opacity: i > activeStage ? 0.4 : 1, cursor: i > activeStage ? 'not-allowed' : 'pointer' }}
                 >
@@ -960,8 +964,8 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
 
                 {/* Brand name */}
                 <div className="bi-field">
-                  <label>品牌 / 项目名称 <em>*</em></label>
-                  <input
+                  <label htmlFor={`${formId}-brand`}>品牌 / 项目名称 <em>*</em></label>
+                  <input id={`${formId}-brand`}
                     value={brandName}
                     onChange={e => setBrandName(e.target.value)}
                     placeholder="例如：中国劲酒年轻化品牌IP"
@@ -970,8 +974,8 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
 
                 {/* Goal */}
                 <div className="bi-field">
-                  <label>希望IP完成什么 <em>*</em> <small>一句话即可</small></label>
-                  <textarea
+                  <label htmlFor={`${formId}-goal`}>希望IP完成什么 <em>*</em> <small>一句话即可</small></label>
+                  <textarea id={`${formId}-goal`}
                     rows={2}
                     value={goal}
                     onChange={e => setGoal(e.target.value)}
@@ -982,16 +986,16 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
                 {/* Audience & Industry */}
                 <div className="bi-setting-grid" style={{ marginBottom: 16 }}>
                   <div className="bi-field" style={{ margin: 0 }}>
-                    <label>目标受众</label>
-                    <input
+                    <label htmlFor={`${formId}-audience`}>目标受众</label>
+                    <input id={`${formId}-audience`}
                       value={audience}
                       onChange={e => setAudience(e.target.value)}
                       placeholder="25-40岁都市人群"
                     />
                   </div>
                   <div className="bi-field" style={{ margin: 0 }}>
-                    <label>所属行业</label>
-                    <input
+                    <label htmlFor={`${formId}-industry`}>所属行业</label>
+                    <input id={`${formId}-industry`}
                       value={industry}
                       onChange={e => setIndustry(e.target.value)}
                       placeholder="酒水/食品/科技"
@@ -1025,8 +1029,8 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
                 </div>
 
                 <div className="bi-field">
-                  <label>策略模型</label>
-                  <select
+                  <label htmlFor={`${formId}-strategy-model`}>策略模型</label>
+                  <select id={`${formId}-strategy-model`}
                     value={selectedChatModelKey}
                     onChange={event => setSelectedChatModelKey(event.target.value)}
                     disabled={chatModels.length === 0 || isAnalyzing}
@@ -1330,8 +1334,8 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
                       </div>
                     )}
                     <div className="bi-field" style={{ marginBottom: 10 }}>
-                      <label>图像模型</label>
-                      <select
+                      <label htmlFor={`${formId}-image-model`}>图像模型</label>
+                      <select id={`${formId}-image-model`}
                         value={selectedImageModelKey}
                         onChange={event => setSelectedImageModelKey(event.target.value)}
                         disabled={imageModels.length === 0 || generatingAsset}
@@ -1382,15 +1386,15 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
                   <span>ADVANCED</span>
                   <h2>高级设置</h2>
                 </div>
-                <button onClick={() => setShowAdvanced(false)}>×</button>
+                <button onClick={() => setShowAdvanced(false)} aria-label="关闭品牌IP高级设置">×</button>
               </div>
               <p className="bi-drawer-intro">
                 高级参数用于控制角色定位、生产限制和风险策略。不填写时系统将使用推荐默认值，不会阻塞基础流程。
               </p>
 
               <div className="bi-setting-group">
-                <label>IP 主角色定位</label>
-                <select value={advRole} onChange={e => setAdvRole(e.target.value)}>
+                <label htmlFor={`${formId}-role`}>IP 主角色定位</label>
+                <select id={`${formId}-role`} value={advRole} onChange={e => setAdvRole(e.target.value)}>
                   <option>长期代言人</option>
                   <option>活动限定角色</option>
                   <option>系列主角</option>
@@ -1400,16 +1404,16 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
 
               <div className="bi-setting-grid">
                 <div className="bi-setting-group">
-                  <label>角色数量</label>
-                  <select value={advCount} onChange={e => setAdvCount(e.target.value)}>
+                  <label htmlFor={`${formId}-count`}>角色数量</label>
+                  <select id={`${formId}-count`} value={advCount} onChange={e => setAdvCount(e.target.value)}>
                     <option value="1">1 个</option>
                     <option value="2">2 个</option>
                     <option value="3">3 个</option>
                   </select>
                 </div>
                 <div className="bi-setting-group">
-                  <label>视觉气质</label>
-                  <select value={advVibe} onChange={e => setAdvVibe(e.target.value)}>
+                  <label htmlFor={`${formId}-vibe`}>视觉气质</label>
+                  <select id={`${formId}-vibe`} value={advVibe} onChange={e => setAdvVibe(e.target.value)}>
                     <option>温暖亲和</option>
                     <option>活力运动</option>
                     <option>酷炫科技</option>
@@ -1420,8 +1424,8 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
               </div>
 
               <div className="bi-setting-group">
-                <label>生产限制</label>
-                <textarea
+                <label htmlFor={`${formId}-constraints`}>生产限制</label>
+                <textarea id={`${formId}-constraints`}
                   rows={2}
                   value={advConstraints}
                   onChange={e => setAdvConstraints(e.target.value)}
@@ -1430,8 +1434,8 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
               </div>
 
               <div className="bi-setting-group">
-                <label>禁止项</label>
-                <textarea
+                <label htmlFor={`${formId}-forbidden`}>禁止项</label>
+                <textarea id={`${formId}-forbidden`}
                   rows={2}
                   value={advForbidden}
                   onChange={e => setAdvForbidden(e.target.value)}

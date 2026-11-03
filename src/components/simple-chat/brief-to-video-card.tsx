@@ -73,7 +73,7 @@ export function BriefToVideoCard({
       </div>
       {!waitingApproval && !completed && (
         <AgentProgressTimeline projection={run.projection} stale={run.stale}
-          onCancel={() => { void control('cancel'); }} />
+          onCancel={() => control('cancel')} />
       )}
       {waitingApproval && (
         <BriefToVideoApprovalCard runId={runId} projectId={projectId} fetcher={fetcher}
@@ -84,7 +84,7 @@ export function BriefToVideoCard({
       {completed && <>
         <BriefToVideoResultCard runId={runId} projectId={projectId} fetcher={fetcher} />
         <button type="button" disabled={pending} aria-label="返回画布"
-          className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
           onClick={() => { void returnToCanvas(); }}>
           <Undo2 className="h-4 w-4" aria-hidden="true" />返回画布
         </button>

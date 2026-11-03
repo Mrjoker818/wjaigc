@@ -106,9 +106,9 @@ export function BrandResultGallery({
             return (
               <div key={templateId} className={`rounded-xl border overflow-hidden ${border}`}>
                 {/* Template header */}
-                <div className={`flex items-center justify-between px-3 py-2 ${isMonochrome ? 'bg-gray-50' : 'bg-[#1a1a1a]'}`}>
-                  <div className="flex items-center gap-2">
-                    <span className={`text-sm font-medium ${text}`}>{templateName}</span>
+                <div className={`flex flex-col items-stretch gap-2 px-3 py-2 sm:flex-row sm:items-center sm:justify-between ${isMonochrome ? 'bg-gray-50' : 'bg-[#1a1a1a]'}`}>
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <span className={`min-w-0 text-sm font-medium [overflow-wrap:anywhere] ${text}`}>{templateName}</span>
                     {hasMultipleVariants && (
                       <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${isMonochrome ? 'bg-blue-50 text-blue-500' : 'bg-[#d4af37]/10 text-[#d4af37]'}`}>
                         {successVariants.length} 个变体
@@ -119,7 +119,7 @@ export function BrandResultGallery({
                     <button
                       onClick={() => onRegenerateTemplate(templateId)}
                       disabled={isGenerating}
-                      className={`flex items-center gap-1 text-xs ${textMuted} hover:${accentText} transition-colors cursor-pointer`}
+                      className={`flex shrink-0 self-start items-center gap-1 whitespace-nowrap text-xs ${textMuted} hover:${accentText} transition-colors cursor-pointer sm:self-auto`}
                       title="重新生成"
                     >
                       <RotateCw size={12} />
@@ -141,10 +141,10 @@ export function BrandResultGallery({
                           onClick={() => onAddToCanvas([r.imageUrl!])}
                         />
                         {/* Hover overlay with actions */}
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
+                        <div className="pointer-events-none absolute inset-0 bg-black/40 opacity-100 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
                           <button
                             onClick={(e) => { e.stopPropagation(); onAddToCanvas([r.imageUrl!]); }}
-                            className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium ${accent} ${isMonochrome ? 'text-white' : 'text-black'} cursor-pointer`}
+                            className={`pointer-events-auto flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium ${accent} ${isMonochrome ? 'text-white' : 'text-black'} cursor-pointer`}
                           >
                             <Plus size={10} /> 画布
                           </button>
@@ -168,7 +168,7 @@ export function BrandResultGallery({
                     <div className="text-center px-4">
                       <X size={20} className="text-red-400 mx-auto mb-1" />
                       {Array.from(new Set(failedVariants.map(r => r.error || '生成失败'))).map(error => (
-                        <p key={error} role="alert" className="text-xs text-red-400 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{error}</p>
+                        <p key={error} role="alert" className="text-xs text-red-400 whitespace-pre-wrap [overflow-wrap:anywhere]">{error}</p>
                       ))}
                     </div>
                   </div>

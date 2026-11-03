@@ -512,7 +512,7 @@ export default function MediaGatewayAdmin() {
   return (
     <section
       data-testid="media-gateway-admin"
-      className="h-full max-w-full overflow-x-hidden overflow-y-auto bg-background p-4 text-foreground sm:p-6"
+      className="h-full min-h-0 max-w-full overflow-x-hidden overflow-y-auto bg-background p-4 text-foreground sm:p-6 max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11"
     >
       <div className="mx-auto w-full max-w-7xl space-y-5">
         <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -535,7 +535,7 @@ export default function MediaGatewayAdmin() {
           </div>
         </header>
 
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
+        <div className="grid grid-cols-1 gap-2 min-[540px]:grid-cols-2 xl:grid-cols-4 sm:gap-3">
           {[
             ['密钥总数', summary.total],
             ['正常密钥', summary.active],
@@ -550,7 +550,7 @@ export default function MediaGatewayAdmin() {
         </div>
 
         {listError && (
-          <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+          <div role="alert" className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-foreground">
             <AlertTriangle className="mt-0.5 size-4 shrink-0" />
             <span>{listError}</span>
           </div>
@@ -594,12 +594,12 @@ export default function MediaGatewayAdmin() {
       </div>
 
       <Sheet open={drawerMode !== null} onOpenChange={open => { if (!open) closeDrawer(); }}>
-        <SheetContent className="w-[calc(100%-1rem)] max-w-md overflow-x-hidden overflow-y-auto border-border sm:w-full">
-          <SheetHeader>
+        <SheetContent className="w-[calc(100%-1rem)] max-w-md overflow-x-hidden overflow-y-auto border-border sm:w-full [&_button]:min-h-11 [&_button]:min-w-11 [&_input:not([type=checkbox])]:min-h-11 [&_input:not([type=checkbox])]:text-base">
+          <SheetHeader className="shrink-0 pr-16">
             <SheetTitle>{drawerMode === 'issue' ? '签发媒体网关密钥' : '编辑媒体网关密钥'}</SheetTitle>
             <SheetDescription>{drawerMode === 'issue' ? 'Secret 只在签发成功后显示一次。' : '用户与密钥前缀不可修改。'}</SheetDescription>
           </SheetHeader>
-          <div className="space-y-4 px-4">
+          <div className="shrink-0 space-y-4 px-4">
             <FormField label="用户 ID" htmlFor="gateway-user-id">
               <Input id="gateway-user-id" value={form.userId} disabled={drawerMode === 'edit'} onChange={event => setForm(current => ({ ...current, userId: event.target.value }))} />
             </FormField>
@@ -615,14 +615,14 @@ export default function MediaGatewayAdmin() {
               </FormField>
             </div>
             {drawerMode === 'edit' && (
-              <label className="flex min-h-10 items-center justify-between gap-3 rounded-lg border border-border px-3 text-sm">
+              <label className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-border px-3 text-sm">
                 <span>启用密钥</span>
                 <input type="checkbox" checked={form.enabled} onChange={event => setForm(current => ({ ...current, enabled: event.target.checked }))} className="size-4 accent-primary" />
               </label>
             )}
             {sheetError && <ContextError message={sheetError} />}
           </div>
-          <SheetFooter>
+          <SheetFooter className="shrink-0">
             <Button onClick={() => void submitForm()} disabled={saving || (formScope !== null && lockedMutations.has(formScope))}>
               {saving ? '提交中...' : drawerMode === 'issue' ? '确认签发' : '保存修改'}
             </Button>
@@ -632,14 +632,14 @@ export default function MediaGatewayAdmin() {
       </Sheet>
 
       <Dialog open={issuedSecret !== null} onOpenChange={open => { if (!open) closeSecretDialog(); }}>
-        <DialogContent showCloseButton={false} className="max-w-[calc(100%-1rem)] overflow-x-hidden border-border sm:max-w-md">
+        <DialogContent showCloseButton={false} className="max-h-[calc(100dvh-1rem)] max-w-[calc(100%-1rem)] overflow-x-hidden overflow-y-auto border-border sm:max-w-md [&_button]:min-h-11 [&_button]:min-w-11">
           <DialogHeader>
             <DialogTitle>密钥签发成功</DialogTitle>
             <DialogDescription>这是唯一一次显示完整 Secret。关闭后无法再次查看。</DialogDescription>
           </DialogHeader>
           {issuedSecret && (
             <div className="flex min-w-0 items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
-              <code className="min-w-0 flex-1 break-all text-sm text-amber-200">{issuedSecret}</code>
+              <code className="min-w-0 flex-1 break-all text-sm text-foreground">{issuedSecret}</code>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button size="icon-sm" variant="ghost" aria-label="复制 Secret" onClick={() => void copySecret()}>
@@ -658,9 +658,9 @@ export default function MediaGatewayAdmin() {
       </Dialog>
 
       <AlertDialog open={revokeKey !== null} onOpenChange={open => { if (!open) closeRevokeDialog(); }}>
-        <AlertDialogContent>
+        <AlertDialogContent className="max-h-[calc(100dvh-1rem)] overflow-x-hidden overflow-y-auto [&_button]:min-h-11 [&_button]:min-w-11">
           <AlertDialogHeader>
-            <AlertDialogTitle>吊销 {revokeKey?.label}</AlertDialogTitle>
+            <AlertDialogTitle className="[overflow-wrap:anywhere]">吊销 {revokeKey?.label}</AlertDialogTitle>
             <AlertDialogDescription>吊销后无法恢复，使用该密钥的请求会立即被拒绝。</AlertDialogDescription>
           </AlertDialogHeader>
           {revokeError && <ContextError message={revokeError} />}
@@ -707,7 +707,7 @@ function KeyActions({ gatewayKey, onEdit, onRevoke }: Pick<RowProps, 'gatewayKey
       <Button size="icon-sm" variant="ghost" aria-label={`编辑 ${gatewayKey.label}`} onClick={() => onEdit(gatewayKey)} disabled={revoked}>
         <Pencil />
       </Button>
-      <Button size="icon-sm" variant="ghost" aria-label={`吊销 ${gatewayKey.label}`} onClick={() => onRevoke(gatewayKey)} disabled={revoked} className="text-red-400 hover:bg-red-500/10 hover:text-red-300">
+      <Button size="icon-sm" variant="ghost" aria-label={`吊销 ${gatewayKey.label}`} onClick={() => onRevoke(gatewayKey)} disabled={revoked} className="text-destructive hover:bg-destructive/10 hover:text-destructive">
         <ShieldOff />
       </Button>
     </span>
@@ -739,18 +739,18 @@ function KeyMobileRow(props: RowProps) {
     <article className="min-w-0 space-y-3 p-4">
       <div className="flex min-w-0 items-start justify-between gap-2">
         <div className="min-w-0">
-          <h2 className="truncate text-sm font-semibold">{gatewayKey.label}</h2>
-          <p className="truncate text-xs text-muted-foreground">{gatewayKey.userId}</p>
+          <h2 className="whitespace-normal text-base font-semibold [overflow-wrap:anywhere]">{gatewayKey.label}</h2>
+          <p className="whitespace-normal text-xs text-muted-foreground [overflow-wrap:anywhere]">{gatewayKey.userId}</p>
         </div>
-        <span className={`shrink-0 rounded-md px-2 py-1 text-xs ${status.className}`}>{status.label}</span>
+        <span className={`shrink-0 rounded-md px-2 py-1 text-xs text-foreground! ${status.className}`}>{status.label}</span>
       </div>
-      <div className="grid grid-cols-3 gap-2 text-xs">
-        <div><p className="text-muted-foreground">RPM</p><p className="mt-1 font-mono">{gatewayKey.requestsPerMinute}</p></div>
-        <div><p className="text-muted-foreground">今日使用</p><p className="mt-1 font-mono">{gatewayKey.todayUsage}</p></div>
-        <div><p className="text-muted-foreground">日配额</p><p className="mt-1 font-mono">{gatewayKey.dailyQuota}</p></div>
+      <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
+        <div className="flex items-baseline justify-between gap-2 sm:block"><p className="text-muted-foreground">RPM</p><p className="mt-1 whitespace-nowrap font-mono">{gatewayKey.requestsPerMinute}</p></div>
+        <div className="flex items-baseline justify-between gap-2 sm:block"><p className="text-muted-foreground">今日使用</p><p className="mt-1 whitespace-nowrap font-mono">{gatewayKey.todayUsage}</p></div>
+        <div className="flex items-baseline justify-between gap-2 sm:block"><p className="text-muted-foreground">日配额</p><p className="mt-1 whitespace-nowrap font-mono">{gatewayKey.dailyQuota}</p></div>
       </div>
-      <div className="flex min-w-0 items-center justify-between gap-2 border-t border-border pt-2">
-        <div className="min-w-0"><PrefixCopy {...props} /><p className="truncate text-[11px] text-muted-foreground">{formatTimestamp(gatewayKey.lastUsedAt)}</p></div>
+      <div className="flex min-w-0 flex-col items-stretch justify-between gap-2 border-t border-border pt-2 sm:flex-row sm:items-center">
+        <div className="min-w-0"><PrefixCopy {...props} /><p className="whitespace-normal text-[11px] text-muted-foreground [overflow-wrap:anywhere]">{formatTimestamp(gatewayKey.lastUsedAt)}</p></div>
         <KeyActions {...props} />
       </div>
     </article>
@@ -768,7 +768,7 @@ function FormField({ label, htmlFor, children }: { label: string; htmlFor: strin
 
 function ContextError({ message }: { message: string }) {
   return (
-    <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+    <div role="alert" className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-foreground">
       <AlertTriangle className="mt-0.5 size-4 shrink-0" />
       <span className="min-w-0 break-words">{message}</span>
     </div>

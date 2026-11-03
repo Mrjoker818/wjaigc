@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, use, useRef } from 'react';
+import { useState, useEffect, use, useRef, useCallback, type ReactElement } from 'react';
 import QRCode from 'qrcode';
+import Link from 'next/link';
 import { RECHARGE_PACKAGES } from '@/lib/credits-constants';
 
 interface OrderInfo {
@@ -22,27 +23,58 @@ interface RechargeData {
   order: OrderInfo;
   payLink: string;
   note: string;
+  balance?: number | null;
 }
 
-export default function RechargePage({ params }: { params: Promise<{ orderId: string }> }) {
+interface RechargeOrderViewProps {
+  orderId: string;
+}
+
+export default function RechargePage({ params }: { params: Promise<{ orderId: string }> }): ReactElement {
   const { orderId } = use(params);
+  return <RechargeOrderView key={orderId} orderId={orderId} />;
+}
+
+function RechargeOrderView({ orderId }: RechargeOrderViewProps): ReactElement | null {
   const [data, setData] = useState<RechargeData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [paid, setPaid] = useState(false);
-  const [payResult, setPayResult] = useState<{ balance: number; amount: number } | null>(null);
+  const [payResult, setPayResult] = useState<{ balance: number | null; amount: number } | null>(null);
   const [hasGoneToPay, setHasGoneToPay] = useState(false);
   const [payQrDataUrl, setPayQrDataUrl] = useState('');
   const [submitted, setSubmitted] = useState(false); // waiting for admin approval
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lifetimeRef = useRef(0);
+  const orderRequestRef = useRef(0);
+  const inFlightOrderRequestRef = useRef<number | null>(null);
+
+  const applyOrderData = useCallback((nextData: RechargeData): void => {
+    const status = nextData.order.paymentStatus;
+    setData(nextData);
+    setPaid(status === 'paid');
+    setSubmitted(status === 'submitted');
+    setPayResult(status === 'paid' ? {
+      balance: typeof nextData.balance === 'number' && Number.isFinite(nextData.balance) ? nextData.balance : null,
+      amount: nextData.order.amount,
+    } : null);
+    if (status === 'submitted') setHasGoneToPay(true);
+    setError(status === 'rejected' ? `审核未通过：${nextData.order.rejectReason || '请重新支付或联系客服'}` : '');
+    if ((status === 'paid' || status === 'rejected') && pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
-    fetchOrderDetails();
+    lifetimeRef.current += 1;
+    void fetchOrderDetails();
     try {
       const saved = sessionStorage.getItem(`recharge_pay_${orderId}`);
       if (saved === '1') setHasGoneToPay(true);
     } catch { /* ignore */ }
+    return () => { lifetimeRef.current += 1; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderId]);
 
@@ -50,28 +82,23 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
   useEffect(() => {
     if (submitted && !paid && !pollTimerRef.current) {
       pollTimerRef.current = setInterval(async () => {
+        // A background tick must not supersede an unfinished current read.
+        if (inFlightOrderRequestRef.current !== null) return;
+        const lifetime = lifetimeRef.current;
+        const request = ++orderRequestRef.current;
+        inFlightOrderRequestRef.current = request;
         try {
           const res = await fetch(`/api/recharge/${orderId}`, { cache: 'no-store' });
           const json = await res.json();
+          if (lifetime !== lifetimeRef.current || request !== orderRequestRef.current) return;
           if (json.success) {
-            setData(json);
-            if (json.order?.paymentStatus === 'paid') {
-              setPaid(true);
-              setPayResult({ balance: json.balance || 0, amount: json.order.amount });
-              if (pollTimerRef.current) {
-                clearInterval(pollTimerRef.current);
-                pollTimerRef.current = null;
-              }
-            } else if (json.order?.paymentStatus === 'rejected') {
-              setSubmitted(false);
-              setError(`审核未通过：${json.order.rejectReason || '请重新支付或联系客服'}`);
-              if (pollTimerRef.current) {
-                clearInterval(pollTimerRef.current);
-                pollTimerRef.current = null;
-              }
-            }
+            applyOrderData(json);
           }
-        } catch { /* ignore poll errors */ }
+        } catch { /* ignore poll errors */ } finally {
+          if (lifetime === lifetimeRef.current && inFlightOrderRequestRef.current === request) {
+            inFlightOrderRequestRef.current = null;
+          }
+        }
       }, 5000);
     }
     return () => {
@@ -80,52 +107,59 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
         pollTimerRef.current = null;
       }
     };
-  }, [submitted, paid, orderId]);
+  }, [submitted, paid, orderId, applyOrderData]);
 
   useEffect(() => {
-    if (!data?.payLink) {
-      setPayQrDataUrl('');
-      return;
-    }
+    let active = true;
+    setPayQrDataUrl('');
+    if (!data?.payLink) return;
     QRCode.toDataURL(data.payLink, {
       width: 200,
       margin: 2,
       color: { dark: '#000000', light: '#ffffff' },
       errorCorrectionLevel: 'M',
-    }).then(setPayQrDataUrl).catch(() => setPayQrDataUrl(''));
+    }).then((dataUrl: string) => {
+      if (active) setPayQrDataUrl(dataUrl);
+    }).catch(() => {
+      if (active) setPayQrDataUrl('');
+    });
+    return () => { active = false; };
   }, [data?.payLink]);
 
-  async function fetchOrderDetails() {
+  async function fetchOrderDetails(): Promise<void> {
+    const lifetime = lifetimeRef.current;
+    const request = ++orderRequestRef.current;
+    inFlightOrderRequestRef.current = request;
+    const isCurrent = (): boolean => lifetime === lifetimeRef.current && request === orderRequestRef.current;
     try {
       const res = await fetch(`/api/recharge/${orderId}`, { cache: 'no-store' });
       const json = await res.json();
+      if (!isCurrent()) return;
       if (!json.success) {
         setError(json.error || '获取订单信息失败');
       } else {
-        setData(json);
-        if (json.order?.paymentStatus === 'paid') {
-          setPaid(true);
-          setPayResult({ balance: json.balance || 0, amount: json.order.amount });
-        } else if (json.order?.paymentStatus === 'submitted') {
-          setSubmitted(true);
-          setHasGoneToPay(true);
-        }
+        applyOrderData(json);
       }
     } catch {
-      setError('网络错误，请刷新重试');
+      if (isCurrent()) setError('网络错误，请刷新重试');
     } finally {
-      setLoading(false);
+      if (isCurrent()) {
+        if (inFlightOrderRequestRef.current === request) inFlightOrderRequestRef.current = null;
+        setLoading(false);
+      }
     }
   }
 
-  function handlePayClick() {
+  function handlePayClick(): void {
     try { sessionStorage.setItem(`recharge_pay_${orderId}`, '1'); } catch { /* ignore */ }
     setHasGoneToPay(true);
   }
 
   // User notifies admin: they paid, now waiting for verification
-  async function handleNotifyPaid() {
+  async function handleNotifyPaid(): Promise<void> {
     if (submitting || submitted || paid) return;
+    const lifetime = lifetimeRef.current;
+    const isCurrent = (): boolean => lifetime === lifetimeRef.current;
     setSubmitting(true);
     setError('');
     try {
@@ -135,23 +169,28 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
         body: JSON.stringify({ action: 'confirm-paid', orderId }),
       });
       const json = await res.json();
+      if (!isCurrent()) return;
       if (json.success) {
-        setSubmitted(true);
-        setData(prev => prev ? { ...prev, order: { ...prev.order, paymentStatus: 'submitted' } } : prev);
+        if (json.alreadyPaid === true) {
+          await fetchOrderDetails();
+        } else {
+          setSubmitted(true);
+          setData(prev => prev ? { ...prev, order: { ...prev.order, paymentStatus: 'submitted' } } : prev);
+        }
       } else {
         setError(json.error || '提交失败，请重试');
       }
     } catch {
-      setError('网络错误，请重试');
+      if (isCurrent()) setError('网络错误，请重试');
     } finally {
-      setSubmitting(false);
+      if (isCurrent()) setSubmitting(false);
     }
   }
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0d1117] flex items-center justify-center">
-        <div className="text-center">
+      <div className="h-dvh min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain bg-[#0d1117] flex items-start justify-center">
+        <div className="my-auto text-center">
           <div className="w-10 h-10 border-3 border-[#d4af37]/30 border-t-[#d4af37] rounded-full animate-spin mx-auto mb-4" />
           <p className="text-white/60 text-sm">加载中...</p>
         </div>
@@ -161,8 +200,8 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
 
   if (error && !data) {
     return (
-      <div className="min-h-screen bg-[#0d1117] flex items-center justify-center p-6">
-        <div className="bg-[#1c2128] border border-[#30363d] rounded-2xl p-8 max-w-md w-full text-center">
+      <div className="h-dvh min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain bg-[#0d1117] flex items-start justify-center p-6">
+        <div className="bg-[#1c2128] border border-[#30363d] rounded-2xl p-8 my-auto min-w-0 shrink-0 [overflow-wrap:anywhere] max-w-md w-full text-center">
           <div className="text-4xl mb-4">&#9888;&#65039;</div>
           <h2 className="text-white text-lg font-semibold mb-2">加载失败</h2>
           <p className="text-white/60 text-sm">{error}</p>
@@ -185,8 +224,8 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
   // Success state (admin approved)
   if (paid) {
     return (
-      <div className="min-h-screen bg-[#0d1117] flex items-center justify-center p-6">
-        <div className="bg-[#1c2128] border border-[#30363d] rounded-2xl p-8 max-w-md w-full text-center">
+      <div className="h-dvh min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain bg-[#0d1117] flex items-start justify-center p-6">
+        <div className="bg-[#1c2128] border border-[#30363d] rounded-2xl p-8 my-auto min-w-0 shrink-0 [overflow-wrap:anywhere] max-w-md w-full text-center">
           <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
             <svg className="w-8 h-8 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -196,10 +235,10 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
           <p className="text-[#d4af37] text-2xl font-bold mb-1">{payResult?.amount || order.amount} 积分</p>
           <p className="text-white/50 text-sm mb-6">已审核通过并到账，可在无界AI工作台查看余额</p>
           <div className="bg-white/5 rounded-xl p-4 mb-4">
-            <p className="text-white/40 text-xs mb-1">当前余额</p>
-            <p className="text-white text-lg font-semibold">{payResult?.balance || '--'} 积分</p>
+            <p className="text-white/60 text-xs mb-1">当前余额</p>
+            <p className="text-white text-lg font-semibold">{payResult?.balance ?? '--'} 积分</p>
           </div>
-          <p className="text-white/30 text-xs">您可以关闭此页面</p>
+          <p className="text-white/60 text-xs">您可以关闭此页面</p>
         </div>
       </div>
     );
@@ -208,8 +247,8 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
   // Waiting for admin approval state
   if (submitted) {
     return (
-      <div className="min-h-screen bg-[#0d1117] flex items-center justify-center p-6">
-        <div className="bg-[#1c2128] border border-[#30363d] rounded-2xl p-8 max-w-md w-full text-center">
+      <div className="h-dvh min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain bg-[#0d1117] flex items-start justify-center p-6">
+        <div className="bg-[#1c2128] border border-[#30363d] rounded-2xl p-8 my-auto min-w-0 shrink-0 [overflow-wrap:anywhere] max-w-md w-full text-center">
           <div className="w-16 h-16 bg-amber-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
             <div className="w-8 h-8 border-3 border-amber-400/30 border-t-amber-400 rounded-full animate-spin" />
           </div>
@@ -220,15 +259,15 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
           </p>
           <div className="bg-white/5 rounded-xl p-4 mb-4 text-left">
             <div className="flex justify-between text-sm mb-2">
-              <span className="text-white/40">订单金额</span>
+              <span className="text-white/60">订单金额</span>
               <span className="text-white font-semibold">¥{order.priceCny.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-sm mb-2">
-              <span className="text-white/40">到账积分</span>
+              <span className="text-white/60">到账积分</span>
               <span className="text-[#d4af37] font-semibold">{order.amount} 积分{order.bonus > 0 && ` (+${order.bonus}赠)`}</span>
             </div>
             <div className="flex justify-between text-sm">
-              <span className="text-white/40">支付方式</span>
+              <span className="text-white/60">支付方式</span>
               <span className="text-white/80">{methodIcon} {methodLabel}</span>
             </div>
           </div>
@@ -238,7 +277,7 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
           >
             刷新状态
           </button>
-          <p className="text-white/25 text-xs mt-4">如有问题请联系客服处理</p>
+          <p className="text-white/60 text-xs mt-4">如有问题请联系客服处理</p>
         </div>
       </div>
     );
@@ -247,8 +286,8 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
   // Rejected state
   if (order.paymentStatus === 'rejected') {
     return (
-      <div className="min-h-screen bg-[#0d1117] flex items-center justify-center p-6">
-        <div className="bg-[#1c2128] border border-red-500/30 rounded-2xl p-8 max-w-md w-full text-center">
+      <div className="h-dvh min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain bg-[#0d1117] flex items-start justify-center p-6">
+        <div className="bg-[#1c2128] border border-red-500/30 rounded-2xl p-8 my-auto min-w-0 shrink-0 [overflow-wrap:anywhere] max-w-md w-full text-center">
           <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
             <svg className="w-8 h-8 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -256,13 +295,14 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
           </div>
           <h2 className="text-white text-xl font-bold mb-2">审核未通过</h2>
           <p className="text-white/60 text-sm mb-6">{order.rejectReason || '未收到对应款项，请确认支付成功后重新提交'}</p>
-          <button
-            onClick={() => { setSubmitted(false); setHasGoneToPay(false); setError(''); }}
-            className="w-full py-3.5 rounded-xl text-base font-bold text-white transition-all hover:opacity-90"
+          <Link
+            href="/?view=dashboard"
+            prefetch={false}
+            className="block w-full py-3.5 rounded-xl text-center text-base font-bold text-black transition-all hover:opacity-90"
             style={{ backgroundColor: methodColor }}
           >
-            重新支付
-          </button>
+            返回工作台重新充值
+          </Link>
         </div>
       </div>
     );
@@ -270,12 +310,12 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
 
   if (order.isExpired) {
     return (
-      <div className="min-h-screen bg-[#0d1117] flex items-center justify-center p-6">
-        <div className="bg-[#1c2128] border border-[#30363d] rounded-2xl p-8 max-w-md w-full text-center">
+      <div className="h-dvh min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain bg-[#0d1117] flex items-start justify-center p-6">
+        <div className="bg-[#1c2128] border border-[#30363d] rounded-2xl p-8 my-auto min-w-0 shrink-0 [overflow-wrap:anywhere] max-w-md w-full text-center">
           <div className="text-4xl mb-4">&#9203;</div>
           <h2 className="text-white text-lg font-semibold mb-2">订单已过期</h2>
           <p className="text-white/60 text-sm">该充值订单已超时，请返回无界AI重新发起充值</p>
-          {expiresDate && <p className="text-white/30 text-xs mt-2">过期时间：{expiresDate}</p>}
+          {expiresDate && <p className="text-white/60 text-xs mt-2">过期时间：{expiresDate}</p>}
         </div>
       </div>
     );
@@ -284,8 +324,8 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
   const showError = error && data;
 
   return (
-    <div className="min-h-screen bg-[#0d1117] flex items-center justify-center p-4">
-      <div className="bg-[#1c2128] border border-[#30363d] rounded-2xl max-w-md w-full overflow-hidden">
+    <div className="h-dvh min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain bg-[#0d1117] flex items-start justify-center p-4">
+      <div className="bg-[#1c2128] border border-[#30363d] rounded-2xl my-auto min-w-0 shrink-0 [overflow-wrap:anywhere] max-w-md w-full overflow-hidden">
         {/* Header */}
         <div className="bg-gradient-to-r from-[#d4af37]/20 to-[#d4af37]/5 px-6 py-5 border-b border-[#30363d]">
           <div className="flex items-center gap-3">
@@ -296,7 +336,7 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
             </div>
             <div>
               <h1 className="text-white text-lg font-bold">无界AI 积分充值</h1>
-              <p className="text-white/40 text-xs">扫码转账，审核到账</p>
+              <p className="text-white/60 text-xs">扫码转账，审核到账</p>
             </div>
           </div>
         </div>
@@ -306,13 +346,13 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
           <div className="bg-white/5 rounded-xl p-5 mb-5">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <p className="text-white/40 text-xs mb-1">充值金额</p>
+                <p className="text-white/60 text-xs mb-1">充值金额</p>
                 <p className="text-[#d4af37] text-3xl font-bold">
                   ¥{order.priceCny.toFixed(2)}
                 </p>
               </div>
               <div className="text-right">
-                <p className="text-white/40 text-xs mb-1">获得积分</p>
+                <p className="text-white/60 text-xs mb-1">获得积分</p>
                 <p className="text-white text-2xl font-bold">
                   {order.amount}
                   {order.bonus > 0 && (
@@ -322,7 +362,7 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
               </div>
             </div>
             <div className="flex items-center gap-2 text-xs">
-              <span className="bg-[#d4af37]/20 text-[#d4af37] px-2 py-0.5 rounded-full">
+              <span className="bg-[#d4af37]/20 text-amber-200 px-2 py-0.5 rounded-full">
                 {isCustomPkg ? `自定义 ${order.amount} 积分` : pkg?.label || `${order.amount} 积分`}
               </span>
               <span className="bg-white/10 text-white/60 px-2 py-0.5 rounded-full">
@@ -345,7 +385,7 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
               <span className="text-2xl">{methodIcon}</span>
             </div>
             <div>
-              <p className="text-white/50 text-xs">使用{methodLabel}支付</p>
+              <p className="text-white/50 text-xs">使用{methodLabel}{isWechat ? '' : '支付'}</p>
               <p className="text-white text-lg font-bold">¥{order.priceCny.toFixed(2)}</p>
             </div>
           </div>
@@ -356,7 +396,7 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
                 <a
                   href={payLink}
                   onClick={handlePayClick}
-                  className="block w-full py-4 rounded-xl text-lg font-bold transition-all text-white text-center hover:opacity-90 active:scale-[0.98] shadow-lg no-underline"
+                  className="block w-full py-4 rounded-xl text-lg font-bold transition-all text-black text-center hover:opacity-90 active:scale-[0.98] shadow-lg no-underline"
                   style={{ backgroundColor: methodColor, boxShadow: `0 8px 24px ${methodColor}30` }}
                 >
                   立即支付 ¥{order.priceCny.toFixed(2)}
@@ -369,7 +409,7 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
 
               {payQrDataUrl && (
                 <div className="text-center">
-                  <p className="text-white/30 text-xs mb-3">
+                  <p className="text-white/60 text-xs mb-3">
                     {isWechat
                       ? '点击按钮未打开微信？长按下方二维码保存，打开微信扫一扫 → 相册选图'
                       : '点击按钮未打开支付宝？长按下方二维码保存，打开支付宝扫一扫 → 相册选图'
@@ -397,7 +437,7 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
                   if (!payLink) { e.preventDefault(); return; }
                   handlePayClick();
                 }}
-                className="block w-full py-3.5 rounded-xl text-base font-bold transition-all text-white text-center hover:opacity-90 active:scale-[0.98] no-underline"
+                className="block w-full py-3.5 rounded-xl text-base font-bold transition-all text-black text-center hover:opacity-90 active:scale-[0.98] no-underline"
                 style={{ backgroundColor: methodColor }}
               >
                 重新支付 ¥{order.priceCny.toFixed(2)}
@@ -408,7 +448,7 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
                 className={`w-full py-3.5 rounded-xl text-base font-bold transition-all ${
                   submitting
                     ? 'bg-white/10 text-white/30 cursor-not-allowed'
-                    : 'bg-amber-500 text-white hover:bg-amber-400 active:scale-[0.98] shadow-lg shadow-amber-500/20'
+                    : 'bg-amber-500 text-black hover:bg-amber-400 active:scale-[0.98] shadow-lg shadow-amber-500/20'
                 }`}
               >
                 {submitting ? (
@@ -430,7 +470,7 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
 
               {payQrDataUrl && (
                 <div className="text-center pt-2">
-                  <p className="text-white/25 text-xs mb-2">
+                  <p className="text-white/60 text-xs mb-2">
                     {isWechat
                       ? '如未完成支付，长按二维码保存，微信扫一扫 → 相册'
                       : '如未完成支付，长按二维码保存，支付宝扫一扫 → 相册'
@@ -449,27 +489,27 @@ export default function RechargePage({ params }: { params: Promise<{ orderId: st
           )}
 
           {!hasGoneToPay && payLink && (
-            <p className="text-white/25 text-xs text-center mt-3">
+            <p className="text-white/60 text-xs text-center mt-3">
               点击后将打开{methodLabel}完成付款
             </p>
           )}
 
           {hasGoneToPay && (
-            <p className="text-white/25 text-xs text-center mt-3">
+            <p className="text-white/60 text-xs text-center mt-3">
               付款完成后点击“我已完成付款”，管理员审核通过后积分将到账
             </p>
           )}
 
           {note && (
             <div className="bg-white/5 rounded-lg py-2 px-3 text-center mt-4">
-              <p className="text-white/40 text-xs">💡 {note}</p>
+              <p className="text-white/60 text-xs">💡 {note}</p>
             </div>
           )}
         </div>
 
         <div className="px-6 py-4 border-t border-[#30363d] bg-white/[0.02]">
-          <div className="flex items-center justify-between text-xs text-white/20">
-            <span className="truncate max-w-[60%]">订单号：{orderId.slice(0, 24)}...</span>
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-white/60">
+            <span className="min-w-0 max-w-full break-all">订单号：{orderId.slice(0, 24)}...</span>
             {expiresDate && <span>有效期至：{expiresDate}</span>}
           </div>
         </div>

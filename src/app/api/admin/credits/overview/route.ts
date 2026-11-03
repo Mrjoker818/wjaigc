@@ -216,6 +216,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
+      creditObservabilityVersion: 1,
       totalBalance: Number(summary.total_balance) || 0,
       totalRecharged: toNonNegativeNumber(dist.recharged),
       totalConsumed: Number(summary.total_consumed) || 0,

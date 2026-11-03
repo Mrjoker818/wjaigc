@@ -31,6 +31,7 @@ export default function VideoPlayer({
   height = 360,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const playerContainerRef = useRef<HTMLDivElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -60,7 +61,7 @@ export default function VideoPlayer({
 
   // 全屏切换
   const toggleFullscreen = useCallback(() => {
-    const container = videoRef.current?.parentElement;
+    const container = playerContainerRef.current ?? videoRef.current?.parentElement;
     if (!container) return;
     if (!document.fullscreenElement) {
       container.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
@@ -76,6 +77,15 @@ export default function VideoPlayer({
     const rect = e.currentTarget.getBoundingClientRect();
     const ratio = (e.clientX - rect.left) / rect.width;
     video.currentTime = ratio * video.duration;
+  }, []);
+
+  const handleSeekChange = useCallback((event: React.ChangeEvent<HTMLInputElement>): void => {
+    const video = videoRef.current;
+    if (!video || !Number.isFinite(video.duration) || video.duration <= 0) return;
+    const nextTime = Math.max(0, Math.min(video.duration, Number(event.currentTarget.value)));
+    if (!Number.isFinite(nextTime)) return;
+    video.currentTime = nextTime;
+    setCurrentTime(nextTime);
   }, []);
 
   // 下载视频
@@ -148,6 +158,8 @@ export default function VideoPlayer({
   };
 
   const progress = totalDuration > 0 ? (currentTime / totalDuration) * 100 : 0;
+  const seekDuration = Number.isFinite(totalDuration) && totalDuration > 0 ? totalDuration : 0;
+  const seekTime = Number.isFinite(currentTime) ? Math.max(0, Math.min(currentTime, seekDuration)) : 0;
 
   // 内嵌模式
   if (!modal) {
@@ -204,72 +216,91 @@ export default function VideoPlayer({
   return (
     <div
       className="fixed inset-0 z-[500] bg-black/85 flex items-center justify-center"
+      role="dialog"
+      aria-modal="true"
+      aria-label="视频预览"
+      data-modal="video-player"
       onClick={(e) => { if (e.target === e.currentTarget && onClose) onClose(); }}
     >
       {/* 关闭按钮 */}
       <button
         onClick={onClose}
-        className="absolute top-4 right-4 w-10 h-10 rounded-full bg-[#1a1a1a]/80 hover:bg-[#1a1a1a] border border-white/10 flex items-center justify-center text-white/70 hover:text-white transition-colors cursor-pointer z-10"
+        aria-label="关闭视频预览"
+        className="absolute top-4 right-4 w-11 h-11 rounded-full bg-[#1a1a1a]/80 hover:bg-[#1a1a1a] border border-white/10 flex items-center justify-center text-white/70 hover:text-white transition-colors cursor-pointer z-10"
       >
         <X className="w-5 h-5" />
       </button>
 
       {/* 视频容器 */}
       <div
-        className="relative max-w-[90vw] max-h-[85vh] bg-black rounded-xl overflow-hidden shadow-2xl"
+        ref={playerContainerRef}
+        className={`relative flex flex-col bg-black overflow-hidden shadow-2xl ${isFullscreen ? 'w-screen h-screen' : 'w-[calc(100vw-2rem)] max-w-[960px] max-h-[calc(100dvh-6rem)] rounded-xl'}`}
         onMouseMove={resetHideTimer}
         onMouseLeave={() => !isPlaying && setShowControls(true)}
+        onPointerDown={resetHideTimer}
       >
+        <div className="relative flex min-h-0 flex-1 items-center justify-center">
         <video
           ref={videoRef}
           src={videoUrl}
           poster={thumbnailUrl}
-          className="max-w-[90vw] max-h-[85vh] object-contain"
+          className={`block w-full object-contain ${isFullscreen ? 'h-full min-h-0' : 'max-h-[calc(100dvh-13rem)]'}`}
           playsInline
           preload="metadata"
         />
 
         {/* 播放/暂停大按钮覆盖层 */}
         {!isPlaying && (
-          <div
+          <button
+            type="button"
+            aria-label="播放视频"
             className="absolute inset-0 flex items-center justify-center cursor-pointer bg-black/20"
             onClick={togglePlay}
           >
-            <div className="w-20 h-20 rounded-full bg-[#d4af37]/90 flex items-center justify-center shadow-lg hover:scale-105 transition-transform">
+            <span className="w-16 h-16 rounded-full bg-[#d4af37]/90 flex items-center justify-center shadow-lg">
               <Play className="w-8 h-8 text-black ml-1" fill="black" />
-            </div>
-          </div>
+            </span>
+          </button>
         )}
+        </div>
 
         {/* 底部控制栏 */}
-        <div className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent px-4 pb-3 pt-8 transition-opacity duration-200 ${showControls || !isPlaying ? 'opacity-100' : 'opacity-0'}`}>
+        <div className={`shrink-0 bg-black px-3 pb-3 pt-1 transition-opacity duration-200 max-[768px]:opacity-100 focus-within:opacity-100 ${showControls || !isPlaying ? 'opacity-100' : 'opacity-0'}`}>
           {/* 进度条 */}
-          <div className="w-full h-1.5 bg-white/20 rounded-full mb-3 cursor-pointer hover:h-2 transition-all group" onClick={handleProgressClick}>
-            <div className="h-full bg-[#d4af37] rounded-full transition-all relative" style={{ width: `${progress}%` }}>
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-[#d4af37] rounded-full shadow-md opacity-0 group-hover:opacity-100 transition-opacity" />
-            </div>
-          </div>
+          <input
+            type="range"
+            aria-label="视频进度"
+            aria-valuetext={`${formatTime(seekTime)} / ${formatTime(seekDuration)}`}
+            min={0}
+            max={seekDuration}
+            step={0.01}
+            value={seekTime}
+            disabled={seekDuration === 0}
+            onChange={handleSeekChange}
+            style={{ height: 44, background: `linear-gradient(to right, #d4af37 ${(seekTime / (seekDuration || 1)) * 100}%, rgba(255,255,255,0.35) ${(seekTime / (seekDuration || 1)) * 100}%) center / 100% 4px no-repeat` }}
+            className="block h-11 w-full cursor-pointer accent-[#d4af37] disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4af37]"
+          />
 
-          <div className="flex items-center gap-3">
-            <button onClick={togglePlay} className="text-white/80 hover:text-white cursor-pointer transition-colors">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button onClick={togglePlay} aria-label={isPlaying ? '暂停' : '播放'} className="flex min-h-11 min-w-11 shrink-0 items-center justify-center text-white/80 hover:text-white cursor-pointer transition-colors">
               {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
             </button>
 
-            <button onClick={toggleMute} className="text-white/80 hover:text-white cursor-pointer transition-colors">
+            <button onClick={toggleMute} aria-label={isMuted ? '取消静音' : '静音'} aria-pressed={isMuted} className="flex min-h-11 min-w-11 shrink-0 items-center justify-center text-white/80 hover:text-white cursor-pointer transition-colors">
               {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
             </button>
 
-            <span className="text-sm text-white/60 tabular-nums font-mono">
+            <span className="whitespace-nowrap text-sm text-white/80 tabular-nums font-mono">
               {formatTime(currentTime)} / {formatTime(totalDuration)}
             </span>
 
             <div className="flex-1" />
 
-            <button onClick={handleDownload} className="text-white/60 hover:text-white cursor-pointer transition-colors" title="下载视频">
+            <button onClick={handleDownload} className="flex min-h-11 min-w-11 shrink-0 items-center justify-center text-white/80 hover:text-white cursor-pointer transition-colors" title="下载视频">
               <Download className="w-4 h-4" />
             </button>
 
-            <button onClick={toggleFullscreen} className="text-white/60 hover:text-white cursor-pointer transition-colors" title="全屏">
+            <button onClick={toggleFullscreen} aria-pressed={isFullscreen} className="flex min-h-11 min-w-11 shrink-0 items-center justify-center text-white/80 hover:text-white cursor-pointer transition-colors" title={isFullscreen ? '退出全屏' : '全屏'}>
               {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
             </button>
           </div>

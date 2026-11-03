@@ -19,6 +19,8 @@ import { useProgressTimer } from '@/hooks/useProgressTimer';
 import {
   constrainFloatingPanelPosition,
   getCenteredFloatingPanelPosition,
+  getFloatingPanelViewport,
+  subscribeFloatingPanelViewport,
 } from '@/lib/floating-panel-position';
 
 /* ─── types ─── */
@@ -117,19 +119,18 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
   // ─── Drag state ───
   const [position, setPosition] = useState(() => {
     if (typeof window !== 'undefined') {
-      return getCenteredFloatingPanelPosition({
-        viewportWidth: window.innerWidth,
-        viewportHeight: window.innerHeight,
-        panelWidth: Math.min(460, Math.max(0, window.innerWidth - 32)),
-        panelHeight: Math.min(580, Math.max(0, window.innerHeight - 32)),
+      const frame = getFloatingPanelViewport();
+      const centered = getCenteredFloatingPanelPosition({
+        viewportWidth: frame.width,
+        viewportHeight: frame.height,
+        panelWidth: Math.min(460, Math.max(0, frame.width - 32)),
+        panelHeight: Math.min(580, Math.max(0, frame.height - 32)),
       });
+      return { x: centered.x + frame.left, y: centered.y + frame.top };
     }
     return { x: 0, y: 0 };
   });
-  const [viewport, setViewport] = useState(() => ({
-    width: typeof window === 'undefined' ? 492 : window.innerWidth,
-    height: typeof window === 'undefined' ? 612 : window.innerHeight,
-  }));
+  const [viewport, setViewport] = useState(getFloatingPanelViewport);
   const [hasPosition, setHasPosition] = useState(true);
   const isDragging = useRef(false);
   const [isDraggingState, setIsDraggingState] = useState(false);
@@ -139,28 +140,32 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
   const panelMaxHeight = Math.max(0, viewport.height - 32);
 
   const constrainPanelPosition = useCallback((next: { x: number; y: number }) => {
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
+    const frame = getFloatingPanelViewport();
+    const viewportWidth = frame.width;
+    const viewportHeight = frame.height;
     const width = Math.min(460, Math.max(0, viewportWidth - 32));
     const measuredHeight = panelRef.current?.getBoundingClientRect().height || 580;
     const height = Math.min(measuredHeight, Math.max(0, viewportHeight - 32));
-    return constrainFloatingPanelPosition({
-      ...next,
+    const constrained = constrainFloatingPanelPosition({
+      x: next.x - frame.left,
+      y: next.y - frame.top,
       viewportWidth,
       viewportHeight,
       panelWidth: width,
       panelHeight: height,
     });
+    return { x: constrained.x + frame.left, y: constrained.y + frame.top };
   }, []);
 
   useLayoutEffect(() => {
     const updateViewport = (center: boolean) => {
-      const viewportWidth = window.innerWidth;
-      const viewportHeight = window.innerHeight;
+      const frame = getFloatingPanelViewport();
+      const viewportWidth = frame.width;
+      const viewportHeight = frame.height;
       const width = Math.min(460, Math.max(0, viewportWidth - 32));
       const measuredHeight = panelRef.current?.getBoundingClientRect().height || 580;
       const height = Math.min(measuredHeight, Math.max(0, viewportHeight - 32));
-      setViewport({ width: viewportWidth, height: viewportHeight });
+      setViewport(frame);
       setPosition((current) => {
         const next = center
           ? getCenteredFloatingPanelPosition({
@@ -169,21 +174,20 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
               panelWidth: width,
               panelHeight: height,
             })
-          : current;
-        return constrainFloatingPanelPosition({
+          : { x: current.x - frame.left, y: current.y - frame.top };
+        const constrained = constrainFloatingPanelPosition({
           ...next,
           viewportWidth,
           viewportHeight,
           panelWidth: width,
           panelHeight: height,
         });
+        return { x: constrained.x + frame.left, y: constrained.y + frame.top };
       });
     };
 
     updateViewport(true);
-    const handleResize = () => updateViewport(false);
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    return subscribeFloatingPanelViewport(() => updateViewport(false));
   }, []);
 
   useLayoutEffect(() => {
@@ -719,7 +723,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
     <div
       ref={panelRef}
       data-floating-panel
-      className="fixed z-[150]"
+      className="fixed z-[150] [&_button]:min-h-11 [&_button]:min-w-11"
       style={{
         left: position.x,
         top: position.y,
@@ -749,17 +753,18 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
         style={{ borderBottom: `1px solid ${borderColor}` }}
         onMouseDown={handlePanelDragStart}
       >
-        <GripVertical size={16} style={{ color: mutedColor }} />
-        <Scan size={17} style={{ color: accentColor }} />
-        <span className="text-base font-semibold flex-1" style={{ color: accentColor }}>
+        <GripVertical size={16} className="shrink-0" style={{ color: mutedColor }} />
+        <Scan size={17} className="shrink-0" style={{ color: accentColor }} />
+        <span className="min-w-0 flex-1 whitespace-nowrap text-base font-semibold" style={{ color: accentColor }}>
           精修引擎
         </span>
-        <span className="text-xs px-2 py-0.5 rounded" style={{ color: textSubColor, background: isMonochrome ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.06)' }}>
+        <span className="hidden min-w-0 max-w-[140px] truncate rounded px-2 py-0.5 text-xs sm:block" style={{ color: textSubColor, background: isMonochrome ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.06)' }}>
           {selectedCategoryName} · {refineMode === 'expert' ? '专家精修' : '标准精修'}
         </span>
         <button
           onClick={onClose}
-          className="p-1 rounded-md transition-colors"
+          aria-label="关闭精修引擎"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md transition-colors"
           style={{ color: textMutedColor }}
           onMouseEnter={e => (e.currentTarget.style.color = textColor)}
           onMouseLeave={e => (e.currentTarget.style.color = textMutedColor)}

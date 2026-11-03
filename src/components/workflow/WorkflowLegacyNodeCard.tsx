@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 
 import type { NodePort, NodeType, WorkflowNode } from '@/lib/workflow-engine';
+import { WORKFLOW_IMAGE_SOURCE_OPTIONS } from '@/lib/workflow-image-source-options';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { parseExactModelKey, resolvePersistedModelSelection } from '@/lib/model-defaults';
 import { parsePlatformComplianceReport } from '@/lib/platform-compliance/report-schema';
@@ -146,6 +147,8 @@ export interface WorkflowLegacyNodeCardProps {
   onDragStart: (e: React.MouseEvent) => void;
   onPortMouseDown: (e: React.MouseEvent, nodeId: string, port: NodePort) => void;
   onPortMouseUp: (nodeId: string, port: NodePort) => void;
+  onPortPointerDown?: (event: React.PointerEvent<HTMLElement>, nodeId: string, port: NodePort) => void;
+  mobileActionMenu?: boolean;
   onDelete: () => void;
   onDeselect: () => void;
   onPreviewImage: (url: string) => void;
@@ -167,18 +170,23 @@ function OutputImageGroupContent({ imageUrls, theme: T, onPreviewImage }: {
 }) {
   const [page, setPage] = useState(0);
   const total = imageUrls.length;
-  const currentUrl = total > 0 ? imageUrls[page] : '';
+  const activePage = Math.min(page, Math.max(0, total - 1));
+  const currentUrl = total > 0 ? imageUrls[activePage] : '';
+
+  useEffect(() => {
+    setPage(current => Math.min(current, Math.max(0, total - 1)));
+  }, [total]);
 
   return (
     <div className="w-full h-full flex flex-col gap-1" onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
       {total > 0 && currentUrl ? (
         /* 有图片时显示当前页图片 */
         <div
-          className="flex-1 w-full relative group cursor-pointer flex items-center justify-center rounded overflow-hidden"
+          className="aspect-video min-h-11 w-full shrink-0 relative group cursor-pointer flex items-center justify-center rounded overflow-hidden"
           style={{ background: T.nodeBg === '#161b22' ? '#1c2128' : '#f0f0f0' }}
           onClick={() => onPreviewImage(currentUrl)}
         >
-          <NextImage unoptimized width={1} height={1} src={currentUrl} alt={`图片 ${page + 1}`} className="max-w-full max-h-full object-contain transition-opacity opacity-90 group-hover:opacity-100" />
+          <NextImage unoptimized fill src={currentUrl} alt={`图片 ${activePage + 1}`} className="max-w-full max-h-full object-contain transition-opacity opacity-90 group-hover:opacity-100" />
           <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
             <span className="opacity-0 group-hover:opacity-100 text-white text-xs bg-black/50 px-2 py-0.5 rounded transition-opacity">预览</span>
           </div>
@@ -186,7 +194,7 @@ function OutputImageGroupContent({ imageUrls, theme: T, onPreviewImage }: {
       ) : (
         /* 无图片时显示虚线占位框 */
         <div
-          className="flex-1 w-full flex flex-col items-center justify-center gap-1.5 rounded border-2 border-dashed transition-colors"
+          className="aspect-video min-h-11 w-full shrink-0 flex flex-col items-center justify-center gap-1.5 rounded border-2 border-dashed transition-colors"
           style={{
             borderColor: T.accent + '40',
             background: T.nodeBg === '#161b22' ? '#1c2128' : '#fafafa',
@@ -200,21 +208,25 @@ function OutputImageGroupContent({ imageUrls, theme: T, onPreviewImage }: {
       {total > 1 && (
         <div className="flex items-center justify-center gap-1 shrink-0">
           <button
-            className="w-5 h-5 flex items-center justify-center rounded transition-colors cursor-pointer"
+            type="button"
+            aria-label="上一张图片"
+            className="min-w-11 min-h-11 inline-flex items-center justify-center rounded transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             style={{ background: T.btnBg, color: T.btnText }}
-            onClick={(e) => { e.stopPropagation(); setPage(Math.max(0, page - 1)); }}
-            disabled={page === 0}
+            onClick={(e) => { e.stopPropagation(); setPage(Math.max(0, activePage - 1)); }}
+            disabled={activePage === 0}
           >
             <ChevronLeft size={12} />
           </button>
           <span className="text-[9px] font-mono min-w-[28px] text-center" style={{ color: T.textMuted }}>
-            {page + 1}/{total}
+            {activePage + 1}/{total}
           </span>
           <button
-            className="w-5 h-5 flex items-center justify-center rounded transition-colors cursor-pointer"
+            type="button"
+            aria-label="下一张图片"
+            className="min-w-11 min-h-11 inline-flex items-center justify-center rounded transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             style={{ background: T.btnBg, color: T.btnText }}
-            onClick={(e) => { e.stopPropagation(); setPage(Math.min(total - 1, page + 1)); }}
-            disabled={page >= total - 1}
+            onClick={(e) => { e.stopPropagation(); setPage(Math.min(total - 1, activePage + 1)); }}
+            disabled={activePage >= total - 1}
           >
             <ChevronRight size={12} />
           </button>
@@ -260,7 +272,7 @@ function readWorkflowComplianceSummary(output: Record<string, unknown> | undefin
   };
 }
 
-export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard({ node, isSelected, isHovered, execResult, isRunning, theme, canvasImages, llmModels, imageModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onSendToChat, onTriggerImageUpload, onImageFileDrop, promptPresets = [], promptTemplates = [], onSavePromptPreset, onDeletePromptPreset, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onDeselect, onPreviewImage, onResizeNode, onUpdateNodeSize, collapsedNodes, onToggleCollapse, onContextMenu, onDoubleClickAnnotation, layout = 'canvas', renderPortHandle }: WorkflowLegacyNodeCardProps) {
+export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard({ node, isSelected, isHovered, execResult, isRunning, theme, canvasImages, llmModels, imageModels, onNodeFieldChange, onLlmOptimize, onCascadeRun, onExtractToSource, onGridSplit, onCompare, onSendToChat, onTriggerImageUpload, onImageFileDrop, promptPresets = [], promptTemplates = [], onSavePromptPreset, onDeletePromptPreset, upstreamImageUrl, onSelect, onHover, onDragStart, onPortMouseDown, onPortMouseUp, onPortPointerDown, mobileActionMenu = false, onDeselect, onPreviewImage, onResizeNode, onUpdateNodeSize, collapsedNodes, onToggleCollapse, onContextMenu, onDoubleClickAnnotation, layout = 'canvas', renderPortHandle }: WorkflowLegacyNodeCardProps) {
   const T = theme;
   const cat = getWorkflowRenderNodeCategory(node.type);
   const color = WORKFLOW_RENDER_NODE_COLORS[cat];
@@ -282,7 +294,16 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
       cancelAnimationFrame(resizeFrame);
       resizeFrame = requestAnimationFrame(() => {
         for (const entry of entriesSnapshot) {
-        const { width, height } = entry.contentRect;
+          // Workflow dimensions use the unscaled border box, including its padding and border.
+          const borderBox = entry.borderBoxSize?.[0];
+          const fallbackStyle = borderBox ? null : getComputedStyle(entry.target);
+          const edge = (value: string | undefined): number => Number.parseFloat(value ?? '0') || 0;
+          const width = borderBox?.inlineSize ?? entry.contentRect.width
+            + edge(fallbackStyle?.paddingLeft) + edge(fallbackStyle?.paddingRight)
+            + edge(fallbackStyle?.borderLeftWidth) + edge(fallbackStyle?.borderRightWidth);
+          const height = borderBox?.blockSize ?? entry.contentRect.height
+            + edge(fallbackStyle?.paddingTop) + edge(fallbackStyle?.paddingBottom)
+            + edge(fallbackStyle?.borderTopWidth) + edge(fallbackStyle?.borderBottomWidth);
           const measuredSize = measuredSizeRef.current;
           if (Math.abs(width - measuredSize.width) > 2 || Math.abs(height - measuredSize.height) > 2) {
             onUpdateNodeSizeRef.current?.(node.id, width, height);
@@ -296,6 +317,9 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
       cancelAnimationFrame(resizeFrame);
     };
   }, [layout, node.id]);
+  const suppressPointerMouseRef = useRef(false);
+  const previewMousePointerRef = useRef<{ id: number; x: number; y: number; url: string; owner: Element; moved: boolean } | null>(null);
+  const cancelledPreviewMouseRef = useRef<{ id: number; owner: Element } | null>(null);
   const inputPorts = node.ports.filter(p => p.direction === 'in');
   const outputPorts = node.ports.filter(p => p.direction === 'out');
   const renderPortDot = (port: NodePort, direction: 'in' | 'out', style: React.CSSProperties) => {
@@ -311,7 +335,11 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
     return <div
       className={props.className}
       data-port-id={`${node.id}-${direction}-${port.id}`}
+      data-workflow-port-node={node.id}
+      data-workflow-port-key={port.id}
+      data-workflow-port-direction={direction}
       style={style}
+      onPointerDown={onPortPointerDown ? event => onPortPointerDown(event, node.id, port) : undefined}
       onMouseDown={direction === 'out' ? event => { event.stopPropagation(); onPortMouseDown(event, node.id, port); } : undefined}
       onMouseUp={direction === 'in' ? event => { event.stopPropagation(); onPortMouseUp(node.id, port); } : undefined}
       title={port.label}
@@ -327,7 +355,22 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
     : null;
 
   // 图片URL: 优先执行结果, 其次节点配置(input-image节点)
-  const hasImageOutput = (execResult?.output?.imageUrl || node.config?.imageUrl) as string | undefined;
+  const receivesUpstream = isInputImage && node.config.source === 'upstream';
+  const sourceOptions = isInputImage ? WORKFLOW_IMAGE_SOURCE_OPTIONS : [];
+  const record = (value: unknown): Record<string, unknown> | null => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+  const transform = record(node.config.imageInputTransform);
+  const grid = transform?.kind === 'grid' ? transform : null;
+  const columns = grid?.columns, rows = grid?.rows, column = grid?.column, row = grid?.row;
+  const preparedGrid = grid && typeof columns === 'number' && typeof rows === 'number' && typeof column === 'number' && typeof row === 'number'
+    && node.config.gridIndex === row * columns + column + 1 && node.config.gridCol === column + 1 && node.config.gridRow === row + 1
+    && ['assetId', 'assetVersionId', 'placementId', 'projectId', 'imageUrl'].every(key => typeof node.config[key] === 'string' && Boolean(node.config[key]));
+  const resultInput = record(execResult?.output?.imageInput), resultCell = record(resultInput?.cell);
+  const resultGrid = grid && execResult?.status === 'success' && resultInput?.version === 1 && resultCell
+    && ['columns', 'rows', 'column', 'row'].every(key => resultCell[key] === grid[key]) && typeof execResult.output?.imageUrl === 'string';
+  // Registered prepared tiles keep their own previews. Identity uses the actual upstream, never the old local target.
+  const hasImageOutput = receivesUpstream
+    ? grid ? resultGrid ? execResult!.output!.imageUrl as string : preparedGrid ? node.config.imageUrl as string : undefined : upstreamImageUrl
+    : (execResult?.output?.imageUrl || node.config?.imageUrl) as string | undefined;
   // 画布模式专用节点标记
   const isCanvasFeature = ['ai-font-design', 'ai-refine-engine', 'ai-human-repair', 'ai-brand-ecommerce', 'ai-segment', 'ai-multi-angle', 'ai-3d-model'].includes(node.type);
   const isCollapsed = collapsedNodes?.has(node.id) ?? false;
@@ -379,6 +422,7 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
     if (!isInputImage) return;
     e.preventDefault();
     e.stopPropagation();
+    if (receivesUpstream) return;
     const file = e.dataTransfer.files?.[0];
     if (!file || !file.type.startsWith('image/')) return;
     onImageFileDrop?.(node.id, file);
@@ -395,14 +439,99 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
         width: node.width,
         minHeight: isCollapsed ? 45 : node.height,
         height: isCollapsed ? 45 : 'auto',
+        pointerEvents: 'auto',
         zIndex: isSelected ? 10 : isHovered ? 5 : 1,
       }}
       aria-label={node.label}
+      data-workflow-mobile-action-menu={mobileActionMenu && layout === 'canvas' ? '' : undefined}
       tabIndex={0}
+      onKeyDown={(event: React.KeyboardEvent<HTMLDivElement>): void => {
+        if (event.target !== event.currentTarget || event.nativeEvent.isComposing
+          || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey
+          || (event.key !== 'Enter' && event.key !== ' ')) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onSelect();
+      }}
+      onPointerDown={(event: React.PointerEvent<HTMLDivElement>): void => {
+        if (layout !== 'canvas' || !event.isPrimary || event.button !== 0
+          || !['mouse', 'touch', 'pen'].includes(event.pointerType)
+          || !Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return;
+        const target = event.target;
+        if (!(target instanceof Element) || !event.currentTarget.contains(target)) return;
+        if (target.closest('button, input, textarea, select, [role="button"], [contenteditable="true"], .port-dot')) return;
+        if (event.pointerType !== 'mouse' && !target.closest('[data-workflow-node-drag-handle]')) return;
+        if (previewMousePointerRef.current && previewMousePointerRef.current.id !== event.pointerId) return;
+        cancelledPreviewMouseRef.current = null;
+        const previewOwner = target.closest('[data-workflow-node-image-preview]');
+        previewMousePointerRef.current = event.pointerType === 'mouse' && previewOwner && hasImageOutput
+          && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey
+          ? { id: event.pointerId, x: event.clientX, y: event.clientY, url: hasImageOutput, owner: previewOwner, moved: false }
+          : null;
+        event.preventDefault();
+        event.stopPropagation();
+        // This receipt survives pointerup: touch compatibility mousedown can follow it.
+        suppressPointerMouseRef.current = true;
+        onSelect(event);
+        onDragStart(event);
+        if (previewMousePointerRef.current?.id === event.pointerId && !event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+          previewMousePointerRef.current = null;
+        }
+      }}
+      onPointerMove={(event: React.PointerEvent<HTMLDivElement>): void => {
+        const pending = previewMousePointerRef.current;
+        if (pending && event.pointerId === pending.id && event.pointerType === 'mouse') {
+          pending.moved ||= (event.buttons & ~1) !== 0 || Math.hypot(event.clientX - pending.x, event.clientY - pending.y) >= 3;
+        }
+      }}
+      onPointerUp={(event: React.PointerEvent<HTMLDivElement>): void => {
+        const pending = previewMousePointerRef.current;
+        if (!pending || event.pointerId !== pending.id || event.pointerType !== 'mouse') return;
+        previewMousePointerRef.current = null;
+        if (event.target !== event.currentTarget) {
+          cancelledPreviewMouseRef.current = { id: pending.id, owner: pending.owner };
+          return;
+        }
+        if (!pending || pending.moved || event.button !== 0 || event.pointerType !== 'mouse' || event.pointerId !== pending.id || pending.url !== hasImageOutput
+          || !pending.owner.isConnected || !event.currentTarget.contains(pending.owner)
+          || Math.hypot(event.clientX - pending.x, event.clientY - pending.y) >= 3) return;
+        const released = document.elementFromPoint(event.clientX, event.clientY);
+        if (released && pending.owner.contains(released)) onPreviewImage(pending.url);
+      }}
+      onPointerCancel={(event: React.PointerEvent<HTMLDivElement>): void => {
+        const pending = previewMousePointerRef.current;
+        if (pending?.id === event.pointerId) { cancelledPreviewMouseRef.current = { id: pending.id, owner: pending.owner }; previewMousePointerRef.current = null; }
+      }}
+      onLostPointerCapture={(event: React.PointerEvent<HTMLDivElement>): void => {
+        const pending = previewMousePointerRef.current;
+        if (pending?.id === event.pointerId) { cancelledPreviewMouseRef.current = { id: pending.id, owner: pending.owner }; previewMousePointerRef.current = null; }
+      }}
       onMouseDown={(e) => {
         e.stopPropagation();
+        if (suppressPointerMouseRef.current) {
+          suppressPointerMouseRef.current = false;
+          return;
+        }
+        // Inline controls must receive their click before any inspector or drag transition.
+        const target = e.target;
+        const control = target instanceof Element
+          ? target.closest('button, input, textarea, select, [role="button"], [contenteditable="true"]')
+          : null;
+        if (control && control !== e.currentTarget && e.currentTarget.contains(control)) {
+          return;
+        }
         onSelect(e);
         if (layout === 'canvas') onDragStart(e);
+      }}
+      onClick={(event: React.MouseEvent<HTMLDivElement>): void => {
+        const target = event.target;
+        const control = target instanceof Element
+          ? target.closest('button, input, textarea, select, [role="button"], [contenteditable="true"]')
+          : null;
+        // Let the inner control act without bubbling into the renderer's node selection.
+        if (control && control !== event.currentTarget && event.currentTarget.contains(control)) {
+          event.stopPropagation();
+        }
       }}
       onMouseEnter={() => onHover(node.id)}
       onMouseLeave={() => onHover(null)}
@@ -425,7 +554,7 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
 
       {/* ===== 节点标题区 — 42px高度 ===== */}
       {!isCondition && (
-        <div className="node-header" style={{ background: `${color}0F` }}>
+        <div data-workflow-node-drag-handle className="node-header" style={{ background: `${color}0F`, touchAction: layout === 'canvas' ? 'none' : undefined }}>
           <div className="node-header-left">
             <div className="flex items-center justify-center w-[22px] h-[22px] rounded-md" style={{ background: color + '20', color }}>
               {getNodeIcon(node.type, 12)}
@@ -450,7 +579,7 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
           {execResult?.status === 'success' && (
             <span className="status-badge done"><span className="status-dot" />完成</span>
           )}
-          {execResult?.status === 'error' && (
+          {execResult && ['error', 'failed', 'timeout'].includes(execResult.status) && (
             <span className="status-badge failed"><span className="status-dot" />失败</span>
           )}
           {execResult?.status === 'paused' && (
@@ -702,17 +831,47 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
           {/* input-image 节点: 图片预览 + 拖拽上传区 */}
           {isInputImage && (
             <div className="flex flex-col gap-1.5" style={{ color: T.nodeTitle, fontSize: 10 }} onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+              <select aria-label="图片来源" value={String(node.config.source || 'upload')}
+                className="min-h-11 w-full min-w-0 rounded-md border px-2 text-sm"
+                style={{ background: T.inputBg, borderColor: T.cardBorder, color: T.nodeTitle }}
+                onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()} onMouseUp={event => event.stopPropagation()}
+                onChange={event => { event.stopPropagation(); onNodeFieldChange?.(node.id, 'source', event.target.value); }}>
+                {sourceOptions.map(option => <option key={String(option.value)} value={String(option.value)}>{option.label}</option>)}
+              </select>
+              {inputPorts.map(port => {
+                const portColor = PORT_COLORS[port.type] || T.connColor;
+                return <div key={port.id} className="port-row" style={{ padding: '4px 12px' }}>
+                  {renderPortDot(port, 'in', { borderColor: portColor, color: portColor })}
+                  <span className="port-label" style={{ color: T.nodePortText, fontSize: 10 }}>{port.label}</span>
+                </div>;
+              })}
               <div className="image-preview has-image">
                 {hasImageOutput ? (
                   <div
+                    data-workflow-node-image-preview
                     className="w-full h-full relative group cursor-pointer"
                     style={{ background: '#1c2128' }}
-                    onClick={() => onPreviewImage(hasImageOutput)}
+                    onMouseDown={(event: React.MouseEvent<HTMLDivElement>): void => { if (layout === 'canvas' && !window.matchMedia('(min-width: 48rem)').matches && event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) { event.stopPropagation(); onDragStart(event); } }}
+                    onClick={(event: React.MouseEvent<HTMLDivElement>): void => {
+                      const cancelled = cancelledPreviewMouseRef.current;
+                      const native = event.nativeEvent as MouseEvent & { pointerId?: number; pointerType?: string };
+                      if (native.isTrusted && native.pointerType === 'mouse' && native.button === 0 && event.detail > 0 && (native.buttons & ~1) !== 0) return;
+                      if (cancelled && native.isTrusted && native.pointerType === 'mouse' && native.pointerId === cancelled.id
+                        && event.currentTarget === cancelled.owner && event.detail > 0) {
+                        cancelledPreviewMouseRef.current = null;
+                        return;
+                      }
+                      onPreviewImage(hasImageOutput);
+                    }}
                   >
                     <NextImage unoptimized width={1} height={1} src={hasImageOutput} alt="" className="image-preview img" style={{ objectFit: 'cover' }} />
                     <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
                       <span className="opacity-0 group-hover:opacity-100 text-white text-xs bg-black/50 px-2 py-0.5 rounded transition-opacity">预览</span>
                     </div>
+                  </div>
+                ) : receivesUpstream ? (
+                  <div className="image-preview empty flex items-center justify-center" style={{ aspectRatio: '4/3' }}>
+                    <span className="text-xs text-muted-foreground">连接上游图片</span>
                   </div>
                 ) : (
                   <div
@@ -727,7 +886,7 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
                   </div>
                 )}
               </div>
-              {!hasImageOutput && (
+              {!hasImageOutput && !receivesUpstream && (
                 <input
                   type="text"
                   placeholder="粘贴图片 URL..."
@@ -948,7 +1107,7 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
 
       {/* 条件节点: 文字 */}
       {isCondition && (
-        <div className="w-full h-full flex items-center justify-center">
+        <div data-workflow-node-drag-handle className="w-full h-full flex items-center justify-center" style={{ touchAction: layout === 'canvas' ? 'none' : undefined }}>
           <span className="text-[12px] font-medium truncate px-2" style={{ color: T.nodeTitle }}>{node.label}</span>
         </div>
       )}
@@ -967,7 +1126,7 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
 
       {/* 关闭编辑按钮 (选中时显示) */}
       {isSelected && (
-        <div className="absolute -right-[12px] -top-[14px] z-20">
+        <div className="workflow-inline-node-close absolute -right-[12px] top-0 z-20">
           <button
             title="关闭编辑"
             onClick={(e) => { e.stopPropagation(); onDeselect(); }}

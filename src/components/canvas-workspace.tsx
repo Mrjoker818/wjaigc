@@ -4,6 +4,8 @@ import type { DocumentMediaBatchRequest } from '@/lib/collaboration/document-med
 import { validSketchId, type SketchScope } from '@/lib/sketch-to-code/client';
 import { parseWorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
 import type { SketchTransform } from '@/lib/sketch-to-code/placement-client';
+import { expectedActorHeaders } from '@/lib/expected-actor-header';
+import OhMyPrompt from '@/components/oh-my-prompt';
 
 import { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo, type CSSProperties } from 'react';
 import dynamic from 'next/dynamic';
@@ -53,7 +55,7 @@ import {
 } from '@/features/annotations/annotation-persistence';
 import { buildAnnotationSourceVersionId } from '@/features/annotations/annotation-source-version';
 import type { CanvasAnnotationV2 } from '@/features/annotations/annotation-types';
-import { IncrementalHistoryManager } from '@/lib/canvas-incremental-history';
+import { CANVAS_CROP_OPERATION, IncrementalHistoryManager } from '@/lib/canvas-incremental-history';
 import {
   canvasSnapshotToNodes,
   createCanvasDocumentSnapshot,
@@ -75,6 +77,7 @@ import { TreeHistoryManager, type VersionNode } from '@/lib/canvas-tree-history'
 import { createAutoConnection, type ConnectionRelationType } from '@/lib/canvas-connections';
 import type { GenerationParams, CtrlRefSelection } from '@/components/generation-panel';
 import { useTaskModelCatalog } from '@/hooks/use-task-model-catalog';
+import { useWorkspaceTheme } from '@/hooks/use-workspace-theme';
 import type { VideoGenerationPanelHandle } from '@/components/video-generation-panel';
 import type { QuickCreateCompileViewState, QuickCreateRequest } from '@/components/quick-create-panel';
 import type { VectorDesignAsset } from '@/components/vector-design/vector-editor-dialog';
@@ -199,7 +202,7 @@ import {
   shouldConsumeCanvasHydrationGuard,
   type CanvasHydrationGuard,
 } from '@/lib/canvas-autosave-guard';
-import { shouldInitiallyCollapseWorkspacePanel } from '@/lib/workspace-panel-layout';
+import { WORKSPACE_PANEL_RAIL_WIDTH, shouldInitiallyCollapseWorkspacePanel } from '@/lib/workspace-panel-layout';
 import { sendUserDataRecord } from '@/lib/user-data-record-client';
 import { withClientImageOutputPreference } from '@/lib/image-generation-output-preference';
 import { getTransparentOutputWarning } from '@/lib/image-generation-output';
@@ -236,7 +239,6 @@ const HelpGuide = dynamic(() => import('@/components/help-guide').then(m => m.He
 const FavoritesPanel = dynamic(() => import('@/components/favorites-panel').then(m => m.FavoritesPanel), { loading: () => null });
 const PromptTemplatePanel = dynamic(() => import('@/components/prompt-template-panel'), { loading: () => null });
 
-type ThemeStyle = 'gold' | 'monochrome';
 type ActivePanel = 'generate' | 'video' | 'chat';
 type CreateMode = 'quick' | 'professional' | 'vector';
 
@@ -583,6 +585,7 @@ async function persistCanvasSnapshotMedia(
 interface CanvasWorkspaceProps {
   initialUser: User;
   onLoggedOut: () => void;
+  renameDraftStore?: Map<string, { value: string; error: string | null }>;
 }
 
 type CanvasHistoryIntent = 'record' | 'skip';
@@ -604,7 +607,7 @@ function rebaseCanvasImages(
   )) as CanvasImage[];
 }
 
-export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspaceProps) {
+export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: CanvasWorkspaceProps) {
   const {
     models: catalogModels,
     descriptorsByKey: taskModelCatalogIndex,
@@ -838,6 +841,33 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     setDocumentHistoryRecoveryState({ ...recovery });
   }, [flushQueuedCanvasHistoryChange, isActiveCanvasHistoryTransition]);
 
+  const captureCropHistory = useCallback((operation: object) => {
+    const actorId = currentUserRef.current?.id;
+    const projectId = historyProjectIdRef.current;
+    const epoch = historyTransitionEpochRef.current;
+    const currentScope = (): boolean => !!actorId && isMountedRef.current
+      && currentUserRef.current?.id === actorId && (currentProjectRef.current?.id ?? null) === projectId
+      && historyProjectIdRef.current === projectId && historyTransitionEpochRef.current === epoch
+      && canUseLegacyCanvasPersistence(projectId, collaborativeCanvasRef.current);
+    if (!currentScope()) return null;
+    const current = (id: string): CanvasImage[] | null => {
+      if (!currentScope()) return null;
+      const image = latestImagesRef.current.find(item => item.id === id);
+      return image?.isProcessingPlaceholder && image.processing?.label === '裁切中'
+        && image.processing[CANVAS_CROP_OPERATION] === operation ? latestImagesRef.current : null;
+    };
+    const settle = (id: string, patch: Partial<CanvasImage>): void => {
+      if (!currentScope()) return;
+      const image = latestImagesRef.current.find(item => item.id === id);
+      const visibleCrop = image?.isProcessingPlaceholder && image.processing?.label === '裁切中'
+        && image.processing[CANVAS_CROP_OPERATION] === operation;
+      const completedCrop = image && !image.isProcessingPlaceholder && image.url === patch.url;
+      if (image && !visibleCrop && !completedCrop) return;
+      incrementalHistoryRef.current.updateCropCreation(id, patch, !image, operation);
+    };
+    return { current, settle };
+  }, []);
+
   const beginCanvasHistoryTransaction = useCallback((id: string) => {
     incrementalHistoryRef.current.beginTransaction(id);
   }, []);
@@ -1066,8 +1096,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     }
   }, [clearRestoredCanvasImageTombstones, commitCanvasHistorySnapshot, flushQueuedCanvasHistoryChange, isActiveCanvasHistoryTransition, isDocumentHistoryRecoveryPending, suspendDocumentHistoryOperation, syncAssetV3HistoryTransition]);
   const [, setActiveGenerationCount] = useState(0);
-  const [previewImage, setPreviewImage] = useState<CanvasImage | null>(null);
-  const [themeStyle, setThemeStyle] = useState<ThemeStyle>('gold');
+  const [previewState, setPreviewState] = useState<{
+    image: CanvasImage;
+    scope: { actorId: string | null; projectId: string | null };
+  } | null>(null);
+  const { themeStyle, themePreference, setThemePreference, toggleTheme } = useWorkspaceTheme();
   const themeStyleRef = useRef(themeStyle);
   themeStyleRef.current = themeStyle;
   const [panelCollapsed, setPanelCollapsed] = useState(() => (
@@ -1098,8 +1131,18 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   const [quickCreateCompileState, setQuickCreateCompileState] = useState<QuickCreateCompileViewState>(EMPTY_QUICK_CREATE_COMPILE_STATE);
   const quickCreateCompileControllerRef = useRef<AbortController | null>(null);
   const projectLoadGateRef = useRef(createLatestProjectLoadGate());
+  const canvasChatProjectLoadRef = useRef<object | null>(null);
+  const projectLoadActiveRef = useRef(true);
+  useLayoutEffect(() => {
+    projectLoadActiveRef.current = true;
+    return () => { projectLoadActiveRef.current = false; canvasChatProjectLoadRef.current = null; };
+  }, []);
   // 从工作台加载指定项目
   const loadProjectById = useCallback(async (projectId: string) => {
+    if (!projectLoadActiveRef.current) return;
+    const chatLoad = {};
+    canvasChatProjectLoadRef.current = chatLoad;
+    const isCurrentLoad = (): boolean => projectLoadActiveRef.current && canvasChatProjectLoadRef.current === chatLoad;
     try {
       // ★ 加载项目前：清空 undo 历史 + 跳过 diff 记录，防止 Ctrl+Z 撤销到空画布
       historyTransitionEpochRef.current += 1;
@@ -1120,7 +1163,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       const resolvedProject = await projectLoadGateRef.current.resolve(() => (
         ownProject ? Promise.resolve(ownProject) : readInvitedCollaborativeWorkspace(projectId)
       ));
-      if (!resolvedProject.isCurrent()) return;
+      if (!isCurrentLoad() || !resolvedProject.isCurrent()) return;
       const storedProject = resolvedProject.value;
       if (storedProject) {
         const recoveryOwnerId = userMgr.getUser()?.id ?? '';
@@ -1166,7 +1209,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             };
           }
         }
-        if (!resolvedProject.isCurrent()) return;
+        if (!isCurrentLoad() || !resolvedProject.isCurrent()) return;
         if (hadPendingMedia) {
           toast.warning(recoveredMedia?.discardedBlobIds.length
             ? '部分临时图片在页面关闭前未完成上传，请重新上传缺失图片。'
@@ -1176,10 +1219,12 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           targetProject.id,
           hydratedTargetImages,
         );
+        if (!isCurrentLoad() || !resolvedProject.isCurrent()) return;
         replaceWorkspaceHistoryState(
           window,
           buildProjectWorkspaceUrl(window.location, targetProject.id),
         );
+        if (!isCurrentLoad() || !resolvedProject.isCurrent()) return;
         setCurrentProject(targetProject);
         setNodeWorkflow(workflowFromProjectMetadata(targetProject.metadata));
         const restoredViewState = normalizeCanvasViewState(targetProject.metadata?.viewState);
@@ -1242,11 +1287,29 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
     } catch (e) {
       console.error('加载项目失败:', e);
+    } finally {
+      if (canvasChatProjectLoadRef.current === chatLoad) canvasChatProjectLoadRef.current = null;
     }
   }, [setImages]);
 
   const [appMode, setAppMode] = useState<WorkspaceMode>(getInitialWorkspaceMode);
   const [shareCreateOpen, setShareCreateOpen] = useState(false);
+  const shareMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const shareMenuGenerationRef = useRef(0);
+  const shareMenuScopeRef = useRef<string | null>(null);
+  const shareMenuSessionsRef = useRef(new WeakMap<EventTarget, { generation: number; handingOff: boolean }>());
+  const activeShareMenuSessionRef = useRef<{ generation: number; handingOff: boolean } | null>(null);
+  const registerShareMenuContent = useCallback((node: HTMLDivElement | null): void => {
+    if (!node) return;
+    const existing = shareMenuSessionsRef.current.get(node);
+    if (existing) {
+      activeShareMenuSessionRef.current = existing;
+      return;
+    }
+    const session = { generation: ++shareMenuGenerationRef.current, handingOff: false };
+    activeShareMenuSessionRef.current = session;
+    shareMenuSessionsRef.current.set(node, session);
+  }, []);
   const [shareManageOpen, setShareManageOpen] = useState(false);
   const [createdShareAccess, setCreatedShareAccess] = useState<CanvasShareCreatedAccess>();
   const [pendingModeSwitch, setPendingModeSwitch] = useState<'node' | 'workflow-hub' | 'dashboard' | null>(null);
@@ -1276,7 +1339,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   // Alt+Click inline reference markers (displayed as numbered tags in the prompt textarea)
   const [altRefMarkers, setAltRefMarkers] = useState<Array<{id: string; url: string; number: number}>>([]);
   const [showPromptEquation, setShowPromptEquation] = useState(false);
-  const [announcement, setAnnouncement] = useState<{ text: string; type: string; id: string; displayMode?: string } | null>(null);
+  const [announcement, setAnnouncement] = useState<{ text: string; type: string; id: string; displayMode?: string; persistDismissal?: boolean } | null>(null);
   const [showAnnouncement, setShowAnnouncement] = useState(true);
   const dismissedAnnouncementsRef = useRef<Set<string>>(new Set());
 
@@ -1307,8 +1370,14 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     return () => window.removeEventListener('wujie:canvas-tool-opened', closeExternalToolPanels);
   }, []);
 
+  const handleCanvasToolActivated = useCallback((): void => {
+    if (shouldInitiallyCollapseWorkspacePanel(window.innerWidth)) {
+      setPanelCollapsed(true);
+    }
+  }, []);
+
   // Chat panel integration states
-  const [chatInitialImage, setChatInitialImage] = useState<CanvasImage | null>(null);
+  const [chatInitialImage, setChatInitialImage] = useState<{ image: CanvasImage; scope: number } | null>(null);
   const [chatTabOpen, setChatTabOpen] = useState(false);
 
   // Current chat model info from ChatPanel (used for vision-prompt)
@@ -1343,8 +1412,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
   // Oh My Prompt - Vision Prompt state
   const [visionPromptEnabled, setVisionPromptEnabled] = useState(false);
-  const [isVisionAnalyzing, setIsVisionAnalyzing] = useState(false);
-  const [visionResult, setVisionResult] = useState<import('@/components/oh-my-prompt').VisionApiResultData | null>(null);
+  const [visionAnalyzingScope, setVisionAnalyzingScope] = useState<number | null>(null);
+  const [visionResults, setVisionResults] = useState<Record<string, import('@/components/oh-my-prompt').VisionApiResultData>>({});
+  const visionRequestSequence = useRef(0);
 
   // Fetch system announcement
   useEffect(() => {
@@ -1359,9 +1429,22 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           const data = await res.json() as { success: boolean; announcement?: { text: string; type: string; enabled: boolean; displayMode?: string } };
           if (data.success && data.announcement?.enabled && data.announcement.text?.trim()) {
             const displayMode = data.announcement.displayMode || 'banner';
-            const id = `${displayMode}:${data.announcement.text.slice(0, 64)}`;
-            if (!dismissedAnnouncementsRef.current.has(id)) {
-              setAnnouncement({ text: data.announcement.text, type: data.announcement.type || 'info', id, displayMode });
+            const text = data.announcement.text;
+            let id = `${displayMode}:${text}`;
+            let persistDismissal = true;
+            if (text.length >= 64) {
+              try {
+                // JSON string encoding preserves distinct UTF-16 strings, including lone surrogates.
+                const bytes = new TextEncoder().encode(JSON.stringify(text));
+                const digest = await crypto.subtle.digest('SHA-256', bytes);
+                id = `${displayMode}:v2:sha256:${Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')}`;
+              } catch {
+                // Without a digest, show the announcement but do not persist an ambiguous key.
+                persistDismissal = false;
+              }
+            }
+            if (!persistDismissal || !dismissedAnnouncementsRef.current.has(id)) {
+              setAnnouncement({ text, type: data.announcement.type || 'info', id, displayMode, persistDismissal });
               setShowAnnouncement(true);
             }
           }
@@ -1373,8 +1456,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
   const dismissAnnouncement = useCallback(() => {
     if (!announcement) return;
-    dismissedAnnouncementsRef.current.add(announcement.id);
-    localStorage.setItem('dismissed_announcements', JSON.stringify([...dismissedAnnouncementsRef.current]));
+    if (announcement.persistDismissal !== false) {
+      dismissedAnnouncementsRef.current.add(announcement.id);
+      localStorage.setItem('dismissed_announcements', JSON.stringify([...dismissedAnnouncementsRef.current]));
+    }
     setShowAnnouncement(false);
   }, [announcement]);
 
@@ -1679,6 +1764,24 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
   const [ohMyPromptOpen, setOhMyPromptOpen] = useState(false);
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
+  const previewScope = useMemo(() => ({
+    actorId: currentUser?.id ?? null,
+    projectId: currentProject?.id ?? null,
+  }), [currentUser?.id, currentProject?.id]);
+  const committedPreviewScope = useRef(previewScope);
+  const activePreviewRef = useRef<typeof previewState>(null);
+  useLayoutEffect(() => {
+    committedPreviewScope.current = previewScope;
+    if (activePreviewRef.current?.scope !== previewScope) activePreviewRef.current = null;
+    setPreviewState(previous => previous?.scope === previewScope ? previous : null);
+  }, [previewScope]);
+  // Only the current actor/project may retain an already opened sidebar.
+  // This is mount ownership, not a draft cache or task lifecycle.
+  const [panelHasOpened, setPanelHasOpened] = useState<string | null>(null);
+  useEffect(() => {
+    const scope = JSON.stringify([currentUser?.id ?? null, currentProject?.id ?? null]);
+    setPanelHasOpened(previous => !panelCollapsed ? scope : previous === scope ? previous : null);
+  }, [panelCollapsed, currentUser?.id, currentProject?.id]);
   historyProjectIdRef.current = currentProject?.id ?? null;
   const collaborativeCanvas = useCollaborativeCanvas(
     currentProject?.id ?? null, currentUser?.id ?? null, currentProject?.userId ?? null,
@@ -1686,6 +1789,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   collaborativeCanvasRef.current = collaborativeCanvas;
   const currentProjectRef = useRef(currentProject);
   currentProjectRef.current = currentProject;
+  const canvasChatScopeRef = useRef({ actorId: currentUser?.id, projectId: currentProject?.id, epoch: 0 });
+  if (canvasChatScopeRef.current.actorId !== currentUser?.id || canvasChatScopeRef.current.projectId !== currentProject?.id) {
+    canvasChatScopeRef.current = { actorId: currentUser?.id, projectId: currentProject?.id, epoch: canvasChatScopeRef.current.epoch + 1 };
+  }
+  useEffect(() => () => { canvasChatScopeRef.current.epoch += 1; }, []);
   useEffect(() => {
     if (!currentProject?.id || collaborativeCanvas.projectId !== currentProject.id ||
         collaborativeCanvas.authority !== 'document' ||
@@ -1713,6 +1821,13 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     ));
   }, [currentProject?.id, collaborativeCanvas.projectId,
     collaborativeCanvas.authority, collaborativeCanvas.groups]);
+  const shareMenuScope = JSON.stringify([currentUser?.id ?? null, currentProject?.id ?? null]);
+  useLayoutEffect(() => {
+    if (shareMenuScopeRef.current !== shareMenuScope) {
+      shareMenuScopeRef.current = shareMenuScope;
+      shareMenuGenerationRef.current += 1;
+    }
+  }, [shareMenuScope]);
   useEffect(() => {
     setShareCreateOpen(false);
     setShareManageOpen(false);
@@ -1726,32 +1841,56 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   } | null>(null);
 
   const resolveCanvasImageForChat = useCallback(async (image: CanvasImage): Promise<CanvasImage> => {
-    return prepareCanvasAssetForChat(image, async () => {
-      if (!currentProject?.id) throw new Error('Missing target project');
-        const response = await fetch('/api/assets/transfer', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sourceVersion: image.assetVersionId,
-            targetProject: currentProject.id,
-            targetWorkspace: `embedded-chat:${currentProject.id}`,
-            entityType: 'chat-attachment',
-            entityId: image.id,
-            idempotencyKey: `canvas-chat:${currentProject.id}:${image.id}:${image.assetVersionId}`,
-            metadata: { name: image.prompt?.slice(0, 80) || '画布图片', source: 'canvas' },
-          }),
-        });
-      if (!response.ok) throw new Error(`Asset transfer failed (${response.status})`);
-      return response.json() as Promise<WorkspaceAssetReference>;
+    if (canvasChatProjectLoadRef.current) throw new Error('项目正在加载，请稍后重新选择图片');
+    const scope = { ...canvasChatScopeRef.current, transition: historyTransitionEpochRef.current };
+    const isCurrent = (): boolean => Boolean(scope.actorId && scope.projectId) && !canvasChatProjectLoadRef.current
+      && canvasChatScopeRef.current.epoch === scope.epoch
+      && currentUserRef.current?.id === scope.actorId && currentProjectRef.current?.id === scope.projectId
+      && historyTransitionEpochRef.current === scope.transition;
+    if (!isCurrent()) throw new Error('画布项目或账号已变化，请重新选择图片');
+    let blocked = false;
+    const resolved = await prepareCanvasAssetForChat(image, async () => {
+      if (!isCurrent()) { blocked = true; throw new Error('Canvas chat scope changed'); }
+      const response = await fetch('/api/assets/transfer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-wujie-expected-actor-id': scope.actorId! },
+        body: JSON.stringify({
+          sourceVersion: image.assetVersionId,
+          targetProject: scope.projectId,
+          targetWorkspace: `embedded-chat:${scope.projectId}`,
+          entityType: 'chat-attachment',
+          entityId: image.id,
+          idempotencyKey: `canvas-chat:${scope.projectId}:${image.id}:${image.assetVersionId}`,
+          metadata: { name: image.prompt?.slice(0, 80) || '画布图片', source: 'canvas' },
+        }),
+      });
+      const payload = await response.json().catch(() => null) as (WorkspaceAssetReference & { error?: string }) | null;
+      if (!isCurrent()) { blocked = true; throw new Error('Canvas chat scope changed'); }
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403 || payload?.error === 'ACTOR_SCOPE_CHANGED') blocked = true;
+        throw new Error(`Asset transfer failed (${response.status})`);
+      }
+      if (!payload) throw new Error('Asset transfer response invalid');
+      return payload;
     });
-  }, [currentProject?.id]);
+    if (blocked || !isCurrent()) throw new Error('图片无法发送，请检查账号或项目访问权限');
+    return resolved;
+  }, []);
 
   const handleSendCanvasImageToChat = useCallback(async (image: CanvasImage) => {
+    const scope = { ...canvasChatScopeRef.current, transition: historyTransitionEpochRef.current };
     const expectedProjectId = currentProjectRef.current?.id;
-    const transferredImage = await resolveCanvasImageForChat(image);
-    if (!isWorkspaceResultScopeCurrent(expectedProjectId, currentProjectRef.current?.id)) return;
-    setChatInitialImage(transferredImage);
-    setChatTabOpen(true);
+    try {
+      if (canvasChatProjectLoadRef.current) throw new Error('项目正在加载，请稍后重新选择图片');
+      const transferredImage = await resolveCanvasImageForChat(image);
+      if (!isWorkspaceResultScopeCurrent(expectedProjectId, currentProjectRef.current?.id)
+        || canvasChatScopeRef.current.epoch !== scope.epoch || currentUserRef.current?.id !== scope.actorId
+        || historyTransitionEpochRef.current !== scope.transition) return;
+      setChatInitialImage({ image: transferredImage, scope: scope.epoch });
+      setChatTabOpen(true);
+    } catch (error) {
+      if (canvasChatScopeRef.current.epoch === scope.epoch) toast.error(error instanceof Error ? error.message : '图片无法发送到聊天');
+    }
   }, [resolveCanvasImageForChat]);
 
   const videoPanelRef = useRef<VideoGenerationPanelHandle>(null);
@@ -3075,65 +3214,58 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
   // ★ 异步持久化 data:/blob: URL：页面加载后自动检测并持久化临时 URL
   // 解决刷新后图片消失的问题：data: URL 在 normalizeImageUrls 中不再被清空，
   // 但需要尽快转换为服务器 URL 以确保跨会话可用
-  const persistedDataUrlIdsRef = useRef<Set<string>>(new Set());
+  const persistedDataUrlIdsRef = useRef<Map<string, { url: string; actorId: string; projectId: string | null; epoch: number }>>(new Map());
   useEffect(() => {
-    const pendingImages = images.filter(img =>
-      img.url && (img.url.startsWith('data:') || img.url.startsWith('blob:'))
-      && !persistedDataUrlIdsRef.current.has(img.id)
-    );
+    const actorId = currentUser?.id;
+    const projectId = currentProject?.id ?? null;
+    const epoch = historyTransitionEpochRef.current;
+    if (!actorId) return;
+    const sameScope = (): boolean => isMountedRef.current && currentUserRef.current?.id === actorId
+      && (currentProjectRef.current?.id ?? null) === projectId && historyTransitionEpochRef.current === epoch;
+    const pendingImages = images.filter(img => {
+      if (!img.url || !(img.url.startsWith('data:') || img.url.startsWith('blob:'))) return false;
+      const pending = persistedDataUrlIdsRef.current.get(img.id);
+      return !pending || pending.url !== img.url || pending.actorId !== actorId
+        || pending.projectId !== projectId || pending.epoch !== epoch;
+    });
     if (pendingImages.length === 0) return;
-
-    // 标记为正在处理，避免重复提交
-    for (const img of pendingImages) {
-      persistedDataUrlIdsRef.current.add(img.id);
-    }
-
-    const persistDataUrls = async () => {
-      const urlMapping: Record<string, string> = {};
+    for (const img of pendingImages) persistedDataUrlIdsRef.current.set(img.id, { url: img.url, actorId, projectId, epoch });
+    const persistDataUrls = async (): Promise<void> => {
+      const urlMapping = new Map<string, { original: string; persisted: string }>();
       for (const img of pendingImages) {
         try {
           let urlToSave = img.url;
-          // blob: 先转 data:
           if (urlToSave.startsWith('blob:')) {
-            try {
-              const resp = await fetch(urlToSave);
-              const blob = await resp.blob();
-              urlToSave = await new Promise<string>((resolve) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result as string);
-                reader.readAsDataURL(blob);
-              });
-            } catch { continue; }
+            const resp = await fetch(urlToSave);
+            const blob = await resp.blob();
+            urlToSave = await new Promise<string>(resolve => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve(reader.result as string);
+              reader.readAsDataURL(blob);
+            });
           }
+          if (!sameScope()) return;
           const saveResp = await fetch('/api/save-image', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ imageUrl: urlToSave, userId: currentUser?.id }),
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageUrl: urlToSave, userId: actorId }),
           });
-          if (!saveResp.ok) {
-            console.warn(`[persistPendingDataUrls] save-image returned ${saveResp.status} for image ${img.id}`);
-            continue;
-          }
+          if (!saveResp.ok) continue;
           const saveData = await saveResp.json();
-          if (saveData.success && saveData.url) {
-            urlMapping[img.id] = saveData.url;
-          }
+          if (saveData.success && saveData.url) urlMapping.set(img.id, { original: img.url, persisted: saveData.url });
         } catch (error) {
           console.warn(`[persistPendingDataUrls] Failed to persist image ${img.id}:`, error);
         }
       }
-      // 更新 images 状态中的非持久化 URL
-      if (Object.keys(urlMapping).length > 0) {
-        setImages(prev => prev.map(img =>
-          urlMapping[img.id] ? { ...img, url: urlMapping[img.id] } : img
-        ), { history: 'skip' });
+      if (sameScope() && urlMapping.size > 0) {
+        setImages(prev => prev.map(img => {
+          const mapping = urlMapping.get(img.id);
+          return mapping && img.url === mapping.original ? { ...img, url: mapping.persisted } : img;
+        }), { history: 'skip' });
       }
     };
-
-    // Start persistence immediately so temporary media spends the shortest possible time in memory only.
     void persistDataUrls();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [images]);
+  }, [images, currentUser?.id, currentProject?.id]);
 
   // ★ SSE 连接：实时推送任务完成事件，避免轮询延迟
   useEffect(() => {
@@ -4509,6 +4641,14 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     });
   }, [handleAddImages]);
 
+  const captureDisplay3dInsertion = useCallback(() => {
+    const scope = captureCanvasInsertionScope();
+    return async (urls: string[], meta?: { modelName?: string; apiProvider?: string }): Promise<void> => {
+      await handleAddImages(urls, undefined, { ...meta, scope });
+      scope.assertCurrent();
+    };
+  }, [captureCanvasInsertionScope, handleAddImages]);
+
   const documentUploadBusyRef = useRef(false);
   const documentUploadControllerRef = useRef<AbortController | null>(null);
   const annotationExecutionIdentity = useMemo(() => ({ actorId: currentUser?.id,
@@ -4799,6 +4939,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       transferred = await transferCanvasSkillAsset({
           reference,
           projectId: expectedProjectId,
+          expectedActorId: scope.actorId,
           runId: meta.runId,
           sourceVersionIds: meta.sourceVersionIds ?? [],
           restoreDeletedPlacement: meta.restoreDeletedPlacement,
@@ -4807,10 +4948,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         });
     } else {
       const requestNonce = Date.now();
-      const response = await scope.fetcher('/api/assets/transfer', {
+      const response = await scope.fetcher('/api/assets/actor-v2/transfer', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...expectedActorHeaders(scope.actorId) },
         body: JSON.stringify({
+          expectedActorId: scope.actorId,
           sourceVersion: reference.assetVersionId,
           targetProject: expectedProjectId,
           targetWorkspace: `canvas:${expectedProjectId}`,
@@ -4894,6 +5036,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     const transferred = await transferCanvasSkillAssets({
       references,
       projectId: expectedProjectId,
+      expectedActorId: scope.actorId,
       runId: meta.runId,
       sourceVersionIds: meta.sourceVersionIds ?? [],
       restoreDeletedPlacement: meta.restoreDeletedPlacement,
@@ -5397,8 +5540,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       }, [autoLayoutImages, handleAddImages, setImages, stabilizeCanvasImages]);
 
   const handlePreview = useCallback((image: CanvasImage) => {
-    setPreviewImage(image);
-  }, []);
+    if (committedPreviewScope.current !== previewScope) return;
+    const instance = { image, scope: previewScope };
+    activePreviewRef.current = instance;
+    setPreviewState(instance);
+  }, [previewScope]);
 
   // 视频生成处理
   const handleVideoGenerate = useCallback(async (params: {
@@ -6546,11 +6692,21 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
   // 提示词大师 - 从chat-panel传递到generation-panel
   const [externalPrompt, setExternalPrompt] = useState<string | undefined>(undefined);
+  const [visionInsertions, setVisionInsertions] = useState<Array<{ id: number; scope: string; text: string }>>([]);
+  const visionInsertionId = useRef(0);
+  const visionDestinationDrafts = useRef(new Map<string, string>());
+  const dashboardRenameDrafts = useRef(new Map<string, { value: string; error: string | null }>());
+  const visionScopeKey = JSON.stringify([currentUser?.id ?? null, currentProject?.id ?? null]);
+  const pendingVisionInsertion = visionInsertions.find(item => item.scope === visionScopeKey);
   const [externalChatPrompt, setExternalChatPrompt] = useState<string | undefined>(undefined);
   const [externalReferenceImage, setExternalReferenceImage] = useState<{ url: string; description?: string } | null>(null);
 
   // Oh My Prompt - Vision Prompt handler
   const handleVisionPrompt = useCallback(async (imageUrl: string) => {
+    const epoch = canvasChatScopeRef.current.epoch;
+    const resultScope = JSON.stringify([canvasChatScopeRef.current.actorId ?? null, canvasChatScopeRef.current.projectId ?? null]);
+    const sequence = ++visionRequestSequence.current;
+    const current = (): boolean => canvasChatScopeRef.current.epoch === epoch && visionRequestSequence.current === sequence;
     // Use the same model/API as the chat panel (智能对话)
     let visionModel = '';
     let providerId: string | undefined;
@@ -6612,6 +6768,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       } catch {}
     }
 
+    if (!current()) return;
     if (!visionModel) {
       toast.error('未找到支持图片理解的模型', {
         description: '请在智能对话面板中选择一个支持视觉的模型',
@@ -6620,7 +6777,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       return;
     }
 
-    setIsVisionAnalyzing(true);
+    setVisionAnalyzingScope(epoch);
     try {
       toast.info('正在分析图片...', {
         description: '灵感提示词库正在生成双语提示词',
@@ -6648,11 +6805,12 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       }
 
       const result = await response.json();
+      if (!current()) return;
 
       if (result.success && result.data) {
         const data = result.data;
-        // Store structured vision result for OhMyPrompt component (user picks category there)
-        setVisionResult(data);
+        // Retain only a result from the current account, project and request.
+        setVisionResults(previous => ({ ...previous, [resultScope]: data }));
 
         const hasContent = data.zh?.prompt || data.en?.prompt || data.zh_style_tags?.length || data.en_style_tags?.length || data.raw;
         if (hasContent) {
@@ -6670,13 +6828,14 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         throw new Error(result.error || '分析失败');
       }
     } catch (error) {
+      if (!current()) return;
       console.error('Vision prompt error:', error);
       toast.error('图片分析失败', {
         description: error instanceof Error ? error.message : '请重试',
         className: 'bg-[#141414] border border-red-900 text-white',
       });
     } finally {
-      setIsVisionAnalyzing(false);
+      if (current()) setVisionAnalyzingScope(null);
     }
   }, [currentChatModelInfo, currentUser?.id, themeStyle]);
 
@@ -7631,7 +7790,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       <>
       <DashboardView
         key={currentUser?.id || 'no-user'}
+        renameDraftStore={renameDraftStore ?? dashboardRenameDrafts.current}
         isMonochrome={themeStyle === 'monochrome'}
+        themePreference={themePreference}
+        onSetThemePreference={setThemePreference}
         user={currentUser!}
         onOpenProject={(project) => {
           setAppMode('canvas');
@@ -7783,18 +7945,18 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       style={{ '--project-menu-bottom': `${currentProject ? projectMenuBottom : 0}px` } as CSSProperties}>
       {/* System Announcement - Banner mode (top bar) */}
       {announcement && showAnnouncement && announcement.displayMode !== 'popup' && announcement.displayMode !== 'sidebar' && (
-        <div className={`fixed top-0 left-0 right-0 z-[400] flex items-center justify-center gap-2 px-4 py-2 text-sm ${
+        <div className={`fixed top-0 left-0 right-0 z-[400] flex max-h-[40dvh] items-start justify-center gap-2 px-3 py-2 text-sm ${
           announcement.type === 'warning'
             ? 'bg-amber-500 text-amber-950'
             : announcement.type === 'danger'
-              ? 'bg-red-500 text-white'
+              ? 'bg-red-700 text-white'
               : themeStyle === 'monochrome'
                 ? 'bg-blue-600 text-white'
                 : 'bg-[#d4af37] text-[#0a0a0a]'
         }`}>
           <Bell className="w-4 h-4 flex-shrink-0" />
-          <span className="flex-1 text-center">{announcement.text}</span>
-          <button onClick={dismissAnnouncement} className="p-1 hover:opacity-70 transition-opacity flex-shrink-0">
+          <span className="max-h-[calc(40dvh-16px)] min-w-0 flex-1 overflow-y-auto overscroll-contain whitespace-pre-wrap text-center [overflow-wrap:anywhere]">{announcement.text}</span>
+          <button type="button" aria-label="关闭系统公告" onClick={dismissAnnouncement} className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded hover:opacity-70 transition-opacity focus-visible:outline-2 focus-visible:outline-offset-2">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -7877,6 +8039,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
+                ref={shareMenuTriggerRef}
                 type="button"
                 className="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 aria-label={`${currentProject.name} 项目菜单`}
@@ -7884,10 +8047,21 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                 <MoreHorizontal className="size-4" aria-hidden="true" />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="center" className="w-40">
+            <DropdownMenuContent
+              align="center"
+              className="w-40"
+              ref={registerShareMenuContent}
+              onCloseAutoFocus={event => {
+                const session = event.currentTarget ? shareMenuSessionsRef.current.get(event.currentTarget) : undefined;
+                if (!session || session.handingOff || session.generation !== shareMenuGenerationRef.current) {
+                  event.preventDefault();
+                }
+              }}
+            >
               <DropdownMenuItem
                 className="min-h-11"
                 onSelect={() => {
+                  if (activeShareMenuSessionRef.current) activeShareMenuSessionRef.current.handingOff = true;
                   setCreatedShareAccess(undefined);
                   setShareCreateOpen(true);
                 }}
@@ -7897,6 +8071,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               <DropdownMenuItem
                 className="min-h-11"
                 onSelect={() => {
+                  if (activeShareMenuSessionRef.current) activeShareMenuSessionRef.current.handingOff = true;
                   setCreatedShareAccess(undefined);
                   setShareManageOpen(true);
                 }}
@@ -7911,10 +8086,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       {/* System Announcement - Popup mode (center modal) */}
       {announcement && showAnnouncement && announcement.displayMode === 'popup' && (
         <div className="fixed inset-0 z-[500] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className={`max-w-md w-[90vw] mx-4 rounded-xl shadow-2xl ${
+          <div role="dialog" aria-modal="true" aria-label="系统公告" className={`flex max-h-[calc(100dvh-16px)] w-[90vw] max-w-md flex-col overflow-hidden rounded-xl shadow-2xl ${
             themeStyle === 'monochrome' ? 'bg-white border border-gray-200' : 'bg-[#1a1a1a] border border-[#333]'
           }`}>
-            <div className={`flex items-center gap-3 px-5 py-4 border-b ${
+            <div className={`flex shrink-0 items-center gap-3 px-4 py-3 border-b ${
               themeStyle === 'monochrome' ? 'border-gray-100' : 'border-[#2a2a2a]'
             }`}>
               <div className={`p-2 rounded-lg ${
@@ -7931,21 +8106,21 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               <h3 className={`font-semibold text-lg ${
                 themeStyle === 'monochrome' ? 'text-gray-900' : 'text-white'
               }`}>系统公告</h3>
-              <button onClick={dismissAnnouncement} className={`ml-auto p-1.5 rounded-lg transition-colors ${
+              <button type="button" aria-label="关闭系统公告" onClick={dismissAnnouncement} className={`ml-auto flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 ${
                 themeStyle === 'monochrome' ? 'hover:bg-gray-100 text-gray-400' : 'hover:bg-[#2a2a2a] text-gray-500'
               }`}>
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="px-5 py-6">
+            <div className="min-h-0 overflow-y-auto overscroll-contain px-4 py-4 [overflow-wrap:anywhere]">
               <p className={`text-base leading-relaxed whitespace-pre-wrap ${
                 themeStyle === 'monochrome' ? 'text-gray-700' : 'text-gray-300'
               }`}>{announcement.text}</p>
             </div>
-            <div className={`flex justify-end gap-3 px-5 py-4 border-t ${
+            <div className={`flex shrink-0 justify-end gap-3 px-4 py-3 border-t ${
               themeStyle === 'monochrome' ? 'border-gray-100' : 'border-[#2a2a2a]'
             }`}>
-              <button onClick={dismissAnnouncement} className={`px-6 py-2 rounded-lg font-medium transition-colors ${
+              <button type="button" onClick={dismissAnnouncement} className={`min-h-11 px-6 py-2 rounded-lg font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 ${
                 themeStyle === 'monochrome'
                   ? 'bg-blue-600 text-white hover:bg-blue-700'
                   : 'bg-[#d4af37] text-[#0a0a0a] hover:bg-[#c4a030]'
@@ -7956,7 +8131,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       )}
       {/* System Announcement - Sidebar/Toast mode (right side notification) */}
       {announcement && showAnnouncement && announcement.displayMode === 'sidebar' && (
-        <div className={`fixed top-20 right-4 z-[450] max-w-sm w-80 rounded-xl shadow-2xl animate-in slide-in-from-right duration-300 ${
+        <div className={`fixed top-4 right-2 z-[450] max-h-[calc(100dvh-32px)] w-[calc(100vw-16px)] max-w-sm rounded-xl shadow-2xl animate-in slide-in-from-right duration-300 sm:top-20 sm:right-4 sm:max-h-[calc(100dvh-96px)] ${
           themeStyle === 'monochrome' ? 'bg-white border border-gray-200' : 'bg-[#1a1a1a] border border-[#333]'
         }`}>
           <div className={`flex items-start gap-3 p-4`}>
@@ -7971,7 +8146,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             }`}>
               <Bell className="w-4 h-4" />
             </div>
-            <div className="flex-1 min-w-0">
+            <div className="max-h-[calc(100dvh-80px)] min-w-0 flex-1 overflow-y-auto overscroll-contain [overflow-wrap:anywhere] sm:max-h-[calc(100dvh-144px)]">
               <div className={`font-semibold text-sm mb-1 ${
                 themeStyle === 'monochrome' ? 'text-gray-900' : 'text-white'
               }`}>系统通知</div>
@@ -7979,7 +8154,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                 themeStyle === 'monochrome' ? 'text-gray-600' : 'text-gray-400'
               }`}>{announcement.text}</p>
             </div>
-            <button onClick={dismissAnnouncement} className={`p-1 rounded flex-shrink-0 transition-colors ${
+            <button type="button" aria-label="关闭系统通知" onClick={dismissAnnouncement} className={`flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 ${
               themeStyle === 'monochrome' ? 'hover:bg-gray-100 text-gray-400' : 'hover:bg-[#2a2a2a] text-gray-500'
             }`}>
               <X className="w-4 h-4" />
@@ -8041,8 +8216,15 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           onUploadFiles={handleDocumentCanvasFiles}
           uploadAuthority={!currentProject?.id ? 'legacy'
             : collaborativeCanvas.projectId === currentProject.id ? collaborativeCanvas.authority : 'unknown'}
+          onCaptureCropHistory={captureCropHistory}
           onUndo={handleUndo}
           onRedo={handleRedo}
+          mobileCanUndo={currentProject?.id && collaborativeCanvas.authority === 'document'
+            ? ((collaborativeCanvas.status === 'saved' || collaborativeCanvas.status === 'pending') && !historyTransitionPending) || documentHistoryRecoveryState?.state === 'failed' && documentHistoryRecoveryState.direction === 'undo'
+            : !historyTransitionPending && (!currentProject?.id || canUseLegacyCanvasPersistence(currentProject.id, collaborativeCanvas)) && incrementalHistoryRef.current.canUndo()}
+          mobileCanRedo={currentProject?.id && collaborativeCanvas.authority === 'document'
+            ? ((collaborativeCanvas.status === 'saved' || collaborativeCanvas.status === 'pending') && !historyTransitionPending) || documentHistoryRecoveryState?.state === 'failed' && documentHistoryRecoveryState.direction === 'redo'
+            : !historyTransitionPending && (!currentProject?.id || canUseLegacyCanvasPersistence(currentProject.id, collaborativeCanvas)) && incrementalHistoryRef.current.canRedo()}
 
           selectedImage={selectedImage}
           onSelectImage={setSelectedImage}
@@ -8051,6 +8233,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           onExtractKeywords={handleCanvasExtractKeywords}
           onFusion={handleCanvasFusion}
           onAddImages={handleAddImagesFromUi}
+          captureDisplay3dInsertion={captureDisplay3dInsertion}
           onUploadEffectReverseSource={handleUploadEffectReverseSource}
           onReferenceSelect={handleCanvasReferenceSelect}
           referenceIds={ctrlRefSelections.map(r => r.id)}
@@ -8064,14 +8247,20 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             setOhMyPromptOpen(prev => !prev);
           }}
           ohMyPromptOpen={ohMyPromptOpen}
+          renderOhMyPromptExternally
           onCloseOhMyPrompt={() => { setOhMyPromptOpen(false); setVisionPromptEnabled(false); }}
           onToggleOhMyPrompt={() => setOhMyPromptOpen(prev => !prev)}
           onInsertPrompt={(prompt: string) => setExternalPrompt(prompt)}
+          onInsertVisionPrompt={(text: string) => {
+            const id = ++visionInsertionId.current;
+            setVisionInsertions(previous => [...previous, { id, scope: visionScopeKey, text }]);
+          }}
+          visionScopeKey={visionScopeKey}
           ohMyPromptThemeStyle={themeStyle === 'monochrome' ? 'default' : 'gold'}
-          isVisionAnalyzing={isVisionAnalyzing}
-          visionResult={visionResult}
+          isVisionAnalyzing={visionAnalyzingScope === canvasChatScopeRef.current.epoch}
+          visionResult={visionResults[visionScopeKey] ?? null}
           onToggleSettings={() => setPanelCollapsed(prev => !prev)}
-          onToggleTheme={() => setThemeStyle(prev => prev === 'gold' ? 'monochrome' : 'gold')}
+          onToggleTheme={toggleTheme}
           onToggleUserManager={() => setAppMode('dashboard')}
           onToggleAdminSystem={() => setAppMode('dashboard')}
           isAdmin={currentUser?.role === 'admin'}
@@ -8089,6 +8278,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             brandDna: null,
           } : null}
           projectId={currentProject?.id}
+          canvasGeneratorActorId={currentUser?.id ?? null}
           initialAnnotations={initialCanvasAnnotations}
           documentMetadataMode={collaborativeCanvas.projectId === currentProject?.id
             && collaborativeCanvas.authority === 'document'}
@@ -8100,6 +8290,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           onSwitchToDashboard={() => safeSwitchMode('dashboard')}
           initialViewState={viewStateRef.current || undefined}
           isPanelCollapsed={panelCollapsed}
+          onCanvasToolActivated={handleCanvasToolActivated}
           navigateToImageId={navigateToImageId}
           onNavigateToImageComplete={() => setNavigateToImageId(null)}
           onGroupsChange={(groups, renderedBaseline) => {
@@ -8149,6 +8340,24 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           onRetryProcessing={handleRetryVideoProcessing}
         />
       </div>
+      {ohMyPromptOpen && (
+        <OhMyPrompt
+          isOpen={true}
+          onClose={() => { setOhMyPromptOpen(false); setVisionPromptEnabled(false); }}
+          onInsertPrompt={(prompt: string) => setExternalPrompt(prompt)}
+          onInsertVisionPrompt={(text: string) => {
+            const id = ++visionInsertionId.current;
+            setVisionInsertions(previous => [...previous, { id, scope: visionScopeKey, text }]);
+          }}
+          visionScopeKey={visionScopeKey}
+          onVisionPrompt={handleVisionPrompt}
+          isVisionAnalyzing={visionAnalyzingScope === canvasChatScopeRef.current.epoch}
+          visionResult={visionResults[visionScopeKey] ?? null}
+          themeStyle={themeStyle === 'monochrome' ? 'default' : 'gold'}
+          floating={true}
+          defaultActiveTab="agent"
+        />
+      )}
 
       {currentProject && (
         <>
@@ -8156,6 +8365,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             open={shareCreateOpen}
             onOpenChange={setShareCreateOpen}
             projectId={currentProject.id}
+            returnFocusRef={shareMenuTriggerRef}
+            returnFocusScope={JSON.stringify([currentUser?.id ?? null, currentProject.id])}
             requestedViewport={viewStateRef.current}
             onOpenManagement={(access) => {
               setCreatedShareAccess(access);
@@ -8170,6 +8381,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
             }}
             projectId={currentProject.id}
             projectName={currentProject.name}
+            returnFocusRef={shareMenuTriggerRef}
+            returnFocusScope={JSON.stringify([currentUser?.id ?? null, currentProject.id])}
             createdShareAccess={createdShareAccess}
           />
         </>
@@ -8219,14 +8432,15 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
       )}
 
       {/* Right Panel - with vertical collapse strip */}
-      <div data-workspace-right-panel className={`fixed right-0 bottom-[calc(72px+env(safe-area-inset-bottom))] md:bottom-0 z-[70] flex transition-all duration-300 ease-in-out ${panelCollapsed ? 'top-0' : 'top-[var(--project-menu-bottom,0px)] md:top-0'}`} style={{ width: panelCollapsed ? '20px' : 'min(480px, 100vw)' }}>
+      <div data-workspace-right-panel className={`fixed right-0 bottom-[calc(72px+env(safe-area-inset-bottom))] md:bottom-0 z-[70] flex transition-all duration-300 ease-in-out ${panelCollapsed ? 'top-0' : 'top-[var(--project-menu-bottom,0px)] md:top-0'}`} style={{ width: panelCollapsed ? WORKSPACE_PANEL_RAIL_WIDTH : 'min(480px, 100vw)' }}>
         {/* Vertical collapse strip */}
         <button
           onClick={() => setPanelCollapsed(prev => !prev)}
-          className={`w-5 flex items-center justify-center cursor-pointer transition-all duration-200 shrink-0 ${themeStyle === 'monochrome' ? 'bg-gray-100 hover:bg-gray-200 border-r border-gray-200' : 'bg-[#0F1117] hover:bg-[#1a1d26] border-r border-white/[0.06]'}`}
-          style={{ borderRadius: '4px 0 0 4px' }}
+          className={`flex items-center justify-center cursor-pointer transition-all duration-200 shrink-0 ${themeStyle === 'monochrome' ? 'bg-gray-100 hover:bg-gray-200 border-r border-gray-200' : 'bg-[#0F1117] hover:bg-[#1a1d26] border-r border-white/[0.06]'}`}
+          style={{ width: WORKSPACE_PANEL_RAIL_WIDTH, minHeight: WORKSPACE_PANEL_RAIL_WIDTH, borderRadius: '4px 0 0 4px' }}
           title={panelCollapsed ? '展开面板' : '收起面板'}
           aria-label={panelCollapsed ? '展开面板' : '收起面板'}
+          aria-expanded={!panelCollapsed}
         >
           {panelCollapsed ? (
             <ChevronLeft size={14} className={themeStyle === 'monochrome' ? 'text-gray-500' : 'text-gold-muted'} />
@@ -8236,8 +8450,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         </button>
 
         {/* Panel Content */}
-        {!panelCollapsed && (
-        <div className={`min-w-0 flex-1 flex flex-col ${themeStyle === 'monochrome' ? 'bg-white border-l border-gray-200' : 'bg-[#141418] border-l border-white/[0.06]'} overflow-hidden`}>
+        {(!panelCollapsed || panelHasOpened === JSON.stringify([currentUser?.id ?? null, currentProject?.id ?? null])) && (
+        <div key={JSON.stringify([currentUser?.id ?? null, currentProject?.id ?? null])} style={{ display: panelCollapsed ? 'none' : undefined }} inert={panelCollapsed} aria-hidden={panelCollapsed} className={`min-w-0 flex-1 flex flex-col ${themeStyle === 'monochrome' ? 'bg-white border-l border-gray-200' : 'bg-[#141418] border-l border-white/[0.06]'} overflow-hidden`}>
           {/* 软件标题 */}
           <div className="px-4 py-2.5 flex-shrink-0 flex items-center">
             <div className="flex flex-col">
@@ -8347,11 +8561,17 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
                   />
                 ) : (
                   <GenerationPanel
+                    isVisible={!panelCollapsed && activePanel === 'generate'}
                     onGenerate={handleGenerate}
                     onAnalyzeImage={handleAnalyzeImage}
                     onAddToCanvas={handleAddToCanvas}
                     onExtractPrompt={handleExtractPrompt}
                     externalPrompt={externalPrompt}
+                    visionScopeKey={visionScopeKey}
+                    initialVisionDraft={visionDestinationDrafts.current.get(visionScopeKey)}
+                    onVisionDraftChange={(draft: string) => { visionDestinationDrafts.current.set(visionScopeKey, draft); }}
+                    visionInsertion={pendingVisionInsertion}
+                    onVisionInsertionConsumed={(id: number) => setVisionInsertions(previous => previous.filter(item => item.id !== id))}
                     onExternalPromptConsumed={handleExternalPromptConsumed}
                     ctrlRefSelections={ctrlRefSelections}
                     onRemoveCtrlRef={handleRemoveCtrlRef}
@@ -8380,7 +8600,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
               </div>
             </div>
             <div className={activePanel === 'chat' ? 'flex-1 overflow-hidden' : 'hidden'}>
-              <ChatPanel canvasAuthority={collaborativeCanvas.authority==='unknown'?'pending':collaborativeCanvas.authority} themeStyle={themeStyle} projectId={currentProject?.id} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} onAddGeneratedImage={handleAddEmbeddedChatImage} onAddGeneratedImages={handleAddEmbeddedChatImages} canvasImages={images} selectedCanvasImage={selectedImage} onResolveCanvasImageForChat={resolveCanvasImageForChat} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage} onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} onGenerateImage={handleChatGenerateImage} externalPrompt={externalChatPrompt} onExternalPromptConsumed={() => setExternalChatPrompt(undefined)} />
+              <ChatPanel isVisible={!panelCollapsed && activePanel === 'chat'} canvasAuthority={collaborativeCanvas.authority==='unknown'?'pending':collaborativeCanvas.authority} themeStyle={themeStyle} projectId={currentProject?.id} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} onAddGeneratedImage={handleAddEmbeddedChatImage} onAddGeneratedImages={handleAddEmbeddedChatImages} canvasImages={images} selectedCanvasImage={selectedImage} onResolveCanvasImageForChat={resolveCanvasImageForChat} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage?.scope === canvasChatScopeRef.current.epoch ? chatInitialImage.image : null} chatInitialImageResolved onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} onGenerateImage={handleChatGenerateImage} externalPrompt={externalChatPrompt} onExternalPromptConsumed={() => setExternalChatPrompt(undefined)} />
             </div>
 
             {/* 固定在底部的开始生成按钮 */}
@@ -8417,10 +8637,19 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
 
       {/* Preview */}
       <ImagePreview
-        image={previewImage}
-        onClose={() => setPreviewImage(null)}
+        image={previewState?.scope === previewScope ? previewState.image : null}
+        onClose={() => {
+          if (!previewState || previewState.scope !== previewScope || committedPreviewScope.current !== previewScope || activePreviewRef.current !== previewState) return;
+          activePreviewRef.current = null;
+          setPreviewState(null);
+        }}
         themeStyle={themeStyle}
-        onEditImage={(img) => { setPreviewImage(null); handleEditImage(img); }}
+        onEditImage={(img) => {
+          if (!previewState || previewState.scope !== previewScope || committedPreviewScope.current !== previewScope || activePreviewRef.current !== previewState || img !== previewState.image) return;
+          activePreviewRef.current = null;
+          setPreviewState(null);
+          handleEditImage(previewState.image);
+        }}
       />
 
       {/* Floating Video Generation Panel */}

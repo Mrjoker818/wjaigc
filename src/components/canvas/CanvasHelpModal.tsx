@@ -11,18 +11,18 @@ interface CanvasHelpModalProps {
 
 export function CanvasHelpModal({ mode, isMonochrome, onClose }: CanvasHelpModalProps) {
   return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center" onClick={onClose}>
+    <div data-modal="canvas-help" className="absolute inset-0 z-[90] flex items-center justify-center" onClick={onClose}>
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-      <div className={`relative rounded-2xl border shadow-2xl overflow-hidden ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#444]'}`} style={{ width: 560, maxHeight: '80vh' }} onClick={(e) => e.stopPropagation()}>
+      <div role="dialog" aria-modal="true" aria-label={mode === 'instructions' ? '使用说明' : '更新内容'} className={`relative flex min-h-0 flex-col rounded-2xl border shadow-2xl overflow-hidden ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#444]'}`} style={{ width: 'min(560px, calc(100% - 16px))', maxHeight: '80dvh' }} onClick={(e) => e.stopPropagation()}>
         {/* Header */}
-        <div className={`flex items-center justify-between px-5 py-3 border-b ${isMonochrome ? 'border-gray-100' : 'border-white/[0.14]'}`}>
+        <div className={`flex shrink-0 items-center justify-between px-5 py-3 border-b ${isMonochrome ? 'border-gray-100' : 'border-white/[0.14]'}`}>
           <div className="flex items-center gap-2">
             {mode === 'instructions' ? <Info size={16} className={isMonochrome ? 'text-gray-700' : 'text-gold'} /> : <FileText size={16} className={isMonochrome ? 'text-gray-700' : 'text-gold'} />}
             <span className={`text-sm font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>{mode === 'instructions' ? '使用说明' : '更新内容'}</span>
           </div>
-          <button onClick={onClose} className={`p-1 rounded-lg transition-colors ${isMonochrome ? 'text-blue-400 hover:text-blue-600 hover:bg-blue-50' : 'text-gold-muted/70 hover:text-white hover:bg-[#2a2a2a]'}`}><X size={16} /></button>
+          <button aria-label="关闭画布帮助" onClick={onClose} className={`flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center p-1 rounded-lg transition-colors ${isMonochrome ? 'text-blue-600 hover:text-blue-700 hover:bg-blue-50' : 'text-gold-muted/70 hover:text-white hover:bg-[#2a2a2a]'}`}><X size={16} /></button>
         </div>
-        <div className={`overflow-y-auto ${isMonochrome ? 'text-gray-700' : 'text-text-bright'}`} style={{ maxHeight: 'calc(80vh - 52px)' }}>
+        <div className={`min-h-0 flex-1 overflow-y-auto overscroll-contain ${isMonochrome ? 'text-gray-700' : 'text-text-bright'}`}>
           {mode === 'instructions' ? (
             <InstructionsContent isMonochrome={isMonochrome} />
           ) : (
@@ -52,10 +52,10 @@ function ToolCard({ icon: Icon, title, desc, imageFile, detail, isMonochrome }: 
 }) {
   return (
     <div className={`rounded-lg p-3 ${isMonochrome ? 'bg-gray-50' : 'bg-[#222]'}`}>
-      <div className="flex items-center gap-2 mb-1.5">
+      <div className="flex flex-wrap items-center gap-2 mb-1.5">
         <Icon size={13} className={isMonochrome ? 'text-gray-600' : 'text-gold'} />
         <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>{title}</span>
-        <span className={`text-xs ml-auto ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/70'}`}>{desc}</span>
+        <span className={`text-xs ml-auto ${isMonochrome ? 'text-gray-600' : 'text-gold-muted'}`}>{desc}</span>
       </div>
       {imageFile && (
         <div className="rounded-lg overflow-hidden border mt-2" style={{ borderColor: isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.08)' }}>
@@ -71,7 +71,7 @@ function SimpleToolCard({ title, desc, isMonochrome }: { title: string; desc: st
   return (
     <div className="flex items-center justify-between">
       <span className={isMonochrome ? 'text-gray-600' : 'text-[#999]'}>{title}</span>
-      <span className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/70'}`}>{desc}</span>
+      <span className={`text-xs ${isMonochrome ? 'text-gray-600' : 'text-gold-muted'}`}>{desc}</span>
     </div>
   );
 }
@@ -83,8 +83,8 @@ function InstructionsContent({ isMonochrome }: { isMonochrome: boolean }) {
 
       {/* 画布操作 */}
       <div>
-        <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-gold'}`}>画布操作</div>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+        <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-600' : 'text-gold'}`}>画布操作</div>
+        <div className="grid grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2">
           {[['左键单击', '选择图片'], ['左键拖拽空白', '框选多图'], ['Ctrl+左键', '多选/参考融合'], ['Alt+左键', '标记参考图'], ['长按拖动图片', '移动图片'], ['空格+拖动', '平移画布'], ['滚轮', '缩放画布'], ['右键', '上下文菜单'], ['Ctrl+D', '复制图片'], ['Ctrl+Z', '撤回操作'], ['ESC', '退出编辑'], ['Delete', '删除图片']].map(([k, v]) => (
             <SimpleToolCard key={k} title={k} desc={v} isMonochrome={isMonochrome} />
           ))}
@@ -95,7 +95,7 @@ function InstructionsContent({ isMonochrome }: { isMonochrome: boolean }) {
 
       {/* 图片编辑工具 */}
       <div>
-        <div className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isMonochrome ? 'text-gray-400' : 'text-gold'}`}>图片编辑工具</div>
+        <div className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isMonochrome ? 'text-gray-600' : 'text-gold'}`}>图片编辑工具</div>
         <div className="space-y-3">
           <ToolCard icon={Eraser} title="擦除" desc="画笔涂抹消除，自动修复" imageFile="erase-tool.jpeg" detail="涂抹要消除的区域，本地 LaMa/ZITS/Anime-Lama 优先修复，AI 智能修复兜底，所有工具统一使用图像生成面板当前模型，支持任务取消" isMonochrome={isMonochrome} />
           <ToolCard icon={Brush} title="蒙版" desc="精准遮罩，AI 重新生成" imageFile="mask-tool.jpeg" detail="画白色区域标记要重新生成的部分，输入提示词描述，AI 仅在蒙版区域生成新内容" isMonochrome={isMonochrome} />
@@ -115,7 +115,7 @@ function InstructionsContent({ isMonochrome }: { isMonochrome: boolean }) {
               <MoreHorizontal size={13} className={isMonochrome ? 'text-gray-600' : 'text-gold'} />
               <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>其他工具</span>
             </div>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+            <div className="grid grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2">
               {[['编辑元素', '按元素智能分层'], ['多角度', '多视角旋转生成'], ['图转3D工厂', '生成3D模型预览'], ['裁切', '自由/预设比例裁切'], ['Logo Pro', 'AI Logo设计与生成'], ['图生图', '基于原图风格生成'], ['品牌工厂', '品牌视觉资产生成'], ['下载', 'PNG/SVG/PSD多格式']].map(([k, v]) => (
                 <SimpleToolCard key={k} title={k} desc={v} isMonochrome={isMonochrome} />
               ))}
@@ -128,8 +128,8 @@ function InstructionsContent({ isMonochrome }: { isMonochrome: boolean }) {
 
       {/* 组与参考图 */}
       <div>
-        <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-gold'}`}>组与参考图</div>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+        <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-600' : 'text-gold'}`}>组与参考图</div>
+        <div className="grid grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2">
           {[['多图右键', '创建组'], ['组标题栏', '折叠/展开组'], ['长按组标题', '移动整个组'], ['Alt+左键', '标记参考图（紫色R）'], ['参考图标记', '自动添加到描述'], ['Backspace', '删除参考图标记']].map(([k, v]) => (
             <SimpleToolCard key={k} title={k} desc={v} isMonochrome={isMonochrome} />
           ))}
@@ -140,9 +140,9 @@ function InstructionsContent({ isMonochrome }: { isMonochrome: boolean }) {
 
       {/* Oh My Prompt */}
       <div>
-        <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-gold'}`}>Oh My Prompt</div>
+        <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-600' : 'text-gold'}`}>Oh My Prompt</div>
         <HelpImage file="oh-my-prompt.jpeg" alt="Oh My Prompt" isMonochrome={isMonochrome} />
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mt-2">
+        <div className="grid grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2 mt-2">
           {[['资源库', '精选提示词模板'], ['图片识词', 'AI 识别图片关键词'], ['提示词优化', '增强/扩展/精简'], ['一键发送', '填充到生成面板']].map(([k, v]) => (
             <SimpleToolCard key={k} title={k} desc={v} isMonochrome={isMonochrome} />
           ))}
@@ -153,8 +153,8 @@ function InstructionsContent({ isMonochrome }: { isMonochrome: boolean }) {
 
       {/* 左上角工具栏 */}
       <div>
-        <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-gold'}`}>左上角工具栏</div>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+        <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-600' : 'text-gold'}`}>左上角工具栏</div>
+        <div className="grid grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2">
           {[['Oh My Prompt', '提示词管理'], ['参考融合', 'Ctrl+Click融合生成'], ['设置', '应用配置'], ['主题切换', '黑白/彩色切换'], ['用户管理', '多用户管理'], ['项目数据', '项目保存加载'], ['管理员系统', 'API配置（管理员）'], ['使用说明', '操作与更新']].map(([k, v]) => (
             <SimpleToolCard key={k} title={k} desc={v} isMonochrome={isMonochrome} />
           ))}
@@ -165,8 +165,8 @@ function InstructionsContent({ isMonochrome }: { isMonochrome: boolean }) {
 
       {/* 底部工具栏 */}
       <div>
-        <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-400' : 'text-gold'}`}>底部工具栏</div>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+        <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-600' : 'text-gold'}`}>底部工具栏</div>
+        <div className="grid grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2">
           {[['选择工具', '点击/框选图片'], ['抓手工具', '平移画布'], ['图片上传', '上传本地图片'], ['图像生成器', 'AI图像生成（金色按钮）'], ['视频生成器', 'AI视频生成与编辑'], ['语言修图', '自然语言修改图片'], ['Agent编排', '智能编排多工具'], ['Logo Pro', 'AI Logo设计与生成'], ['品牌工厂', '品牌视觉资产生成'], ['精修引擎', '产品商业级精修'], ['字境大师', 'AI字体设计与生成'], ['节点编辑器', '可视化工作流编排'], ['六面体', '6面贴图预览'], ['缩放控制', '放大/缩小/重置']].map(([k, v]) => (
             <SimpleToolCard key={k} title={k} desc={v} isMonochrome={isMonochrome} />
           ))}
@@ -179,7 +179,7 @@ function InstructionsContent({ isMonochrome }: { isMonochrome: boolean }) {
 function ChangelogContent({ isMonochrome }: { isMonochrome: boolean }) {
   return (
     <div className="p-5">
-      <div className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isMonochrome ? 'text-gray-400' : 'text-gold'}`}>{APP_VERSION_LABEL}</div>
+      <div className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isMonochrome ? 'text-gray-600' : 'text-gold'}`}>{APP_VERSION_LABEL}</div>
       <div className="space-y-2.5">
         {[
           'v4.1.0 修复：生图数量>1时多图完整返回，不再丢失图片',

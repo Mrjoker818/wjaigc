@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
 import { Download, Copy, X, ZoomIn, ZoomOut, Check, FileImage, FileCode, Loader2, FileJson, Box, Eye, RotateCcw, Pencil } from 'lucide-react';
 import { exportAsPSD } from '@/lib/psd-export';
 import { downloadSVG } from '@/lib/svg-export';
@@ -20,20 +20,59 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
   const [zoom, setZoom] = useState(1);
   const [copied, setCopied] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [imageFailed, setImageFailed] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const previewSession = useRef(0);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [exporting, setExporting] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('2d');
   const [threeDMode, setThreeDMode] = useState<ThreeDMode>('cube');
+
+  const previewRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    previewSession.current += 1;
+    setIsLoading(Boolean(image));
+    setImageFailed(false);
+    setFeedback(null);
+    setCopied(false);
+    setExporting(null);
+    return () => {
+      previewSession.current += 1;
+      if (copyTimer.current !== null) clearTimeout(copyTimer.current);
+      copyTimer.current = null;
+    };
+  }, [image?.id, image?.url]);
+
+  useEffect(() => {
+    if (!image) return;
+    const opener = document.activeElement;
+    previewRef.current?.focus();
+    return () => {
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    };
+  }, [image]);
 
   // 3D viewer state
   const [rotX, setRotX] = useState(-15);
   const [rotY, setRotY] = useState(25);
   const [isDragging3D, setIsDragging3D] = useState(false);
   const [autoRotate3D, setAutoRotate3D] = useState(true);
+  const [reduceMotion3D, setReduceMotion3D] = useState(true);
+  const active3DPointer = useRef<{ id: number; owner: HTMLDivElement } | null>(null);
   const lastPos3D = useRef({ x: 0, y: 0 });
   const animRef3D = useRef<number>(0);
   const rotRef3D = useRef({ x: -15, y: 25 });
   const sphereCanvasRef = useRef<HTMLCanvasElement>(null);
   const imgDataRef = useRef<{ data: Uint8ClampedArray; w: number; h: number } | null>(null);
+
+  useEffect(() => {
+    const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update = (): void => setReduceMotion3D(preference.matches);
+    update();
+    preference.addEventListener('change', update);
+    return () => preference.removeEventListener('change', update);
+  }, []);
 
   // Preload image pixel data for sphere rendering
   useEffect(() => {
@@ -116,8 +155,8 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
 
   // Auto rotation
   useEffect(() => {
-    if (viewMode !== '3d') return;
-    if (!autoRotate3D || isDragging3D) {
+    if (viewMode !== '3d' || !image) return;
+    if (!autoRotate3D || isDragging3D || reduceMotion3D) {
       if (animRef3D.current) cancelAnimationFrame(animRef3D.current);
       return;
     }
@@ -130,7 +169,7 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
     return () => {
       if (animRef3D.current) cancelAnimationFrame(animRef3D.current);
     };
-  }, [viewMode, autoRotate3D, isDragging3D]);
+  }, [viewMode, image, autoRotate3D, isDragging3D, reduceMotion3D]);
 
   // Sphere canvas rendering
   useEffect(() => {
@@ -266,15 +305,18 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
   }, [viewMode, threeDMode, rotX, rotY]);
 
   // 3D drag handlers
-  const handle3DPointerDown = useCallback((e: React.PointerEvent) => {
+  const handle3DPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>): void => {
+    if (!e.isPrimary || e.button !== 0 || active3DPointer.current) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    active3DPointer.current = { id: e.pointerId, owner: e.currentTarget };
     setIsDragging3D(true);
     setAutoRotate3D(false);
     lastPos3D.current = { x: e.clientX, y: e.clientY };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
   }, []);
 
-  const handle3DPointerMove = useCallback((e: React.PointerEvent) => {
-    if (!isDragging3D) return;
+  const handle3DPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>): void => {
+    if (active3DPointer.current?.id !== e.pointerId) return;
     const dx = e.clientX - lastPos3D.current.x;
     const dy = e.clientY - lastPos3D.current.y;
     lastPos3D.current = { x: e.clientX, y: e.clientY };
@@ -284,11 +326,24 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
     };
     setRotX(rotRef3D.current.x);
     setRotY(rotRef3D.current.y);
-  }, [isDragging3D]);
-
-  const handle3DPointerUp = useCallback(() => {
-    setIsDragging3D(false);
   }, []);
+
+  const handle3DPointerUp = useCallback((e?: React.PointerEvent<HTMLDivElement>): void => {
+    const active = active3DPointer.current;
+    if (!active || (e && e.pointerId !== active.id)) return;
+    active3DPointer.current = null;
+    setIsDragging3D(false);
+    if (active.owner.hasPointerCapture(active.id)) active.owner.releasePointerCapture(active.id);
+  }, []);
+
+  useEffect(() => {
+    const stop = (): void => handle3DPointerUp();
+    window.addEventListener('blur', stop);
+    return () => {
+      window.removeEventListener('blur', stop);
+      stop();
+    };
+  }, [viewMode, threeDMode, image?.id, handle3DPointerUp]);
 
   // Early return after all hooks
   if (!image) return null;
@@ -305,19 +360,46 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
   };
 
   const handleDownload = async (format: 'png' | 'svg' | 'psd') => {
+    const session = previewSession.current;
+    setFeedback(null);
     setExporting(format);
     try {
       if (format === 'png') {
         const response = await fetch(image.url);
+        if (!response.ok) throw new Error(`图片请求失败（${response.status}）`);
         const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
+        const bitmap = await createImageBitmap(blob);
+        let png: Blob;
+        try {
+          const signature = new Uint8Array(await blob.slice(0, 8).arrayBuffer());
+          const isPng = [137, 80, 78, 71, 13, 10, 26, 10].every((value, index) => signature[index] === value);
+          if (isPng) {
+            png = blob.type === 'image/png' ? blob : new Blob([blob], { type: 'image/png' });
+          } else {
+            const canvas = document.createElement('canvas');
+            canvas.width = bitmap.width;
+            canvas.height = bitmap.height;
+            const context = canvas.getContext('2d');
+            if (!context) throw new Error('浏览器暂不支持图片转换');
+            context.drawImage(bitmap, 0, 0);
+            png = await new Promise<Blob>((resolve, reject) => {
+              canvas.toBlob(value => value ? resolve(value) : reject(new Error('PNG 编码失败')), 'image/png');
+            });
+          }
+        } finally {
+          bitmap.close();
+        }
+        const url = URL.createObjectURL(png);
         const a = document.createElement('a');
-        a.href = url;
-        a.download = `${image.prompt?.substring(0, 30) || 'image'}.png`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        try {
+          a.href = url;
+          a.download = `${image.prompt?.substring(0, 30) || 'image'}.png`;
+          document.body.appendChild(a);
+          a.click();
+        } finally {
+          a.remove();
+          URL.revokeObjectURL(url);
+        }
       } else if (format === 'svg') {
         await downloadSVG(image.url, 'pro');
       } else if (format === 'psd') {
@@ -326,18 +408,34 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
       }
     } catch (error) {
       console.error(`Export as ${format} failed:`, error);
+      if (previewSession.current === session) {
+        const message = error instanceof Error ? error.message.slice(0, 160) : '请稍后重试';
+        setFeedback(`${format.toUpperCase()} 导出失败：${message}。请重试。`);
+      }
     } finally {
-      setExporting(null);
+      if (previewSession.current === session) setExporting(null);
     }
   };
 
   const handleCopyUrl = async () => {
+    const session = previewSession.current;
+    setFeedback(null);
+    setCopied(false);
+    if (copyTimer.current !== null) clearTimeout(copyTimer.current);
+    copyTimer.current = null;
     try {
       await navigator.clipboard.writeText(image.url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      if (previewSession.current === session) {
+        setCopied(true);
+        const timer = setTimeout(() => {
+          if (previewSession.current === session) setCopied(false);
+          if (copyTimer.current === timer) copyTimer.current = null;
+        }, 2000);
+        copyTimer.current = timer;
+      }
     } catch (error) {
       console.error('Copy failed:', error);
+      if (previewSession.current === session) setFeedback('复制链接失败，请检查浏览器剪贴板权限后重试。');
     }
   };
 
@@ -354,8 +452,8 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
   const overlayBg = isMonochrome ? 'from-white/90 to-white/60' : 'from-black/80 to-transparent';
 
   // Cube dimensions
-  const cubeSize = 200;
-  const half = cubeSize / 2;
+  const cubeSize = 'min(200px, 40cqw, 40cqh)';
+  const half = 'calc(min(200px, 40cqw, 40cqh) / 2)';
 
   const cubeFace = (transform: string, content: React.ReactNode, extra: React.CSSProperties = {}): React.ReactNode => (
     <div
@@ -394,20 +492,52 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md animate-in fade-in duration-200"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/85 p-2 backdrop-blur-md animate-in fade-in duration-200"
+      role="dialog"
+      aria-modal="true"
+      aria-label="图片预览"
       onClick={onClose}
+      onKeyDown={(event: React.KeyboardEvent<HTMLDivElement>): void => {
+        event.stopPropagation();
+        if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
+          event.preventDefault();
+          onClose();
+          return;
+        }
+        if (event.key !== 'Tab') return;
+        const panel = previewRef.current;
+        if (!panel) return;
+        const controls = Array.from(panel.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter(element => element.getClientRects().length > 0);
+        if (!controls.length) {
+          event.preventDefault();
+          panel.focus();
+          return;
+        }
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === panel)) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }}
     >
       <div
-        className={`relative ${viewMode === '3d' ? 'w-[700px] h-[600px]' : 'max-w-[95vw] max-h-[95vh]'} ${bgColor} ${borderColor} border rounded-xl overflow-hidden shadow-2xl`}
+        ref={previewRef}
+        tabIndex={-1}
+        className={`relative flex w-[calc(100vw-1rem)] min-h-0 min-w-0 flex-col ${viewMode === '3d' ? 'max-w-[700px] h-[min(600px,calc(100dvh-1rem))]' : 'max-w-[70rem] h-[min(56rem,calc(100dvh-1rem))]'} ${bgColor} ${borderColor} border rounded-xl overflow-hidden shadow-2xl outline-none [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:shrink-0 [&_button]:whitespace-nowrap [&_button]:focus-visible:ring-2 [&_button]:focus-visible:ring-inset [&_button]:focus-visible:ring-primary`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className={`absolute top-0 left-0 right-0 z-20 flex items-center justify-between p-3 bg-gradient-to-b ${overlayBg}`}>
+        <div className={`relative z-20 flex shrink-0 flex-wrap items-center justify-between gap-2 p-2 bg-gradient-to-b ${overlayBg}`}>
           {/* Left: View mode + Zoom */}
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <div className={`flex items-center gap-0.5 p-0.5 rounded-lg ${isMonochrome ? 'bg-gray-100' : 'bg-[#1a1a1a]'} border ${borderColor}`}>
               <button
                 onClick={() => setViewMode('2d')}
+                aria-pressed={viewMode === '2d'}
                 className={`flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md transition-all ${
                   viewMode === '2d' ? `${accentBg} ${accentColor}` : `${btnText} hover:${textColor}`
                 }`}
@@ -417,6 +547,7 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
               </button>
               <button
                 onClick={() => setViewMode('3d')}
+                aria-pressed={viewMode === '3d'}
                 className={`flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md transition-all ${
                   viewMode === '3d' ? `${accentBg} ${accentColor}` : `${btnText} hover:${textColor}`
                 }`}
@@ -430,6 +561,7 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
               <div className="flex items-center gap-1">
                 <button
                   onClick={() => setZoom(z => Math.min(3, z + 0.25))}
+                  aria-label="放大预览"
                   className={`p-1.5 ${btnText} hover:${textColor} ${isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-white/10'} rounded-lg transition-all`}
                 >
                   <ZoomIn className="h-3.5 w-3.5" />
@@ -439,6 +571,7 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
                 </span>
                 <button
                   onClick={() => setZoom(z => Math.max(0.25, z - 0.25))}
+                  aria-label="缩小预览"
                   className={`p-1.5 ${btnText} hover:${textColor} ${isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-white/10'} rounded-lg transition-all`}
                 >
                   <ZoomOut className="h-3.5 w-3.5" />
@@ -448,7 +581,7 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
           </div>
 
           {/* Right: Export + Close */}
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <button
               onClick={handleCopyUrl}
               className={`flex items-center gap-1 px-2.5 py-1 text-xs ${btnText} hover:${textColor} ${isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-white/10'} rounded-lg transition-all`}
@@ -489,6 +622,7 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
 
             <button
               onClick={onClose}
+              aria-label="关闭图片预览"
               className={`p-1.5 ${btnText} hover:${textColor} ${isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-white/10'} rounded-lg transition-all`}
             >
               <X className="h-4 w-4" />
@@ -496,44 +630,65 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
           </div>
         </div>
 
+        {(imageFailed || feedback) && (
+          <div
+            role="alert"
+            className={`flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2 text-sm ${isMonochrome ? 'border-red-200 bg-red-50 text-red-800' : 'border-red-800 bg-[#241414] text-red-200'}`}
+          >
+            <span className="min-w-0 flex-1 break-words">{imageFailed ? '图片加载失败，请重试。' : feedback}</span>
+            {imageFailed && (
+              <button
+                type="button"
+                className="rounded-md border border-current px-3 py-1 text-sm"
+                onClick={(): void => {
+                  setViewMode('2d');
+                  setFeedback(null);
+                  setImageFailed(false);
+                  setIsLoading(true);
+                  setLoadAttempt(value => value + 1);
+                }}
+              >
+                重试加载
+              </button>
+            )}
+          </div>
+        )}
+
         {/* 2D View */}
         {viewMode === '2d' && (
-          <>
+          <div className="relative flex min-h-0 flex-1 flex-col">
             {isLoading && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
                 <div className={`animate-spin w-8 h-8 border-2 ${accentBorder} ${isMonochrome ? 'border-blue-600' : 'border-[#d4af37]'} border-t-transparent rounded-full`} />
               </div>
             )}
-            <div className="overflow-auto pt-14 pb-16" style={{ maxHeight: '95vh' }}>
+            <div className="min-h-0 flex-1 overflow-auto p-2">
               <div
                 style={{ transform: `scale(${zoom})`, transformOrigin: 'center center', transition: 'transform 0.2s ease' }}
-                className="flex items-center justify-center min-h-[60vh]"
+                className="flex min-h-full items-center justify-center"
               >
                 <img
+                  key={`${image.id}:${image.url}:${loadAttempt}`}
                   src={image.url}
                   alt={image.prompt}
-                  className="max-w-full max-h-[80vh] object-contain"
-                  onLoad={() => setIsLoading(false)}
-                  onError={() => setIsLoading(false)}
+                  className={`max-w-full max-h-[80vh] object-contain ${imageFailed ? 'invisible' : ''}`}
+                  onLoad={(): void => { setIsLoading(false); setImageFailed(false); }}
+                  onError={(): void => { setIsLoading(false); setImageFailed(true); }}
                   draggable={false}
                 />
               </div>
             </div>
-          </>
+          </div>
         )}
 
         {/* 3D View - INLINED, no dynamic import */}
         {viewMode === '3d' && (
           <div
-            className="absolute inset-0 pt-12 pb-3 select-none"
-            onPointerDown={handle3DPointerDown}
-            onPointerMove={handle3DPointerMove}
-            onPointerUp={handle3DPointerUp}
-            onPointerLeave={handle3DPointerUp}
+            className="relative flex min-h-0 flex-1 flex-col overflow-hidden select-none"
             style={{ cursor: isDragging3D ? 'grabbing' : 'grab' }}
           >
             {/* Mode switcher overlay */}
-            <div className="absolute top-14 left-3 right-3 z-10 flex items-center gap-2">
+            <div className="relative z-10 flex shrink-0 flex-wrap items-center gap-2 p-2">
               <div className="flex bg-black/60 backdrop-blur-sm rounded-lg p-0.5 border border-[#333]">
                 <button
                   onClick={(e) => { e.stopPropagation(); setThreeDMode('cube'); }}
@@ -573,10 +728,18 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
             </div>
 
             {/* 3D Content */}
-            <div className="w-full h-full flex items-center justify-center">
+            <div
+              className="flex min-h-0 flex-1 overflow-hidden"
+              style={{ containerType: 'size', touchAction: 'none' }}
+              onPointerDown={handle3DPointerDown}
+              onPointerMove={handle3DPointerMove}
+              onPointerUp={handle3DPointerUp}
+              onPointerCancel={handle3DPointerUp}
+              onLostPointerCapture={handle3DPointerUp}
+            >
               {threeDMode === 'cube' ? (
                 /* CSS 3D Cube */
-                <div style={{ perspective: '800px', perspectiveOrigin: '50% 50%' }}>
+                <div className="m-auto shrink-0" style={{ perspective: '800px', perspectiveOrigin: '50% 50%' }}>
                   <div
                     style={{
                       width: cubeSize,
@@ -584,39 +747,40 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
                       position: 'relative',
                       transformStyle: 'preserve-3d',
                       transform: `rotateX(${rotX}deg) rotateY(${rotY}deg)`,
-                      transition: isDragging3D ? 'none' : 'transform 0.1s ease-out',
+                      transition: isDragging3D || reduceMotion3D ? 'none' : 'transform 0.1s ease-out',
                     }}
                   >
                     {/* Front - main image */}
-                    {cubeFace(`translateZ(${half}px)`,
-                      <img src={image.url} alt="front" crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />,
+                    {cubeFace(`translateZ(${half})`,
+                      <img src={image.url} alt="front" crossOrigin="anonymous" draggable={false} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />,
                       { border: '2px solid #d4af37' }
                     )}
                     {/* Back */}
-                    {cubeFace(`rotateY(180deg) translateZ(${half}px)`, sideContent('背面'))}
+                    {cubeFace(`rotateY(180deg) translateZ(${half})`, sideContent('背面'))}
                     {/* Right */}
-                    {cubeFace(`rotateY(90deg) translateZ(${half}px)`, sideContent('右侧'))}
+                    {cubeFace(`rotateY(90deg) translateZ(${half})`, sideContent('右侧'))}
                     {/* Left */}
-                    {cubeFace(`rotateY(-90deg) translateZ(${half}px)`, sideContent('左侧'))}
+                    {cubeFace(`rotateY(-90deg) translateZ(${half})`, sideContent('左侧'))}
                     {/* Top */}
-                    {cubeFace(`rotateX(90deg) translateZ(${half}px)`, sideContent('顶部'))}
+                    {cubeFace(`rotateX(90deg) translateZ(${half})`, sideContent('顶部'))}
                     {/* Bottom */}
-                    {cubeFace(`rotateX(-90deg) translateZ(${half}px)`, sideContent('底部'))}
+                    {cubeFace(`rotateX(-90deg) translateZ(${half})`, sideContent('底部'))}
                   </div>
                 </div>
               ) : (
                 /* Sphere - Canvas 2D */
                 <canvas
                   ref={sphereCanvasRef}
+                  className="m-auto"
                   width={660}
                   height={520}
-                  style={{ maxWidth: '100%', maxHeight: '100%' }}
+                  style={{ width: 'min(100cqw, calc(100cqh * 33 / 26))', height: 'auto', maxWidth: '100%', maxHeight: '100%' }}
                 />
               )}
             </div>
 
             {/* Bottom hint */}
-            <div className="absolute bottom-3 left-3 right-3 z-10 text-center">
+            <div className="relative z-10 shrink-0 p-2 text-center">
               <p className="text-xs text-[#666]">
                 {threeDMode === 'cube'
                   ? '左键拖动旋转立方体，查看主体各角度'
@@ -634,7 +798,7 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
 
         {/* Footer (only in 2D mode) */}
         {viewMode === '2d' && (
-          <div className={`absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t ${overlayBg}`}>
+          <div className={`shrink-0 p-3 bg-gradient-to-t ${overlayBg}`}>
             <p className={`${textMutedColor} text-xs line-clamp-2 leading-relaxed`}>{image.prompt}</p>
             <div className={`flex items-center justify-between mt-1.5 text-xs ${isMonochrome ? 'text-gray-400' : 'text-white/40'} font-mono`}>
               <span>{image.createdAt ? new Date(image.createdAt).toLocaleString('zh-CN') : ''}</span>

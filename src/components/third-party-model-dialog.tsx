@@ -14,6 +14,7 @@ import type { ProviderCapabilityOverridesV1 } from '@/lib/task-core/model-capabi
 import { readProviderCapabilityOverrides } from '@/lib/task-core/model-capability-resolution';
 
 interface ThirdPartyModelDialogProps {
+  interactive?: boolean;
   isOpen: boolean;
   onClose: () => void;
   themeStyle: 'gold' | 'monochrome';
@@ -25,6 +26,7 @@ interface ThirdPartyModelDialogProps {
 }
 
 export function ThirdPartyModelDialog({
+  interactive = true,
   isOpen,
   onClose,
   themeStyle,
@@ -69,7 +71,7 @@ export function ThirdPartyModelDialog({
   }, [isOpen, defaultType, manager]);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !interactive) return;
     const handleEscapeKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
@@ -78,7 +80,7 @@ export function ThirdPartyModelDialog({
     };
     window.addEventListener('keydown', handleEscapeKey);
     return () => window.removeEventListener('keydown', handleEscapeKey);
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, interactive]);
 
   const resetForm = () => {
     setFormDisplayName('');
@@ -283,21 +285,21 @@ export function ThirdPartyModelDialog({
 
   if (!isOpen) return null;
 
-  const inputCls = `flex-1 min-w-0 px-2.5 py-1.5 rounded-lg text-xs border outline-none transition-colors ${
+  const inputCls = `flex-1 min-w-0 h-11 px-2.5 py-1.5 rounded-lg text-base md:text-xs border outline-none transition-colors ${
     isGold 
       ? 'border-[#2a2a2a] bg-[#1a1a1a] text-white focus:border-[#d4af37] placeholder:text-[#444]' 
       : 'border-gray-200 bg-gray-50 text-gray-900 focus:border-gray-400 placeholder:text-gray-300'
   }`;
 
-  const labelCls = `text-xs w-16 shrink-0 ${isGold ? 'text-[#888]' : 'text-gray-500'}`;
+  const labelCls = `text-sm w-full sm:w-16 shrink-0 ${isGold ? 'text-[#888]' : 'text-gray-500'}`;
 
   const sectionTitleCls = `text-xs font-medium uppercase tracking-wider ${isGold ? 'text-[#555]' : 'text-gray-400'}`;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-2" style={{ background: isGold ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.9)', backdropFilter: 'blur(20px)' }}>
       <div 
-        className={`w-full max-w-[340px] max-h-[85vh] rounded-2xl overflow-hidden shadow-2xl flex flex-col ${isGold ? 'bg-[#141414] border border-[#2a2a2a]' : 'bg-white border border-gray-200'}`}
-        style={{ minWidth: '280px' }}
+        className={`w-full min-w-0 max-w-[560px] max-h-[calc(100dvh-16px)] md:max-w-[340px] md:max-h-[85vh] [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:shrink-0 [&_button]:whitespace-nowrap [&_button>svg]:shrink-0 [&_input:not([type=checkbox])]:text-base [&_input:not([type=checkbox])]:min-h-11 [&_select]:text-base [&_select]:min-h-11 rounded-2xl overflow-hidden shadow-2xl flex flex-col ${isGold ? 'bg-[#141414] border border-[#2a2a2a]' : 'bg-white border border-gray-200'}`}
+        role="dialog" aria-modal="true" aria-label="第三方模型调用"
       >
         
         {/* Header */}
@@ -305,17 +307,18 @@ export function ThirdPartyModelDialog({
           <h2 className={`text-sm font-semibold ${isGold ? 'text-white' : 'text-gray-900'}`}>
             {showAddForm ? (editingProviderId ? '编辑模型' : '添加') : '第三方模型调用'}
           </h2>
-          <button onClick={onClose} className={`p-1.5 rounded-lg transition-colors ${isGold ? 'hover:bg-[#1a1a1a] text-[#888]' : 'hover:bg-gray-100 text-gray-400'}`}>
+          <button aria-label="关闭模型设置" onClick={onClose} className={`p-1.5 rounded-lg transition-colors ${isGold ? 'hover:bg-[#1a1a1a] text-[#888]' : 'hover:bg-gray-100 text-gray-400'}`}>
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto overflow-x-hidden">
+        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
           {!showAddForm ? (
             <>
               {/* Tab 选择 */}
               <div className="grid grid-cols-2 gap-2 px-4 pt-3 pb-2">
                 <button
+                  aria-pressed={activeTab === 'image'}
                   onClick={() => setActiveTab('image')}
                   className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
                     activeTab === 'image'
@@ -331,6 +334,7 @@ export function ThirdPartyModelDialog({
                   图像模型
                 </button>
                 <button
+                  aria-pressed={activeTab === 'chat'}
                   onClick={() => setActiveTab('chat')}
                   className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
                     activeTab === 'chat'
@@ -346,6 +350,7 @@ export function ThirdPartyModelDialog({
                   文本对话模型
                 </button>
                 <button
+                  aria-pressed={activeTab === '3d'}
                   onClick={() => setActiveTab('3d')}
                   className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
                     activeTab === '3d'
@@ -361,6 +366,7 @@ export function ThirdPartyModelDialog({
                   3D 模型
                 </button>
                 <button
+                  aria-pressed={activeTab === 'video'}
                   onClick={() => setActiveTab('video')}
                   className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
                     activeTab === 'video'
@@ -383,7 +389,7 @@ export function ThirdPartyModelDialog({
                   <div className="space-y-2 mb-3">
                     {currentProviders.map(provider => (
                       <div key={provider.id} className={`rounded-xl p-2.5 transition-all ${isGold ? 'bg-[#0f0f0f] border border-[#2a2a2a]' : 'bg-gray-50 border border-gray-100'}`}>
-                        <div className="flex items-center gap-2">
+                        <div className="grid grid-cols-[28px_minmax(0,1fr)] items-start gap-2">
                           <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
                             provider.connectionStatus === 'success' 
                               ? (isGold ? 'bg-green-900/30' : 'bg-green-50')
@@ -418,8 +424,8 @@ export function ThirdPartyModelDialog({
                             )}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              <p className={`text-xs font-medium truncate ${isGold ? 'text-white' : 'text-gray-900'}`}>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <p className={`min-w-0 text-xs font-medium whitespace-normal [overflow-wrap:anywhere] ${isGold ? 'text-white' : 'text-gray-900'}`}>
                                 {provider.displayName || provider.name}
                               </p>
                               {provider.isRelay && (
@@ -435,24 +441,24 @@ export function ThirdPartyModelDialog({
                                 {provider.isEnabled ? '启用' : '禁用'}
                               </span>
                             </div>
-                            <p className={`text-xs mt-0.5 truncate ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>
+                            <p className={`text-xs mt-0.5 whitespace-normal [overflow-wrap:anywhere] ${isGold ? 'text-[#666]' : 'text-gray-400'}`}>
                               {(provider.selectedModels && provider.selectedModels.length > 0) 
                                 ? `${provider.selectedModels.length}个模型`
                                 : provider.selectedModel || provider.name}
                             </p>
                           </div>
-                          <div className="flex items-center gap-0.5">
-                            <button onClick={() => handleEdit(provider)}
+                          <div className="col-span-2 flex flex-wrap items-center justify-end gap-1">
+                            <button aria-label={`编辑 ${provider.displayName || provider.name}`} onClick={() => handleEdit(provider)}
                               className={`p-1 rounded-md ${isGold ? 'text-[#888] hover:bg-[#1a1a1a]' : 'text-gray-400 hover:bg-gray-100'}`}
                               title="编辑">
                               <Settings className="w-3 h-3" />
                             </button>
-                            <button onClick={() => handleToggleEnabled(provider.id, !provider.isEnabled)}
+                            <button aria-label={`${provider.isEnabled ? '禁用配置' : '启用配置'} ${provider.displayName || provider.name}`} onClick={() => handleToggleEnabled(provider.id, !provider.isEnabled)}
                               className={`p-1 rounded-md ${isGold ? 'text-[#888] hover:bg-[#1a1a1a]' : 'text-gray-400 hover:bg-gray-100'}`}
                               title={provider.isEnabled ? '禁用' : '启用'}>
                               {provider.isEnabled ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
                             </button>
-                            <button onClick={() => handleDelete(provider.id)}
+                            <button aria-label={`删除配置 ${provider.displayName || provider.name}`} onClick={() => handleDelete(provider.id)}
                               className={`p-1 rounded-md opacity-60 hover:opacity-100 ${isGold ? 'text-red-500 hover:bg-red-900/20' : 'text-red-400 hover:bg-red-50'}`}
                               title="删除">
                               <Trash2 className="w-3 h-3" />
@@ -504,10 +510,11 @@ export function ThirdPartyModelDialog({
                 <p className={sectionTitleCls}>基础配置</p>
                 
                 {/* 显示名称 */}
-                <div className="flex items-center gap-2">
+                <div className="grid grid-cols-1 gap-1.5 sm:flex sm:items-center sm:gap-2">
                   <label className={labelCls}>显示名称</label>
                   <input
                     type="text"
+                    aria-label="显示名称"
                     value={formDisplayName}
                     onChange={(e) => setFormDisplayName(e.target.value)}
                     placeholder="请输入显示名称"
@@ -516,14 +523,17 @@ export function ThirdPartyModelDialog({
                 </div>
 
                 {/* 启用状态 */}
-                <div className="flex items-center gap-2">
+                <div className="grid grid-cols-1 gap-1.5 sm:flex sm:items-center sm:gap-2">
                   <label className={labelCls}>启用状态</label>
                   <button
                     type="button"
+                    role="switch" aria-label="启用状态" aria-checked={formIsEnabled}
                     onClick={() => setFormIsEnabled(!formIsEnabled)}
-                    className={`relative w-9 h-[18px] rounded-full transition-colors ${formIsEnabled ? (isGold ? 'bg-[#d4af37]' : 'bg-gray-700') : (isGold ? 'bg-[#2a2a2a]' : 'bg-gray-300')}`}
+                    className="relative inline-flex w-11 items-center justify-center rounded-lg"
                   >
-                    <span className={`absolute top-[1px] left-[1px] w-4 h-4 rounded-full bg-white transition-transform shadow-sm ${formIsEnabled ? 'translate-x-[18px]' : 'translate-x-0'}`} />
+                    <span className={`relative block w-9 h-[18px] rounded-full transition-colors ${formIsEnabled ? (isGold ? 'bg-[#d4af37]' : 'bg-gray-700') : (isGold ? 'bg-[#2a2a2a]' : 'bg-gray-300')}`}>
+                      <span className={`absolute top-[1px] left-[1px] w-4 h-4 rounded-full bg-white transition-transform shadow-sm ${formIsEnabled ? 'translate-x-[18px]' : 'translate-x-0'}`} />
+                    </span>
                   </button>
                 </div>
               </div>
@@ -533,9 +543,10 @@ export function ThirdPartyModelDialog({
                 <p className={sectionTitleCls}>提供商配置</p>
                 
                 {/* 提供商选择 */}
-                <div className="flex items-center gap-2">
+                <div className="grid grid-cols-1 gap-1.5 sm:flex sm:items-center sm:gap-2">
                   <label className={labelCls}>提供商</label>
                   <select
+                    aria-label="提供商"
                     value={formProvider}
                     onChange={(e) => handleProviderPresetChange(e.target.value)}
                     className={inputCls}
@@ -551,30 +562,32 @@ export function ThirdPartyModelDialog({
                   const preset = PROVIDER_PRESETS.find(p => p.id === formProvider);
                   if (!preset?.description) return null;
                   return (
-                    <p className={`text-xs leading-relaxed pl-[72px] ${isGold ? 'text-[#444]' : 'text-gray-400'}`}>
+                    <p className={`text-xs leading-relaxed sm:pl-[72px] ${isGold ? 'text-[#444]' : 'text-gray-400'}`}>
                       {preset.description}
                     </p>
                   );
                 })()}
 
                 {/* API密钥 */}
-                <div className="flex items-center gap-2">
+                <div className="grid grid-cols-1 gap-1.5 sm:flex sm:items-center sm:gap-2">
                   <label className={`${labelCls} flex items-center gap-1`}>
                     <Key className="w-2.5 h-2.5" />
                     API密钥
                   </label>
-                  <div className="flex-1 relative">
+                  <div className="flex-1 min-w-0 flex items-center gap-1.5">
                     <input
                       type={showApiKey ? "text" : "password"}
+                      aria-label="API密钥"
                       value={formApiKey}
                       onChange={(e) => setFormApiKey(e.target.value)}
                       placeholder="输入API密钥"
-                      className={`w-full min-w-0 px-2.5 py-1.5 pr-8 rounded-lg text-xs border font-mono outline-none transition-colors ${isGold ? 'border-[#2a2a2a] bg-[#1a1a1a] text-white focus:border-[#d4af37]' : 'border-gray-200 bg-gray-50 text-gray-900'} placeholder:text-[#444]'}`}
+                      className={`flex-1 w-0 min-w-0 h-11 px-2.5 py-1.5 rounded-lg text-base border font-mono outline-none transition-colors ${isGold ? 'border-[#2a2a2a] bg-[#1a1a1a] text-white focus:border-[#d4af37]' : 'border-gray-200 bg-gray-50 text-gray-900'} placeholder:text-[#444]`}
                     />
                     <button
                       type="button"
+                      aria-label={showApiKey ? '隐藏API密钥' : '显示API密钥'}
                       onClick={() => setShowApiKey(!showApiKey)}
-                      className={`absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded ${isGold ? 'text-[#666] hover:text-[#999]' : 'text-gray-400 hover:text-gray-600'}`}
+                      className={`inline-flex items-center justify-center p-0.5 rounded ${isGold ? 'text-[#666] hover:text-[#999]' : 'text-gray-400 hover:text-gray-600'}`}
                     >
                       {showApiKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
                     </button>
@@ -582,13 +595,14 @@ export function ThirdPartyModelDialog({
                 </div>
 
                 {/* API地址 */}
-                <div className="flex items-center gap-2">
+                <div className="grid grid-cols-1 gap-1.5 sm:flex sm:items-center sm:gap-2">
                   <label className={`${labelCls} flex items-center gap-1`}>
                     <Link2 className="w-2.5 h-2.5" />
                     API地址
                   </label>
                   <input
                     type="text"
+                    aria-label="API地址"
                     value={formBaseUrl}
                     onChange={(e) => setFormBaseUrl(e.target.value)}
                     placeholder="https://api.example.com"
@@ -597,9 +611,10 @@ export function ThirdPartyModelDialog({
                 </div>
 
                 {/* 请求风格 */}
-                <div className="flex items-center gap-2">
+                <div className="grid grid-cols-1 gap-1.5 sm:flex sm:items-center sm:gap-2">
                   <label className={labelCls}>请求风格</label>
                   <select
+                    aria-label="请求风格"
                     value={formRequestStyle}
                     onChange={(e) => setFormRequestStyle(e.target.value as 'chat-completions' | 'images-generations')}
                     className={inputCls}
@@ -616,17 +631,19 @@ export function ThirdPartyModelDialog({
                 <p className={sectionTitleCls}>模型配置</p>
                 
                 {/* 模型搜索 + 刷新 */}
-                <div className="flex items-center gap-2">
+                <div className="grid grid-cols-1 gap-1.5 sm:flex sm:items-center sm:gap-2">
                   <label className={labelCls}>选择模型</label>
                   <div className="flex-1 flex gap-1.5 min-w-0">
                     <input
                       type="text"
+                      aria-label="搜索或手动输入模型ID"
                       value={modelSearch}
                       onChange={(e) => setModelSearch(e.target.value)}
                       placeholder="搜索或手动输入模型ID"
                       className={inputCls}
                     />
                     <button
+                      aria-label="发现模型"
                       onClick={handleDiscoverModels}
                       disabled={isDiscovering || !formApiKey.trim() || !formBaseUrl.trim()}
                       className={`px-2 py-1.5 rounded-lg text-xs flex items-center gap-1 transition-all shrink-0 ${
@@ -644,14 +661,15 @@ export function ThirdPartyModelDialog({
 
                 {/* 已选模型标签 */}
                 {formSelectedModels.length > 0 && (
-                  <div className="pl-[72px]">
+                  <div className="sm:pl-[72px]">
                     <div className="flex items-center gap-1 flex-wrap">
                       {formSelectedModels.map(modelId => (
-                        <span key={modelId} className={`inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 rounded-md ${
+                        <span key={modelId} className={`inline-flex max-w-full min-w-0 items-center gap-1 text-xs px-1.5 py-0.5 rounded-md ${
                           isGold ? 'bg-[#d4af37]/15 text-[#d4af37] border border-[#d4af37]/20' : 'bg-gray-100 text-gray-700 border border-gray-200'
                         }`}>
-                          <span className="truncate max-w-[100px]">{modelId}</span>
+                          <span className="min-w-0 whitespace-normal [overflow-wrap:anywhere]">{modelId}</span>
                           <button 
+                            aria-label={`移除模型 ${modelId}`}
                             onClick={() => toggleModel(modelId)}
                             className={`shrink-0 ${isGold ? 'hover:text-white' : 'hover:text-gray-900'}`}
                           >
@@ -720,7 +738,7 @@ export function ThirdPartyModelDialog({
 
                 {/* 手动添加模型 */}
                 {modelSearch.trim() && !discoveredModels.includes(modelSearch.trim()) && (
-                  <div className="pl-[72px]">
+                  <div className="sm:pl-[72px]">
                     <button
                       onClick={() => {
                         const trimmed = modelSearch.trim();
@@ -729,7 +747,7 @@ export function ThirdPartyModelDialog({
                         }
                         setModelSearch('');
                       }}
-                      className={`flex items-center gap-1 text-xs px-2 py-1 rounded-md ${
+                      className={`min-w-0 max-w-full whitespace-normal! [overflow-wrap:anywhere] text-left flex items-center gap-1 text-xs px-2 py-1 rounded-md ${
                         isGold ? 'text-[#d4af37] bg-[#d4af37]/10 border border-[#d4af37]/20 hover:bg-[#d4af37]/20' 
                                : 'text-blue-500 bg-blue-50 border border-blue-200 hover:bg-blue-100'
                       }`}
@@ -755,6 +773,7 @@ export function ThirdPartyModelDialog({
               {/* 高级参数 */}
               <div className="space-y-2">
                 <button
+                  aria-expanded={showAdvanced}
                   onClick={() => setShowAdvanced(!showAdvanced)}
                   className={`w-full flex items-center justify-between text-xs font-medium ${isGold ? 'text-[#555]' : 'text-gray-400'}`}
                 >
@@ -771,24 +790,27 @@ export function ThirdPartyModelDialog({
                 {showAdvanced && (
                   <div className={`space-y-1.5 p-2 rounded-lg ${isGold ? 'bg-[#0a0a0a] border border-[#2a2a2a]' : 'bg-gray-50 border border-gray-100'}`}>
                     {Object.entries(formAdvancedParams).map(([key, value]) => (
-                      <div key={key} className="flex items-center gap-1.5">
+                      <div key={key} className="grid grid-cols-[minmax(0,1fr)_44px] items-center gap-1.5">
                         <input
                           type="text"
+                          aria-label="参数名"
                           value={key}
                           onChange={(e) => handleParamKeyChange(key, e.target.value)}
                           placeholder="参数名"
-                          className={`w-[35%] px-2 py-1 rounded-md text-xs border outline-none ${isGold ? 'border-[#2a2a2a] bg-[#1a1a1a] text-white' : 'border-gray-200 bg-white text-gray-900'}`}
+                          className={`col-start-1 w-full min-w-0 px-2 py-1 rounded-md text-base border outline-none ${isGold ? 'border-[#2a2a2a] bg-[#1a1a1a] text-white' : 'border-gray-200 bg-white text-gray-900'}`}
                         />
                         <input
                           type="text"
+                          aria-label="参数值"
                           value={value}
                           onChange={(e) => handleParamValueChange(key, e.target.value)}
                           placeholder="参数值"
-                          className={`flex-1 min-w-0 px-2 py-1 rounded-md text-xs border outline-none ${isGold ? 'border-[#2a2a2a] bg-[#1a1a1a] text-white' : 'border-gray-200 bg-white text-gray-900'}`}
+                          className={`col-start-1 row-start-2 w-full min-w-0 px-2 py-1 rounded-md text-base border outline-none ${isGold ? 'border-[#2a2a2a] bg-[#1a1a1a] text-white' : 'border-gray-200 bg-white text-gray-900'}`}
                         />
                         <button
+                          aria-label={`移除参数 ${key}`}
                           onClick={() => handleRemoveParam(key)}
-                          className={`p-0.5 rounded-md shrink-0 ${isGold ? 'text-red-500/60 hover:bg-red-900/20' : 'text-red-300 hover:bg-red-50'}`}
+                          className={`col-start-2 row-start-1 row-span-2 self-center p-0.5 rounded-md shrink-0 ${isGold ? 'text-red-500/60 hover:bg-red-900/20' : 'text-red-300 hover:bg-red-50'}`}
                         >
                           <Trash2 className="w-2.5 h-2.5" />
                         </button>
@@ -821,7 +843,7 @@ export function ThirdPartyModelDialog({
         </div>
 
         {/* Footer */}
-        <div className={`px-4 py-2.5 flex items-center justify-between shrink-0 ${isGold ? 'border-t border-[#2a2a2a] bg-[#0f0f0f]' : 'border-t border-gray-100 bg-gray-50'}`}>
+        <div className={`px-4 py-2.5 flex flex-wrap gap-2 items-center justify-between shrink-0 ${isGold ? 'border-t border-[#2a2a2a] bg-[#0f0f0f]' : 'border-t border-gray-100 bg-gray-50'}`}>
           {showAddForm ? (
             <>
               <button

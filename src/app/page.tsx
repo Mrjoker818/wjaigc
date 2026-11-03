@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useState, useEffect, useCallback } from 'react';
+import { Suspense, useState, useEffect, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
 import { User } from '@/lib/user-types';
@@ -48,6 +48,8 @@ function HomeContent() {
   const returningToDashboard = searchParams.get('view') === 'dashboard';
   const [authChecked, setAuthChecked] = useState(!returningToDashboard);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  // Survives workspace logout/remount within this page only; never persisted.
+  const dashboardRenameDrafts = useRef(new Map<string, { value: string; error: string | null }>());
 
   // Check session on mount
   useEffect(() => {
@@ -109,7 +111,7 @@ function HomeContent() {
   }
 
   // Authenticated: dynamically load the heavy canvas workspace
-  return <CanvasWorkspace initialUser={currentUser} onLoggedOut={handleWorkspaceLogout} />;
+  return <CanvasWorkspace initialUser={currentUser} onLoggedOut={handleWorkspaceLogout} renameDraftStore={dashboardRenameDrafts.current} />;
 }
 
 export default function Home() {

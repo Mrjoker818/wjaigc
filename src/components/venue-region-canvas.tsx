@@ -5,11 +5,18 @@ import { useRef, useEffect, useCallback } from 'react';
 export interface VenueRegion {
   id: string;
   name: string;
-  type: 'entrance' | 'main-display' | 'interactive' | 'photo-spot' | 'storage' | 'passage' | 'other';
-  /** normalized 0-1 bbox [x, y, w, h] */
-  position: { x: number; y: number; w: number; h: number };
-  estimatedSize?: string;
+  type: string;
+  /** A descriptive location or normalized 0-1 bbox [x, y, w, h]. */
+  position: string | { x: number; y: number; w: number; h: number };
+  estimatedSize?: string | { length: number; width: number };
   notes?: string;
+}
+
+export function hasVenueRegionCoordinates(region: VenueRegion): region is VenueRegion & { position: { x: number; y: number; w: number; h: number } } {
+  const p = region.position;
+  if (!p || typeof p !== 'object') return false;
+  return [p.x, p.y, p.w, p.h].every(Number.isFinite)
+    && p.x >= 0 && p.y >= 0 && p.w > 0 && p.h > 0 && p.x + p.w <= 1 && p.y + p.h <= 1;
 }
 
 interface VenueRegionCanvasProps {
@@ -20,7 +27,7 @@ interface VenueRegionCanvasProps {
   className?: string;
 }
 
-const REGION_COLORS: Record<VenueRegion['type'], string> = {
+const REGION_COLORS: Record<string, string> = {
   entrance: '#f59e0b',
   'main-display': '#3b82f6',
   interactive: '#8b5cf6',
@@ -30,7 +37,7 @@ const REGION_COLORS: Record<VenueRegion['type'], string> = {
   other: '#f97316',
 };
 
-const REGION_LABELS: Record<VenueRegion['type'], string> = {
+const REGION_LABELS: Record<string, string> = {
   entrance: '入口',
   'main-display': '主展区',
   interactive: '互动区',
@@ -61,12 +68,13 @@ export function VenueRegionCanvas({
     ctx.drawImage(imgRef.current, 0, 0, cw, ch);
 
     regions.forEach((region) => {
+      if (!hasVenueRegionCoordinates(region)) return;
       const { x, y, w, h } = region.position;
       const rx = x * cw;
       const ry = y * ch;
       const rw = w * cw;
       const rh = h * ch;
-      const color = REGION_COLORS[region.type] || '#f97316';
+      const color = Object.hasOwn(REGION_COLORS, region.type) ? REGION_COLORS[region.type] : '#f97316';
       const isSelected = region.id === selectedRegionId;
 
       // Fill with semi-transparent color
@@ -81,7 +89,8 @@ export function VenueRegionCanvas({
       ctx.setLineDash([]);
 
       // Label pill
-      const label = `${REGION_LABELS[region.type] || region.type} · ${region.name}`;
+      const regionLabel = Object.hasOwn(REGION_LABELS, region.type) ? REGION_LABELS[region.type] : region.type;
+      const label = `${regionLabel} · ${region.name}`;
       const fontSize = Math.max(10, Math.min(13, cw / 40));
       ctx.font = `600 ${fontSize}px -apple-system, sans-serif`;
       const textW = ctx.measureText(label).width;
@@ -133,6 +142,7 @@ export function VenueRegionCanvas({
 
     // Find topmost region containing click (last = topmost visually)
     const hit = [...regions].reverse().find((r) => {
+      if (!hasVenueRegionCoordinates(r)) return false;
       const { x, y, w, h } = r.position;
       return mx >= x && mx <= x + w && my >= y && my <= y + h;
     });

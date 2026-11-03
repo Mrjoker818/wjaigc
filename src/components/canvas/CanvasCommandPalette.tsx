@@ -1,6 +1,6 @@
 'use client';
 
-import { CornerDownLeft, Search } from 'lucide-react';
+import { CornerDownLeft, Search, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 export interface CanvasCommandItem {
@@ -128,7 +128,7 @@ export function CanvasCommandPalette({
       data-popup
       data-command-palette
       data-testid="canvas-command-palette-backdrop"
-      className="fixed inset-0 z-[95] flex items-start justify-center bg-black/50 px-4 pt-[18vh]"
+      className="fixed inset-0 z-[95] flex items-start justify-center bg-black/50 px-4 py-4 md:pb-0 md:pt-[18vh]"
       onMouseDown={event => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -138,14 +138,14 @@ export function CanvasCommandPalette({
         aria-modal="true"
         aria-labelledby="canvas-command-palette-title"
         onKeyDown={handleKeyDown}
-        className={`flex max-h-[52vh] w-[560px] max-w-full flex-col overflow-hidden rounded-lg border shadow-2xl ${
+        className={`flex max-h-[calc(100dvh-32px)] w-[560px] max-w-full flex-col overflow-hidden rounded-lg border shadow-2xl md:max-h-[52vh] ${
           isMonochrome
             ? 'border-gray-300 bg-white text-gray-900'
             : 'border-white/15 bg-[#161616] text-[#e8e8e8]'
         }`}
       >
         <div
-          className={`flex items-center gap-2.5 border-b px-4 ${
+          className={`flex shrink-0 items-center gap-2.5 border-b px-3 md:px-4 ${
             isMonochrome ? 'border-gray-200 bg-gray-50' : 'border-white/10 bg-[#1d1d1d]'
           }`}
         >
@@ -158,14 +158,27 @@ export function CanvasCommandPalette({
             value={query}
             onChange={event => setQuery(event.target.value)}
             placeholder="搜索命令"
-            className="h-12 w-full bg-transparent text-sm outline-none placeholder:text-gray-500"
+            className="h-12 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-gray-500 md:text-sm"
           />
-          <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] ${
+          <span className={`hidden shrink-0 rounded border px-1.5 py-0.5 text-[10px] md:inline ${
             isMonochrome ? 'border-gray-300 text-gray-500' : 'border-white/15 text-[#9a9a9a]'
           }`}>ESC</span>
+          <button
+            type="button"
+            aria-label="关闭命令面板"
+            onClick={onClose}
+            onKeyDown={event => {
+              if (event.key === 'Enter') event.stopPropagation();
+            }}
+            className={`flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current ${
+              isMonochrome ? 'text-gray-700 hover:bg-gray-200' : 'text-[#e8e8e8] hover:bg-white/10'
+            }`}
+          >
+            <X aria-hidden="true" className="h-5 w-5" />
+          </button>
         </div>
 
-        <div ref={listRef} className="flex-1 overflow-y-auto py-1.5">
+        <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-1.5">
           {filteredCommands.length === 0 ? (
             <div className={`px-4 py-6 text-center text-xs ${isMonochrome ? 'text-gray-500' : 'text-[#9a9a9a]'}`}>
               没有匹配的命令
@@ -178,9 +191,13 @@ export function CanvasCommandPalette({
                 type="button"
                 data-command-index={index}
                 aria-current={selected ? 'true' : undefined}
+                onFocus={() => setSelectedIndex(index)}
                 onMouseEnter={() => setSelectedIndex(index)}
+                onKeyDown={event => {
+                  if (event.key === 'Enter') event.stopPropagation();
+                }}
                 onClick={() => executeCommand(index)}
-                className={`flex w-full items-center gap-3 border-l-2 px-4 py-2.5 text-left transition-colors ${
+                className={`flex min-h-11 w-full items-center gap-3 border-l-2 px-4 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-current ${
                   selected
                     ? isMonochrome
                       ? 'border-gray-900 bg-gray-100'
@@ -216,7 +233,7 @@ export function CanvasCommandPalette({
           })}
         </div>
 
-        <div className={`flex items-center gap-3 border-t px-4 py-2 text-[10px] ${
+        <div className={`flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-t px-4 py-2 text-[10px] ${
           isMonochrome ? 'border-gray-200 text-gray-500' : 'border-white/10 text-[#9a9a9a]'
         }`}>
           <span>上下键导航</span>

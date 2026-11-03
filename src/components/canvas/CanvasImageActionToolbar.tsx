@@ -1,5 +1,7 @@
 'use client';
 
+import { useLayoutEffect, useState } from 'react';
+
 import type {
   CSSProperties,
   Dispatch,
@@ -10,6 +12,11 @@ import type {
 import { Check, ChevronDown, ChevronUp, Settings2, Trash2, X } from 'lucide-react';
 
 import type { ImageToolbarPosition } from '@/lib/image-toolbar-position';
+
+interface ImageToolbarOverflowPlacement {
+  opensUpward: boolean;
+  maxHeight: number | null;
+}
 
 export interface CanvasImageToolbarAction {
   icon: ReactNode;
@@ -59,10 +66,55 @@ export function CanvasImageActionToolbar({
   onResetPreferences,
 }: CanvasImageActionToolbarProps) {
   const hasMoreActions = overflowActions.length > 0;
+  const [overflowPlacement, setOverflowPlacement] = useState<ImageToolbarOverflowPlacement>({
+    opensUpward: false,
+    maxHeight: null,
+  });
+
+  useLayoutEffect(() => {
+    if (!expanded) return;
+    const toolbar = toolbarRef.current;
+    if (!toolbar) return;
+    const viewport = window.visualViewport;
+    const syncPlacement = (): void => {
+      const bounds = toolbar.getBoundingClientRect();
+      const viewportTop = viewport?.offsetTop ?? 0;
+      const viewportHeight = viewport?.height ?? window.innerHeight;
+      const above = Math.max(0, bounds.top - viewportTop - 24);
+      const below = Math.max(0, viewportTop + viewportHeight - bounds.bottom - 24);
+      const opensUpward = above > below;
+      const maxHeight = Math.min(420, viewportHeight / 2, opensUpward ? above : below);
+      setOverflowPlacement((previous) => previous.opensUpward === opensUpward && previous.maxHeight === maxHeight
+        ? previous
+        : { opensUpward, maxHeight });
+    };
+    syncPlacement();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(syncPlacement);
+    observer?.observe(toolbar);
+    window.addEventListener('resize', syncPlacement);
+    viewport?.addEventListener('resize', syncPlacement);
+    viewport?.addEventListener('scroll', syncPlacement);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', syncPlacement);
+      viewport?.removeEventListener('resize', syncPlacement);
+      viewport?.removeEventListener('scroll', syncPlacement);
+    };
+  }, [expanded, position.left, position.top, position.transform, toolbarRef]);
+
+  const overflowStyle: CSSProperties = {
+    top: overflowPlacement.opensUpward ? 'auto' : '100%',
+    bottom: overflowPlacement.opensUpward ? '100%' : 'auto',
+    marginTop: overflowPlacement.opensUpward ? 0 : 8,
+    marginBottom: overflowPlacement.opensUpward ? 8 : 0,
+    maxHeight: overflowPlacement.maxHeight ?? undefined,
+  };
+
   const positionStyle: CSSProperties = {
     left: position.left,
     top: position.top,
     transform: position.transform,
+    zIndex: expanded ? 60 : undefined,
   };
 
   const setItemHidden = (label: string, hidden: boolean): void => {
@@ -168,6 +220,7 @@ export function CanvasImageActionToolbar({
         <div
           id="selected-image-toolbar-overflow"
           data-image-toolbar-overflow
+          style={overflowStyle}
           className={`absolute right-0 top-full z-[100] mt-2 max-h-[min(50vh,420px)] w-56 max-w-[calc(100vw-24px)] overflow-y-auto rounded-lg border p-1 shadow-2xl ${
             expanded ? 'block' : 'hidden'
           } ${isMonochrome ? 'border-gray-200 bg-white' : 'border-white/[0.12] bg-[#141418]'}`}
@@ -186,7 +239,7 @@ export function CanvasImageActionToolbar({
                 onExpandedChange(false);
                 action.action();
               }}
-              className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs transition-colors motion-reduce:transition-none ${
+              className={`flex min-h-11 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs transition-colors motion-reduce:transition-none [@media(hover:hover)_and_(pointer:fine)]:min-h-0 ${
                 isMonochrome ? 'text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:bg-white/10 hover:text-white'
               }`}
             >

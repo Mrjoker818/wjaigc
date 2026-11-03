@@ -141,58 +141,60 @@ export function CanvasEditor({
   const wordCount = content.length;
 
   return (
-    <div className="flex h-full flex-col border-l border-border bg-background">
+    <div className="fixed inset-y-0 right-0 z-[200] flex h-dvh w-full min-w-0 flex-col overflow-hidden border-l border-border bg-background shadow-xl sm:w-[min(48rem,100vw)]" role="region" aria-label="写作画布">
       {/* 头部 */}
-      <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
-        <div className="flex items-center gap-2">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2 whitespace-nowrap">
           <PenIcon />
           <span className="text-sm font-semibold">写作画布</span>
           <span className="text-xs text-muted-foreground">{wordCount} 字</span>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-1">
           <button
             onClick={() => setShowHistory(!showHistory)}
-            className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+            aria-expanded={showHistory}
+            className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-lg px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <History size={14} />
             版本 ({versions.length})
           </button>
-          <button onClick={handleCopy} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" title="复制全部">
+          <button onClick={handleCopy} className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" title="复制全部">
             <Copy size={15} />
           </button>
-          <button onClick={handleExport} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" title="导出 Markdown">
+          <button onClick={handleExport} className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" title="导出 Markdown">
             <Download size={15} />
           </button>
           {onSave && (
             <button
               onClick={() => { onSave(content); toast.success("已保存"); }}
-              className="flex items-center gap-1 rounded-lg bg-primary px-2.5 py-1.5 text-xs text-primary-foreground hover:bg-primary/90"
+              className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-lg bg-primary px-2.5 py-1.5 text-xs text-primary-foreground hover:bg-primary/90"
             >
               <Check size={13} />
               保存
             </button>
           )}
-          <button onClick={onClose} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground">
+          <button onClick={onClose} aria-label="关闭写作画布" className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground">
             <X size={16} />
           </button>
         </div>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
         {/* 编辑器主体 */}
-        <div className="flex flex-1 flex-col">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <textarea
             ref={textareaRef}
+            aria-label="文案内容"
             value={content}
             onChange={e => setContent(e.target.value)}
             onSelect={handleSelect}
-            className="flex-1 resize-none bg-transparent p-4 text-sm leading-relaxed outline-none placeholder:text-muted-foreground/50"
+            className="min-h-24 min-w-0 flex-1 resize-none bg-transparent p-3 text-base leading-relaxed outline-none placeholder:text-foreground/75"
             placeholder="在这里编辑文案..."
           />
 
           {/* AI 协同编辑栏 */}
           {onAiEdit && onPrepareAiEdit && (
-            <div className="border-t border-border p-3">
+            <div className="max-h-[40dvh] shrink-0 overflow-y-auto overscroll-contain border-t border-border p-3">
               {selectedText && (
                 <div className="mb-2 rounded-lg bg-primary/10 px-2.5 py-1.5 text-xs text-primary">
                   已选中 {selectedText.length} 字：{selectedText.slice(0, 40)}{selectedText.length > 40 ? "..." : ""}
@@ -215,19 +217,20 @@ export function CanvasEditor({
                   </button>
                 </div>
               )}
-              <div className="flex gap-2">
+              <div className="flex min-w-0 gap-2">
                 <input
+                  aria-label="AI 修改要求"
                   value={aiInstruction}
                   onChange={e => setAiInstruction(e.target.value)}
                   onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void handleAiEdit(); } }}
                   placeholder={selectedText ? "告诉 AI 如何修改选中部分..." : "告诉 AI 如何修改全文..."}
-                  className="flex-1 rounded-lg border border-border bg-muted px-3 py-2 text-sm outline-none focus:border-primary/50"
+                  className="min-h-11 min-w-0 flex-1 rounded-lg border border-border bg-muted px-3 py-2 text-base outline-none placeholder:text-foreground/75 focus:border-primary/50"
                   disabled={isAiEditing}
                 />
                 <button
                   onClick={() => void handleAiEdit()}
                   disabled={isAiEditing || !aiInstruction.trim()}
-                  className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
+                  className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
                 >
                   {isAiEditing ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
                   AI 修改
@@ -239,13 +242,13 @@ export function CanvasEditor({
 
         {/* 版本历史侧栏 */}
         {showHistory && (
-          <div className="w-56 overflow-y-auto border-l border-border bg-muted/30 p-2">
+          <div className="absolute inset-0 z-10 min-h-0 w-full overflow-y-auto overscroll-contain border-l border-border bg-card p-2 sm:static sm:w-56 sm:shrink-0">
             <div className="mb-2 px-2 text-xs font-medium text-muted-foreground">版本历史</div>
             {[...versions].reverse().map(v => (
               <button
                 key={v.id}
                 onClick={() => restoreVersion(v)}
-                className="mb-1 w-full rounded-lg border border-transparent px-2.5 py-2 text-left hover:border-border hover:bg-background"
+                className="mb-1 min-h-11 w-full break-words rounded-lg border border-transparent px-2.5 py-2 text-left hover:border-border hover:bg-background"
               >
                 <div className="text-xs font-medium">{v.note || `版本 ${v.id}`}</div>
                 <div className="mt-0.5 text-[10px] text-muted-foreground">

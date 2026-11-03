@@ -77,6 +77,20 @@ export function VectorEditorDialog({ asset, templateIds, onClose, onSave }: Vect
   const [isApplying, setIsApplying] = useState(false);
   const [history, setHistory] = useState<string[]>([]);
   const stageRef = useRef<HTMLDivElement>(null);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+  const closeEditor = (): void => {
+    mountedRef.current = false;
+    onClose();
+  };
+  const exportRaster = (format: 'png' | 'jpg'): void => {
+    void rasterizeSvg(svg, format).catch((error: unknown) => {
+      if (mountedRef.current) toast.error(error instanceof Error ? error.message : '导出失败');
+    });
+  };
 
   // ★ 选中元素视觉反馈：为选中的 SVG 元素添加高亮 filter
   useEffect(() => {
@@ -163,11 +177,13 @@ export function VectorEditorDialog({ asset, templateIds, onClose, onSave }: Vect
           model: asset.model,
           sourceSvg: svg,
         }),
+      }).catch(() => {
+        throw new Error('网络连接中断，保存结果未确认');
       });
       const data = await response.json();
       if (!response.ok || !data.success) throw new Error(data.error || '保存矢量图失败');
       onSave(data.asset);
-      onClose();
+      closeEditor();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '保存矢量图失败');
     } finally {
@@ -177,14 +193,23 @@ export function VectorEditorDialog({ asset, templateIds, onClose, onSave }: Vect
 
   return (
     <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm" data-modal>
-      <div className="flex h-[min(820px,94vh)] w-[min(1180px,96vw)] overflow-hidden rounded-2xl border border-[#3b3425] bg-[#111216] shadow-2xl">
-        <aside className="flex w-64 shrink-0 flex-col border-r border-white/8 bg-[#15161b]">
-          <div className="flex items-center justify-between border-b border-white/8 px-4 py-4">
+      <div className="flex h-[min(820px,94vh)] w-[min(1180px,96vw)] overflow-hidden rounded-2xl border border-[#3b3425] bg-[#111216] shadow-2xl max-md:flex-col max-md:overflow-y-auto">
+        <div className="hidden shrink-0 items-center justify-between border-b border-white/8 bg-[#15161b] px-4 py-2 max-md:order-first max-md:flex">
+          <div>
+            <p className="text-sm font-semibold text-white">SVG 元素编辑</p>
+            <p className="mt-1 text-[11px] text-[#8f9199]">{asset.pathCount} 个矢量形状</p>
+          </div>
+          <button type="button" onClick={closeEditor} className="flex h-11 w-11 items-center justify-center rounded-lg text-gray-300 hover:bg-white/5 hover:text-white" aria-label="关闭">
+            <X size={16} />
+          </button>
+        </div>
+        <aside className="flex w-64 shrink-0 flex-col border-r border-white/8 bg-[#15161b] max-md:w-full max-md:border-b max-md:border-r-0">
+          <div className="flex items-center justify-between border-b border-white/8 px-4 py-4 max-md:hidden">
             <div>
               <p className="text-sm font-semibold text-white">SVG 元素编辑</p>
               <p className="mt-1 text-[11px] text-[#8f9199]">{asset.pathCount} 个矢量形状</p>
             </div>
-            <button type="button" onClick={onClose} className="rounded-lg p-2 text-gray-500 hover:bg-white/5 hover:text-white" aria-label="关闭">
+            <button type="button" onClick={closeEditor} className="rounded-lg p-2 text-gray-500 hover:bg-white/5 hover:text-white" aria-label="关闭">
               <X size={16} />
             </button>
           </div>
@@ -213,12 +238,12 @@ export function VectorEditorDialog({ asset, templateIds, onClose, onSave }: Vect
                 </button>
               </div>
               <div className="mt-2 flex gap-2">
-                <input type="color" value={color} onChange={event => setColor(event.target.value)} className="h-9 w-12 rounded-lg border border-white/8 bg-transparent p-1" />
+                <input type="color" value={color} onChange={event => setColor(event.target.value)} className="h-9 w-12 rounded-lg border border-white/8 bg-transparent p-1 max-md:h-11" />
                 <button
                   type="button"
                   disabled={!selectedElementId}
                   onClick={() => runLocalOperation({ type: 'recolor', elementId: selectedElementId, color })}
-                  className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-[#2a2518] px-2 py-2 text-xs text-[#e4c66d] disabled:opacity-35"
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-[#2a2518] px-2 py-2 text-xs text-[#e4c66d] disabled:opacity-35 max-md:min-h-11"
                 >
                   <Palette size={13} /> 应用颜色
                 </button>
@@ -232,7 +257,7 @@ export function VectorEditorDialog({ asset, templateIds, onClose, onSave }: Vect
                   setSvg(previous);
                   setHistory(items => items.slice(0, -1));
                 }}
-                className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-white/8 px-2 py-2 text-xs text-gray-400 hover:text-white disabled:opacity-35"
+                className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-white/8 px-2 py-2 text-xs text-gray-400 hover:text-white disabled:opacity-35 max-md:min-h-11"
               >
                 <RefreshCw size={13} /> 撤销上一步
               </button>
@@ -257,7 +282,7 @@ export function VectorEditorDialog({ asset, templateIds, onClose, onSave }: Vect
           </div>
         </aside>
 
-        <main className="relative flex min-w-0 flex-1 items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_center,#262934_0,#17181d_58%,#111216_100%)] p-10">
+        <main className="relative flex min-w-0 flex-1 items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_center,#262934_0,#17181d_58%,#111216_100%)] p-10 max-md:order-first max-md:min-h-[min(16rem,calc(94vh-4rem))] max-md:shrink-0 max-md:p-4">
           <div className="absolute left-4 top-4 rounded-full border border-white/8 bg-black/25 px-3 py-1 text-[11px] text-gray-400">
             点击任意形状进行选择
           </div>
@@ -276,7 +301,7 @@ export function VectorEditorDialog({ asset, templateIds, onClose, onSave }: Vect
           `}</style>
           <div
             ref={stageRef}
-            className="vector-edit-stage max-h-full max-w-full overflow-hidden rounded-xl bg-[linear-gradient(45deg,#eee_25%,transparent_25%),linear-gradient(-45deg,#eee_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#eee_75%),linear-gradient(-45deg,transparent_75%,#eee_75%)] bg-[length:20px_20px] bg-white shadow-2xl [&>svg]:block [&>svg]:h-auto [&>svg]:max-h-[68vh] [&>svg]:max-w-full"
+            className="vector-edit-stage max-h-full max-w-full overflow-hidden rounded-xl bg-[linear-gradient(45deg,#eee_25%,transparent_25%),linear-gradient(-45deg,#eee_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#eee_75%),linear-gradient(-45deg,transparent_75%,#eee_75%)] bg-[length:20px_20px] bg-white shadow-2xl [&>svg]:block [&>svg]:h-auto [&>svg]:max-h-[68vh] [&>svg]:max-w-full max-md:[&>svg]:max-h-[min(14rem,calc(94vh-6rem))]"
             onClick={event => {
               const target = event.target as Element;
               const editable = target.closest('[data-vector-element-id]');
@@ -296,17 +321,17 @@ export function VectorEditorDialog({ asset, templateIds, onClose, onSave }: Vect
           />
         </main>
 
-        <aside className="flex w-52 shrink-0 flex-col border-l border-white/8 bg-[#15161b] p-4">
+        <aside className="flex w-52 shrink-0 flex-col border-l border-white/8 bg-[#15161b] p-4 max-md:w-full max-md:border-l-0 max-md:border-t">
           <p className="text-xs font-semibold text-white">导出与保存</p>
           <p className="mt-1 text-[11px] leading-4 text-gray-500">SVG 保留编辑能力；PNG 支持透明背景；JPG 自动使用白色背景。</p>
           <div className="mt-4 space-y-2">
             <button type="button" onClick={() => triggerBlobDownload(new Blob([svg], { type: 'image/svg+xml' }), 'wujie-vector.svg')} className="flex w-full items-center gap-2 rounded-lg border border-white/8 px-3 py-2 text-xs text-gray-300 hover:border-[#d4af37]/40">
               <Download size={14} /> 下载 SVG
             </button>
-            <button type="button" onClick={() => void rasterizeSvg(svg, 'png')} className="flex w-full items-center gap-2 rounded-lg border border-white/8 px-3 py-2 text-xs text-gray-300 hover:border-[#d4af37]/40">
+            <button type="button" onClick={() => exportRaster('png')} className="flex w-full items-center gap-2 rounded-lg border border-white/8 px-3 py-2 text-xs text-gray-300 hover:border-[#d4af37]/40">
               <Download size={14} /> 下载 PNG
             </button>
-            <button type="button" onClick={() => void rasterizeSvg(svg, 'jpg')} className="flex w-full items-center gap-2 rounded-lg border border-white/8 px-3 py-2 text-xs text-gray-300 hover:border-[#d4af37]/40">
+            <button type="button" onClick={() => exportRaster('jpg')} className="flex w-full items-center gap-2 rounded-lg border border-white/8 px-3 py-2 text-xs text-gray-300 hover:border-[#d4af37]/40">
               <Download size={14} /> 下载 JPG
             </button>
           </div>

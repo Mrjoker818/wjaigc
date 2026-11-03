@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef, useId } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Package, X, Minus, Maximize2, Plus, Trash2, Star,
@@ -240,6 +240,7 @@ ${state.customPrompt ? `\n附加要求：${state.customPrompt}` : ''}`;
    组件
    ============================================================ */
 export default function BrandPackagingPanel({ isMonochrome = false, onClose, onAddImages }: Props) {
+  const packagingFormId = useId();
   // === Window drag state ===
   const [isMinimized, setIsMinimized] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -837,7 +838,10 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
             </aside>
 
             {/* === MAIN CONTENT === */}
-            <main className="flex min-w-0 flex-none flex-col lg:min-h-0 lg:flex-1 lg:overflow-hidden">
+            <main
+              className="flex min-w-0 flex-none flex-col lg:min-h-0 lg:flex-1 lg:overflow-hidden"
+              style={panelViewport.width < 1024 ? { height: 'auto', overflow: 'visible' } : undefined}
+            >
               {/* Header */}
               <header className="flex min-h-11 flex-wrap items-center justify-between gap-2 px-4 py-1 shrink-0" style={{ borderBottom: `1px solid ${border}` }}>
                 <div className="flex items-center gap-3">
@@ -863,16 +867,16 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                     </div>
                     <div className="grid grid-cols-1 gap-2 mb-3 sm:grid-cols-3">
                       <div>
-                        <label className="block text-[12px] mb-1" style={{ color: textMuted }}>品牌名</label>
-                        <input className={inputCls} placeholder="例如：山茶记" value={brandName} onChange={e => setBrandName(e.target.value)} />
+                        <label htmlFor={`${packagingFormId}-brand`} className="block text-[12px] mb-1" style={{ color: textMuted }}>品牌名</label>
+                        <input id={`${packagingFormId}-brand`} className={inputCls} placeholder="例如：山茶记" value={brandName} onChange={e => setBrandName(e.target.value)} />
                       </div>
                       <div>
-                        <label className="block text-[12px] mb-1" style={{ color: textMuted }}>产品名称</label>
-                        <input className={inputCls} placeholder="例如：山茶花洁面乳" value={productName} onChange={e => setProductName(e.target.value)} />
+                        <label htmlFor={`${packagingFormId}-product`} className="block text-[12px] mb-1" style={{ color: textMuted }}>产品名称</label>
+                        <input id={`${packagingFormId}-product`} className={inputCls} placeholder="例如：山茶花洁面乳" value={productName} onChange={e => setProductName(e.target.value)} />
                       </div>
                       <div>
-                        <label className="block text-[12px] mb-1" style={{ color: textMuted }}>品类</label>
-                        <select className={selectCls} value={category} onChange={e => setCategory(e.target.value as PackagingCategory)}>
+                        <label htmlFor={`${packagingFormId}-category`} className="block text-[12px] mb-1" style={{ color: textMuted }}>品类</label>
+                        <select id={`${packagingFormId}-category`} className={selectCls} value={category} onChange={e => setCategory(e.target.value as PackagingCategory)}>
                           {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
                         </select>
                       </div>
@@ -1056,28 +1060,28 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                     {/* 物理尺寸输入（CMF 模式时显示必填提示）*/}
                     <div className="grid grid-cols-3 gap-2">
                       <div>
-                        <label className="block text-[12px] mb-1 flex items-center gap-1" style={{ color: cmfModeEnabled ? textAccent : textMuted }}>
+                        <label htmlFor={`${packagingFormId}-length`} className="block text-[12px] mb-1 flex items-center gap-1" style={{ color: cmfModeEnabled ? textAccent : textMuted }}>
                           长 (mm){cmfModeEnabled && <span style={{ color: isMonochrome ? '#ef4444' : '#f87171' }}>*</span>}
                         </label>
-                        <input className={inputCls} type="number" placeholder="60" value={structure.length || ''} onChange={e => setStructure(p => ({ ...p, length: Number(e.target.value) }))} style={cmfModeEnabled && !structure.length ? { borderColor: isMonochrome ? '#fca5a5' : 'rgba(248,113,113,0.5)' } : {}} />
+                        <input id={`${packagingFormId}-length`} className={inputCls} type="number" placeholder="60" value={structure.length || ''} onChange={e => setStructure(p => ({ ...p, length: Number(e.target.value) }))} style={cmfModeEnabled && !structure.length ? { borderColor: isMonochrome ? '#fca5a5' : 'rgba(248,113,113,0.5)' } : {}} />
                       </div>
                       <div>
-                        <label className="block text-[12px] mb-1 flex items-center gap-1" style={{ color: cmfModeEnabled ? textAccent : textMuted }}>
+                        <label htmlFor={`${packagingFormId}-width`} className="block text-[12px] mb-1 flex items-center gap-1" style={{ color: cmfModeEnabled ? textAccent : textMuted }}>
                           宽 (mm){cmfModeEnabled && <span style={{ color: isMonochrome ? '#ef4444' : '#f87171' }}>*</span>}
                         </label>
-                        <input className={inputCls} type="number" placeholder="40" value={structure.width || ''} onChange={e => setStructure(p => ({ ...p, width: Number(e.target.value) }))} style={cmfModeEnabled && !structure.width ? { borderColor: isMonochrome ? '#fca5a5' : 'rgba(248,113,113,0.5)' } : {}} />
+                        <input id={`${packagingFormId}-width`} className={inputCls} type="number" placeholder="40" value={structure.width || ''} onChange={e => setStructure(p => ({ ...p, width: Number(e.target.value) }))} style={cmfModeEnabled && !structure.width ? { borderColor: isMonochrome ? '#fca5a5' : 'rgba(248,113,113,0.5)' } : {}} />
                       </div>
                       <div>
-                        <label className="block text-[12px] mb-1 flex items-center gap-1" style={{ color: cmfModeEnabled ? textAccent : textMuted }}>
+                        <label htmlFor={`${packagingFormId}-height`} className="block text-[12px] mb-1 flex items-center gap-1" style={{ color: cmfModeEnabled ? textAccent : textMuted }}>
                           高 (mm){cmfModeEnabled && <span style={{ color: isMonochrome ? '#ef4444' : '#f87171' }}>*</span>}
                         </label>
-                        <input className={inputCls} type="number" placeholder="150" value={structure.height || ''} onChange={e => setStructure(p => ({ ...p, height: Number(e.target.value) }))} style={cmfModeEnabled && !structure.height ? { borderColor: isMonochrome ? '#fca5a5' : 'rgba(248,113,113,0.5)' } : {}} />
+                        <input id={`${packagingFormId}-height`} className={inputCls} type="number" placeholder="150" value={structure.height || ''} onChange={e => setStructure(p => ({ ...p, height: Number(e.target.value) }))} style={cmfModeEnabled && !structure.height ? { borderColor: isMonochrome ? '#fca5a5' : 'rgba(248,113,113,0.5)' } : {}} />
                       </div>
-                      <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>容量</label><input className={inputCls} placeholder="100 ml" value={structure.capacity || ''} onChange={e => setStructure(p => ({ ...p, capacity: e.target.value }))} /></div>
-                      <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>净含量</label><input className={inputCls} placeholder="100 g" value={structure.netContent || ''} onChange={e => setStructure(p => ({ ...p, netContent: e.target.value }))} /></div>
-                      <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>内托</label><select className={selectCls} value={structure.insertTray || ''} onChange={e => setStructure(p => ({ ...p, insertTray: e.target.value }))}>{INSERT_TRAY_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
-                      <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>手提绳</label><select className={selectCls} value={structure.handleRope || ''} onChange={e => setStructure(p => ({ ...p, handleRope: e.target.value }))}>{HANDLE_ROPE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
-                      <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>开窗</label><select className={selectCls} value={structure.windowType || ''} onChange={e => setStructure(p => ({ ...p, windowType: e.target.value }))}>{WINDOW_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                      <div><label htmlFor={`${packagingFormId}-capacity`} className="block text-[12px] mb-1" style={{ color: textMuted }}>容量</label><input id={`${packagingFormId}-capacity`} className={inputCls} placeholder="100 ml" value={structure.capacity || ''} onChange={e => setStructure(p => ({ ...p, capacity: e.target.value }))} /></div>
+                      <div><label htmlFor={`${packagingFormId}-net-content`} className="block text-[12px] mb-1" style={{ color: textMuted }}>净含量</label><input id={`${packagingFormId}-net-content`} className={inputCls} placeholder="100 g" value={structure.netContent || ''} onChange={e => setStructure(p => ({ ...p, netContent: e.target.value }))} /></div>
+                      <div><label htmlFor={`${packagingFormId}-tray`} className="block text-[12px] mb-1" style={{ color: textMuted }}>内托</label><select id={`${packagingFormId}-tray`} className={selectCls} value={structure.insertTray || ''} onChange={e => setStructure(p => ({ ...p, insertTray: e.target.value }))}>{INSERT_TRAY_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                      <div><label htmlFor={`${packagingFormId}-handle`} className="block text-[12px] mb-1" style={{ color: textMuted }}>手提绳</label><select id={`${packagingFormId}-handle`} className={selectCls} value={structure.handleRope || ''} onChange={e => setStructure(p => ({ ...p, handleRope: e.target.value }))}>{HANDLE_ROPE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
+                      <div><label htmlFor={`${packagingFormId}-window`} className="block text-[12px] mb-1" style={{ color: textMuted }}>开窗</label><select id={`${packagingFormId}-window`} className={selectCls} value={structure.windowType || ''} onChange={e => setStructure(p => ({ ...p, windowType: e.target.value }))}>{WINDOW_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
                     </div>
                   </section>
 

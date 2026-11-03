@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 
 /* ─── 通用弹窗样式变量 ─── */
@@ -78,41 +79,100 @@ interface ConfirmDialogProps {
   open: boolean;
   title: string;
   message: string;
+  details?: React.ReactNode;
   confirmText?: string;
   cancelText?: string;
   variant?: 'danger' | 'warning';
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
   onCancel: () => void;
+  returnFocusFallback?: () => HTMLElement | null;
 }
 
-export function ConfirmDialog({ open, title, message, confirmText = '确定', cancelText = '取消', variant = 'danger', onConfirm, onCancel }: ConfirmDialogProps) {
-  const handleKey = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') onCancel();
-  }, [onCancel]);
+export function ConfirmDialog({ open, title, message, details, confirmText = '确定', cancelText = '取消', variant = 'danger', onConfirm, onCancel, returnFocusFallback }: ConfirmDialogProps) {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const submittingRef = useRef(false);
+  const operationVersion = useRef(0);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+  useLayoutEffect(() => {
+    operationVersion.current++;
+    submittingRef.current = false;
+    setSubmitting(false);
+    setSubmitError('');
+    return () => { operationVersion.current++; };
+  }, [open, onConfirm]);
+  const requestCancel = (): void => { if (!submittingRef.current) onCancel(); };
+  const confirm = async (): Promise<void> => {
+    if (submittingRef.current) return;
+    const version = operationVersion.current;
+    submittingRef.current = true;
+    setSubmitting(true);
+    setSubmitError('');
+    try { await onConfirm(); }
+    catch {
+      if (operationVersion.current === version) setSubmitError('未能确认操作结果，请核对当前状态。');
+    } finally {
+      if (operationVersion.current === version) {
+        submittingRef.current = false;
+        setSubmitting(false);
+      }
+    }
+  };
 
   if (!open) return null;
 
   return (
-    <div className={overlayCls} onClick={onCancel}>
-      <div className={dialogCls} onClick={e => e.stopPropagation()} onKeyDown={handleKey}>
+    <DialogPrimitive.Root open={open} onOpenChange={value => { if (!value) requestCancel(); }}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className={overlayCls} />
+        <DialogPrimitive.Content aria-modal="true" aria-busy={submitting} className={dialogCls}
+          style={{ position: 'fixed', zIndex: 10000, left: '50%', top: '50%', transform: 'translate(-50%, -50%)', width: 'calc(100vw - 2rem)', maxHeight: 'calc(100dvh - 2rem)', overflowY: 'auto' }}
+          onOpenAutoFocus={event => {
+            returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+            event.preventDefault();
+            cancelRef.current?.focus();
+          }}
+          onCloseAutoFocus={event => {
+            const focus = (target: HTMLElement | null | undefined): boolean => {
+              if (!target?.isConnected || target.matches(':disabled')) return false;
+              for (let node: HTMLElement | null = target; node; node = node.parentElement) {
+                if (node.hidden || node.hasAttribute('inert')) return false;
+                const style = getComputedStyle(node);
+                if (style.display === 'none' || style.visibility === 'hidden') return false;
+              }
+              target.focus({ preventScroll: true });
+              return document.activeElement === target;
+            };
+            if (focus(returnFocusRef.current) || focus(returnFocusFallback?.())) event.preventDefault();
+          }}
+          onEscapeKeyDown={event => { if (submittingRef.current) event.preventDefault(); }}
+          onInteractOutside={event => { if (submittingRef.current) event.preventDefault(); }}>
         {/* 标题 */}
         <div className="flex items-center justify-between px-6 pt-5 pb-2">
-          <h3 className={titleCls}>{title}</h3>
-          <button onClick={onCancel} className="text-[#666] hover:text-[#d4af37] transition-colors">
+          <DialogPrimitive.Title asChild><h3 className={titleCls}>{title}</h3></DialogPrimitive.Title>
+          <button aria-label={`关闭${title}`} disabled={submitting} onClick={requestCancel} className="min-h-[44px] min-w-[44px] flex items-center justify-center text-[#666] hover:text-[#d4af37] transition-colors disabled:opacity-50">
             <X size={18} />
           </button>
         </div>
         {/* 消息 */}
         <div className="px-6 py-3">
-          <p className="text-sm text-[#bbb] leading-relaxed">{message}</p>
+          <DialogPrimitive.Description asChild><p className="break-words text-sm text-[#bbb] leading-relaxed">{message}</p></DialogPrimitive.Description>
         </div>
+        {details && (
+          <div role="region" aria-label="待删除项目" tabIndex={0} className="mx-6 mb-3 max-h-[min(40dvh,18rem)] overflow-y-auto overscroll-contain rounded focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4af37]">
+            {details}
+          </div>
+        )}
+        {submitError && <p role="alert" className="mx-6 mb-3 text-sm text-red-300">{submitError}</p>}
         {/* 按钮 */}
         <div className="flex justify-end gap-3 px-6 pb-5 pt-1">
-          <button className={btnSecondary} onClick={onCancel}>{cancelText}</button>
-          <button className={variant === 'danger' ? btnDanger : btnPrimary} onClick={onConfirm}>{confirmText}</button>
+          <button ref={cancelRef} disabled={submitting} className={`${btnSecondary} min-h-[44px] min-w-[44px] disabled:opacity-50`} onClick={requestCancel}>{cancelText}</button>
+          <button disabled={submitting} className={`${variant === 'danger' ? btnDanger : btnPrimary} min-h-[44px] min-w-[44px] disabled:opacity-50`} onClick={() => { void confirm(); }}>{confirmText}</button>
         </div>
-      </div>
-    </div>
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }
 

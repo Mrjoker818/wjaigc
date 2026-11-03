@@ -64,7 +64,28 @@ export async function navigateToWorkflowChatAfterPersistence(
   navigate(url);
 }
 
+const RETURN_KEYS = [
+  'assetProjectId', 'workflowVersionId', 'sourceVersionId', 'workflowId', 'workflowExecutionId',
+  'workflowOutputNodeId', 'workflowOutputLabel',
+] as const;
+
+export function hasAmbiguousWorkflowChatReturnParameters(search: string): boolean {
+  const params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
+  if (!RETURN_KEYS.some(key => params.has(key))) return false;
+  if ([...RETURN_KEYS, 'projectId', 'taskId'].some(key => params.getAll(key).length > 1)) return true;
+  if (params.has('workflowVersionId') && params.has('sourceVersionId')) {
+    const rawVersion = params.get('workflowVersionId');
+    const version = bounded(rawVersion, LIMITS.id);
+    const alias = bounded(params.get('sourceVersionId'), LIMITS.id);
+    if (rawVersion === '' && alias) return false;
+    if (version && params.get('sourceVersionId') === '') return false;
+    return !version || !alias || version !== alias;
+  }
+  return false;
+}
+
 export function parseWorkflowChatReturnIntent(search: string): WorkflowChatReturnIntent | null {
+  if (hasAmbiguousWorkflowChatReturnParameters(search)) return null;
   const params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
   const intent: WorkflowChatReturnIntent = {
     assetProjectId: bounded(params.get('assetProjectId'), LIMITS.id),

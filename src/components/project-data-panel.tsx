@@ -430,7 +430,7 @@ export function ProjectDataPanel({
                 {/* Prompt + Actions area */}
                 <div className="p-2">
                   {/* Prompt box */}
-                  <div className={`text-[10px] ${mutedText} leading-relaxed mb-1.5 min-h-[24px] line-clamp-2`}>
+                  <div className={`text-[10px] ${mutedText} leading-relaxed mb-1.5 min-h-[24px] whitespace-pre-wrap break-words`}>
                     {img.prompt || '无提示词'}
                   </div>
                   {/* Model info */}
@@ -501,7 +501,7 @@ export function ProjectDataPanel({
                 </div>
                 {/* Info */}
                 <div className="flex-1 min-w-0">
-                  <p className={`text-xs ${textColor} line-clamp-2 leading-relaxed`}>
+                  <p className={`text-xs ${textColor} whitespace-pre-wrap break-words leading-relaxed`}>
                     {img.prompt || '无提示词'}
                   </p>
                   <div className="flex items-center gap-1.5 mt-1 flex-wrap">

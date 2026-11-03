@@ -127,12 +127,9 @@ export async function GET(request: NextRequest) {
 
     // Admin overview: all users with credits and names
     if (action === 'admin-overview' && isAdmin) {
-      const allCredits = await dbGetAllCredits();
-      let usersData: Array<{ id: string; name: string }> = [];
-      try {
-        const result = await execSql('SELECT id, name FROM wujie_users');
-        usersData = result.rows as Array<{ id: string; name: string }>;
-      } catch { /* ignore */ }
+      const allCredits = await dbGetAllCredits({ throwOnError: true });
+      const usersResult = await execSql('SELECT id, name FROM wujie_users');
+      const usersData = usersResult.rows as Array<{ id: string; name: string }>;
       const nameMap = new Map(usersData.map(u => [u.id, u.name]));
       const overview = allCredits.map(c => ({
         userId: c.user_id,
@@ -151,7 +148,7 @@ export async function GET(request: NextRequest) {
 
     // Admin: get all users' credits
     if (wantAll && isAdmin) {
-      const allCredits = await dbGetAllCredits();
+      const allCredits = await dbGetAllCredits({ throwOnError: true });
       return NextResponse.json({ success: true, credits: allCredits });
     }
 
@@ -164,6 +161,7 @@ export async function GET(request: NextRequest) {
         type: txType,
         limit: txLimit,
         offset: txOffset,
+        throwOnError: true,
       });
       return NextResponse.json({
         success: true,
@@ -179,21 +177,24 @@ export async function GET(request: NextRequest) {
     }
 
     // Get credits balance
-    let credits = await dbGetCredits(effectiveUserId);
+    let credits = await dbGetCredits(effectiveUserId, { throwOnError: true });
     if (!credits) {
-      credits = await dbInitCredits(effectiveUserId);
+      credits = await dbInitCredits(effectiveUserId, 0, { throwOnError: true });
+    }
+    if (!credits) {
+      throw new Error('CREDITS_ACCOUNT_READ_UNAVAILABLE');
     }
 
     const creditPricing = await loadCreditPricingConfig();
 
     return NextResponse.json({
       success: true,
-      credits: credits ? {
+      credits: {
         userId: credits.user_id,
         balance: credits.balance,
         totalRecharged: credits.total_recharged,
         totalUsed: credits.total_used,
-      } : { userId: effectiveUserId, balance: 0, totalRecharged: 0, totalUsed: 0 },
+      },
       pricing: {
         creditsToCNY: CREDITS_TO_CNY,
         cnyToCredits: CNY_TO_CREDITS,
@@ -385,10 +386,27 @@ export async function POST(request: NextRequest) {
 
         // Submit for admin review - DO NOT add credits immediately
         const nowTs = Date.now();
-        await execSql(
-          `UPDATE wujie_recharge_orders SET payment_status = 'submitted', submitted_at = $2, updated_at = $3 WHERE id = $1`,
-          [orderId, nowTs, nowTs]
+        const updateResult = await execSql(
+          `UPDATE wujie_recharge_orders SET payment_status = 'submitted', submitted_at = $2, updated_at = $3 WHERE id = $1 AND user_id = $4 AND payment_status = 'pending' RETURNING id`,
+          [orderId, nowTs, nowTs, user.id]
         );
+        if (updateResult.rowCount === 0) {
+          const current = await execSql(
+            'SELECT * FROM wujie_recharge_orders WHERE id = $1 AND user_id = $2',
+            [orderId, user.id]
+          );
+          if (current.rows.length === 0) {
+            return NextResponse.json({ success: false, error: '订单不存在' }, { status: 404 });
+          }
+          const currentOrder = current.rows[0] as Record<string, unknown>;
+          if (currentOrder.payment_status === 'paid') {
+            return NextResponse.json({ success: true, message: '订单已到账', alreadyPaid: true });
+          }
+          if (currentOrder.payment_status === 'submitted') {
+            return NextResponse.json({ success: true, message: '已提交付款确认，等待管理员审核', alreadySubmitted: true });
+          }
+          return NextResponse.json({ success: false, error: '订单状态不正确' }, { status: 400 });
+        }
 
         return NextResponse.json({
           success: true,

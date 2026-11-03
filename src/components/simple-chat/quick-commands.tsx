@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { ChevronDown, FileSearch, ImagePlus, MessageSquareText, PenLine, Sparkles, Wand2 } from "lucide-react";
 
 export interface QuickCommand {
@@ -84,53 +85,75 @@ interface QuickCommandsProps {
   disabled?: boolean;
   isMonochrome?: boolean;
   onClose?: () => void;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  trigger?: ReactNode;
 }
 
-export function QuickCommands({ onSelect, hasImages, disabled }: QuickCommandsProps) {
-  const [open, setOpen] = useState(false);
+export function QuickCommands({ onSelect, hasImages, disabled, onClose, open, onOpenChange, trigger }: QuickCommandsProps) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const selectedRef = useRef(false);
+  const menuOpen = open ?? internalOpen;
+
+  function changeOpen(nextOpen: boolean): void {
+    if (nextOpen) selectedRef.current = false;
+    if (open === undefined) setInternalOpen(nextOpen);
+    onOpenChange?.(nextOpen);
+    if (!nextOpen) onClose?.();
+  }
 
   return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen(!open)}
-        disabled={disabled}
-        className="flex h-9 items-center gap-1 rounded-lg border border-border bg-muted px-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground disabled:opacity-40"
-        title="快捷指令"
+    <DropdownMenu open={menuOpen} onOpenChange={changeOpen} modal={false}>
+      <DropdownMenuTrigger asChild ref={triggerRef} disabled={disabled}>
+        {trigger ?? (
+          <button type="button" className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1 rounded-lg border border-border bg-muted px-2.5 text-sm text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground disabled:opacity-40" title="快捷指令">
+            <Sparkles size={14} />
+            <span>快捷指令</span>
+            <ChevronDown size={12} className={menuOpen ? "rotate-180" : ""} />
+          </button>
+        )}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        ref={contentRef}
+        aria-label="文案策划快捷指令"
+        aria-labelledby={undefined}
+        side="top"
+        align="start"
+        collisionPadding={8}
+        loop
+        className="w-72 max-w-[calc(100vw-1rem)] rounded-xl overscroll-contain"
+        onCloseAutoFocus={event => {
+          event.preventDefault();
+          const activeElement = document.activeElement;
+          const hasOutsideFocus = activeElement instanceof HTMLElement
+            && activeElement.isConnected && activeElement !== document.body
+            && activeElement !== triggerRef.current && !contentRef.current?.contains(activeElement);
+          if (!selectedRef.current && !hasOutsideFocus) triggerRef.current?.focus();
+          selectedRef.current = false;
+        }}
       >
-        <Sparkles size={14} />
-        <span className="hidden sm:inline">快捷指令</span>
-        <ChevronDown size={12} className={`transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
-
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full left-0 z-50 mb-2 w-64 overflow-hidden rounded-xl border border-border bg-popover shadow-xl">
-            <div className="border-b border-border px-3 py-2 text-xs font-medium text-muted-foreground">
-              文案策划快捷指令
-            </div>
-            <div className="max-h-72 overflow-y-auto p-1">
-              {QUICK_COMMANDS.map(cmd => {
-                const Icon = ICON_MAP[cmd.icon] || Sparkles;
-                const needsImage = cmd.requiresImage && !hasImages;
-                return (
-                  <button
-                    key={cmd.id}
-                    disabled={needsImage}
-                    onClick={() => { onSelect(cmd.prompt); setOpen(false); }}
-                    className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
-                    title={needsImage ? "需先上传图片" : cmd.label}
-                  >
-                    <Icon size={15} className="shrink-0 text-primary" />
-                    <span>{cmd.label}</span>
-                    {cmd.requiresImage && <span className="ml-auto text-[10px] text-muted-foreground">需图片</span>}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </>
-      )}
-    </div>
+        <DropdownMenuLabel className="text-xs text-muted-foreground">文案策划快捷指令</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {QUICK_COMMANDS.map(cmd => {
+          const Icon = ICON_MAP[cmd.icon] || Sparkles;
+          const needsImage = !!cmd.requiresImage && !hasImages;
+          return (
+            <DropdownMenuItem
+              key={cmd.id}
+              disabled={disabled || needsImage}
+              onSelect={() => { selectedRef.current = true; onSelect(cmd.prompt); }}
+              className="min-h-11 min-w-0 gap-2.5 rounded-lg px-3 py-2 text-base"
+              title={needsImage ? "需先上传图片" : cmd.label}
+            >
+              <Icon size={15} className="shrink-0 text-primary" />
+              <span className="min-w-0 flex-1 break-words">{cmd.label}</span>
+              {cmd.requiresImage && <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">需图片</span>}
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

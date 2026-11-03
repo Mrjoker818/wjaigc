@@ -30,6 +30,9 @@ export interface CanvasMediaSourceState {
 
 interface CanvasMediaNodeProps {
   imageId: string;
+  mediaIdentity?: string;
+  mediaOriginalIdentity?: string;
+  mediaThumbnailIdentity?: string;
   source: string;
   sourceKind: 'thumbnail' | 'original';
   alt: string;
@@ -45,6 +48,7 @@ export interface CanvasMediaRenderProps {
   'data-canvas-media-node'?: string;
   'data-canvas-media-state'?: string;
   'data-canvas-media-source'?: string;
+  'data-canvas-media-token'?: string;
   source: string;
   alt: string;
   width: number;
@@ -74,6 +78,7 @@ export function areCanvasMediaRenderPropsEqual(
     && left['data-canvas-media-node'] === right['data-canvas-media-node']
     && left['data-canvas-media-state'] === right['data-canvas-media-state']
     && left['data-canvas-media-source'] === right['data-canvas-media-source']
+    && left['data-canvas-media-token'] === right['data-canvas-media-token']
     && left.alt === right.alt
     && left.width === right.width
     && left.height === right.height
@@ -89,6 +94,7 @@ const StableCanvasImage = memo(function StableCanvasImage({
   'data-canvas-media-node': mediaNode,
   'data-canvas-media-state': mediaState,
   'data-canvas-media-source': mediaSource,
+  'data-canvas-media-token': mediaToken,
   source,
   alt,
   width,
@@ -106,6 +112,7 @@ const StableCanvasImage = memo(function StableCanvasImage({
       data-canvas-media-node={mediaNode}
       data-canvas-media-state={mediaState}
       data-canvas-media-source={mediaSource}
+      data-canvas-media-token={mediaToken}
       src={source}
       alt={alt}
       width={width}
@@ -217,6 +224,9 @@ export function resolveCanvasMediaLoadedSource(
 
 export function CanvasMediaNode({
   imageId,
+  mediaIdentity = imageId,
+  mediaOriginalIdentity,
+  mediaThumbnailIdentity,
   source,
   sourceKind,
   alt,
@@ -230,12 +240,21 @@ export function CanvasMediaNode({
   const [mediaState, setMediaState] = useState<CanvasMediaSourceState>(() => (
     createCanvasMediaSourceState(source)
   ));
+  const identity = useMemo(() => ({ scope: mediaIdentity, original: mediaOriginalIdentity, thumbnail: mediaThumbnailIdentity }), [mediaIdentity, mediaOriginalIdentity, mediaThumbnailIdentity]);
+  const [displayIdentity, setDisplayIdentity] = useState(identity);
+  const [displayToken, setDisplayToken] = useState(0);
+  const currentIdentityRef = useRef(identity);
+  const currentSourceRef = useRef(source);
+  const displayedRef = useRef({ identity: displayIdentity, source: mediaState.committedSource, token: displayToken });
   const loadingPolicy = getCanvasMediaLoadingPolicy(priority);
   const onErrorRef = useRef(onError);
 
   useLayoutEffect(() => {
     onErrorRef.current = onError;
-  }, [onError]);
+    currentIdentityRef.current = identity;
+    currentSourceRef.current = source;
+    displayedRef.current = { identity: displayIdentity, source: mediaState.committedSource, token: displayToken };
+  }, [onError, identity, source, displayIdentity, displayToken, mediaState.committedSource]);
 
   useEffect(() => {
     if (!source) {
@@ -243,6 +262,12 @@ export function CanvasMediaNode({
       return;
     }
     if (source === mediaState.committedSource) {
+      if (displayIdentity !== identity) {
+        setDisplayIdentity(identity);
+        setDisplayToken(current => current + 1);
+        setMediaState(current => ({ ...current, pendingSource: null, loadState: { kind: 'loading' } }));
+        return;
+      }
       if (mediaState.pendingSource !== null) {
         setMediaState(current => beginCanvasMediaSourceTransition(current, source));
       }
@@ -259,7 +284,9 @@ export function CanvasMediaNode({
     const complete = async () => {
       try {
         if (typeof probe.decode === 'function') await probe.decode();
-        if (cancelled) return;
+        if (cancelled || currentIdentityRef.current !== identity || currentSourceRef.current !== source) return;
+        setDisplayIdentity(identity);
+        setDisplayToken(current => current + 1);
         setMediaState(current => completeCanvasMediaSourceTransition(
           current,
           source,
@@ -267,7 +294,9 @@ export function CanvasMediaNode({
           probe.naturalHeight,
         ));
       } catch {
-        if (cancelled) return;
+        if (cancelled || currentIdentityRef.current !== identity || currentSourceRef.current !== source) return;
+        setDisplayIdentity(identity);
+        setDisplayToken(current => current + 1);
         setMediaState({
           committedSource: source,
           pendingSource: null,
@@ -277,7 +306,9 @@ export function CanvasMediaNode({
     };
     probe.onload = () => { void complete(); };
     probe.onerror = () => {
-      if (cancelled) return;
+      if (cancelled || currentIdentityRef.current !== identity || currentSourceRef.current !== source) return;
+      setDisplayIdentity(identity);
+      setDisplayToken(current => current + 1);
       setMediaState({
         committedSource: source,
         pendingSource: null,
@@ -286,13 +317,15 @@ export function CanvasMediaNode({
     };
     probe.src = source;
     return () => { cancelled = true; };
-  }, [mediaState.committedSource, mediaState.pendingSource, source]);
+  }, [mediaState.committedSource, mediaState.pendingSource, source, identity, displayIdentity]);
 
   const dimensions = useMemo(() => ({
     width: Math.max(1, Math.round(Math.abs(width))),
     height: Math.max(1, Math.round(Math.abs(height))),
   }), [height, width]);
   const handleLoad = useCallback((event: SyntheticEvent<HTMLImageElement>) => {
+    if (displayedRef.current.identity !== currentIdentityRef.current || displayedRef.current.source !== currentSourceRef.current
+      || event.currentTarget.getAttribute('data-canvas-media-token') !== String(displayedRef.current.token)) return;
     const element = event.currentTarget;
     setMediaState(current => {
       const loadedSource = resolveCanvasMediaLoadedSource(
@@ -309,6 +342,8 @@ export function CanvasMediaNode({
     });
   }, [source]);
   const handleError = useCallback((event: SyntheticEvent<HTMLImageElement>) => {
+    if (displayedRef.current.identity !== currentIdentityRef.current || displayedRef.current.source !== currentSourceRef.current
+      || event.currentTarget.getAttribute('data-canvas-media-token') !== String(displayedRef.current.token)) return;
     setMediaState(current => ({
       committedSource: current.committedSource,
       pendingSource: null,
@@ -333,9 +368,11 @@ export function CanvasMediaNode({
 
   return (
     <StableCanvasImage
+      key={displayToken}
       data-canvas-media-node={imageId}
       data-canvas-media-state={mediaState.loadState.kind}
       data-canvas-media-source={sourceKind}
+      data-canvas-media-token={String(displayToken)}
       source={mediaState.committedSource}
       alt={alt}
       width={dimensions.width}

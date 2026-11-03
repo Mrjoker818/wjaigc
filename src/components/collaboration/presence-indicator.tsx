@@ -124,7 +124,7 @@ export function PresenceIndicator({ projectId, isOwner, themeStyle }: PresenceIn
           role="dialog"
           aria-label="项目在线成员"
           data-modal
-          className={`fixed left-1/2 top-16 z-[100] w-[min(20rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border p-4 shadow-xl ${dark ? 'border-white/10 bg-[#1a1a1a] text-white' : 'border-gray-200 bg-white text-gray-900'}`}
+          className={`fixed left-1/2 top-16 z-[100] w-[min(20rem,calc(100vw-2rem))] max-h-[calc(100dvh-5rem)] -translate-x-1/2 overflow-y-auto rounded-xl border p-4 shadow-xl ${dark ? 'border-white/10 bg-[#1a1a1a] text-white' : 'border-gray-200 bg-white text-gray-900'}`}
           onKeyDown={event => { if (event.key === 'Escape') setOpen(false); }}
         >
           <div className="mb-3 flex items-center justify-between gap-3">
@@ -144,11 +144,11 @@ export function PresenceIndicator({ projectId, isOwner, themeStyle }: PresenceIn
             </div>
           </form>
           {error && <p role="alert" className="mt-2 text-xs text-red-500">{error}</p>}
-          <ul className="mt-3 max-h-48 space-y-1 overflow-y-auto" aria-label="已邀请成员">
+          <ul className="mt-3 max-h-48 space-y-1 overflow-y-auto [@media(max-height:400px)]:max-h-none [@media(max-height:400px)]:overflow-visible" aria-label="已邀请成员">
             {members.map(member => (
               <li key={member.userId} className="flex min-h-11 items-center justify-between gap-2 text-sm">
                 <span className="min-w-0 truncate" title={member.userId}>{member.name}</span>
-                <button type="button" disabled={busy} aria-label={`撤销${member.name}的在线资格`} onClick={() => void mutate('DELETE', member.userId)} className="min-h-11 shrink-0 rounded-lg px-2 text-xs text-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">撤销</button>
+                <button type="button" disabled={busy} aria-label={`撤销${member.name}的在线资格`} onClick={() => void mutate('DELETE', member.userId)} className="min-h-11 min-w-11 shrink-0 rounded-lg px-2 text-xs text-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">撤销</button>
               </li>
             ))}
           </ul>

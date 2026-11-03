@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import { NextRequest, NextResponse } from 'next/server';
+import { readExpectedActor } from '@/lib/expected-actor-header';
 
 import { AssetServiceError, createAssetService, type TransferVersionInput } from '@/lib/asset-core/service';
 import { parseWorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
@@ -132,6 +133,11 @@ async function readBoundedText(request: NextRequest): Promise<string | null> {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const sessionUser = await getSessionUser(request);
   if (!sessionUser) return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+  const expectedActor = readExpectedActor(request.headers);
+  if (expectedActor.status === 'invalid') return NextResponse.json({ error: 'ASSET_REQUEST_INVALID' }, { status: 400 });
+  if (expectedActor.status === 'present' && expectedActor.actorId !== sessionUser.id) {
+    return NextResponse.json({ error: 'ACTOR_SCOPE_CHANGED' }, { status: 409 });
+  }
   const declaredLength = Number(request.headers.get('content-length') || 0);
   if (Number.isFinite(declaredLength) && declaredLength > MAX_REQUEST_BYTES) {
     return NextResponse.json({ error: 'ASSET_REQUEST_INVALID' }, { status: 413 });

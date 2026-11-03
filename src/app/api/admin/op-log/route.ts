@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
     const model = searchParams.get('model') || undefined;
     const providerId = searchParams.get('providerId') || undefined;
 
-    const result = await dbGetAuditLogs({
+    const result = await dbGetAuditLogs({ throwOnError: true,
       action,
       level,
       userId,
@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
 // ─── 统计数据 ──────────────────────────────────────────────────────────────
 
 async function handleStatistics() {
-  const stats = await dbGetAuditStats();
+  const stats = await dbGetAuditStats({ throwOnError: true });
   return NextResponse.json({ success: true, stats });
 }
 
@@ -116,11 +116,11 @@ async function handleAnalyze(_request: NextRequest, body: { logIds?: string[]; q
   let logsToAnalyze;
   if (logIds && logIds.length > 0) {
     // 先获取足够多的日志再筛选
-    const result = await dbGetAuditLogs({ limit: 200, offset: 0 });
+    const result = await dbGetAuditLogs({ throwOnError: true, limit: 200, offset: 0 });
     logsToAnalyze = result.logs.filter((log: DbAuditLog) => logIds.includes(String(log.id)));
   } else {
     // 默认分析最近的错误日志
-    const result = await dbGetAuditLogs({
+    const result = await dbGetAuditLogs({ throwOnError: true,
       level: 'error',
       limit: 20,
       offset: 0,
@@ -273,7 +273,7 @@ async function handleFix(_request: NextRequest, body: { logId: string; fixAction
   }
 
   // 获取日志详情 - 查找特定日志
-  const allResult = await dbGetAuditLogs({ limit: 500, offset: 0 });
+  const allResult = await dbGetAuditLogs({ throwOnError: true, limit: 500, offset: 0 });
   const log = allResult.logs.find((entry: DbAuditLog) => String(entry.id) === String(logId));
   if (!log) {
     return NextResponse.json({ success: false, error: '日志不存在' }, { status: 404 });
@@ -422,7 +422,7 @@ async function handleBatchDelete(body: { logIds?: string[]; beforeDate?: number;
 async function handleExport(body: { format?: string; startTime?: number; endTime?: number; level?: string; action?: string }) {
   const { format = 'json', startTime, endTime, level, action } = body;
 
-  const result = await dbGetAuditLogs({
+  const result = await dbGetAuditLogs({ throwOnError: true,
     startTime,
     endTime,
     level,

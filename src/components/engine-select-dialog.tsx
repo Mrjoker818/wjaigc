@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { X, Zap, Cpu, Sparkles, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -49,7 +49,7 @@ const TOOL_SPECIFIC_HINTS: Record<string, Record<EditEngine, string>> = {
   upscale: {
     auto: 'AI专用放大模型 → 通用AI放大 → 本地 Real-ESRGAN',
     ai: 'SeedVR2 / Real-ESRGAN 等云端AI超分模型',
-    local: '本地 upscayl (Real-ESRGAN NCNN)，无需API',
+    local: '本地保真放大，模型不可用时使用插值，无需API',
   },
   removebg: {
     auto: 'RemoveBG专用模型 → 通用AI透明背景 → 本地 IOPaint',
@@ -77,6 +77,18 @@ export function EngineSelectDialog({
   onClose,
   loadingEngine,
 }: EngineSelectDialogProps) {
+  useEffect(() => {
+    if (!open) return;
+    const handleEscape = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    };
+    document.addEventListener('keydown', handleEscape, true);
+    return () => document.removeEventListener('keydown', handleEscape, true);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   const engines: EditEngine[] = ['auto', 'ai', 'local'];
@@ -87,13 +99,14 @@ export function EngineSelectDialog({
       onClick={onClose}
     >
       <div
-        className="relative w-[480px] max-w-[90vw] bg-card border border-border rounded-2xl shadow-2xl p-6 animate-in zoom-in-95 duration-200"
+        className="relative w-[480px] max-w-[90vw] max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain bg-card border border-border rounded-2xl shadow-2xl p-6 animate-in zoom-in-95 duration-200"
         onClick={e => e.stopPropagation()}
       >
         {/* 关闭按钮 */}
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          aria-label="关闭引擎选择"
+          className="absolute top-4 right-4 inline-flex min-h-11 min-w-11 items-center justify-center p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
         >
           <X className="w-5 h-5" />
         </button>

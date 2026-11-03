@@ -56,6 +56,10 @@ function saveLocalFavorites(items: FavoriteItem[]) {
 }
 
 export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }: FavoritesPanelProps) {
+    return <FavoritesPanelForUser key={userId} userId={userId} onClose={onClose} isMonochrome={isMonochrome} onApplyParams={onApplyParams} />;
+}
+
+function FavoritesPanelForUser({ userId, onClose, isMonochrome, onApplyParams }: FavoritesPanelProps) {
     const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -110,11 +114,12 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
     const textMuted = mc ? '#94a3b8' : '#64748b';
     const inputBg = mc ? '#f1f5f9' : 'rgba(255,255,255,0.04)';
 
-    const fetchFavorites = useCallback(async (p: number) => {
+    const fetchFavorites = useCallback(async (p: number, isCurrent: () => boolean) => {
         setLoading(true);
         try {
             const res = await fetch(`/api/favorites?userId=${encodeURIComponent(userId)}&page=${p}&limit=20`);
             const data = await res.json();
+            if (!isCurrent()) return;
             if (data.success && data.favorites) {
                 const items = data.favorites.map((f: Record<string, unknown>) => ({
                     id: f.id as number,
@@ -147,15 +152,20 @@ export function FavoritesPanel({ userId, onClose, isMonochrome, onApplyParams }:
                 setTotalPages(1);
             }
         } catch {
+            if (!isCurrent()) return;
             const local = getLocalFavorites(userId);
             setFavorites(local);
             setTotalPages(1);
         } finally {
-            setLoading(false);
+            if (isCurrent()) setLoading(false);
         }
     }, [userId]);
 
-    useEffect(() => { fetchFavorites(page); }, [fetchFavorites, page]);
+    useEffect(() => {
+        let current = true;
+        void fetchFavorites(page, () => current);
+        return () => { current = false; };
+    }, [fetchFavorites, page]);
 
     const handleDelete = async (id: number | string) => {
         try {

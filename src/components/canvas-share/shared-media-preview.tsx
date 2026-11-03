@@ -84,7 +84,7 @@ export function SharedMediaPreview({
           event.preventDefault();
           returnFocusTo?.focus();
         }}
-        className="flex max-h-[calc(100dvh-1.5rem)] max-w-[calc(100%-1.5rem)] flex-col gap-0 overflow-hidden rounded-2xl border-border bg-card p-0 shadow-dialog motion-reduce:animate-none sm:max-h-[calc(100dvh-3rem)] sm:max-w-6xl"
+        className="flex max-h-[calc(100dvh-1.5rem)] max-w-[calc(100%-1.5rem)] flex-col gap-0 overflow-hidden rounded-2xl border-border bg-card p-0 shadow-dialog motion-reduce:animate-none! sm:max-h-[calc(100dvh-3rem)] sm:max-w-6xl"
       >
         <DialogTitle className="sr-only">媒体预览</DialogTitle>
         <DialogDescription className="sr-only">

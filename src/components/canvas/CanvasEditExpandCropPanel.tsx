@@ -1,8 +1,19 @@
 'use client';
 
 import * as React from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, Expand, Scissors } from 'lucide-react';
 import type { CanvasImage, EditMode } from '@/components/infinite-canvas';
+
+function subscribeExpandViewport(notify: () => void): () => void {
+  window.addEventListener('resize', notify);
+  return () => window.removeEventListener('resize', notify);
+}
+function getExpandViewportSnapshot(): number { return window.innerWidth; }
+function getServerExpandViewportSnapshot(): number { return 0; }
+interface PaddingTouch {
+  pointerId: number; startX: number; startY: number; startPad: ExpandPadding;
+}
 
 export interface ExpandPadding {
   top: number;
@@ -77,6 +88,15 @@ export function CanvasEditExpandCropPanel({
   panelCancelBtnClass,
   panelInputClass,
 }: CanvasEditExpandCropPanelProps): React.ReactElement | null {
+  const viewportWidth = React.useSyncExternalStore(
+    subscribeExpandViewport, getExpandViewportSnapshot, getServerExpandViewportSnapshot,
+  );
+  const isMobilePanel = viewportWidth > 0 && viewportWidth < 768;
+  const paddingTouchRef = React.useRef<PaddingTouch | null>(null);
+  React.useEffect(() => () => { paddingTouchRef.current = null; }, [editMode, editImageId]);
+  const renderToolbar = (element: React.ReactElement): React.ReactElement => (
+    isMobilePanel ? createPortal(element, document.body) : element
+  );
   return (
     <>
 {/* ====== EXPAND PREVIEW OVERLAY + DRAG HANDLES ====== */}
@@ -119,6 +139,46 @@ export function CanvasEditExpandCropPanel({
             { id: 'bottom-left',  cx: expX,            cy: expY + expH,     cursor: 'nesw-resize', dir: 'bottom-left' },
             { id: 'bottom-right', cx: expX + expW,     cy: expY + expH,     cursor: 'nwse-resize', dir: 'bottom-right' },
           ];
+
+          // Nonmouse drags share the existing padding state, without changing mouse callbacks.
+          const startPaddingTouch = (event: React.PointerEvent<HTMLDivElement>): void => {
+            if (event.pointerType === 'mouse') return;
+            event.preventDefault(); event.stopPropagation();
+            if (paddingTouchRef.current) return;
+            paddingTouchRef.current = { pointerId: event.pointerId, startX: event.clientX,
+              startY: event.clientY, startPad: { ...expandPaddingRef.current } };
+            event.currentTarget.setPointerCapture(event.pointerId);
+          };
+          const movePaddingTouch = (event: React.PointerEvent<HTMLDivElement>, direction: string): void => {
+            if (event.pointerType === 'mouse') return;
+            event.preventDefault(); event.stopPropagation();
+            const active = paddingTouchRef.current;
+            if (!active || active.pointerId !== event.pointerId) return;
+            const dx = Math.round(Math.round((event.clientX - active.startX) / zoom * scaleX) / 8) * 8;
+            const dy = Math.round(Math.round((event.clientY - active.startY) / zoom * scaleY) / 8) * 8;
+            const padding = { ...active.startPad };
+            if (direction.includes('top')) padding.top = Math.max(0, active.startPad.top - dy);
+            if (direction.includes('bottom')) padding.bottom = Math.max(0, active.startPad.bottom + dy);
+            if (direction.includes('left')) padding.left = Math.max(0, active.startPad.left - dx);
+            if (direction.includes('right')) padding.right = Math.max(0, active.startPad.right + dx);
+            const ow = editImg.originalWidth || Math.round(editImg.width);
+            const oh = editImg.originalHeight || Math.round(editImg.height);
+            padding.right = Math.max(0, Math.min(padding.right, 4096 - ow - padding.left));
+            padding.bottom = Math.max(0, Math.min(padding.bottom, 4096 - oh - padding.top));
+            padding.left = Math.max(0, Math.min(padding.left, 4096 - ow - padding.right));
+            padding.top = Math.max(0, Math.min(padding.top, 4096 - oh - padding.bottom));
+            expandPaddingRef.current = padding; setExpandPadding(padding);
+          };
+          const finishPaddingTouch = (event: React.PointerEvent<HTMLDivElement>, direction: string, commit: boolean): void => {
+            if (event.pointerType === 'mouse') return;
+            event.preventDefault(); event.stopPropagation();
+            const active = paddingTouchRef.current;
+            if (!active || active.pointerId !== event.pointerId) return;
+            if (commit) movePaddingTouch(event, direction);
+            else { expandPaddingRef.current = active.startPad; setExpandPadding(active.startPad); }
+            paddingTouchRef.current = null;
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+          };
 
           // Padding dimension label positions (midpoint of each padding edge)
           const dimLabels = [
@@ -229,13 +289,19 @@ export function CanvasEditExpandCropPanel({
                   key={h.id}
                   className="absolute pointer-events-auto"
                   style={{
-                    left: h.cx - hs / 2,
-                    top: h.cy - hs / 2,
-                    width: hs,
-                    height: hs,
+                    left: h.cx - (isMobilePanel ? 44 : hs) / 2,
+                    top: h.cy - (isMobilePanel ? 44 : hs) / 2,
+                    width: isMobilePanel ? 44 : hs,
+                    height: isMobilePanel ? 44 : hs,
+                    touchAction: 'none',
                     cursor: h.cursor,
                     zIndex: 46,
                   }}
+                  onPointerDown={startPaddingTouch}
+                  onPointerMove={(event) => movePaddingTouch(event, h.dir)}
+                  onPointerUp={(event) => finishPaddingTouch(event, h.dir, true)}
+                  onPointerCancel={(event) => finishPaddingTouch(event, h.dir, false)}
+                  onLostPointerCapture={(event) => finishPaddingTouch(event, h.dir, false)}
                   onMouseDown={(e) => {
                     e.stopPropagation();
                     e.preventDefault();
@@ -282,8 +348,9 @@ export function CanvasEditExpandCropPanel({
                 >
                   {/* Inner handle visual */}
                   <div
-                    className="w-full h-full rounded-sm"
+                    className="rounded-sm"
                     style={{
+                      width: hs, height: hs, position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)',
                       background: h.dir.includes('-')
                         ? `linear-gradient(135deg, ${hColor} 30%, rgba(212,175,55,0.6) 30%, rgba(212,175,55,0.6) 70%, ${hColor} 70%)`
                         : hColor,
@@ -305,11 +372,17 @@ export function CanvasEditExpandCropPanel({
                   key={edge.id}
                   className="absolute pointer-events-auto"
                   style={{
-                    left: edge.x, top: edge.y,
-                    width: edge.w, height: edge.h,
+                    left: edge.x - (isMobilePanel && edge.w === 8 ? 18 : 0), top: edge.y - (isMobilePanel && edge.h === 8 ? 18 : 0),
+                    width: isMobilePanel && edge.w === 8 ? 44 : edge.w, height: isMobilePanel && edge.h === 8 ? 44 : edge.h,
+                    touchAction: 'none',
                     cursor: edge.cursor,
                     zIndex: 45,
                   }}
+                  onPointerDown={startPaddingTouch}
+                  onPointerMove={(event) => movePaddingTouch(event, edge.dir)}
+                  onPointerUp={(event) => finishPaddingTouch(event, edge.dir, true)}
+                  onPointerCancel={(event) => finishPaddingTouch(event, edge.dir, false)}
+                  onLostPointerCapture={(event) => finishPaddingTouch(event, edge.dir, false)}
                   onMouseDown={(e) => {
                     e.stopPropagation();
                     e.preventDefault();
@@ -371,19 +444,19 @@ export function CanvasEditExpandCropPanel({
           const panelX = imgScreenX + imgScreenW / 2;
           const panelY = imgScreenY - 8;
 
-          return (
+          return renderToolbar(
             <div
               data-floating-panel="multi-angle"
-              className="absolute z-50 pointer-events-auto motion-reduce:transition-none max-[640px]:!fixed max-[640px]:!inset-x-3 max-[640px]:!bottom-20 max-[640px]:!top-auto max-[640px]:!transform-none"
+              className={isMobilePanel ? 'fixed z-[180] pointer-events-auto overflow-y-auto overscroll-contain motion-reduce:transition-none' : 'absolute z-50 pointer-events-auto motion-reduce:transition-none'}
               data-toolbar="edit-mode"
-              style={{ left: panelX, top: panelY, transform: 'translate(-50%, -100%)' }}
+              style={isMobilePanel ? { right: 'max(12px, env(safe-area-inset-right))', bottom: 'max(112px, calc(env(safe-area-inset-bottom) + 96px))', width: 'min(360px, calc(100vw - max(12px, env(safe-area-inset-left)) - max(12px, env(safe-area-inset-right))))', maxHeight: 'min(40dvh, calc(100dvh - max(12px, env(safe-area-inset-top)) - max(112px, calc(env(safe-area-inset-bottom) + 96px))))', touchAction: 'pan-y' } : { left: panelX, top: panelY, transform: 'translate(-50%, -100%)' }}
               onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
             >
               {editMode === 'expand' && (
                 <div
-                  className={`${panelBaseClass} max-[640px]:w-full max-[640px]:flex-wrap max-[640px]:justify-center`}
-                  style={{ minWidth: 'min(360px, calc(100vw - 24px))' }}
+                  className={`${panelBaseClass} ${isMobilePanel ? 'w-full flex-wrap justify-start [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:whitespace-nowrap [&_input]:min-h-11 [&_input]:text-base' : ''}`} 
+                  style={{ minWidth: isMobilePanel ? 0 : 'min(360px, calc(100vw - 24px))' }}
                   onMouseDown={(e) => e.stopPropagation()}
                 >
                   <Expand size={14} className={isMonochrome ? 'text-blue-500' : 'text-gold'} />
@@ -465,14 +538,14 @@ export function CanvasEditExpandCropPanel({
               {/* CROP toolbar */}
               {editMode === 'crop' && (
                 <div
-                  className={`${panelBaseClass} max-[640px]:w-full max-[640px]:flex-wrap max-[640px]:justify-center`}
-                  style={{ minWidth: 'min(480px, calc(100vw - 24px))' }}
+                  className={`${panelBaseClass} ${isMobilePanel ? 'w-full flex-wrap justify-start [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:whitespace-nowrap [&_input]:min-h-11 [&_input]:text-base' : ''}`} 
+                  style={{ minWidth: isMobilePanel ? 0 : 'min(480px, calc(100vw - 24px))' }}
                   onMouseDown={(e) => e.stopPropagation()}
                 >
                   <Scissors size={14} className={isMonochrome ? 'text-blue-500' : 'text-gold'} />
                   <span className={panelLabelClass}>裁切</span>
                   <div className={panelDividerClass} />
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 flex-wrap">
                     <button
                       onClick={() => setCropRatio('free')}
                       className={`px-2 py-1 text-xs rounded-md transition-all ${
@@ -500,15 +573,17 @@ export function CanvasEditExpandCropPanel({
                         {r}
                       </button>
                     ))}
-                    <div className="relative">
+                    <div className="relative" style={isMobilePanel && showCropRatios ? { width: '100%' } : undefined}>
                       <button
+                        aria-label="更多裁切比例"
+                        aria-expanded={showCropRatios}
                         onClick={(e) => { e.stopPropagation(); setShowCropRatios(!showCropRatios); }}
                         className={`px-2 py-1 text-xs rounded-md transition-all ${isMonochrome ? 'bg-blue-50 text-blue-600 hover:bg-blue-100' : 'bg-[#252525] text-[#999] hover:bg-[#282828]/85'}`}
                       >
                         <ChevronDown size={10} />
                       </button>
                       {showCropRatios && (
-                        <div className={`absolute top-full left-0 mt-1 py-1 rounded-lg border shadow-xl z-50 ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1e1e1e] border-[#444]'}`}>
+                        <div className={`${isMobilePanel ? 'grid grid-cols-3 gap-1' : 'absolute top-full left-0'} mt-1 py-1 rounded-lg border shadow-xl z-50 ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1e1e1e] border-[#444]'}`}>
                           {ratioOptions.slice(4).map(r => (
                             <button key={r} onClick={(e) => { e.stopPropagation(); setCropRatio(r); setShowCropRatios(false); }} className={`w-full px-3 py-1.5 text-xs text-left hover:bg-gold/10 ${cropRatio === r ? 'text-gold' : isMonochrome ? 'text-gray-600' : 'text-text-bright'}`}>
                               {r} {cropRatio === r && '✓'}
@@ -523,6 +598,7 @@ export function CanvasEditExpandCropPanel({
                     <span className={panelSmallLabelClass}>W</span>
                     <input
                       type="number"
+                      aria-label="裁切宽度"
                       value={Math.round(cropRect?.w || 0)}
                       onChange={(e) => {
                         const val = Number(e.target.value);
@@ -533,6 +609,7 @@ export function CanvasEditExpandCropPanel({
                     <span className={panelSmallLabelClass}>H</span>
                     <input
                       type="number"
+                      aria-label="裁切高度"
                       value={Math.round(cropRect?.h || 0)}
                       onChange={(e) => {
                         const val = Number(e.target.value);

@@ -1,12 +1,15 @@
 'use client';
 
-import { useCallback, useLayoutEffect, useRef, useState, type MouseEvent, type RefObject } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, type MouseEvent, type PointerEvent, type RefObject } from 'react';
 
 import type { NodePort, PortType, WorkflowConnection, WorkflowNode } from '@/lib/workflow-engine';
 import type { WorkflowInteractionCommand } from '@/lib/workflow-renderer/commands';
 import { WORKFLOW_RENDER_PORT_COLORS as PORT_COLORS } from '@/lib/workflow-renderer/presentation';
 import type { WorkflowRenderModel } from '@/lib/workflow-renderer/view-model';
 import { getLegacyPortWorldPosition } from '@/lib/workflow-renderer/legacy-port-position';
+import type { LegacyPortEndpoint } from '@/lib/workflow-renderer/legacy-mobile-pointer';
+import type { LegacyScreenPort, LegacyScreenRect } from '@/lib/workflow-renderer/legacy-port-targets';
+import { WorkflowPortTargets } from '@/components/workflow/WorkflowPortTargets';
 import {
   WorkflowLegacyNodeCard,
   type WorkflowLegacyCanvasImageRef,
@@ -68,6 +71,9 @@ export interface WorkflowLegacySurfaceProps {
   getPortPosition?: (node: WorkflowNode, port: NodePort) => { x: number; y: number } | null;
   isConnectionHighlighted?: (connection: WorkflowConnection) => boolean;
   onToggleConnectionBlocked?: (connection: WorkflowConnection, targetNode: WorkflowNode) => void;
+  onDirectPortPointerDown?: (event: PointerEvent<HTMLElement>, endpoint: LegacyPortEndpoint) => void;
+  onPortListRequest?: (endpoint: LegacyPortEndpoint) => void;
+  disablePortTargets?: boolean;
 }
 
 export const DEFAULT_WORKFLOW_NODE_THEME: WorkflowLegacyNodeTheme = {
@@ -92,9 +98,12 @@ export function WorkflowLegacySurface({
   draggingConnection, boxSelect, svgViewportTransformRef, nodeViewportTransformRef,
   getConnectionPath = defaultConnectionPath, getPortPosition, isConnectionHighlighted = () => false,
   onToggleConnectionBlocked,
+  onDirectPortPointerDown, onPortListRequest, disablePortTargets = false,
 }: WorkflowLegacySurfaceProps) {
+  const surfaceRef = useRef<HTMLDivElement>(null);
   const nodeLayerRef = useRef<HTMLDivElement | null>(null);
   const [portPositions, setPortPositions] = useState<Map<string, { x: number; y: number }>>(new Map());
+  const [targetGeometry, setTargetGeometry] = useState<{ bounds: LegacyScreenRect; obstacles: LegacyScreenRect[] }>({ bounds: { x: 0, y: 0, width: 0, height: 0 }, obstacles: [] });
   const setNodeLayerRef = useCallback((element: HTMLDivElement | null): void => {
     nodeLayerRef.current = element;
     if (nodeViewportTransformRef) nodeViewportTransformRef.current = element;
@@ -119,9 +128,25 @@ export function WorkflowLegacySurface({
           return old?.x === position.x && old.y === position.y;
         }) ? previous : next
       ));
+      const surface = surfaceRef.current?.getBoundingClientRect();
+      if (surface && onDirectPortPointerDown) {
+        const internal = Array.from(layer.querySelectorAll<HTMLElement>('button, input, textarea, select, a, img, video, canvas, .image-preview, [role="button"], [contenteditable="true"], [data-workflow-node-drag-handle]'));
+        const external = Array.from(layer.ownerDocument.querySelectorAll<HTMLElement>('[data-workflow-ui-occlusion], [data-modal], [data-popup], [data-toolbar]')).filter(element =>
+          !element.contains(surfaceRef.current) && !surfaceRef.current?.contains(element));
+        const obstacles = [...internal, ...external].map(element => {
+          const rect = element.getBoundingClientRect();
+          return { x: rect.left - surface.left, y: rect.top - surface.top, width: rect.width, height: rect.height };
+        });
+        const next = { bounds: { x: 0, y: 0, width: surface.width, height: surface.height }, obstacles };
+        setTargetGeometry(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
+      }
     };
     measure();
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    if (surfaceRef.current) observer?.observe(surfaceRef.current);
+    for (const element of layer.ownerDocument.querySelectorAll('[data-workflow-ui-occlusion], [data-modal], [data-popup], [data-toolbar]')) {
+      if (!element.contains(surfaceRef.current) && !surfaceRef.current?.contains(element)) observer?.observe(element);
+    }
     for (const element of layer.querySelectorAll('[data-node-id], .node-body, .port-row, .input-card')) {
       observer?.observe(element);
     }
@@ -132,7 +157,7 @@ export function WorkflowLegacySurface({
       layer.removeEventListener('load', measure, true);
       layer.removeEventListener('animationend', measure, true);
     };
-  }, [model.nodes, model.viewport, execResults, cardCallbacks?.collapsedNodes, visibleNodeKey]);
+  }, [model.nodes, model.viewport, execResults, cardCallbacks?.collapsedNodes, visibleNodeKey, onDirectPortPointerDown]);
 
   const resolvePortPosition = (node: WorkflowNode, port: NodePort): { x: number; y: number } | null => {
     const measured = portPositions.get(`${node.id}-${port.direction}-${port.id}`);
@@ -159,14 +184,26 @@ export function WorkflowLegacySurface({
     onSelect: noop, onHover: noop, onDragStart: noop, onPortMouseDown: noop, onPortMouseUp: noop,
     onDelete: noop, onDeselect: noop, onPreviewImage: noop,
   };
+  const screenPorts: LegacyScreenPort[] = visibleNodes.flatMap(renderNode => {
+    const node = nodeById.get(renderNode.id)!;
+    return node.ports.flatMap(port => {
+      const world = resolvePortPosition(node, port);
+      if (!world) return [];
+      return [{ key: JSON.stringify([node.id, port.direction, port.id]), nodeId: node.id, portId: port.id, direction: port.direction,
+        label: `${node.label} ${port.label}`, type: port.type,
+        point: { x: world.x * model.viewport.zoom + model.viewport.x, y: world.y * model.viewport.zoom + model.viewport.y } }];
+    });
+  });
 
   return (
     <div
+      ref={surfaceRef}
       data-workflow-legacy-surface
       data-domain-node-count={model.nodes.length}
       data-domain-node-ids={model.nodes.map(node => node.id).join(' ')}
       className="absolute inset-0"
     >
+      <div data-workflow-legacy-blank-hit-plane className="absolute inset-0" style={{ zIndex: 0, touchAction: 'none' }} />
       <svg data-workflow-legacy-edge-layer className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 1 }} aria-hidden="true">
         <defs>
           <marker id="arrow-image" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill={PORT_COLORS.image} /></marker>
@@ -226,7 +263,7 @@ export function WorkflowLegacySurface({
         </g>
       </svg>
 
-      <div data-workflow-legacy-node-layer ref={setNodeLayerRef} className="absolute inset-0" style={{ zIndex: 2, transform: `translate(${model.viewport.x}px, ${model.viewport.y}px) scale(${model.viewport.zoom})`, transformOrigin: '0 0', willChange: 'transform', contain: 'layout style' }}>
+      <div data-workflow-legacy-node-layer ref={setNodeLayerRef} className="pointer-events-none absolute inset-0" style={{ zIndex: 2, transform: `translate(${model.viewport.x}px, ${model.viewport.y}px) scale(${model.viewport.zoom})`, transformOrigin: '0 0', willChange: 'transform', contain: 'layout style' }}>
         {visibleNodes.map(renderNode => {
           const node = nodeById.get(renderNode.id)!;
           return <WorkflowLegacyNodeCard
@@ -242,6 +279,8 @@ export function WorkflowLegacySurface({
         />;
         })}
       </div>
+      {!disablePortTargets && onDirectPortPointerDown && onPortListRequest && <WorkflowPortTargets ports={screenPorts} bounds={targetGeometry.bounds} obstacles={targetGeometry.obstacles}
+        onPointerDown={onDirectPortPointerDown} onChoose={onPortListRequest} />}
     </div>
   );
 }

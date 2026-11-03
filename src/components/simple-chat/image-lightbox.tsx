@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Copy, Download, X, ZoomIn, ZoomOut } from "lucide-react";
 import { toast } from "sonner";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 interface ImageLightboxProps {
   images: string[];
@@ -11,7 +12,16 @@ interface ImageLightboxProps {
 }
 
 export function ImageLightbox({ images, initialIndex, onClose }: ImageLightboxProps) {
-  const [index, setIndex] = useState(initialIndex);
+  const boundedIndex = (value: number): number => Math.max(0, Math.min(images.length - 1, Number.isFinite(value) ? Math.trunc(value) : 0));
+  const [index, setIndex] = useState(() => boundedIndex(initialIndex));
+  const currentIndex = boundedIndex(index);
+  const [downloading, setDownloading] = useState(false);
+  const [copying, setCopying] = useState(false);
+  const downloadingRef = useRef(false);
+  const copyingRef = useRef(false);
+  const mountedRef = useRef(false);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
   const [zoom, setZoom] = useState(1);
 
   const prev = useCallback(() => {
@@ -25,110 +35,82 @@ export function ImageLightbox({ images, initialIndex, onClose }: ImageLightboxPr
   }, [images.length]);
 
   useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+    if (images.length === 0) return;
+    function onKey(e: KeyboardEvent): void {
       if (e.key === "ArrowLeft") prev();
       if (e.key === "ArrowRight") next();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, prev, next]);
+  }, [images.length, prev, next]);
 
-  const handleDownload = async () => {
-    const url = images[index];
+  const handleDownload = async (): Promise<void> => {
+    if (downloadingRef.current) return;
+    downloadingRef.current = true;
+    setDownloading(true);
+    const url = images[currentIndex];
     try {
       const res = await fetch(url);
+      if (!res.ok) throw new Error("IMAGE_DOWNLOAD_FAILED");
       const blob = await res.blob();
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = blobUrl;
-      a.download = `image-${index + 1}.png`;
+      a.download = `image-${currentIndex + 1}.png`;
       a.click();
       URL.revokeObjectURL(blobUrl);
     } catch {
-      toast.error("下载失败");
+      if (mountedRef.current) toast.error("下载失败");
+    } finally {
+      downloadingRef.current = false;
+      if (mountedRef.current) setDownloading(false);
     }
   };
 
-  const handleCopyLink = async () => {
+  const handleCopyLink = async (): Promise<void> => {
+    if (copyingRef.current) return;
+    copyingRef.current = true;
+    setCopying(true);
     try {
-      await navigator.clipboard.writeText(images[index]);
-      toast.success("链接已复制");
+      await navigator.clipboard.writeText(images[currentIndex]);
+      if (mountedRef.current) toast.success("链接已复制");
     } catch {
-      toast.error("复制失败");
+      if (mountedRef.current) toast.error("复制失败");
+    } finally {
+      copyingRef.current = false;
+      if (mountedRef.current) setCopying(false);
     }
   };
 
   if (images.length === 0) return null;
 
+  const controlClass = "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-white/10 text-white hover:bg-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:opacity-50";
   return (
-    <div
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/90 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      {/* 工具栏 */}
-      <div className="absolute top-4 right-4 z-10 flex items-center gap-2" onClick={e => e.stopPropagation()}>
-        <button
-          onClick={() => setZoom(z => Math.max(0.5, z - 0.25))}
-          className="rounded-lg bg-white/10 p-2 text-white hover:bg-white/20"
-          title="缩小"
-        >
-          <ZoomOut size={18} />
-        </button>
-        <span className="min-w-12 text-center text-xs text-white/80">{Math.round(zoom * 100)}%</span>
-        <button
-          onClick={() => setZoom(z => Math.min(4, z + 0.25))}
-          className="rounded-lg bg-white/10 p-2 text-white hover:bg-white/20"
-          title="放大"
-        >
-          <ZoomIn size={18} />
-        </button>
-        <button onClick={handleDownload} className="rounded-lg bg-white/10 p-2 text-white hover:bg-white/20" title="下载">
-          <Download size={18} />
-        </button>
-        <button onClick={handleCopyLink} className="rounded-lg bg-white/10 p-2 text-white hover:bg-white/20" title="复制链接">
-          <Copy size={18} />
-        </button>
-        <button onClick={onClose} className="rounded-lg bg-white/10 p-2 text-white hover:bg-white/20" title="关闭 (Esc)">
-          <X size={18} />
-        </button>
-      </div>
-
-      {/* 计数 */}
-      {images.length > 1 && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 rounded-full bg-white/10 px-3 py-1 text-xs text-white/80">
-          {index + 1} / {images.length}
+    <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
+      <DialogContent showCloseButton={false} aria-describedby={undefined}
+        className="!fixed !inset-2 !z-[200] !flex !h-auto !w-auto !max-w-none !translate-x-0 !translate-y-0 flex-col gap-2 overflow-hidden border-white/15 bg-black/95 !p-2 text-white sm:!max-w-none"
+        onOpenAutoFocus={() => { returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; }}
+        onCloseAutoFocus={event => { event.preventDefault(); const target = returnFocusRef.current; if (target?.isConnected && target.getClientRects().length > 0) target.focus(); }}>
+        <DialogTitle className="sr-only">图片预览</DialogTitle>
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1" aria-label="图片工具栏">
+          <button type="button" onClick={() => setZoom(z => Math.max(0.5, z - 0.25))} className={controlClass} title="缩小" aria-label="缩小"><ZoomOut size={18} /></button>
+          <span className="min-w-10 text-center text-xs tabular-nums text-white/80">{Math.round(zoom * 100)}%</span>
+          <button type="button" onClick={() => setZoom(z => Math.min(4, z + 0.25))} className={controlClass} title="放大" aria-label="放大"><ZoomIn size={18} /></button>
+          <button type="button" onClick={handleDownload} disabled={downloading} aria-busy={downloading} className={controlClass} title="下载" aria-label="下载"><Download size={18} /></button>
+          <button type="button" onClick={handleCopyLink} disabled={copying} aria-busy={copying} className={controlClass} title="复制链接" aria-label="复制链接"><Copy size={18} /></button>
+          <button type="button" onClick={onClose} className={controlClass} title="关闭 (Esc)" aria-label="关闭图片预览"><X size={18} /></button>
         </div>
-      )}
-
-      {/* 左右切换 */}
-      {images.length > 1 && (
-        <>
-          <button
-            onClick={e => { e.stopPropagation(); prev(); }}
-            className="absolute left-4 top-1/2 -translate-y-1/2 rounded-full bg-white/10 p-3 text-white hover:bg-white/20"
-          >
-            <ChevronLeft size={22} />
-          </button>
-          <button
-            onClick={e => { e.stopPropagation(); next(); }}
-            className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full bg-white/10 p-3 text-white hover:bg-white/20"
-          >
-            <ChevronRight size={22} />
-          </button>
-        </>
-      )}
-
-      {/* 图片 */}
-      <div className="max-h-[85vh] max-w-[85vw] overflow-auto" onClick={e => e.stopPropagation()}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={images[index]}
-          alt={`图片 ${index + 1}`}
-          className="transition-transform"
-          style={{ transform: `scale(${zoom})`, transformOrigin: "center center", maxWidth: "100%", maxHeight: "85vh" }}
-        />
-      </div>
-    </div>
+        <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-auto">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={images[currentIndex]} alt={`图片 ${currentIndex + 1}`} className="max-h-full max-w-full object-contain motion-safe:transition-transform"
+            style={{ transform: `scale(${zoom})`, transformOrigin: "center center" }} />
+        </div>
+        {images.length > 1 && <div className="flex shrink-0 items-center justify-between gap-2">
+          <button type="button" onClick={prev} className={controlClass} aria-label="上一张图片"><ChevronLeft size={22} /></button>
+          <span className="text-xs tabular-nums text-white/80">{currentIndex + 1} / {images.length}</span>
+          <button type="button" onClick={next} className={controlClass} aria-label="下一张图片"><ChevronRight size={22} /></button>
+        </div>}
+      </DialogContent>
+    </Dialog>
   );
 }

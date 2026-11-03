@@ -11,6 +11,7 @@ import { updateTaskProgress } from '@/lib/task-registry';
 import { normalizeImageEditLocalReference, readImageToolsLocalFile } from '@/lib/image-tools/local-image-reader';
 import type { ModelConfig } from './ordinary-generation-request';
 import { verifyGeneratedImageAlphaSet } from '@/lib/generated-image-alpha';
+import { createHash } from 'node:crypto';
 
 /** Only this deployment's managed-media URLs may be resolved from local storage. */
 export function ordinaryManagedLocalPath(imgUrl: string): string | null {
@@ -420,7 +421,7 @@ export function createOrdinaryProvider(options: OrdinaryProviderOptions): (
               const ext = path.extname(localPath).toLowerCase();
               const mimeMap: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
               const mime = mimeMap[ext] || 'image/png';
-              console.log('[generate] Resolved managed reference locally:', localPath, 'size:', imgBuf.length);
+              console.log('[generate] Resolved managed reference locally, size:', imgBuf.length);
               return `data:${mime};base64,${imgBuf.toString('base64')}`;
             }
             // Managed uploads may be archived to object storage; preserve HTTP recovery.
@@ -433,11 +434,11 @@ export function createOrdinaryProvider(options: OrdinaryProviderOptions): (
                 if (localResp.ok) {
                   const recovered = Buffer.from(await localResp.arrayBuffer());
                   const contentType = localResp.headers.get('content-type') || 'image/png';
-                  console.log('[generate] Resolved serve-upload image via localhost:', localPath, 'size:', recovered.length);
+                  console.log('[generate] Resolved serve-upload image via localhost, size:', recovered.length);
                   return `data:${contentType};base64,${recovered.toString('base64')}`;
                 }
-              } catch (error) {
-                console.warn('[generate] localhost fetch failed for', localPath, (error as Error).message);
+              } catch {
+                console.warn('[generate] Local reference recovery failed');
               }
             }
             return null;
@@ -450,21 +451,21 @@ export function createOrdinaryProvider(options: OrdinaryProviderOptions): (
               const port = process.env.DEPLOY_RUN_PORT || 5000;
               const urlPath = new URL(imgUrl).pathname + new URL(imgUrl).search;
               fetchUrl = `${proto}://localhost:${port}${urlPath}`;
-              console.log('[generate] Rewriting self-domain URL to localhost:', imgUrl, '→', fetchUrl);
+              console.log('[generate] Resolving self-domain reference via localhost');
             }
             const imgResp = await fetch(fetchUrl, { signal: AbortSignal.timeout(15000) });
             if (imgResp.ok) {
               const imgBuf = Buffer.from(await imgResp.arrayBuffer());
               const contentType = imgResp.headers.get('content-type') || 'image/png';
-              console.log('[generate] Resolved http image to base64, size:', imgBuf.length, 'from:', fetchUrl.substring(0, 100));
+              console.log('[generate] Resolved HTTP reference to base64, size:', imgBuf.length);
               return `data:${contentType};base64,${imgBuf.toString('base64')}`;
             } else {
-              console.warn('[generate] HTTP fetch failed for image:', fetchUrl, 'status:', imgResp.status);
+              console.warn('[generate] HTTP reference fetch failed, status:', imgResp.status);
             }
           }
         } catch (err) {
           if (err instanceof Error && /Unsafe local media path|Invalid local image file/.test(err.message)) throw err;
-          console.warn('[generate] Failed to resolve image to base64:', imgUrl, err);
+          console.warn('[generate] Reference image resolution failed');
         }
         return null;
       };
@@ -562,9 +563,11 @@ export function createOrdinaryProvider(options: OrdinaryProviderOptions): (
         const chatRequestBody = buildGeminiChatImageRequest(filteredBody);
         if (agentProviderIdempotencyKey) chatRequestBody.idempotency_key = agentProviderIdempotencyKey;
         console.log('Gemini image route: using /chat/completions for model', currentModelConfig.modelId, 'size:', requestBody.size, 'quality:', requestBody.quality || requestBody.resolution);
-        const msgs = chatRequestBody.messages as Array<Record<string, unknown>> | undefined;
-        console.log('Gemini chatRequestBody messages[0]:', JSON.stringify(msgs?.[0]?.content || '').substring(0, 200));
-        console.log('Gemini chatRequestBody generationConfig:', JSON.stringify(chatRequestBody.generationConfig));
+        console.log('Gemini image request prepared:', {
+          providerId: currentProviderId,
+          referenceImageCount: accessibleReferenceImages.length,
+          ...(agentProviderIdempotencyKey ? { taskKeyHash: createHash('sha256').update(agentProviderIdempotencyKey).digest('hex') } : {}),
+        });
 
         const geminiController = new AbortController();
         const geminiTimeoutId = setTimeout(() => geminiController.abort(), 600000); // 10分钟超时（Gemini生图可能很慢）
@@ -590,7 +593,7 @@ export function createOrdinaryProvider(options: OrdinaryProviderOptions): (
 
           if (!chatResponse.ok) {
             const errorText = await chatResponse.text();
-            console.error('Gemini chat/completions error:', chatResponse.status, errorText);
+            console.error('Gemini chat/completions error:', chatResponse.status, { providerId: currentProviderId });
             let errorMsg = `Gemini API 请求失败 (${chatResponse.status})`;
             try {
               const errorJson = JSON.parse(errorText);
@@ -611,7 +614,7 @@ export function createOrdinaryProvider(options: OrdinaryProviderOptions): (
               (chatResponse.status >= 500 && chatResponse.status !== 501) ||
               (chatResponse.status === 401 && combinedErrorText.includes('bad_response_status_code'));
             if (isRetryableError) {
-              console.warn('[generate] Gemini image route retryable error, will try fallback models:', errorMsg);
+              console.warn('[generate] Gemini image route retryable error, will try fallback models:', chatResponse.status);
               const retryErr = new Error(`当前模型暂不可用，请稍后重试或更换模型`);
               (retryErr as Error & { retryable?: boolean }).retryable = true;
               throw retryErr;
@@ -624,7 +627,7 @@ export function createOrdinaryProvider(options: OrdinaryProviderOptions): (
           try {
             chatResult = JSON.parse(chatResponseText);
           } catch {
-            console.error('[generate] Gemini chat returned non-JSON response, first 200 chars:', chatResponseText.substring(0, 200));
+            console.error('[generate] Gemini chat returned non-JSON response:', { providerId: currentProviderId });
             throw new Error('Gemini API 返回了非 JSON 响应');
           }
 
@@ -646,7 +649,7 @@ export function createOrdinaryProvider(options: OrdinaryProviderOptions): (
           const choices = chatResult.choices as Array<Record<string, unknown>> | undefined;
           if (choices && choices.length > 0) {
             const content = (choices[0].message as Record<string, unknown>)?.content;
-            console.error('[generate] Gemini chat response has choices but no extractable image. Content type:', typeof content, 'Content preview:', typeof content === 'string' ? content.substring(0, 200) : JSON.stringify(content).substring(0, 200));
+            console.error('[generate] Gemini chat response has choices but no extractable image. Content type:', typeof content);
           }
 
           throw new Error('Gemini 图像模型未返回图片数据，请检查模型是否支持图像生成');

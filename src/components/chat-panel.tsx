@@ -544,6 +544,7 @@ const AGENTS: AgentDefinition[] = [
 ];
 
 interface ChatPanelProps {
+  isVisible?: boolean;
   themeStyle: 'gold' | 'monochrome';
   projectId?: string;
   canvasAuthority?: 'document' | 'legacy' | 'pending';
@@ -577,6 +578,8 @@ interface ChatPanelProps {
   onInjectBrandDna?: (dna: Record<string, unknown>) => void;
   /** Image sent from canvas right-click menu "发送到聊天修改" */
   chatInitialImage?: CanvasImage | null;
+  /** The workspace has already prepared this image for chat. */
+  chatInitialImageResolved?: boolean;
   /** Called when chatInitialImage has been consumed (auto-tab-mode) */
   onChatInitialImageConsumed?: () => void;
   /** External control to switch to chat tab */
@@ -1304,7 +1307,7 @@ function extractPromptForGeneration(content: string): string {
 /* ========== 智能体搭建弹窗 ========== */
 /* AgentBuilderDialog 已提取至 src/components/chat/AgentBuilderDialog.tsx */
 
-export function ChatPanel({ themeStyle, projectId, canvasAuthority = 'legacy', onAddToPrompt, onAddImages, onAddGeneratedImage, onAddGeneratedImages, canvasImages = [], selectedCanvasImage, onResolveCanvasImageForChat, onChatModelChange, onSuggestionAction, onGenerateImage, brandDna, onInjectBrandDna, chatInitialImage, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage, externalPrompt, onExternalPromptConsumed }: ChatPanelProps) {
+export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAuthority = 'legacy', onAddToPrompt, onAddImages, onAddGeneratedImage, onAddGeneratedImages, canvasImages = [], selectedCanvasImage, onResolveCanvasImageForChat, onChatModelChange, onSuggestionAction, onGenerateImage, brandDna, onInjectBrandDna, chatInitialImage, chatInitialImageResolved = false, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage, externalPrompt, onExternalPromptConsumed }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [showFullHistory, setShowFullHistory] = useState(false);
   const visibleMessages = useMemo(() => (showFullHistory ? messages : messages.slice(-CHAT_RENDER_WINDOW)).filter(Boolean), [messages, showFullHistory]);
@@ -1361,6 +1364,20 @@ export function ChatPanel({ themeStyle, projectId, canvasAuthority = 'legacy', o
   const abortControllerRef = useRef<AbortController | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [showChatSettings, setShowChatSettings] = useState(true);
+  const [compactControlsOpen, setCompactControlsOpen] = useState(false);
+  const [agentPickerOpen, setAgentPickerOpen] = useState(false);
+  const compactControlsToggleRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const query = window.matchMedia('(max-height: 400px)');
+    const closeUnavailableAgentPicker = () => {
+      if (!isVisible || (query.matches && !compactControlsOpen)) {
+        setAgentPickerOpen(false);
+      }
+    };
+    closeUnavailableAgentPicker();
+    query.addEventListener('change', closeUnavailableAgentPicker);
+    return () => query.removeEventListener('change', closeUnavailableAgentPicker);
+  }, [compactControlsOpen, isVisible]);
   // 提示词大师相关状态
   const [activeTab, setActiveTab] = useState<'chat' | 'optimizer' | 'skills'>('chat');
   const [optimizerInput, setOptimizerInput] = useState('');
@@ -1445,6 +1462,20 @@ export function ChatPanel({ themeStyle, projectId, canvasAuthority = 'legacy', o
   const [skillSearchQuery, setSkillSearchQuery] = useState('');
   const [skillCategoryFilter, setSkillCategoryFilter] = useState('');
   const [activeSkill, setActiveSkill] = useState<SkillDefinition | null>(null);
+  const activeSkillFormRef = useRef<HTMLDivElement>(null);
+  const skillListScrollRef = useRef<HTMLDivElement>(null);
+  const [skillSelectionRevision, setSkillSelectionRevision] = useState(0);
+  useEffect(() => {
+    if (activeTab !== 'skills') return;
+    const frame = window.requestAnimationFrame(() => {
+      const scroller = skillListScrollRef.current;
+      const form = activeSkillFormRef.current;
+      if (!scroller || !form) return;
+      const top = scroller.scrollTop + form.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+      scroller.scrollTo({ top: Math.max(0, top), behavior: 'instant' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeTab, activeSkill?.id, skillSelectionRevision]);
   const [skillParamValues, setSkillParamValues] = useState<Record<string, unknown>>({});
   const [skillEstimateRequestFingerprint, setSkillEstimateRequestFingerprint] = useState<string>();
   const [skillRecheckUnavailableReason, setSkillRecheckUnavailableReason] = useState<string>();
@@ -1603,11 +1634,15 @@ export function ChatPanel({ themeStyle, projectId, canvasAuthority = 'legacy', o
   const addCanvasImageToChat = useCallback(async (
     image: CanvasImage,
     includeMention: boolean,
-  ): Promise<void> => {
+    alreadyResolved = false,
+    isCurrent: () => boolean = () => true,
+  ): Promise<boolean> => {
     let resolved = image;
-    if (onResolveCanvasImageForChat) {
-      resolved = await onResolveCanvasImageForChat(image);
+    if (onResolveCanvasImageForChat && !alreadyResolved) {
+      try { resolved = await onResolveCanvasImageForChat(image); }
+      catch (error) { if (isCurrent()) toast.error(error instanceof Error ? error.message : '图片无法发送到聊天'); return false; }
     }
+    if (!isCurrent()) return false;
     const pendingImage = {
       id: resolved.id,
       url: resolved.url,
@@ -1617,6 +1652,7 @@ export function ChatPanel({ themeStyle, projectId, canvasAuthority = 'legacy', o
       ...(resolved.placementId ? { placementId: resolved.placementId } : {}),
     };
     setPendingImages(prev => {
+      if (!isCurrent()) return prev;
       const existingIndex = prev.findIndex(item => item.id === resolved.id);
       if (existingIndex < 0) return [...prev, pendingImage];
       return prev.map((item, index) => index === existingIndex ? pendingImage : item);
@@ -1633,11 +1669,13 @@ export function ChatPanel({ themeStyle, projectId, canvasAuthority = 'legacy', o
         data: { url: resolved.url },
       };
       setActiveMentions(prev => {
+        if (!isCurrent()) return prev;
         const existingIndex = prev.findIndex(item => item.type === 'canvas-image' && item.id === resolved.id);
         if (existingIndex < 0) return [...prev, mention];
         return prev.map((item, index) => index === existingIndex ? mention : item);
       });
     }
+    return true;
   }, [onResolveCanvasImageForChat]);
 
   // ===== / Prompt Template Trigger =====
@@ -1662,36 +1700,49 @@ export function ChatPanel({ themeStyle, projectId, canvasAuthority = 'legacy', o
   // P2-2: ChatCanvas - handle image sent from canvas right-click menu
   useEffect(() => {
     if (chatInitialImage) {
-      void addCanvasImageToChat(chatInitialImage, false);
+      void addCanvasImageToChat(chatInitialImage, false, chatInitialImageResolved);
       setActiveTab('chat');
-      setInput('请帮我修改这张图片：');
+      setInput(prev => prev.trim() ? prev : '请帮我修改这张图片：');
       if (onChatTabOpenChange) onChatTabOpenChange(true);
       if (onChatInitialImageConsumed) onChatInitialImageConsumed();
     }
-  }, [addCanvasImageToChat, chatInitialImage, onChatInitialImageConsumed, onChatTabOpenChange]);
+  }, [addCanvasImageToChat, chatInitialImage, chatInitialImageResolved, onChatInitialImageConsumed, onChatTabOpenChange]);
 
   // P1-5: Auto-enter "针对此图" mode when a canvas image is selected
   // When user selects an image on the canvas, auto-add it to pendingImages ONLY when chat tab is open
   // AND the chat input is focused (user is actively chatting, not just clicking around canvas)
   const prevSelectedCanvasImageIdRef = useRef<string | null>(null);
+  const selectedCanvasImageEpochRef = useRef<{ key: string; epoch: number }>({ key: '', epoch: 0 });
+  const selectedId = selectedCanvasImage?.id ?? null;
+  const selectionKey = JSON.stringify([projectId ?? null, selectedId]);
+  const selectionLifetimeKey = JSON.stringify([projectId ?? null, selectedId, isVisible, !!chatTabOpen]);
+  if (selectedCanvasImageEpochRef.current.key !== selectionLifetimeKey) {
+    selectedCanvasImageEpochRef.current = { key: selectionLifetimeKey, epoch: selectedCanvasImageEpochRef.current.epoch + 1 };
+  }
+  useEffect(() => () => { selectedCanvasImageEpochRef.current.epoch += 1; }, []);
   useEffect(() => {
-    if (!selectedCanvasImage) return;
+    if (!selectedCanvasImage) { prevSelectedCanvasImageIdRef.current = null; return; }
     // Only trigger on NEW selection (image id changed), not re-renders
-    if (selectedCanvasImage.id === prevSelectedCanvasImageIdRef.current) return;
-    prevSelectedCanvasImageIdRef.current = selectedCanvasImage.id;
+    if (selectionKey === prevSelectedCanvasImageIdRef.current) return;
+    prevSelectedCanvasImageIdRef.current = selectionKey;
 
     // Only auto-add to chat when chat tab is open/active AND chat input is focused
-    if (!chatTabOpen) return;
+    if (!chatTabOpen || !isVisible) return;
     if (document.activeElement !== textareaRef.current) return;
 
-    void addCanvasImageToChat(selectedCanvasImage, false);
-
-    // Show visual hint in input (don't overwrite if user is already typing)
-    setInput(prev => {
-      if (prev.trim() && prev !== '请帮我修改这张图片：') return prev; // Don't overwrite user's text
-      return '针对这张图片，我想...';
+    const epoch = selectedCanvasImageEpochRef.current.epoch;
+    const isCurrent = (): boolean => selectedCanvasImageEpochRef.current.epoch === epoch
+      && selectedCanvasImageEpochRef.current.key === selectionLifetimeKey;
+    void addCanvasImageToChat(selectedCanvasImage, false, false, isCurrent).then(applied => {
+      if (!isCurrent()) return;
+      if (!applied) { if (prevSelectedCanvasImageIdRef.current === selectionKey) prevSelectedCanvasImageIdRef.current = null; return; }
+      setInput(prev => {
+        if (!isCurrent()) return prev;
+        if (prev.trim() && prev !== '请帮我修改这张图片：') return prev;
+        return '针对这张图片，我想...';
+      });
     });
-  }, [addCanvasImageToChat, selectedCanvasImage, chatTabOpen]);
+  }, [addCanvasImageToChat, selectedCanvasImage, chatTabOpen, isVisible, selectionKey, selectionLifetimeKey]);
 
   // Get mention picker items based on search
   const mentionPickerItems: MentionRef[] = useMemo(() => {
@@ -1841,19 +1892,25 @@ export function ChatPanel({ themeStyle, projectId, canvasAuthority = 'legacy', o
     detailLevel: 50,
   });
   const [showTunePanel, setShowTunePanel] = useState(false);
+  const [showTuneView, setShowTuneView] = useState(true);
   const tunePanelRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
+  const toolbarScrollRef = useRef<HTMLDivElement>(null);
+  const [toolbarAtEnd, setToolbarAtEnd] = useState(false);
 
   // 点击空白处关闭Tune面板
   useEffect(() => {
     if (!showTunePanel) return;
     const handleClickOutside = (e: MouseEvent) => {
+      if (window.matchMedia('(max-height: 400px)').matches && !showTuneView) return;
       if (tunePanelRef.current && !tunePanelRef.current.contains(e.target as Node)) {
+        if (window.matchMedia('(max-height: 400px)').matches && composerRef.current?.contains(e.target as Node)) return;
         setShowTunePanel(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showTunePanel]);
+  }, [showTunePanel, showTuneView]);
 
   const updateTuneParam = useCallback((key: keyof TuneParams, value: number) => {
     setTuneParams(prev => ({ ...prev, [key]: value }));
@@ -2035,7 +2092,7 @@ export function ChatPanel({ themeStyle, projectId, canvasAuthority = 'legacy', o
 
   const handleMessageListScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const element = event.currentTarget;
-    shouldStickToBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 100;
+    shouldStickToBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < (window.matchMedia('(max-height: 400px)').matches ? 2 : 100);
   }, []);
 
   // Select a prompt template from / trigger
@@ -2569,6 +2626,7 @@ export function ChatPanel({ themeStyle, projectId, canvasAuthority = 'legacy', o
 
   // 监听粘贴事件
   useEffect(() => {
+    if (!isVisible) return;
     const container = chatContainerRef.current;
     if (!container) return;
 
@@ -2594,7 +2652,7 @@ export function ChatPanel({ themeStyle, projectId, canvasAuthority = 'legacy', o
 
     document.addEventListener('paste', handlePaste);
     return () => document.removeEventListener('paste', handlePaste);
-  }, [activeTab]);
+  }, [activeTab, isVisible]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -4525,10 +4583,28 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
 
   const isGold = themeStyle === 'gold';
 
+  const skillCategoryLabels = new Map<string, string>([
+    ['image', '图像'], ['design', '设计'], ['brand', '品牌'], ['storyboard', '分镜'],
+    ['editing', '编辑'], ['custom', '自定义'], ['marketing', '营销'], ['commerce', '电商'],
+    ['画布工具', '画布工具'], ['视频创作', '视频创作'],
+  ]);
+  const skillCategories = Array.from(new Set([
+    'image', 'design', 'brand', 'storyboard', 'editing', 'custom',
+    ...chatSkills.map(skill => skill.category).filter(Boolean),
+  ]));
+  const matchingCanvasSkills = chatSkills
+    .filter(skill => !skillCategoryFilter || skill.category === skillCategoryFilter)
+    .filter(skill => !skillSearchQuery || skill.name.includes(skillSearchQuery) || skill.description.includes(skillSearchQuery));
+  const recommendedCanvasSkills = matchingCanvasSkills
+    .filter(skill => skill.builtIn && skill.enabled && skill.allowedSurfaces.includes('canvas'));
+  const personalCanvasSkills = matchingCanvasSkills.filter(skill => !skill.builtIn);
+
   return (
     <div className={`flex flex-col h-full ${themeClasses.bg}`} ref={chatContainerRef}>
+      {/* 短屏保留原有控件及其状态，按需展开 */}
+      <button ref={compactControlsToggleRef} type="button" className="hidden [@media(max-height:400px)]:block shrink-0 min-h-11 px-3 py-1 text-left text-xs" aria-expanded={compactControlsOpen} onClick={() => setCompactControlsOpen(value => !value)}>{compactControlsOpen ? '收起聊天设置和导航' : '展开聊天设置和导航'}</button>
       {/* Header with Tabs - 精致标签设计 */}
-      <div className={`shrink-0 ${isGold ? 'border-b border-white/[0.04]' : ''}`}>
+      <div className={`shrink-0 ${!compactControlsOpen ? '[@media(max-height:400px)]:hidden' : ''} ${isGold ? 'border-b border-white/[0.04]' : ''}`}>
         <div className="px-4 pt-3 flex items-center justify-between">
           <div className={`relative flex items-center ${isGold ? 'bg-white/[0.04] p-0.5 rounded-lg' : 'bg-gray-100 p-0.5 rounded-lg'}`}>
             <button
@@ -4566,7 +4642,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             <button
               aria-label="Skills技能库"
               onClick={() => setActiveTab('skills')}
-              className={`relative z-10 px-1.5 py-1 min-h-[32px] text-xs font-medium rounded-md transition-all flex items-center gap-1 whitespace-nowrap ${
+              className={`relative z-10 px-1.5 py-1 min-h-11 text-xs font-medium rounded-md transition-all flex items-center gap-1 whitespace-nowrap ${
                 activeTab === 'skills'
                   ? isGold
                     ? 'bg-gold/15 text-gold shadow-sm'
@@ -4654,7 +4730,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
 
       {/* Chat Tab Content */}
       {activeTab === 'chat' && (
-      <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+      <div className="flex-1 flex flex-col overflow-hidden min-h-0 [@media(max-height:400px)]:relative [@media(max-height:400px)]:overflow-y-auto">
         {/* 历史对话面板 */}
         {showHistoryPanel && (
           <div className={`border-b ${themeClasses.border} shrink-0 max-h-[240px] overflow-y-auto`}>
@@ -4750,14 +4826,25 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
         )}
 
         {/* Settings Bar - 单行布局 */}
-        <div className={`border-b ${themeClasses.border} shrink-0 px-3 py-2`}>
+        <div className={`border-b ${themeClasses.border} shrink-0 px-3 py-2 ${!compactControlsOpen ? '[@media(max-height:400px)]:hidden' : ''}`}>
           <div className="flex items-center gap-2 flex-wrap">
             {/* LLM模型选择器 */}
-            <Select value={model} onValueChange={setModel}>
+            <Select key={'chat-model-' + String(isVisible)} open={isVisible ? undefined : false} value={model} onValueChange={setModel}>
               <SelectTrigger className={`h-7 text-xs flex-1 min-w-[120px] ${themeClasses.inputBg} ${themeClasses.border} ${themeClasses.text}`}>
                 <SelectValue placeholder="选择模型" />
               </SelectTrigger>
-              <SelectContent position="popper" side="bottom" sideOffset={4} className={themeClasses.bg}>
+              <SelectContent
+                position="popper"
+                side="bottom"
+                sideOffset={4}
+                className={themeClasses.bg}
+                onCloseAutoFocus={(event) => {
+                  if (isVisible && window.matchMedia('(max-height: 400px)').matches && !compactControlsOpen) {
+                    event.preventDefault();
+                    compactControlsToggleRef.current?.focus({ preventScroll: true });
+                  }
+                }}
+              >
                 {(() => {
                   // Group discovered server models by provider
                   const grouped: Record<string, typeof availableChatModels> = {};
@@ -4789,7 +4876,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             </Select>
 
             {/* 智能体下拉选择器 */}
-            <DropdownMenu>
+            <DropdownMenu key={'agent-picker-' + String(isVisible)} open={isVisible && agentPickerOpen} onOpenChange={setAgentPickerOpen}>
               <DropdownMenuTrigger asChild>
                 <button
                   className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-all border shrink-0 ${
@@ -4807,7 +4894,16 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   <ChevronDown size={14} className="ml-0.5 opacity-60" />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-48 max-h-[280px] overflow-y-auto">
+              <DropdownMenuContent
+                align="start"
+                className="w-48 max-h-[280px] overflow-y-auto"
+                onCloseAutoFocus={(event) => {
+                  if (isVisible && window.matchMedia('(max-height: 400px)').matches && !compactControlsOpen) {
+                    event.preventDefault();
+                    compactControlsToggleRef.current?.focus({ preventScroll: true });
+                  }
+                }}
+              >
                 {allAgents.map(agent => (
                   <DropdownMenuItem
                     key={agent.id}
@@ -4999,7 +5095,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
         )}
 
         {/* Messages - 精致设计 */}
-        <div ref={messageListRef} onScroll={handleMessageListScroll} className={`flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 space-y-3 ${isGold ? 'bg-[#090909]' : 'bg-gray-50/50'}`}>
+        <div ref={messageListRef} onScroll={handleMessageListScroll} className={`flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 space-y-3 [@media(max-height:400px)]:py-1 ${showTunePanel && showTuneView ? '[@media(max-height:400px)]:invisible' : ''} ${isGold ? 'bg-[#090909]' : 'bg-gray-50/50'}`}>
           {messages.length === 0 && pendingImages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center">
               {(() => {
@@ -5502,14 +5598,17 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
         </div>
 
         {/* Input - 精致设计 */}
-        <div className={`px-3 py-4 border-t ${themeClasses.border} shrink-0 ${isGold ? 'bg-[#0d0d0d]/90' : 'bg-white'}`}>
+        <div ref={composerRef} className={`px-3 py-4 border-t ${themeClasses.border} shrink-0 [@media(max-height:400px)]:py-1 ${isGold ? 'bg-[#0d0d0d]/90' : 'bg-white'}`}>
           {/* P2-1: Tune Mode Panel */}
           {showTunePanel && (
-            <div ref={tunePanelRef} className={`mb-1.5 p-2 rounded-lg text-xs space-y-2 ${isGold ? 'bg-white/[0.03] border border-white/[0.06]' : 'bg-gray-50 border border-gray-200'}`}>
+            <div ref={tunePanelRef} className={`mb-1.5 p-2 rounded-lg text-xs space-y-2 [@media(max-height:400px)]:absolute [@media(max-height:400px)]:top-1 [@media(max-height:400px)]:right-1 [@media(max-height:400px)]:z-20 [@media(max-height:400px)]:w-[calc(100%-0.5rem)] [@media(max-height:400px)]:max-h-[100px] [@media(max-height:400px)_and_(pointer:coarse)]:max-h-[84px] [@media(max-height:400px)]:overflow-y-auto ${!showTuneView ? '[@media(max-height:400px)]:hidden' : ''} ${isGold ? 'bg-white/[0.03] [@media(max-height:400px)]:!bg-[#171717] border border-white/[0.06]' : 'bg-gray-50 border border-gray-200'}`}>
               <div className="flex items-center justify-between">
                 <span className={`font-medium ${themeClasses.text}`}>Tune 精细调节</span>
-                <button onClick={() => setShowTunePanel(false)} className={`opacity-50 hover:opacity-100 ${themeClasses.textMuted}`}>
+                <button aria-label="关闭精细调节" onClick={() => setShowTunePanel(false)} className={`opacity-50 hover:opacity-100 [@media(max-height:400px)]:hidden ${themeClasses.textMuted}`}>
                   <X size={12} />
+                </button>
+                <button type="button" aria-label="返回消息" onClick={() => setShowTuneView(false)} className={`hidden [@media(max-height:400px)]:flex min-w-11 min-h-11 items-center gap-1 ${isGold ? 'text-[#e5cc83]' : 'text-gray-700'}`}>
+                  <X size={12} /><span className="whitespace-nowrap">返回消息</span>
                 </button>
               </div>
               {([
@@ -5523,11 +5622,12 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   <span className={`w-16 shrink-0 ${themeClasses.textMuted}`}>{param.label}</span>
                   <input
                     type="range"
+                    aria-label={param.label}
                     min={param.min}
                     max={param.max}
                     value={tuneParams[param.key]}
                     onChange={e => updateTuneParam(param.key, parseInt(e.target.value))}
-                    className="flex-1 h-1 accent-current"
+                    className="flex-1 min-w-0 h-1 accent-current [@media(max-height:400px)]:min-h-11"
                   />
                   <span className={`w-8 text-right tabular-nums ${themeClasses.textMuted}`}>
                     {tuneParams[param.key]}
@@ -5558,11 +5658,12 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             });
             if (allRefImgs.length === 0) return null;
             return (
-              <div className={`mb-2 rounded-lg overflow-hidden ${isGold ? 'bg-white/[0.03] border border-white/[0.06]' : 'bg-gray-50 border border-gray-200'}`}>
+              <div className={`mb-2 rounded-lg overflow-hidden [@media(max-height:400px)]:flex [@media(max-height:400px)]:items-center [@media(max-height:400px)]:mb-1 ${isGold ? 'bg-white/[0.03] border border-white/[0.06]' : 'bg-gray-50 border border-gray-200'}`}>
                 {/* 缩略图行 */}
-                <div className="flex gap-1.5 p-2 overflow-x-auto" style={{ maxWidth: '100%' }}>
+                <div className="flex gap-1.5 p-2 overflow-x-auto [@media(max-height:400px)]:flex-1 [@media(max-height:400px)]:min-w-0 [@media(max-height:400px)]:py-1" style={{ maxWidth: '100%' }}>
                   {allRefImgs.map((img, idx) => (
                     <div key={img.id} className="relative shrink-0 group">
+                      <div className="flex items-start">
                       <div className="w-12 h-12 rounded-md overflow-hidden bg-black/20">
                         <img src={img.url} alt="" className="w-full h-full object-cover" />
                       </div>
@@ -5572,10 +5673,12 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                           setPendingImages(prev => prev.filter(p => p.id !== img.id));
                           setActiveMentions(prev => prev.filter(m => !(m.type === 'canvas-image' && m.id === img.id)));
                         }}
-                        className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-black/70 text-white flex items-center justify-center hover:bg-black/90 transition-colors opacity-0 group-hover:opacity-100 shadow-sm"
+                        aria-label={`移除第${idx + 1}张参考图 ${img.name}`}
+                        className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-black/70 text-white flex items-center justify-center hover:bg-black/90 transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100 shadow-sm [@media(any-pointer:coarse)]:static [@media(any-pointer:coarse)]:ml-1 [@media(any-pointer:coarse)]:w-11 [@media(any-pointer:coarse)]:h-11 [@media(any-pointer:coarse)]:shrink-0 [@media(any-pointer:coarse)]:rounded-lg [@media(any-pointer:coarse)]:bg-white/10 [@media(any-pointer:coarse)]:opacity-100"
                       >
-                        <X size={9} />
+                        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-black/70"><X size={9} className="[@media(any-pointer:coarse)]:h-4 [@media(any-pointer:coarse)]:w-4" /></span>
                       </button>
+                      </div>
                       {/* 左上角序号标签 */}
                       <div className={`absolute top-0.5 left-0.5 px-1 py-px rounded text-[8px] font-bold leading-tight ${isGold ? 'bg-gold/80 text-black' : 'bg-blue-500 text-white'}`}>
                         {idx + 1}
@@ -5590,7 +5693,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   ))}
                 </div>
                 {/* 底部栏：图片数量 + 清空按钮 */}
-                <div className={`flex items-center justify-between px-2 py-1 ${isGold ? 'border-t border-white/[0.04]' : 'border-t border-gray-200'}`}>
+                <div className={`flex items-center justify-between px-2 py-1 [@media(max-height:400px)]:shrink-0 [@media(max-height:400px)]:flex-col [@media(max-height:400px)]:gap-1 ${isGold ? 'border-t border-white/[0.04]' : 'border-t border-gray-200'}`}>
                   <span className={`text-[9px] ${isGold ? 'text-gold/50' : 'text-gray-400'}`}>
                     {allRefImgs.length}张图片引用
                   </span>
@@ -5630,7 +5733,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
           )}
 
           {/* Toolbar Row - 上传/Tune/快捷指令 + 发送按钮 */}
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-2 mb-2 [@media(max-height:400px)]:mb-0 [@media(max-width:400px)]:flex-wrap">
             <input
               ref={fileInputRef}
               type="file"
@@ -5639,8 +5742,9 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               onChange={handleImageUpload}
               className="hidden"
             />
+            <div ref={toolbarScrollRef} onScroll={(event) => { const element = event.currentTarget; setToolbarAtEnd(element.scrollWidth - element.clientWidth - element.scrollLeft <= 2); }} className="contents [@media(max-height:400px)]:flex [@media(max-height:400px)]:items-center [@media(max-height:400px)]:gap-2 [@media(max-height:400px)]:min-w-0 [@media(max-height:400px)]:flex-1 [@media(max-height:400px)]:overflow-x-auto [@media(max-height:400px)]:overflow-y-hidden [@media(max-height:400px)]:[scrollbar-width:none]">
             {/* 图片按钮 - DropdownMenu */}
-            <DropdownMenu>
+            <DropdownMenu key={'image-reference-' + String(isVisible)} open={isVisible ? undefined : false}>
               <DropdownMenuTrigger asChild>
                 <button
                   onClick={(e) => {
@@ -5703,7 +5807,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               )}
             </DropdownMenu>
             {/* Tune按钮 - DropdownMenu */}
-            <DropdownMenu>
+            <DropdownMenu key={'tune-menu-' + String(isVisible)} open={isVisible ? undefined : false}>
               <DropdownMenuTrigger asChild>
                 <button
                   className={`shrink-0 h-7 px-2.5 rounded-md flex items-center gap-1.5 text-[11px] transition-colors ${
@@ -5726,12 +5830,15 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 className={`w-48 ${isGold ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-gray-200'}`}
               >
                 <DropdownMenuItem
-                  onSelect={() => setShowTunePanel(true)}
+                  onSelect={() => { setShowTuneView(true); setShowTunePanel(true); }}
                   className={`text-xs ${isGold ? 'text-white/80 focus:bg-white/5' : 'text-gray-700 focus:bg-gray-50'}`}
                 >
                   <Sliders size={12} className="mr-2" />
                   打开调节面板
                 </DropdownMenuItem>
+                {showTunePanel && (
+                  <DropdownMenuItem onSelect={() => setShowTunePanel(false)} className="hidden [@media(max-height:400px)]:flex text-xs">关闭调节</DropdownMenuItem>
+                )}
                 <DropdownMenuItem
                   onSelect={() => { setShowTunePanel(false); setTuneParams({ strength: 70, styleShift: 0, colorTone: 0, detailLevel: 50 }); }}
                   className={`text-xs ${isGold ? 'text-white/80 focus:bg-white/5' : 'text-gray-700 focus:bg-gray-50'}`}
@@ -5742,7 +5849,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               </DropdownMenuContent>
             </DropdownMenu>
             {/* 快捷指令 - DropdownMenu */}
-            <DropdownMenu>
+            <DropdownMenu key={'command-menu-' + String(isVisible)} open={isVisible ? undefined : false}>
               <DropdownMenuTrigger asChild>
                 <button
                   className={`shrink-0 h-7 px-2.5 rounded-md flex items-center gap-1.5 text-[11px] transition-colors ${
@@ -5781,7 +5888,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               </DropdownMenuContent>
             </DropdownMenu>
             {/* 图像模型选择器 - DropdownMenu */}
-            <DropdownMenu>
+            <DropdownMenu key={'image-model-' + String(isVisible)} open={isVisible ? undefined : false}>
               <DropdownMenuTrigger asChild>
                 <button
                   className={`shrink-0 h-7 px-2.5 rounded-md flex items-center gap-1.5 text-[11px] transition-colors ${
@@ -5854,12 +5961,18 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               </DropdownMenuContent>
             </DropdownMenu>
             <div className="flex-1" />
+            </div>
+            <button type="button" aria-label={toolbarAtEnd ? "向左查看更多工具" : "向右查看更多工具"}
+              onClick={() => { const element = toolbarScrollRef.current; if (element) element.scrollTo({ left: toolbarAtEnd ? 0 : element.scrollWidth, behavior: "smooth" }); }}
+              className={`hidden [@media(max-height:400px)]:flex shrink-0 min-w-11 min-h-11 items-center justify-center whitespace-nowrap text-[11px] ${isGold ? 'text-[#e5cc83]' : 'text-gray-700'}`}>
+              {toolbarAtEnd ? '‹ 返回' : '滑动 ›'}
+            </button>
             {isLoading ? (
               <button
                 onClick={() => {
                   abortControllerRef.current?.abort();
                 }}
-                className={`shrink-0 h-7 px-2 rounded-md flex items-center justify-center gap-1 text-[11px] font-medium transition-all ${
+                className={`shrink-0 h-7 px-2 [@media(max-height:400px)_and_(pointer:coarse)]:min-w-11 [@media(max-height:400px)_and_(pointer:coarse)]:min-h-11 rounded-md flex items-center justify-center gap-1 text-[11px] font-medium transition-all ${
                   isGold
                     ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30'
                     : 'bg-red-50 text-red-500 hover:bg-red-100 border border-red-200'
@@ -5873,7 +5986,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               <button
                 onClick={() => handleSend()}
                 disabled={!input.trim() || isLoading || !isChatModelReady}
-                className={`shrink-0 h-7 px-2 rounded-md flex items-center justify-center text-[11px] font-medium transition-all ${
+                className={`shrink-0 h-7 px-2 [@media(max-height:400px)_and_(pointer:coarse)]:min-w-11 [@media(max-height:400px)_and_(pointer:coarse)]:min-h-11 rounded-md flex items-center justify-center text-[11px] font-medium transition-all ${
                   !input.trim() || !isChatModelReady
                     ? isGold
                       ? 'bg-white/[0.03] text-white/20 cursor-not-allowed'
@@ -5924,7 +6037,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               value={input}
               onChange={handleInputChange}
               placeholder={(() => { if (activeSkill) { const skillName = activeSkill.name; return `描述你的需求，如"帮我生成一个科技公司的${skillName}"...`; } const imgIds = new Set<string>(); activeMentions.forEach(m => { if (m.type === 'canvas-image' && m.id) imgIds.add(m.id); }); pendingImages.forEach(p => imgIds.add(p.id)); const imgCount = imgIds.size; return imgCount > 0 ? `描述你想对这${imgCount}张图片做什么，如"将图片#1的人物和图片#2合并"...` : "输入消息，@ 引用图片/品牌，/ 使用模板..."; })()}
-              className={`w-full resize-none min-h-[60px] max-h-[200px] border-0 bg-transparent px-4 py-3 text-[14px] leading-relaxed focus:outline-none focus:ring-0 ${themeClasses.text} placeholder:${isGold ? 'text-gold-muted/40' : 'text-gray-400'}`}
+              className={`w-full resize-none min-h-[60px] max-h-[200px] [@media(max-height:400px)]:min-h-[44px] [@media(max-height:400px)]:max-h-[48px] [@media(max-height:400px)]:py-1 border-0 bg-transparent px-4 py-3 text-[14px] leading-relaxed focus:outline-none focus:ring-0 ${themeClasses.text} placeholder:${isGold ? 'text-gold-muted/40' : 'text-gray-400'}`}
               onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
                 // Handle template popup navigation (priority over mention picker)
                 if (templatePopupOpen && templatePopupItems.length > 0) {
@@ -6122,7 +6235,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   const tpl = templatePopupItems.find(t => t.id === hoveredTemplateId);
                   if (!tpl?.thumbnail || !thumbnailRect) return null;
                   return createPortal(
-                    <div
+                    <div data-workspace-panel-portal style={{ display: isVisible ? undefined : 'none' }} inert={!isVisible} aria-hidden={!isVisible}>
+<div
                       className="fixed z-[9999] pointer-events-none"
                       style={{
                         left: thumbnailRect.left - 160,
@@ -6133,7 +6247,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                         <img src={tpl.thumbnail} alt={tpl.name} className="w-36 h-36 object-cover" />
                         <div className={`px-2 py-1 text-[10px] truncate ${isGold ? 'text-gold-muted' : 'text-gray-600'}`}>{tpl.name}</div>
                       </div>
-                    </div>,
+                    </div>
+</div>,
                     document.body
                   );
                 })()}
@@ -6373,8 +6488,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
 
       {/* Skills Tab Content */}
       {activeTab === 'skills' && (
-      <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-        <div className="flex-1 min-h-0 overflow-y-auto">
+      <div className="flex-1 flex min-w-0 flex-col overflow-hidden min-h-0">
+        <div ref={skillListScrollRef} className="flex-1 min-h-0 overflow-y-auto">
           <div className="p-3 space-y-3">
             {/* Skill 搜索 */}
             <div className="relative">
@@ -6382,7 +6497,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 value={skillSearchQuery}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSkillSearchQuery(e.target.value)}
                 placeholder="搜索 Skills..."
-                className={`w-full px-3 py-2 rounded-lg text-xs ${isGold ? 'bg-white/[0.03] border border-white/[0.04] text-text-bright placeholder:text-gold-muted/40 focus:border-gold/40' : 'bg-white border border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-gray-400'} focus:outline-none transition-colors`}
+                aria-label="搜索 Skills"
+                className={`min-h-11 w-full min-w-0 px-3 py-2 rounded-lg text-base ${isGold ? 'bg-white/[0.03] border border-white/[0.04] text-text-bright placeholder:text-gold-muted focus:border-gold/40' : 'bg-white border border-gray-200 text-gray-900 placeholder:text-gray-600 focus:border-gray-400'} focus:outline-none transition-colors`}
               />
             </div>
 
@@ -6400,23 +6516,17 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             )}
 
             {/* 类别筛选 */}
-            <div className="flex gap-1 flex-wrap">
-              {[
-                { key: '', label: '全部' },
-                { key: 'image', label: '图像' },
-                { key: 'design', label: '设计' },
-                { key: 'brand', label: '品牌' },
-                { key: 'storyboard', label: '分镜' },
-                { key: 'editing', label: '编辑' },
-                { key: 'custom', label: '自定义' },
-              ].map(cat => (
+            <div className="flex gap-1 flex-wrap" role="group" aria-label="Skill 类别">
+              {[{ key: '', label: '全部' }, ...skillCategories.map(key => ({ key, label: skillCategoryLabels.get(key) || key }))].map(cat => (
                 <button
+                  type="button"
                   key={cat.key}
+                  aria-pressed={skillCategoryFilter === cat.key}
                   onClick={() => setSkillCategoryFilter(cat.key)}
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-medium transition-colors ${
+                  className={`min-h-11 min-w-11 max-w-full whitespace-normal break-words px-3 py-2 rounded-lg text-left text-sm font-medium focus-visible:ring-2 focus-visible:ring-primary transition-colors ${
                     skillCategoryFilter === cat.key
-                      ? isGold ? 'bg-gold/20 text-gold' : 'bg-blue-500 text-white'
-                      : isGold ? 'bg-white/[0.04] text-gold-muted/60 hover:text-gold-muted' : 'bg-gray-100 text-gray-500 hover:text-gray-700'
+                      ? isGold ? 'bg-gold/20 text-gold' : 'bg-blue-700 text-white'
+                      : isGold ? 'bg-white/[0.04] text-gold-muted hover:text-foreground' : 'bg-gray-100 text-gray-700 hover:text-gray-900'
                   }`}
                 >
                   {cat.label}
@@ -6427,24 +6537,25 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             {skillCatalogError && (
               <div role="alert" className="text-xs text-red-500 flex items-center justify-between gap-2">
                 <span>{skillCatalogError}</span>
-                <button type="button" onClick={() => { void loadCanvasSkills(); }}>重试</button>
+                <button type="button" className="min-h-11 min-w-11 shrink-0 rounded px-3 focus-visible:ring-2 focus-visible:ring-primary" onClick={() => { void loadCanvasSkills(); }}>重试</button>
               </div>
             )}
 
             {activeSkill && activeSkill.id !== MULTI_PLATFORM_EXPORT_SKILL_ID && (
-              <div className={`rounded-lg p-3 space-y-3 ${
+              <div ref={activeSkillFormRef} className={`min-w-0 rounded-lg p-3 space-y-3 ${
                 isGold ? 'bg-white/[0.03] border border-gold/20' : 'bg-white border border-blue-200'
               }`}>
                 <div className="flex items-start justify-between gap-2">
-                  <div>
+                  <div className="min-w-0 break-words">
                     <div className={`text-xs font-medium ${themeClasses.text}`}>{activeSkill.name}</div>
                     <div className={`text-[10px] mt-0.5 ${themeClasses.textMuted}`}>{activeSkill.description}</div>
                   </div>
                   <button
                     type="button"
                     title="关闭 Skill"
+                    aria-label="关闭 Skill"
                     onClick={handleCloseSkill}
-                    className={`p-1 rounded ${themeClasses.textMuted}`}
+                    className={`flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded focus-visible:ring-2 focus-visible:ring-primary ${themeClasses.textMuted}`}
                   >
                     <X size={12} />
                   </button>
@@ -6463,7 +6574,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                     <select aria-label="video 模型" value={videoModel}
                       onChange={event => setVideoModel(event.target.value)}
                       disabled={skillRun.busy}
-                      className="min-h-[44px] w-full rounded border px-2 py-1.5 text-sm">
+                      className="min-h-11 w-full min-w-0 rounded border px-3 py-2 text-base">
                       <option value="">选择模型</option>
                       {discoveredVideoModels.map(candidate => (
                         <option key={candidate.id} value={candidate.id}>
@@ -6474,10 +6585,10 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   </label>
                 )}
                 <div className="flex gap-2">
-                  <Button type="button" variant="outline" className="h-8 flex-1 text-xs" onClick={() => { void handleEstimateSkill(); }} disabled={skillRun.busy || !chatSkills.some(skill => skill.id === activeSkill.id && skill.enabled)}>
+                  <Button type="button" variant="outline" className="min-h-11 min-w-0 flex-1 whitespace-nowrap text-sm" onClick={() => { void handleEstimateSkill(); }} disabled={skillRun.busy || !chatSkills.some(skill => skill.id === activeSkill.id && skill.enabled)}>
                     估算积分
                   </Button>
-                  <Button type="button" className="h-8 flex-1 text-xs" onClick={() => { void handleStartSkill(); }} disabled={skillRun.busy || !chatSkills.some(skill => skill.id === activeSkill.id && skill.enabled)}>
+                  <Button type="button" className="min-h-11 min-w-0 flex-1 whitespace-nowrap text-sm" onClick={() => { void handleStartSkill(); }} disabled={skillRun.busy || !chatSkills.some(skill => skill.id === activeSkill.id && skill.enabled)}>
                     运行 Skill
                   </Button>
                 </div>
@@ -6536,7 +6647,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             )}
 
             {portalReady && activeSkill?.id === MULTI_PLATFORM_EXPORT_SKILL_ID && projectId && createPortal(
-              <MultiPlatformExportDrawer
+              <div data-workspace-panel-portal style={{ display: isVisible ? undefined : 'none' }} inert={!isVisible} aria-hidden={!isVisible}>
+<MultiPlatformExportDrawer
                 open
                 projectId={projectId}
                 authority={canvasAuthority}
@@ -6559,12 +6671,13 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 onRestoreRun={handleRestoreSkill}
                 onLocateSource={handleLocateExportSource}
                 onClose={handleCloseSkill}
-              />,
+              />
+</div>,
               document.body,
             )}
 
             {/* 推荐技能 — 来自 Lovart 设计方法论 */}
-            {(!skillCategoryFilter || ['image', 'design', 'brand', 'storyboard'].includes(skillCategoryFilter)) && (
+            {recommendedCanvasSkills.length > 0 && (
               <div className="space-y-1.5">
                 <div className={`text-xs font-medium ${themeClasses.textMuted} flex items-center gap-1`}>
                   <Sparkles size={11} />
@@ -6573,20 +6686,19 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 </div>
                 {(() => {
                   const categoryEmoji: Record<string, string> = { image: '🖼', design: '🎨', brand: '🏢', storyboard: '🎬', editing: '✏️', custom: '⚡' };
-                  const categoryLabel: Record<string, string> = { image: '图像', design: '设计', brand: '品牌', storyboard: '分镜', editing: '编辑', custom: '自定义' };
-                  return chatSkills
-                    .filter(skill => skill.builtIn && skill.enabled && skill.allowedSurfaces.includes('canvas'))
-                    .filter((s: SkillDefinition) => !skillCategoryFilter || s.category === skillCategoryFilter)
-                    .filter((s: SkillDefinition) => !skillSearchQuery || s.name.includes(skillSearchQuery) || s.description.includes(skillSearchQuery))
+                  return recommendedCanvasSkills
                     .map((skill: SkillDefinition) => {
                     return (
-                      <div
+                      <button
+                        type="button"
                         key={skill.id}
                         data-canvas-skill-id={skill.id}
-                        className={`rounded-lg p-2.5 transition-all cursor-pointer hover:scale-[1.01] active:scale-[0.99] ${
+                        aria-label={`使用技能 ${skill.name}`}
+                        aria-pressed={activeSkill?.id === skill.id}
+                        className={`block min-h-11 w-full rounded-lg p-2.5 text-left focus-visible:ring-2 focus-visible:ring-primary transition-colors cursor-pointer ${
                           isGold ? 'bg-white/[0.03] border border-white/[0.04] hover:border-gold/30' : 'bg-white border border-gray-100 hover:border-blue-200'
                         }`}
-                        onClick={() => handleUseSkill(skill)}
+                        onClick={() => { handleUseSkill(skill); setSkillSelectionRevision(value => value + 1); }}
                       >
                         <div className="flex items-start gap-2">
                           <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 text-sm ${
@@ -6600,16 +6712,16 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                               <div className={`text-[10px] mt-0.5 ${themeClasses.textMuted} line-clamp-2`}>{skill.description}</div>
                             )}
                             <div className="flex items-center gap-1.5 mt-1">
-                              <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${
-                                isGold ? 'bg-gold/10 text-gold/70' : 'bg-blue-50 text-blue-500'
+                              <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${
+                                isGold ? 'bg-gold/10 text-gold' : 'bg-blue-50 text-blue-700'
                               }`}>
-                                {categoryLabel[skill.category] || '自定义'}
+                                {skillCategoryLabels.get(skill.category) || skill.category}
                               </span>
                           </div>
                         </div>
                         <Zap size={12} className={`shrink-0 mt-1 ${isGold ? 'text-gold-muted/30' : 'text-gray-300'}`} />
                       </div>
-                    </div>
+                    </button>
                   );
                 })}
                 )()}
@@ -6617,11 +6729,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             )}
 
             {/* 我的 Skills */}
-            {chatSkills
-              .filter(s => !s.builtIn)
-              .filter(s => !skillCategoryFilter || s.category === skillCategoryFilter)
-              .filter(s => !skillSearchQuery || s.name.includes(skillSearchQuery) || s.description.includes(skillSearchQuery))
-              .length > 0 && (
+            {personalCanvasSkills.length > 0 && (
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <div className={`text-xs font-medium ${themeClasses.textMuted}`}>
@@ -6629,15 +6737,12 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   </div>
                   <button
                     onClick={() => { if (confirm('确认清空所有自定义 Skills？')) void handleClearUserSkills(); }}
-                    className={`text-[10px] ${themeClasses.textMuted} hover:text-red-400 transition-colors`}
+                    className={`min-h-11 min-w-11 rounded px-2 text-sm focus-visible:ring-2 focus-visible:ring-primary ${themeClasses.textMuted} hover:text-red-400 transition-colors`}
                   >
                     清空
                   </button>
                 </div>
-                {chatSkills
-                  .filter(s => !s.builtIn)
-                  .filter(s => !skillCategoryFilter || s.category === skillCategoryFilter)
-                  .filter(s => !skillSearchQuery || s.name.includes(skillSearchQuery) || s.description.includes(skillSearchQuery))
+                {personalCanvasSkills
                   .map(skill => (
                   <div
                     key={skill.id}
@@ -6661,7 +6766,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                         )}
                         <div className="flex items-center gap-2 mt-1">
                           <span className={`text-[10px] ${themeClasses.textMuted}`}>
-                            {{image: '图像', design: '设计', brand: '品牌', storyboard: '分镜', editing: '编辑', custom: '自定义'}[skill.category as 'image'|'design'|'brand'|'storyboard'|'editing'|'custom'] || '自定义'}
+                            {skillCategoryLabels.get(skill.category) || skill.category}
                           </span>
                           <span className={`text-[10px] ${themeClasses.textMuted}`}>
                             使用 {skill.usageCount} 次
@@ -6672,31 +6777,34 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                         <button
                           type="button"
                           onClick={() => { void handleToggleSkill(skill); }}
-                          className={`p-1 rounded transition-colors ${
+                          className={`flex min-h-11 min-w-11 items-center justify-center rounded focus-visible:ring-2 focus-visible:ring-primary transition-colors ${
                             skill.enabled
                               ? isGold ? 'text-green-400 hover:bg-green-400/10' : 'text-green-600 hover:bg-green-50'
                               : themeClasses.textMuted
                           }`}
                           title={skill.enabled ? '停用' : '启用'}
+                          aria-label={`${skill.enabled ? '停用' : '启用'} ${skill.name}`}
                         >
                           {skill.enabled ? <Eye size={11} /> : <EyeOff size={11} />}
                         </button>
                         <button
-                          onClick={() => handleUseSkill(skill)}
+                          onClick={() => { handleUseSkill(skill); setSkillSelectionRevision(value => value + 1); }}
                           disabled={!skill.enabled}
-                          className={`p-1 rounded transition-colors ${
+                          className={`flex min-h-11 min-w-11 items-center justify-center rounded focus-visible:ring-2 focus-visible:ring-primary transition-colors ${
                             isGold ? 'text-gold/70 hover:text-gold hover:bg-gold/10' : 'text-blue-400 hover:text-blue-600 hover:bg-blue-50'
                           }`}
                           title="使用此 Skill"
+                          aria-label={`使用技能 ${skill.name}`}
                         >
                           <Zap size={12} />
                         </button>
                         <button
                           onClick={() => handleDeleteSkill(skill.id)}
-                          className={`p-1 rounded transition-colors ${
+                          className={`flex min-h-11 min-w-11 items-center justify-center rounded focus-visible:ring-2 focus-visible:ring-primary transition-colors ${
                             isGold ? 'text-gold-muted/40 hover:text-red-400 hover:bg-red-400/10' : 'text-gray-300 hover:text-red-500 hover:bg-red-50'
                           }`}
                           title="删除"
+                          aria-label={`删除 ${skill.name}`}
                         >
                           <Trash2 size={11} />
                         </button>
@@ -6708,11 +6816,11 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             )}
 
             {/* 空状态 */}
-            {chatSkills.every(skill => skill.builtIn) && (!skillCategoryFilter || !['image', 'design', 'brand', 'storyboard'].includes(skillCategoryFilter)) && (
+            {recommendedCanvasSkills.length === 0 && personalCanvasSkills.length === 0 && (
               <div className={`text-center py-6 ${themeClasses.textMuted}`}>
                 <Bookmark size={20} className="mx-auto mb-2 opacity-30" />
-                <div className="text-xs">暂无自定义 Skills</div>
-                <div className="text-[10px] mt-1 opacity-60">在对话中点击收藏按钮，将对话提炼为可复用 Skill</div>
+                <div className="text-sm">{skillSearchQuery || skillCategoryFilter ? '没有匹配的技能' : '暂无可用技能'}</div>
+                <div className="text-xs mt-1">{skillSearchQuery || skillCategoryFilter ? '试试其他分类或清除搜索条件' : '可以刷新目录，或在对话中保存个人 Skill'}</div>
               </div>
             )}
 
@@ -6733,6 +6841,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
 
       {/* 第三方模型调用弹窗 */}
       <ThirdPartyModelDialog
+        interactive={isVisible}
         isOpen={showThirdPartyDialog}
         onClose={() => setShowThirdPartyDialog(false)}
         themeStyle={themeStyle}
@@ -6800,7 +6909,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       />
       {/* AgentBuilderDialog 通过 portal 挂到 document.body，逃出右侧面板 fixed stacking context */}
       {portalReady && createPortal(
-        <AgentBuilderDialog
+        <div data-workspace-panel-portal style={{ display: isVisible ? undefined : 'none' }} inert={!isVisible} aria-hidden={!isVisible}>
+<AgentBuilderDialog
           open={showAgentBuilder}
           onClose={() => setShowAgentBuilder(false)}
           editingAgent={editingAgent}
@@ -6824,7 +6934,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               return updated;
             });
           }}
-        />,
+        />
+</div>,
         document.body
       )}
     </div>

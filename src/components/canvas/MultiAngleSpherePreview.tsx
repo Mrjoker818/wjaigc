@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 interface MultiAngleSpherePreviewProps {
   imageUrl: string;
@@ -18,12 +18,14 @@ export function MultiAngleSpherePreview({
   isMonochrome,
 }: MultiAngleSpherePreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [imageRevision, setImageRevision] = useState(0);
   const imgDataRef = useRef<ImageData | null>(null);
   const imgLoadingRef = useRef(false);
 
   useEffect(() => {
     if (imgLoadingRef.current) return;
     imgLoadingRef.current = true;
+    imgDataRef.current = null;
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
@@ -46,6 +48,7 @@ export function MultiAngleSpherePreview({
         imgDataRef.current = null;
       }
       imgLoadingRef.current = false;
+      setImageRevision(revision => revision + 1);
     };
     img.onerror = () => {
       imgLoadingRef.current = false;
@@ -180,7 +183,7 @@ export function MultiAngleSpherePreview({
     context.strokeStyle = 'rgba(212,175,55,0.2)';
     context.lineWidth = 1;
     context.stroke();
-  }, [imageUrl, rotation, tilt, zoom, isMonochrome]);
+  }, [imageUrl, rotation, tilt, zoom, isMonochrome, imageRevision]);
 
   return (
     <div className="w-full h-full flex items-center justify-center relative">

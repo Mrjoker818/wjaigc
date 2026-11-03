@@ -25,6 +25,20 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid path' }, { status: 400 });
     }
 
+    if (pathParts[0]?.toLowerCase() === 'generated-audio') {
+      if (pathParts.length !== 2 || pathParts[0] !== 'generated-audio') {
+        return NextResponse.json({ error: 'File not found' }, { status: 404 });
+      }
+      try {
+        const { readGeneratedAudio } = await import('@/lib/generated-audio-storage');
+        const audio = await readGeneratedAudio(pathParts[1], _request.signal);
+        if (!audio) return NextResponse.json({ error: 'File not found' }, { status: 404 });
+        return generatedAudioResponse(_request, audio.buffer, audio.mimeType);
+      } catch {
+        return NextResponse.json({ error: 'File not found' }, { status: 404 });
+      }
+    }
+
     const exportArtifact = exportArtifactDescriptor(pathParts);
     if (pathParts[0]?.toLowerCase() === 'exports' && !exportArtifact) {
       return NextResponse.json({ error: 'File not found' }, { status: 404 });
@@ -204,6 +218,32 @@ export async function GET(
     console.error('serve-upload error:', error);
     return NextResponse.json({ error: 'Failed to serve file' }, { status: 500 });
   }
+}
+
+function generatedAudioResponse(request: Request, bytes: Buffer, mimeType: string): NextResponse {
+  const range = request.headers.get('range');
+  const headers: Record<string, string> = {
+    'Content-Type': mimeType, 'X-Content-Type-Options': 'nosniff',
+    'Accept-Ranges': 'bytes', 'Cache-Control': 'public, max-age=86400',
+  };
+  let start = 0, end = bytes.length - 1;
+  if (range !== null) {
+    const match = /^bytes=(\d*)-(\d*)$/u.exec(range);
+    const first = match?.[1] ? Number(match[1]) : 0;
+    const last = match?.[2] ? Number(match[2]) : bytes.length - 1;
+    if (!match || (!match[1] && !match[2]) || !Number.isSafeInteger(first) || !Number.isSafeInteger(last)
+      || (!match[1] && last < 1)) {
+      return new NextResponse(null, { status: 416, headers: { ...headers, 'Content-Range': `bytes */${bytes.length}` } });
+    }
+    start = match[1] ? first : Math.max(0, bytes.length - last);
+    end = match[1] ? Math.min(last, bytes.length - 1) : bytes.length - 1;
+    if (start >= bytes.length || end < start) {
+      return new NextResponse(null, { status: 416, headers: { ...headers, 'Content-Range': `bytes */${bytes.length}` } });
+    }
+    headers['Content-Range'] = `bytes ${start}-${end}/${bytes.length}`;
+  }
+  headers['Content-Length'] = String(end - start + 1);
+  return new NextResponse(new Uint8Array(bytes.subarray(start, end + 1)), { status: range === null ? 200 : 206, headers });
 }
 
 function getContentType(ext: string): string {

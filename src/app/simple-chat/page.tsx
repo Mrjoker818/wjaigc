@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Sidebar from "@/components/simple-chat/sidebar";
-import ChatArea from "@/components/simple-chat/chat-area";
+import ChatArea, { type KnowledgeItemsMutation, type KnowledgeMutationResult } from "@/components/simple-chat/chat-area";
 import { SimpleChatSyncStatusView } from "@/components/simple-chat/simple-chat-sync-status";
 import { LoginPanel } from "@/components/dashboard/login-panel";
 import {
@@ -14,6 +14,7 @@ import {
 import { selectInitialSimpleChatProject } from "@/components/simple-chat/simple-chat-types";
 import { User } from "@/lib/user-types";
 import { fetchSessionPayload } from "@/lib/auth-session";
+import { hasAmbiguousWorkflowChatReturnParameters } from "@/lib/asset-core/workflow-chat-return";
 import { logoutSimpleChatSession } from "@/lib/simple-chat-logout";
 import {
   createSimpleChatSyncCoordinator,
@@ -87,6 +88,7 @@ export default function SimpleChatPage() {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const activeProjectIdRef = useRef<string | null>(null);
+  const knowledgeIntentProjectRef = useRef<string | null>(null);
   const activeTaskIdRef = useRef<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
@@ -134,6 +136,7 @@ export default function SimpleChatPage() {
 
   useEffect(() => {
     activeProjectIdRef.current = activeProjectId;
+    knowledgeIntentProjectRef.current = activeProjectId;
   }, [activeProjectId]);
 
   useEffect(() => {
@@ -215,6 +218,7 @@ export default function SimpleChatPage() {
       const requestedTaskId = new URLSearchParams(window.location.search).get('taskId');
       const initial = selectInitialSimpleChatProject(loaded, requestedProjectId, requestedTaskId);
       activeProjectIdRef.current = initial?.projectId ?? null;
+      knowledgeIntentProjectRef.current = initial?.projectId ?? null;
       activeTaskIdRef.current = initial?.taskId ?? null;
       setActiveProjectId(initial?.projectId ?? null);
       setActiveTaskId(initial?.taskId ?? null);
@@ -283,6 +287,7 @@ export default function SimpleChatPage() {
 
   useEffect(() => {
     if (!activeProjectId || !activeTaskId || !activeTask) return;
+    if (hasAmbiguousWorkflowChatReturnParameters(window.location.search)) return;
     const current = new URL(window.location.href);
     current.searchParams.set('projectId', activeProjectId);
     current.searchParams.set('taskId', activeTaskId);
@@ -293,6 +298,7 @@ export default function SimpleChatPage() {
   const handleCreateProject = useCallback(() => {
     const p = createDefaultProject();
     commitProjects(prev => [...prev, p]);
+    knowledgeIntentProjectRef.current = p.id;
     setActiveProjectId(p.id);
     setActiveTaskId(p.tasks[0].id);
   }, [commitProjects]);
@@ -305,11 +311,23 @@ export default function SimpleChatPage() {
     } : p));
   }, [commitProjects]);
 
+  const handleUpdateKnowledge = useCallback((actorId: string, projectId: string, createdAt: number, mutation: KnowledgeItemsMutation): KnowledgeMutationResult => {
+    if (!user?.id || latestUserIdRef.current !== actorId || user.id !== actorId || knowledgeIntentProjectRef.current !== projectId) return 'scope';
+    const current = getCurrentUserProjects(actorId).find(project => project.id === projectId && project.createdAt === createdAt);
+    if (!current) return 'scope';
+    const items = mutation(current.knowledgeItems || []);
+    if (!items) return 'conflict';
+    commitProjects(previous => previous.map(project => project.id === projectId && project.createdAt === createdAt
+      ? { ...project, knowledgeItems: items, updatedAt: Date.now() } : project));
+    return 'updated';
+  }, [commitProjects, getCurrentUserProjects, user?.id]);
+
   const handleDeleteProject = useCallback((id: string) => {
     commitProjects(prev => {
       const remaining = prev.filter(p => p.id !== id);
       if (activeProjectId === id) {
         const next = remaining[0];
+        knowledgeIntentProjectRef.current = next?.id ?? null;
         setActiveProjectId(next?.id ?? null);
         setActiveTaskId(next?.tasks[0]?.id ?? null);
       }
@@ -349,23 +367,23 @@ export default function SimpleChatPage() {
   }, [commitProjects]);
 
   const handleUpdateTask = useCallback((task: Task) => {
-    commitProjects(prev => prev.map(p => ({
+    commitProjects(prev => prev.map(p => p.id === task.projectId && p.tasks.some(t => t.id === task.id) ? {
       ...p,
       tasks: p.tasks.map(t => t.id === task.id ? { ...task, updatedAt: Date.now() } : t),
-      updatedAt: p.id === task.projectId ? Date.now() : p.updatedAt
-    })));
+      updatedAt: Date.now()
+    } : p));
   }, [commitProjects]);
 
   const handlePersistTask = useCallback(async (task: Task) => {
     const userId = user?.id;
     if (!userId) return;
-    const next = getCurrentUserProjects(userId).map(project => ({
+    const next = getCurrentUserProjects(userId).map(project => project.id === task.projectId && project.tasks.some(current => current.id === task.id) ? {
       ...project,
       tasks: project.tasks.map(current => current.id === task.id
         ? { ...task, updatedAt: Date.now() }
         : current),
-      updatedAt: project.id === task.projectId ? Date.now() : project.updatedAt,
-    }));
+      updatedAt: Date.now(),
+    } : project);
     commitProjects(next);
     await coordinatorRef.current?.flush('manual');
   }, [commitProjects, getCurrentUserProjects, user?.id]);
@@ -427,6 +445,7 @@ export default function SimpleChatPage() {
         dataOwnerUserIdRef.current = null;
         if (!shouldContinueSync) preReadyCandidateRef.current = null;
         activeProjectIdRef.current = null;
+        knowledgeIntentProjectRef.current = null;
         activeTaskIdRef.current = null;
         setProjects([]);
         setDataOwnerUserId(null);
@@ -520,7 +539,7 @@ export default function SimpleChatPage() {
         activeTaskId={visibleActiveTaskId}
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
-        onSelectProject={id => { setActiveProjectId(id); const p = visibleProjects.find(x => x.id === id); setActiveTaskId(p?.tasks[0]?.id ?? null); }}
+        onSelectProject={id => { knowledgeIntentProjectRef.current = id; setActiveProjectId(id); const p = visibleProjects.find(x => x.id === id); setActiveTaskId(p?.tasks[0]?.id ?? null); }}
         onSelectTask={id => setActiveTaskId(id)}
         onCreateProject={handleCreateProject}
         onDeleteProject={handleDeleteProject}
@@ -531,7 +550,7 @@ export default function SimpleChatPage() {
         onLogout={() => { void handleLogout(); }}
       />
       <div className="flex-1 flex flex-col min-w-0 w-full">
-        <div className="flex h-7 shrink-0 items-center justify-end border-b border-border/60 px-3">
+        <div className="flex min-h-7 shrink-0 items-center justify-end border-b border-border/60 px-3">
           <SimpleChatSyncStatusView
             status={syncSnapshot.status}
             error={syncSnapshot.error}
@@ -545,6 +564,7 @@ export default function SimpleChatPage() {
           onUpdateTask={handleUpdateTask}
           onPersistTask={handlePersistTask}
           onUpdateProject={handleUpdateProject}
+          onUpdateKnowledge={handleUpdateKnowledge}
           onCreateTask={(projectId) => handleCreateTask(projectId)}
           onSelectTask={(task) => setActiveTaskId(task.id)}
           onUpdateAgent={(agent) => activeProject && handleUpdateAgent(activeProject.id, agent)}

@@ -48,10 +48,18 @@ function defaultPaymentConfig(): QrPaymentConfig {
   };
 }
 
-export async function loadPaymentConfig(): Promise<QrPaymentConfig> {
+export async function loadPaymentConfig(options?: { throwOnReadError?: boolean }): Promise<QrPaymentConfig> {
   const defaults = defaultPaymentConfig();
+  let value: unknown;
   try {
-    const value = await dbGetSystemSetting(PAYMENT_CONFIG_KEY);
+    value = options?.throwOnReadError
+      ? await dbGetSystemSetting(PAYMENT_CONFIG_KEY, { throwOnError: true })
+      : await dbGetSystemSetting(PAYMENT_CONFIG_KEY);
+  } catch {
+    if (options?.throwOnReadError) throw new Error('支付配置读取失败');
+    return defaults;
+  }
+  try {
     if (!value) return defaults;
 
     const parsed = typeof value === 'string' ? JSON.parse(value) : value;
@@ -62,8 +70,8 @@ export async function loadPaymentConfig(): Promise<QrPaymentConfig> {
   }
 }
 
-export async function getPaymentStatus(): Promise<PaymentStatus> {
-  const config = await loadPaymentConfig();
+export async function getPaymentStatus(options?: { throwOnReadError?: boolean }): Promise<PaymentStatus> {
+  const config = await loadPaymentConfig(options);
   const wechatReady = config.wechatEnabled && Boolean(config.wechatQrUrl || config.wechatPayLink);
   const alipayReady = config.alipayEnabled && Boolean(config.alipayQrUrl || config.alipayPayLink);
   const methods: Array<'wechat' | 'alipay'> = [];

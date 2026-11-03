@@ -4,7 +4,7 @@ import React, { useState, useCallback, useEffect, useLayoutEffect, useMemo, useR
 import { createPortal } from 'react-dom';
 import { constrainFloatingPanelPosition, getFloatingPanelViewport, subscribeFloatingPanelViewport, type FloatingPanelPosition } from '@/lib/floating-panel-position';
 import { getModelDisplayName } from '@/lib/model-name-map';
-import { VenueRegionCanvas, type VenueRegion } from '@/components/venue-region-canvas';
+import { VenueRegionCanvas, hasVenueRegionCoordinates, type VenueRegion } from '@/components/venue-region-canvas';
 import {
   Box, X, Minus, Maximize2, Upload, Image as ImageIcon, Layers,
   ChevronDown, Sparkles, Download, Send, Search,
@@ -75,7 +75,8 @@ interface Props {
   isMonochrome?: boolean;
   sourceImage?: { id: string; url: string; prompt?: string } | null;
   onClose: () => void;
-  onAddImages?: (urls: string[], meta?: { modelName?: string; apiProvider?: string }) => void;
+  onAddImages?: (urls: string[], meta?: { modelName?: string; apiProvider?: string }) => void | Promise<void>;
+  captureCanvasInsertion?: () => (urls: string[], meta?: { modelName?: string; apiProvider?: string }) => void | Promise<void>;
 }
 
 /* ============================================================
@@ -288,7 +289,7 @@ ${state.customPrompt ? `\n附加要求：${state.customPrompt}` : ''}`;
 /* ============================================================
    组件
    ============================================================ */
-export default function Display3DPanel({ isMonochrome = false, sourceImage = null, onClose, onAddImages }: Props) {
+export default function Display3DPanel({ isMonochrome = false, sourceImage = null, onClose, onAddImages, captureCanvasInsertion }: Props) {
   // === Window drag state ===
   const [isMinimized, setIsMinimized] = useState(false);
   // P2 fix: 追踪所有通过 createObjectURL 创建的 blob URL，组件卸载时统一 revoke
@@ -446,6 +447,22 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
   // === Results state ===
   const [results, setResults] = useState<Display3DResult[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
+  const activeGenerationRef = useRef<symbol | null>(null);
+  const [unconfirmedTaskId, setUnconfirmedTaskId] = useState<string | null>(null);
+  const unconfirmedPollRef = useRef<{ taskId: string; poll: () => Promise<void> } | null>(null);
+  const recheckInFlightRef = useRef(false);
+  const [isRechecking, setIsRechecking] = useState(false);
+  const unconfirmedMessage = unconfirmedTaskId ? `任务 ${unconfirmedTaskId} 的结果待核，暂无法确认；请先核实供应商状态和费用。` : '';
+  const recheckUnconfirmed = useCallback((): void => {
+    const pending = unconfirmedPollRef.current;
+    if (!pending || recheckInFlightRef.current) return;
+    recheckInFlightRef.current = true;
+    setIsRechecking(true);
+    void pending.poll().finally(() => {
+      recheckInFlightRef.current = false;
+      setIsRechecking(false);
+    });
+  }, []);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [activePreviewTab, setActivePreviewTab] = useState<'render' | 'views' | 'decompose' | 'dimension' | 'material' | 'floorplan' | 'bom'>('render');
@@ -483,7 +500,10 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
   const [selectedProposalId, setSelectedProposalId] = useState<string | null>(null);
   const [designId, setDesignId] = useState<DesignID | null>(null);
   const [venueVersions, setVenueVersions] = useState<VenueVersion[]>([]);
-  const [venueQcResult, setVenueQcResult] = useState<QcResult | null>(null);
+  const venueScopeEpochRef = useRef(0);
+  const [qcHiddenVersionIds, setQcHiddenVersionIds] = useState<Set<string>>(() => new Set());
+  const latestVenueVersion = venueVersions[venueVersions.length - 1];
+  const venueQcResult = latestVenueVersion && !qcHiddenVersionIds.has(latestVenueVersion.id) ? latestVenueVersion.qcResult ?? null : null;
   const [isAnalyzingVenue, setIsAnalyzingVenue] = useState(false);
   const [isGeneratingProposals, setIsGeneratingProposals] = useState(false);
   const [isLockingDesign, setIsLockingDesign] = useState(false);
@@ -546,9 +566,25 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
 
   // === Generate ===
   const handleGenerate = useCallback(async () => {
+    if (unconfirmedTaskId || activeGenerationRef.current) return;
     setErrorMsg('');
     if (!brandName.trim()) return;
+    const generationTicket = Symbol('display3d-generation');
+    activeGenerationRef.current = generationTicket;
+    const stopGenerating = (): void => {
+      if (activeGenerationRef.current === generationTicket) activeGenerationRef.current = null;
+      if (activeGenerationRef.current === null) setIsGenerating(false);
+    };
     setIsGenerating(true);
+    let insertGeneratedImages = onAddImages;
+    if (captureCanvasInsertion) {
+      try { insertGeneratedImages = captureCanvasInsertion(); }
+      catch {
+        setErrorMsg('当前画布暂不能接收结果，本次生成未提交。请先确认项目及画布状态。');
+        stopGenerating();
+        return;
+      }
+    }
     try {
       const prompt = buildDisplay3DPrompt({ brandName, productName, sceneType, environment, dimensions, imageUsageMode, materialStyle, lightingStyle, budget: budget || undefined, viewOptions, outputResolution, outputFormat, outputQuality, customPrompt, brandColor, focusProduct });
       const res = await fetch('/api/display-3d/generate', {
@@ -567,7 +603,10 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
       const data = await res.json();
       if (!res.ok || data.error) {
         console.error('[display-3d] Generate error:', data.error);
-        setIsGenerating(false);
+        setErrorMsg(res.status >= 500
+          ? '提交结果暂无法确认，请先查看任务记录后再决定是否重新生成。'
+          : typeof data.error === 'string' && data.error.trim() ? data.error : '提交失败，请检查配置后重试。');
+        stopGenerating();
         return;
       }
       if (data.taskId) {
@@ -581,8 +620,24 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
               body: JSON.stringify({ taskId, model: selectedModel, providerId: selectedProviderId }),
             });
             const taskData = await taskRes.json();
-            if (taskData.status === 'completed') {
-              const imageUrls: string[] = taskData.result?.imageUrls || taskData.imageUrls || [];
+            if (!taskRes.ok || taskData.status === 'error' || taskData.status === 'timeout') {
+              unconfirmedPollRef.current = { taskId, poll };
+              setUnconfirmedTaskId(taskId);
+              stopGenerating();
+            } else if (taskData.status === 'cancelled') {
+              if (unconfirmedPollRef.current?.taskId === taskId) unconfirmedPollRef.current = null;
+              setUnconfirmedTaskId(previous => previous === taskId ? null : previous);
+              setErrorMsg(`任务 ${taskId} 已取消，请核实供应商状态和费用。`);
+              stopGenerating();
+            } else if (taskData.status === 'completed') {
+              const rawImages: unknown = taskData.result?.imageUrls || taskData.imageUrls;
+              const imageUrls = Array.isArray(rawImages) ? rawImages.filter((url): url is string => typeof url === 'string' && url.length > 0) : [];
+              if (imageUrls.length === 0) {
+                unconfirmedPollRef.current = { taskId, poll };
+                setUnconfirmedTaskId(taskId);
+                stopGenerating();
+                return;
+              }
               if (imageUrls.length > 0) {
                 const newResults = imageUrls.map((url: string, i: number) => ({
                   id: `${taskId}_${i}`,
@@ -591,36 +646,55 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
                   label: viewOptions[i % viewOptions.length] || '效果图',
                 }));
                 setResults(prev => [...prev, ...newResults]);
-                onAddImages?.(imageUrls, { modelName: selectedModel, apiProvider: selectedProviderId });
+                try {
+                  await insertGeneratedImages?.(imageUrls, { modelName: selectedModel, apiProvider: selectedProviderId });
+                } catch (error) {
+                  console.error('[display-3d] Add result to canvas failed:', error);
+                  setErrorMsg(`任务已完成（任务：${taskId}），但结果未能添加到画布，请保留任务编号并核实结果。`);
+                }
               }
               // Handle decompose results embedded in task
               if (taskData.result?.decomposition) {
                 setDecomposition(taskData.result.decomposition);
               }
-              setIsGenerating(false);
+              if (unconfirmedPollRef.current?.taskId === taskId) unconfirmedPollRef.current = null;
+              setUnconfirmedTaskId(previous => previous === taskId ? null : previous);
+              stopGenerating();
+            } else if (taskData.code === 'DISPLAY3D_OUTCOME_UNCONFIRMED') {
+              unconfirmedPollRef.current = { taskId, poll };
+              setUnconfirmedTaskId(taskId);
+              stopGenerating();
             } else if (taskData.status === 'failed') {
               console.error('[display-3d] Task failed:', taskData.error);
-              setIsGenerating(false);
-            } else {
+              const detail = typeof taskData.error === 'string' && taskData.error.trim() ? taskData.error : '展陈任务失败';
+              setErrorMsg(/不存在|过期|超时|重新提交|重试|再试/.test(detail)
+                ? `任务结果暂无法确认（任务：${taskId}），请先核实任务状态和费用。`
+                : `${detail}（任务：${taskId}）。请先核实任务状态和费用后再决定是否重新生成。`);
+              stopGenerating();
+            } else if (unconfirmedPollRef.current?.taskId !== taskId) {
               setTimeout(poll, 3000);
             }
           } catch (e) {
             console.error('[display-3d] Poll error:', e);
-            setIsGenerating(false);
+            unconfirmedPollRef.current = { taskId, poll };
+            setUnconfirmedTaskId(taskId);
+            stopGenerating();
           }
         };
         poll();
       } else if (data.results) {
         setResults(data.results);
-        setIsGenerating(false);
+        stopGenerating();
       } else {
-        setIsGenerating(false);
+        setErrorMsg('提交结果暂无法确认，请先查看任务记录后再决定是否重新生成。');
+        stopGenerating();
       }
     } catch (e) {
       console.error('[display-3d] Generate failed:', e);
-      setIsGenerating(false);
+      setErrorMsg('提交结果暂无法确认，请先查看任务记录后再决定是否重新生成。');
+      stopGenerating();
     }
-  }, [brandName, productName, sceneType, environment, dimensions, imageUsageMode, materialStyle, lightingStyle, budget, viewOptions, renderStyle, outputResolution, outputFormat, outputQuality, customPrompt, crowdStyle, assets, onAddImages, selectedModel, selectedProviderId, brandColor, focusProduct, generateAspectRatio]);
+  }, [brandName, productName, sceneType, environment, dimensions, imageUsageMode, materialStyle, lightingStyle, budget, viewOptions, renderStyle, outputResolution, outputFormat, outputQuality, customPrompt, crowdStyle, assets, onAddImages, captureCanvasInsertion, selectedModel, selectedProviderId, brandColor, focusProduct, generateAspectRatio, unconfirmedTaskId]);
 
   // === Decompose handler ===
   const handleDecompose = useCallback(async () => {
@@ -814,9 +888,11 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
     input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
+      const uploadEpoch = ++venueScopeEpochRef.current;
       // Convert to base64 for vision API
       const reader = new FileReader();
       reader.onload = (ev) => {
+        if (venueScopeEpochRef.current !== uploadEpoch) return;
         const dataUrl = ev.target?.result as string;
         setVenueImageUrl(dataUrl);
         setVenueAnalysis(null);
@@ -824,7 +900,7 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
         setSelectedProposalId(null);
         setDesignId(null);
         setVenueVersions([]);
-        setVenueQcResult(null);
+        setQcHiddenVersionIds(new Set());
         setActivityStep(1);
       };
       reader.readAsDataURL(file);
@@ -835,6 +911,7 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
   // Step1: 分析场馆照片
   const handleAnalyzeVenue = useCallback(async () => {
     if (!venueImageUrl) return;
+    const venueEpoch = venueScopeEpochRef.current;
     setIsAnalyzingVenue(true);
     setErrorMsg('');
     try {
@@ -849,6 +926,7 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
         }),
       });
       const data = await res.json();
+      if (venueScopeEpochRef.current !== venueEpoch) { setIsAnalyzingVenue(false); return; }
       if (!res.ok || data.error) {
         setErrorMsg(data.error || '场馆分析失败');
         setIsAnalyzingVenue(false);
@@ -858,12 +936,14 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
         const taskId = data.taskId;
         const poll = async () => {
           try {
+            if (venueScopeEpochRef.current !== venueEpoch) { setIsAnalyzingVenue(false); return; }
             const taskRes = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ taskId }),
             });
             const taskData = await taskRes.json();
+            if (venueScopeEpochRef.current !== venueEpoch) { setIsAnalyzingVenue(false); return; }
             if (taskData.status === 'completed') {
               const analysis = taskData.result?.analysis;
               if (analysis) {
@@ -888,7 +968,7 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
               setTimeout(poll, 3000);
             }
           } catch {
-            setErrorMsg('场馆分析轮询失败');
+            if (venueScopeEpochRef.current === venueEpoch) setErrorMsg('场馆分析轮询失败');
             setIsAnalyzingVenue(false);
           }
         };
@@ -897,7 +977,7 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
         setIsAnalyzingVenue(false);
       }
     } catch (e) {
-      setErrorMsg(e instanceof Error ? e.message : '场馆分析失败');
+      if (venueScopeEpochRef.current === venueEpoch) setErrorMsg(e instanceof Error ? e.message : '场馆分析失败');
       setIsAnalyzingVenue(false);
     }
   }, [venueImageUrl, activityBrief, selectedChatModel, selectedChatProviderId]);
@@ -905,6 +985,7 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
   // Step2: 生成布局方案
   const handleGenerateProposals = useCallback(async () => {
     if (!venueAnalysis || !activityBrief.eventName.trim()) return;
+    const venueEpoch = venueScopeEpochRef.current;
     setIsGeneratingProposals(true);
     setErrorMsg('');
     try {
@@ -919,6 +1000,7 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
         }),
       });
       const data = await res.json();
+      if (venueScopeEpochRef.current !== venueEpoch) { setIsGeneratingProposals(false); return; }
       if (!res.ok || data.error) {
         setErrorMsg(data.error || '方案生成失败');
         setIsGeneratingProposals(false);
@@ -928,12 +1010,14 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
         const taskId = data.taskId;
         const poll = async () => {
           try {
+            if (venueScopeEpochRef.current !== venueEpoch) { setIsGeneratingProposals(false); return; }
             const taskRes = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ taskId }),
             });
             const taskData = await taskRes.json();
+            if (venueScopeEpochRef.current !== venueEpoch) { setIsGeneratingProposals(false); return; }
             if (taskData.status === 'completed') {
               const proposalList = taskData.result?.proposals || [];
               setProposals(proposalList);
@@ -947,7 +1031,7 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
               setTimeout(poll, 3000);
             }
           } catch {
-            setErrorMsg('方案生成轮询失败');
+            if (venueScopeEpochRef.current === venueEpoch) setErrorMsg('方案生成轮询失败');
             setIsGeneratingProposals(false);
           }
         };
@@ -956,7 +1040,7 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
         setIsGeneratingProposals(false);
       }
     } catch (e) {
-      setErrorMsg(e instanceof Error ? e.message : '方案生成失败');
+      if (venueScopeEpochRef.current === venueEpoch) setErrorMsg(e instanceof Error ? e.message : '方案生成失败');
       setIsGeneratingProposals(false);
     }
   }, [venueAnalysis, activityBrief, brandName, assets, selectedChatModel, selectedChatProviderId]);
@@ -965,6 +1049,7 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
   const handleLockDesign = useCallback(async () => {
     const proposal = proposals.find(p => p.id === selectedProposalId);
     if (!proposal) return;
+    const venueEpoch = venueScopeEpochRef.current;
     setIsLockingDesign(true);
     setErrorMsg('');
     try {
@@ -974,12 +1059,14 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
         body: JSON.stringify({ proposal, brandName, venueAnalysis, activityBrief }),
       });
       const data = await res.json();
+      if (venueScopeEpochRef.current !== venueEpoch) { setIsLockingDesign(false); return; }
       if (!res.ok || data.error) {
         setErrorMsg(data.error || '锁定失败');
         setIsLockingDesign(false);
         return;
       }
       if (data.designId) {
+        venueScopeEpochRef.current += 1;
         setDesignId(data.designId);
         setSuccessMsg(`DesignID ${data.designId.version} 已锁定`);
         setTimeout(() => setSuccessMsg(''), 4000);
@@ -987,16 +1074,32 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
       }
       setIsLockingDesign(false);
     } catch (e) {
-      setErrorMsg(e instanceof Error ? e.message : '锁定失败');
+      if (venueScopeEpochRef.current === venueEpoch) setErrorMsg(e instanceof Error ? e.message : '锁定失败');
       setIsLockingDesign(false);
     }
   }, [proposals, selectedProposalId, brandName, venueAnalysis, activityBrief]);
 
   // Step4: 生成效果图（基于DesignID）
   const handleGenerateVenueRender = useCallback(async () => {
-    if (!designId) return;
+    if (!designId || unconfirmedTaskId || activeGenerationRef.current) return;
+    const generationTicket = Symbol('display3d-venue-generation');
+    const venueScopeEpoch = venueScopeEpochRef.current;
+    activeGenerationRef.current = generationTicket;
+    const stopGeneratingVenue = (): void => {
+      if (activeGenerationRef.current === generationTicket) activeGenerationRef.current = null;
+      if (activeGenerationRef.current === null) setIsGeneratingVenue(false);
+    };
     setIsGeneratingVenue(true);
     setErrorMsg('');
+    let insertGeneratedImages = onAddImages;
+    if (captureCanvasInsertion) {
+      try { insertGeneratedImages = captureCanvasInsertion(); }
+      catch {
+        setErrorMsg('当前画布暂不能接收结果，本次生成未提交。请先确认项目及画布状态。');
+        stopGeneratingVenue();
+        return;
+      }
+    }
     try {
       const locked = designId.lockedFields;
       const prompt = `${locked.renderPromptHint || ''}
@@ -1028,7 +1131,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
       const data = await res.json();
       if (!res.ok || data.error) {
         setErrorMsg(data.error || '效果图生成失败');
-        setIsGeneratingVenue(false);
+        stopGeneratingVenue();
         return;
       }
       if (data.taskId) {
@@ -1041,46 +1144,87 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
               body: JSON.stringify({ taskId, model: selectedModel, providerId: selectedProviderId }),
             });
             const taskData = await taskRes.json();
-            if (taskData.status === 'completed') {
-              const imageUrls: string[] = taskData.result?.imageUrls || taskData.imageUrls || [];
+            if (!taskRes.ok || taskData.status === 'error' || taskData.status === 'timeout') {
+              unconfirmedPollRef.current = { taskId, poll };
+              setUnconfirmedTaskId(taskId);
+              stopGeneratingVenue();
+            } else if (taskData.status === 'cancelled') {
+              if (unconfirmedPollRef.current?.taskId === taskId) unconfirmedPollRef.current = null;
+              setUnconfirmedTaskId(previous => previous === taskId ? null : previous);
+              setErrorMsg(`任务 ${taskId} 已取消，请核实供应商状态和费用。`);
+              stopGeneratingVenue();
+            } else if (taskData.status === 'completed') {
+              const rawImages: unknown = taskData.result?.imageUrls || taskData.imageUrls;
+              const imageUrls = Array.isArray(rawImages) ? rawImages.filter((url): url is string => typeof url === 'string' && url.length > 0) : [];
+              if (imageUrls.length === 0) {
+                unconfirmedPollRef.current = { taskId, poll };
+                setUnconfirmedTaskId(taskId);
+                stopGeneratingVenue();
+                return;
+              }
+              if (venueScopeEpochRef.current !== venueScopeEpoch) {
+                if (unconfirmedPollRef.current?.taskId === taskId) unconfirmedPollRef.current = null;
+                setUnconfirmedTaskId(previous => previous === taskId ? null : previous);
+                setErrorMsg(`原场馆任务 ${taskId} 已完成，场馆已更换，结果未应用。`);
+                stopGeneratingVenue();
+                return;
+              }
               if (imageUrls.length > 0) {
                 const newVersion: VenueVersion = {
-                  id: `ver_${Date.now()}`,
+                  id: `ver_${taskId}`,
                   designIdVersion: designId.version,
                   imageUrl: imageUrls[0],
                   createdAt: new Date().toISOString(),
                 };
                 setVenueVersions(prev => [...prev, newVersion]);
-                onAddImages?.(imageUrls, { modelName: selectedModel, apiProvider: selectedProviderId });
+                try {
+                  await insertGeneratedImages?.(imageUrls, { modelName: selectedModel, apiProvider: selectedProviderId });
+                } catch (error) {
+                  console.error('[display-3d] Add venue result to canvas failed:', error);
+                  setErrorMsg(`任务已完成（任务：${taskId}），但结果未能添加到画布，请保留任务编号并核实结果。`);
+                  if (unconfirmedPollRef.current?.taskId === taskId) unconfirmedPollRef.current = null;
+                  setUnconfirmedTaskId(previous => previous === taskId ? null : previous);
+                  stopGeneratingVenue();
+                  return;
+                }
                 setSuccessMsg('效果图生成完成');
                 setTimeout(() => setSuccessMsg(''), 4000);
               }
-              setIsGeneratingVenue(false);
+              if (unconfirmedPollRef.current?.taskId === taskId) unconfirmedPollRef.current = null;
+              setUnconfirmedTaskId(previous => previous === taskId ? null : previous);
+              stopGeneratingVenue();
+            } else if (taskData.code === 'DISPLAY3D_OUTCOME_UNCONFIRMED') {
+              unconfirmedPollRef.current = { taskId, poll };
+              setUnconfirmedTaskId(taskId);
+              stopGeneratingVenue();
             } else if (taskData.status === 'failed') {
               setErrorMsg(taskData.error || '效果图生成失败');
-              setIsGeneratingVenue(false);
-            } else {
+              stopGeneratingVenue();
+            } else if (unconfirmedPollRef.current?.taskId !== taskId) {
               setTimeout(poll, 3000);
             }
           } catch {
-            setErrorMsg('效果图生成轮询失败');
-            setIsGeneratingVenue(false);
+            unconfirmedPollRef.current = { taskId, poll };
+            setUnconfirmedTaskId(taskId);
+            stopGeneratingVenue();
           }
         };
         poll();
       } else {
-        setIsGeneratingVenue(false);
+        stopGeneratingVenue();
       }
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : '效果图生成失败');
-      setIsGeneratingVenue(false);
+      stopGeneratingVenue();
     }
-  }, [designId, activityBrief, dimensions, selectedModel, selectedProviderId, onAddImages]);
+  }, [designId, activityBrief, dimensions, selectedModel, selectedProviderId, onAddImages, captureCanvasInsertion, unconfirmedTaskId]);
 
   // Step4: 质检效果图
   const handleVenueQc = useCallback(async () => {
     const latestVersion = venueVersions[venueVersions.length - 1];
     if (!latestVersion || !designId) return;
+    const venueEpoch = venueScopeEpochRef.current;
+    setQcHiddenVersionIds(previous => new Set(previous).add(latestVersion.id));
     setIsQcRunning(true);
     setErrorMsg('');
     try {
@@ -1095,6 +1239,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
         }),
       });
       const data = await res.json();
+      if (venueScopeEpochRef.current !== venueEpoch) { setIsQcRunning(false); return; }
       if (!res.ok || data.error) {
         setErrorMsg(data.error || '质检失败');
         setIsQcRunning(false);
@@ -1110,15 +1255,20 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
               body: JSON.stringify({ taskId }),
             });
             const taskData = await taskRes.json();
+            if (venueScopeEpochRef.current !== venueEpoch) { setIsQcRunning(false); return; }
             if (taskData.status === 'completed') {
               const qc = taskData.result?.qcResult;
               if (qc) {
-                setVenueQcResult(qc);
-                // Attach QC to latest version
-                setVenueVersions(prev => prev.map((v, i) =>
-                  i === prev.length - 1 ? { ...v, qcResult: qc } : v
+                // Attach the result only to the exact image that was checked.
+                setVenueVersions(prev => prev.map(v =>
+                  v.id === latestVersion.id && v.imageUrl === latestVersion.imageUrl ? { ...v, qcResult: qc } : v
                 ));
-                setSuccessMsg(qc.passed ? `质检通过 (综合评分 ${qc.overallScore}/10)` : `质检未通过 (综合评分 ${qc.overallScore}/10)`);
+                setQcHiddenVersionIds(previous => {
+                  const next = new Set(previous);
+                  next.delete(latestVersion.id);
+                  return next;
+                });
+                setSuccessMsg('质检完成，请查看对应版本');
                 setTimeout(() => setSuccessMsg(''), 5000);
               }
               setIsQcRunning(false);
@@ -1129,7 +1279,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
               setTimeout(poll, 3000);
             }
           } catch {
-            setErrorMsg('质检轮询失败');
+            if (venueScopeEpochRef.current === venueEpoch) setErrorMsg('质检轮询失败');
             setIsQcRunning(false);
           }
         };
@@ -1138,7 +1288,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
         setIsQcRunning(false);
       }
     } catch (e) {
-      setErrorMsg(e instanceof Error ? e.message : '质检失败');
+      if (venueScopeEpochRef.current === venueEpoch) setErrorMsg(e instanceof Error ? e.message : '质检失败');
       setIsQcRunning(false);
     }
   }, [venueVersions, designId, selectedChatModel, selectedChatProviderId]);
@@ -1157,7 +1307,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
       <div
         ref={panelRef}
         data-popup
-        className="relative flex flex-col rounded-xl overflow-hidden shadow-2xl border"
+        className={`relative flex flex-col rounded-xl overflow-hidden shadow-2xl border ${compact ? '[&_button]:min-h-11! [&_button]:min-w-11! [&_button]:text-xs [&_input]:min-h-11 [&_input]:text-base [&_select]:min-h-11 [&_select]:text-base [&_textarea]:text-base' : ''}`}
         style={{
           width: isMinimized ? Math.min(340, panelViewport.width - 16) : panelWidth,
           height: isMinimized ? 'auto' : panelHeight,
@@ -1235,7 +1385,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
             {/* MAIN CONTENT */}
             <main className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
               {/* Header */}
-              <header className={`flex flex-wrap items-center justify-between gap-2 ${compact ? 'px-3' : 'px-4'} py-2 shrink-0`} style={{ minHeight: 44, borderBottom: `1px solid ${border}` }}>
+              <header className={`${compact ? 'grid grid-cols-[minmax(0,1fr)_auto] items-start px-3' : 'flex flex-wrap items-center justify-between px-4'} gap-2 py-2 shrink-0`} style={{ minHeight: 44, borderBottom: `1px solid ${border}` }}>
                 <div className={`flex min-w-0 flex-wrap items-center ${compact ? 'gap-2' : 'gap-3'}`}>
                   <button className={`${compact ? 'block' : 'hidden'} min-h-11 px-2 text-xs`} aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(!sidebarOpen)} style={{ color: textAccent }}>
                     {sidebarOpen ? '收起项目' : '项目栏'}
@@ -1338,7 +1488,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                             <div className="relative rounded-lg overflow-hidden" style={{ maxHeight: 180 }}>
                               <img src={venueImageUrl} className="w-full h-full object-cover" />
                               <button
-                                onClick={() => { setVenueImageUrl(''); setVenueAnalysis(null); setProposals([]); setSelectedProposalId(null); setDesignId(null); setVenueVersions([]); setVenueQcResult(null); setActivityStep(1); }}
+                                onClick={() => { venueScopeEpochRef.current += 1; setVenueImageUrl(''); setVenueAnalysis(null); setProposals([]); setSelectedProposalId(null); setDesignId(null); setVenueVersions([]); setQcHiddenVersionIds(new Set()); setActivityStep(1); }}
                                 className="absolute top-1 right-1 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center"
                               >
                                 <X size={10} />
@@ -1495,7 +1645,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                           <div className="grid grid-cols-2 gap-2">
                             <button
                               onClick={handleGenerateVenueRender}
-                              disabled={isGeneratingVenue}
+                              disabled={isGeneratingVenue || isGenerating || Boolean(unconfirmedTaskId)}
                               className={`rounded-lg py-2 text-xs font-medium cursor-pointer transition-colors disabled:opacity-50 ${
                                 isMonochrome ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-[#d4af37] text-black hover:bg-[#c4a030]'
                               }`}
@@ -1521,12 +1671,27 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                                   <div key={v.id} className="rounded-lg border p-2" style={{ borderColor: border }}>
                                     <div className="flex items-center justify-between mb-1">
                                       <span className="text-[10px] font-medium" style={{ color: textMuted }}>v{i + 1} · {v.designIdVersion}</span>
-                                      {v.qcResult && (
+                                      {v.qcResult && !qcHiddenVersionIds.has(v.id) && (
                                         <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${v.qcResult.passed ? 'bg-green-500/20 text-green-500' : 'bg-red-500/20 text-red-500'}`}>
                                           {v.qcResult.passed ? '通过' : '未通过'} {v.qcResult.overallScore}/10
                                         </span>
                                       )}
                                     </div>
+                                    {v.qcResult && qcHiddenVersionIds.has(v.id) && (
+                                      <details className="mb-2 text-xs" style={{ color: textMuted }}>
+                                        <summary className="min-h-[44px] flex items-center cursor-pointer">查看上次质检结果</summary>
+                                        <p>本次重检尚未取得有效结果，下方为上次记录。</p>
+                                        <p>上次结论：{v.qcResult.passed ? '通过' : '未通过'}</p>
+                                        <p className="mt-1">{v.qcResult.verdict}</p>
+                                        <p>综合评分：{v.qcResult.overallScore}/10</p>
+                                        {Object.entries(v.qcResult.dimensions).map(([key, value]) => {
+                                          const labels: Record<string, string> = { brandIdentity: '品牌识别', styleConsistency: '风格一致', spaceLayout: '空间布局', materialColor: '材质色彩', overallQuality: '整体质量' };
+                                          return <p key={key}>{Object.hasOwn(labels, key) ? labels[key] : key}：{value.score}/10 · {value.comment}</p>;
+                                        })}
+                                        {v.qcResult.issues.map((issue, index) => <p key={`issue-${index}`}>问题：{issue}</p>)}
+                                        {v.qcResult.suggestions.map((suggestion, index) => <p key={`suggestion-${index}`}>建议：{suggestion}</p>)}
+                                      </details>
+                                    )}
                                     <div className="rounded overflow-hidden" style={{ maxHeight: 80 }}>
                                       <img src={v.imageUrl} className="w-full h-full object-cover" />
                                     </div>
@@ -1579,6 +1744,9 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                             selectedRegionId={selectedVenueRegion}
                             onSelectRegion={setSelectedVenueRegion}
                           />
+                          {venueAnalysis.regions?.some(region => !hasVenueRegionCoordinates(region)) && (
+                            <p className="text-xs" style={{ color: textMuted }}>部分区域未提供有效坐标，暂不绘制区域框。</p>
+                          )}
                           <div className="grid grid-cols-2 gap-2 mt-3">
                             {(venueAnalysis.regions || []).map(r => (
                               <button
@@ -1591,7 +1759,10 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                                 }`}
                               >
                                 <div className="text-xs font-medium" style={{ color: selectedVenueRegion === r.id ? textAccent : textPrimary }}>{r.name}</div>
-                                <div className="text-[10px] mt-0.5" style={{ color: textMuted }}>{r.type} · {r.estimatedSize || '-'}</div>
+                                <div className="text-[10px] mt-0.5" style={{ color: textMuted }}>
+                                  {r.type} · {typeof r.estimatedSize === 'string' ? r.estimatedSize : r.estimatedSize ? `${r.estimatedSize.length} × ${r.estimatedSize.width} mm` : '-'}
+                                </div>
+                                {typeof r.position === 'string' && <div className="text-[10px] mt-1" style={{ color: textMuted }}>位置：{r.position}</div>}
                                 {r.notes && <div className="text-[10px] mt-1 line-clamp-1" style={{ color: textMuted }}>{r.notes}</div>}
                               </button>
                             ))}
@@ -1678,8 +1849,9 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                                 </div>
                                 <div className="flex gap-2">
                                   <button
-                                    onClick={() => { const urls = venueVersions.map(v => v.imageUrl); if (urls.length > 0) onAddImages?.(urls, { modelName: selectedModel, apiProvider: selectedProviderId }); }}
-                                    className={`flex-1 rounded-lg border px-3 py-2 text-xs cursor-pointer ${isMonochrome ? 'border-blue-300 text-blue-600 hover:bg-blue-50' : 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10'}`}
+                                    onClick={() => { const urls = venueVersions.map(v => v.imageUrl); if (!isGenerating && !isGeneratingVenue && urls.length > 0) onAddImages?.(urls, { modelName: selectedModel, apiProvider: selectedProviderId }); }}
+                                    disabled={isGenerating || isGeneratingVenue || isRechecking}
+                                    className={`flex-1 rounded-lg border px-3 py-2 text-xs cursor-pointer disabled:opacity-50 ${isMonochrome ? 'border-blue-300 text-blue-600 hover:bg-blue-50' : 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10'}`}
                                   >
                                     发送到画布
                                   </button>
@@ -1740,8 +1912,9 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                     </div>
 
                     {/* Bottom: error/success messages */}
-                    {(errorMsg || successMsg) && (
+                    {(unconfirmedMessage || errorMsg || successMsg) && (
                       <div className="px-4 py-2 shrink-0 border-t" style={{ borderColor: border }}>
+                        {unconfirmedMessage && <div><div role="alert" className="text-xs" style={{ color: '#ef4444' }}>{unconfirmedMessage}</div><button type="button" onClick={recheckUnconfirmed} disabled={isRechecking} className="min-h-11 text-xs underline disabled:opacity-50">{isRechecking ? '查询中...' : '重新查询原任务'}</button></div>}
                         {errorMsg && <div className="text-xs" style={{ color: '#ef4444' }}>{errorMsg}</div>}
                         {successMsg && <div className="text-xs" style={{ color: '#22c55e' }}>{successMsg}</div>}
                       </div>
@@ -1779,31 +1952,31 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                       <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>资产上传</h3>
                       <span className="text-[11px] ml-auto" style={{ color: textMuted }}>点击上传对应素材</span>
                     </div>
-                    <div className="grid grid-cols-5 gap-1.5">
+                    <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-5">
                       {ASSET_TYPES.map(at => (
                         <button key={at.key} className={`h-[52px] rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition-colors ${assets.some(a => a.type === at.key) ? (isMonochrome ? 'border-blue-400 bg-blue-50' : 'border-amber-400/60 bg-amber-400/10') : ''}`}
                           style={{ borderColor: assets.some(a => a.type === at.key) ? undefined : border, color: assets.some(a => a.type === at.key) ? textAccent : textMuted }}
                           onClick={() => handleUpload(at.label)}>
                           {at.icon}
-                          <span className="text-[9px] mt-0.5">{at.label}</span>
+                          <span className={`${compact ? 'text-xs' : 'text-[9px]'} mt-0.5`}>{at.label}</span>
                         </button>
                       ))}
                     </div>
                     {assets.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         {assets.map(a => (
-                          <div key={a.id} className="relative group rounded border overflow-hidden" style={{ borderColor: border }}>
-                            <div className="w-12 h-12">
+                          <div key={a.id} className={`relative group rounded border overflow-hidden ${compact ? 'w-24' : ''}`} style={{ borderColor: border }}>
+                            <div className={compact ? 'w-full h-20' : 'w-12 h-12'}>
                               <img src={a.url} className="w-full h-full object-cover" />
                             </div>
-                            <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-[8px] text-white text-center py-0.5 truncate px-0.5">{a.type}</div>
-                            <button className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => setAssets(prev => prev.filter(x => x.id !== a.id))}><X size={8} /></button>
+                            <div className={compact ? 'bg-black/60 text-xs text-white text-center py-1 px-1' : 'absolute bottom-0 left-0 right-0 bg-black/60 text-[8px] text-white text-center py-0.5 truncate px-0.5'}>{a.type}</div>
+                            <button aria-label={`移除素材 ${a.name}`} className={compact ? `flex h-11 w-full items-center justify-center gap-1 ${isMonochrome ? 'bg-red-50 text-red-700' : 'bg-red-500/10 text-red-300'}` : 'absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity'} onClick={() => setAssets(prev => prev.filter(x => x.id !== a.id))}><X size={compact ? 14 : 8} />{compact && <span>移除</span>}</button>
                           </div>
                         ))}
                       </div>
                     )}
                     <div className="mt-3 mb-2 text-[12px] font-semibold" style={{ color: textMuted }}>快捷资产库</div>
-                    <div className="grid grid-cols-4 gap-1.5">
+                    <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
                       {ASSET_LIBRARY.map(lib => (
                         <button key={lib} className="rounded-lg border px-1.5 py-1.5 text-[10px] cursor-pointer transition-colors"
                           style={{ borderColor: border, color: textMuted, background: 'transparent' }}
@@ -1857,7 +2030,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                       <span className={stepBadgeCls}>4</span>
                       <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>场景设置</h3>
                     </div>
-                    <div className="grid grid-cols-4 gap-1.5 mb-3">
+                    <div className="grid grid-cols-2 gap-1.5 mb-3 sm:grid-cols-4">
                       {SCENE_TYPES.map(s => (
                         <button key={s.value} className={`rounded-lg border p-2 text-[12px] flex flex-col items-center gap-1 cursor-pointer transition-all ${sceneType === s.value ? (isMonochrome ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-amber-400/60 bg-amber-400/10 text-amber-200') : (isMonochrome ? 'border-gray-200 bg-gray-50 text-gray-500' : 'border-white/10 bg-black/30 text-white/60')}`}
                           onClick={() => setSceneType(s.value)}>
@@ -1865,7 +2038,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                         </button>
                       ))}
                     </div>
-                    <div className="grid grid-cols-3 gap-2 mb-2">
+                    <div className="grid grid-cols-1 gap-2 mb-2 sm:grid-cols-3">
                       <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>长 (mm)</label><input className={inputCls} type="number" value={dimensions.length} onChange={e => setDimensions(p => ({ ...p, length: Number(e.target.value) }))} /></div>
                       <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>宽 (mm)</label><input className={inputCls} type="number" value={dimensions.width} onChange={e => setDimensions(p => ({ ...p, width: Number(e.target.value) }))} /></div>
                       <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>高 (mm)</label><input className={inputCls} type="number" value={dimensions.height} onChange={e => setDimensions(p => ({ ...p, height: Number(e.target.value) }))} /></div>
@@ -1878,12 +2051,12 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                       <span className={stepBadgeCls}>5</span>
                       <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>环境与尺寸设置</h3>
                     </div>
-                    <div className="grid grid-cols-4 gap-1.5 mb-3">
+                    <div className="grid grid-cols-2 gap-1.5 mb-3 sm:grid-cols-4">
                       {ENVIRONMENTS.map(e => (
                         <button key={e.value} className={tagBtnCls(environment === e.value)} onClick={() => setEnvironment(e.value)}>{e.label}</button>
                       ))}
                     </div>
-                    <div className="grid grid-cols-2 gap-2 mb-3">
+                    <div className="grid grid-cols-1 gap-2 mb-3 sm:grid-cols-2">
                       <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>预算（¥）</label><input className={inputCls} type="number" placeholder="150000" value={budget} onChange={e => setBudget(e.target.value ? Number(e.target.value) : '')} /></div>
                       <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>材质风格</label><select className={selectCls} value={materialStyle} onChange={e => setMaterialStyle(e.target.value)}>{MATERIAL_STYLES.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
                       <div><label className="block text-[12px] mb-1" style={{ color: textMuted }}>灯光氛围</label><select className={selectCls} value={lightingStyle} onChange={e => setLightingStyle(e.target.value)}>{LIGHTING_STYLES.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
@@ -1900,7 +2073,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                       <span className={stepBadgeCls}>6</span>
                       <h3 className="text-sm font-semibold" style={{ color: textPrimary }}>输出视角选择</h3>
                     </div>
-                    <div className="grid grid-cols-3 gap-1.5">
+                    <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
                       {VIEW_OPTIONS.map(v => (
                         <button key={v.value} className={tagBtnCls(viewOptions.includes(v.value))} onClick={() => toggleView(v.value)}>{v.label}</button>
                       ))}
@@ -1908,7 +2081,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                   </section>
 
                   {/* Output settings (inline) */}
-                  <div className="grid grid-cols-3 gap-2 mb-2">
+                  <div className="grid grid-cols-1 gap-2 mb-2 sm:grid-cols-3">
                     <div>
                       <label className="block text-[12px] mb-1" style={{ color: textMuted }}>分辨率</label>
                       <select className={selectCls} value={outputResolution} onChange={e => setOutputResolution(e.target.value)}>
@@ -2042,12 +2215,13 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                     className="w-full rounded-xl py-3 text-sm font-bold cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                     style={{ background: isMonochrome ? '#3b82f6' : '#d4af37', color: isMonochrome ? '#fff' : '#000' }}
                     onClick={handleGenerate}
-                    disabled={isGenerating || !brandName.trim()}
+                    disabled={isGenerating || isGeneratingVenue || !brandName.trim() || Boolean(unconfirmedTaskId)}
                   >
                     {isGenerating ? <><Loader2 size={14} className="inline animate-spin mr-1" />生成中...</> : <><Sparkles size={14} className="inline mr-1" />生成展陈方案</>}
                   </button>
+                  {unconfirmedMessage && <div><p role="alert" className="text-xs mt-1.5 px-1" style={{ color: '#ef4444' }}>{unconfirmedMessage}</p><button type="button" onClick={recheckUnconfirmed} disabled={isRechecking} className="min-h-11 text-xs underline disabled:opacity-50">{isRechecking ? '查询中...' : '重新查询原任务'}</button></div>}
                   {errorMsg && (
-                    <p className="text-xs mt-1.5 px-1" style={{ color: '#ef4444' }}>{errorMsg}</p>
+                    <p role="alert" className="text-xs mt-1.5 px-1" style={{ color: '#ef4444' }}>{errorMsg}</p>
                   )}
                   {successMsg && (
                     <p className="text-xs mt-1.5 px-1" style={{ color: '#22c55e' }}>{successMsg}</p>
@@ -2059,7 +2233,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                   {/* Preview Stage */}
                   <section className={`${panelCls} ${compact ? 'flex-none min-h-[360px]' : 'flex-1 overflow-hidden'} flex flex-col`}>
                     {/* Tabs */}
-                    <div className="flex shrink-0 items-center gap-1 mb-3 overflow-x-auto">
+                    <div className={`flex shrink-0 items-center gap-1 mb-3 ${compact ? 'flex-wrap' : 'overflow-x-auto'}`}>
                       {(['render', 'views', 'decompose', 'dimension', 'material', 'floorplan', 'bom'] as const).map(tab => (
                         <button key={tab} className={`rounded-lg px-2.5 py-1.5 text-[12px] whitespace-nowrap cursor-pointer transition-colors ${activePreviewTab === tab ? (isMonochrome ? 'bg-blue-50 text-blue-700' : 'bg-amber-500/20 text-amber-200') : (isMonochrome ? 'text-gray-500 hover:bg-gray-100' : 'text-white/50 hover:bg-white/5')}`}
                           onClick={() => setActivePreviewTab(tab)}>
@@ -2270,7 +2444,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                                 className="rounded-lg border px-2.5 py-1 text-[11px] cursor-pointer disabled:opacity-50"
                                 style={{ borderColor: border, color: textAccent }}
                                 onClick={handleGenerate}
-                                disabled={isGenerating || results.length === 0}
+                                disabled={isGenerating || isGeneratingVenue || results.length === 0 || Boolean(unconfirmedTaskId)}
                               >
                                 {isGenerating ? <><Loader2 size={10} className="inline animate-spin mr-1" />生成中...</> : <><Sparkles size={10} className="inline mr-1" />批量生成多角度</>}
                               </button>
@@ -2388,8 +2562,8 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                     </button>
                     <button
                       className={`rounded-lg border px-3 py-1.5 text-[12px] cursor-pointer disabled:opacity-50 ${isMonochrome ? 'border-blue-300 text-blue-600 hover:bg-blue-50' : 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10'}`}
-                      onClick={() => { if (results.length > 0) onAddImages?.(results.slice(0, 1).map(r => r.url), { modelName: selectedModel, apiProvider: selectedProviderId }); }}
-                      disabled={results.length === 0}
+                      onClick={() => { if (!isGenerating && !isGeneratingVenue && results.length > 0) onAddImages?.(results.slice(0, 1).map(r => r.url), { modelName: selectedModel, apiProvider: selectedProviderId }); }}
+                      disabled={results.length === 0 || isGenerating || isGeneratingVenue || isRechecking}
                     >
                       发送到画布
                     </button>
@@ -2410,7 +2584,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                 <div className="w-[520px] max-h-[80vh] overflow-y-auto rounded-2xl p-6 shadow-2xl" onClick={e => e.stopPropagation()} style={{ maxWidth: Math.max(0, panelViewport.width - 16), maxHeight: Math.max(0, panelViewport.height - 16), background: isMonochrome ? '#fff' : '#1a1a1a', border: `1px solid ${isMonochrome ? '#e5e5e5' : 'rgba(255,255,255,0.1)'}` }}>
                   <div className="flex items-center justify-between mb-4">
                     <h2 className="text-lg font-bold" style={{ color: textPrimary }}>3D 展陈系统 Pro — 使用说明</h2>
-                    <button onClick={() => setShowHelp(false)} className="rounded-lg p-1.5 cursor-pointer" style={{ color: textMuted }}><X size={18} /></button>
+                    <button onClick={() => setShowHelp(false)} aria-label="关闭展陈使用说明" className="rounded-lg p-1.5 cursor-pointer" style={{ color: textMuted }}><X size={18} /></button>
                   </div>
                   <div className="space-y-4 text-[13px] leading-relaxed" style={{ color: textPrimary }}>
                     <section>

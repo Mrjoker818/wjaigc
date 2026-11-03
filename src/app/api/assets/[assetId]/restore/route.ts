@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { readExpectedActor } from '@/lib/expected-actor-header';
 
 import { AssetServiceError, createAssetService } from '@/lib/asset-core/service';
 import { getRequestUser } from '@/lib/api-auth';
@@ -21,6 +22,11 @@ function parseRestoreInput(value: unknown): { projectId: string; placementId: st
 export async function POST(request: NextRequest, context: RouteContext): Promise<NextResponse> {
   const auth = await getRequestUser(request);
   if (!auth) return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+  const expectedActor = readExpectedActor(request.headers);
+  if (expectedActor.status === 'invalid') return NextResponse.json({ error: 'ASSET_REQUEST_INVALID' }, { status: 400 });
+  if (expectedActor.status === 'present' && expectedActor.actorId !== auth.user.id) {
+    return NextResponse.json({ error: 'ACTOR_SCOPE_CHANGED' }, { status: 409 });
+  }
   const { assetId } = await context.params;
   let body: unknown;
   try {

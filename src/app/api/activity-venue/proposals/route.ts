@@ -1,9 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { findProviderForModel, findProviderById } from '@/lib/server-api-config';
+import { getApiProviders } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getSessionUser } from '@/lib/server-auth';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
-import { normalizeModelForApi } from '@/lib/model-capabilities';
+import { selectActivityVenueModel } from '@/lib/activity-venue-model';
+import { z } from 'zod';
+
+const proposalText = z.string().refine(value => value.trim().length > 0);
+const proposalSchema = z.object({
+  id: proposalText,
+  name: proposalText,
+  concept: proposalText,
+  style: proposalText,
+  highlights: z.array(proposalText).min(1),
+  regionUsage: z.array(z.object({ regionId: proposalText, usage: proposalText, priority: proposalText }).passthrough()),
+  mainInstallation: proposalText,
+  visualElements: z.object({ primaryColor: proposalText, materials: z.array(proposalText).min(1), lighting: proposalText }).passthrough(),
+  flowDesign: proposalText,
+  estimatedCost: proposalText,
+  renderPromptHint: proposalText,
+  pros: z.array(proposalText).min(1),
+  cons: z.array(proposalText).min(1),
+}).passthrough();
+const proposalsSchema = z.object({
+  proposals: z.array(proposalSchema).length(3).refine(items => new Set(items.map(item => item.id)).size === items.length),
+}).passthrough();
+
+function formatVenuePosition(position: unknown): string {
+  if (typeof position === 'string') return position.trim() ? position : '位置未知';
+  if (!position || typeof position !== 'object' || Array.isArray(position)) return '位置未知';
+  const { x, y, w, h } = position as Record<string, unknown>;
+  if (typeof x !== 'number' || typeof y !== 'number' || typeof w !== 'number' || typeof h !== 'number'
+    || ![x, y, w, h].every(Number.isFinite) || x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > 1 || y + h > 1) return '位置未知';
+  return `归一化坐标（图片左上角为原点，x/y为位置，w/h为宽高，范围0–1） ${JSON.stringify({ x, y, w, h })}`;
+}
 
 /**
  * POST /api/activity-venue/proposals
@@ -20,17 +50,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '请提供场馆分析结果和活动需求' }, { status: 400 });
     }
 
-    const provider = providerId
-      ? await findProviderById(providerId)
-      : await findProviderForModel(model || '', 'chat');
-    if (!provider) {
-      return NextResponse.json({ error: '未找到可用的LLM模型，请在管理员后台配置' }, { status: 400 });
+    if ((providerId !== undefined && typeof providerId !== 'string') || (model !== undefined && typeof model !== 'string')) {
+      return NextResponse.json({ error: '供应商或模型参数无效' }, { status: 400 });
     }
-
-    const rawModel = provider.selectedModels?.[0] || model || 'gemini-2.5-flash';
-    const { apiModelName: selectedModel } = normalizeModelForApi(rawModel);
-
-    const sessionUser = await getSessionUser(request).catch(() => null);
+    const sessionUser = await getSessionUser(request);
+    if (!sessionUser) return NextResponse.json({ error: '请登录后生成布局方案' }, { status: 401 });
+    const providers = await getApiProviders();
+    const selection = selectActivityVenueModel(providers, sessionUser, providerId, model);
+    if (!selection.ok) return NextResponse.json({ error: selection.error }, { status: selection.status });
+    const { provider, modelId: selectedModel } = selection;
     const taskId = `venue_proposals_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     registerTask(taskId, 'venue-proposals', `布局方案生成: ${brandName}`, sessionUser?.id);
 
@@ -45,13 +73,21 @@ export async function POST(request: NextRequest) {
           ? `\n已有品牌素材：${assets.map((a: { type: string }) => a.type).join('、')}`
           : '';
 
+        const exampleRegionId = Array.isArray(venueAnalysis.regions)
+          ? venueAnalysis.regions.find((region: unknown) => region && typeof region === 'object'
+            && 'id' in region && typeof region.id === 'string' && region.id.trim())?.id
+          : undefined;
+        const regionUsageExample = exampleRegionId
+          ? JSON.stringify([{ regionId: exampleRegionId, usage: '主展台+互动装置', priority: 'primary' }])
+          : '[]';
+
         const userPrompt = `基于以下信息，生成3套有明显差异化的展陈布局方案：
 
 ## 场馆条件
 - 空间类型：${venueAnalysis.spaceType}
 - 估算尺寸：${JSON.stringify(venueAnalysis.estimatedDimensions)}mm
 - 光线：${venueAnalysis.lighting}
-- 可用区域：${venueAnalysis.regions?.map((r: { name: string; type: string; position: string }) => `${r.name}(${r.type}, ${r.position})`).join('；')}
+- 可用区域：${venueAnalysis.regions?.map((r: { id?: string; name: string; type: string; position: unknown }) => `${r.name}(${r.type}, ${formatVenuePosition(r.position)}) 区域ID: ${JSON.stringify(r.id || '')}`).join('；')}
 - 结构限制：${venueAnalysis.structuralLimits?.join('；') || '无'}
 
 ## 活动需求
@@ -73,10 +109,7 @@ export async function POST(request: NextRequest) {
       "concept": "方案核心理念（2-3句话）",
       "style": "modern_minimalist",
       "highlights": ["亮点1", "亮点2", "亮点3"],
-      "regionUsage": [
-        { "regionId": "r1", "usage": "主展台+互动装置", "priority": "primary" },
-        { "regionId": "r2", "usage": "打卡拍照区", "priority": "secondary" }
-      ],
+      "regionUsage": ${regionUsageExample},
       "mainInstallation": "主展装置描述",
       "visualElements": { "primaryColor": "品牌主色", "materials": ["铝合金", "亚克力", "LED灯带"], "lighting": "聚光灯+环境光" },
       "flowDesign": "人流动线说明",
@@ -88,7 +121,7 @@ export async function POST(request: NextRequest) {
   ]
 }
 
-确保3套方案在以下维度有明显差异：空间布局策略、视觉风格取向、互动体验形式、预算侧重点。`;
+确保3套方案在以下维度有明显差异：空间布局策略、视觉风格取向、互动体验形式、预算侧重点。regionUsage 中的 regionId 必须使用上述场馆区域ID；若无可用ID，regionUsage 返回空数组。`;
 
         let apiBase = provider.baseUrl.replace(/\/+$/, '');
         if (apiBase.endsWith('/v1')) apiBase = apiBase.slice(0, -3);
@@ -118,7 +151,7 @@ export async function POST(request: NextRequest) {
         const apiResp = await response.json();
         const content = apiResp.choices?.[0]?.message?.content || '';
 
-        let proposals = null;
+        let proposals: unknown = null;
         try {
           const jsonMatch = content.match(/\{[\s\S]*\}/);
           if (jsonMatch) proposals = JSON.parse(jsonMatch[0]);
@@ -126,23 +159,21 @@ export async function POST(request: NextRequest) {
           // ignore
         }
 
-        if (!proposals?.proposals || proposals.proposals.length < 2) {
-          // Retry with simpler prompt
-          updateTaskProgress(taskId, { status: 'processing', progress: 50, label: '正在补全方案...' });
-          // Build 3 minimal fallback proposals
-          proposals = {
-            proposals: [
-              { id: 'p1', name: '方案A — 沉浸体验型', concept: '以沉浸式互动体验为核心，打造品牌专属空间', style: 'immersive', highlights: ['沉浸式视觉', '互动装置', '品牌故事线'], regionUsage: [], mainInstallation: '中央沉浸装置', visualElements: { primaryColor: '#000', materials: ['LED屏', '透明亚克力'], lighting: '动态灯光' }, flowDesign: '环形动线', estimatedCost: '¥100,000', renderPromptHint: `${brandName} immersive brand exhibition, LED display walls, circular flow`, pros: ['视觉冲击强'], cons: ['成本较高'] },
-              { id: 'p2', name: '方案B — 简约展示型', concept: '极简风格，突出产品本身，清晰传达品牌调性', style: 'minimalist', highlights: ['极简展台', '产品焦点', '清晰导视'], regionUsage: [], mainInstallation: '线性展示台', visualElements: { primaryColor: '#fff', materials: ['烤漆板', '不锈钢'], lighting: '自然光+射灯' }, flowDesign: '线性动线', estimatedCost: '¥60,000', renderPromptHint: `${brandName} minimalist product display, white podium, spotlights`, pros: ['预算友好', '制作周期短'], cons: ['互动性弱'] },
-              { id: 'p3', name: '方案C — 互动打卡型', concept: '以社交分享为核心，打造高传播度的打卡场景', style: 'social_media', highlights: ['网红打卡装置', '社交传播点', '品牌LOGO墙'], regionUsage: [], mainInstallation: 'LOGO装置打卡墙', visualElements: { primaryColor: '#ff6b9d', materials: ['花艺', '彩色亚克力', '霓虹灯'], lighting: '柔和环境光' }, flowDesign: '自由探索型', estimatedCost: '¥75,000', renderPromptHint: `${brandName} instagram-worthy brand activation, neon signs, photo wall`, pros: ['传播效果好', '吸引年轻客群'], cons: ['品牌感稍弱'] },
-            ],
-          };
+        const parsed = proposalsSchema.safeParse(proposals);
+        const regionIds = new Set<string>(Array.isArray(venueAnalysis.regions)
+          ? venueAnalysis.regions.flatMap((region: unknown) => {
+            if (!region || typeof region !== 'object' || !('id' in region)) return [];
+            return typeof region.id === 'string' && region.id.trim() ? [region.id] : [];
+          }) : []);
+        if (!parsed.success || parsed.data.proposals.some(proposal => proposal.regionUsage.some(region => !regionIds.has(region.regionId)))) {
+          updateTaskProgress(taskId, { status: 'failed', error: `供应商返回的方案格式无效；请先核实任务 ${taskId} 的状态和费用` });
+          return;
         }
 
         updateTaskProgress(taskId, {
           status: 'completed',
           progress: 100,
-          result: { proposals: proposals.proposals, type: 'venue-proposals' },
+          result: { proposals: parsed.data.proposals, type: 'venue-proposals' },
         });
       } catch (err) {
         updateTaskProgress(taskId, {
@@ -153,9 +184,9 @@ export async function POST(request: NextRequest) {
     })();
 
     return NextResponse.json({ success: true, taskId, status: 'running' });
-  } catch (err) {
+  } catch {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : '服务器错误' },
+      { error: '布局方案暂时不可用，请稍后查看任务状态' },
       { status: 500 },
     );
   }

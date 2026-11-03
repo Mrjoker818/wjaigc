@@ -5,24 +5,17 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getApiProviders } from '@/lib/server-api-config';
-import { writeFile, mkdir } from 'fs/promises';
-import path from 'path';
-import { randomUUID } from 'crypto';
+import { isGeneratedAudioFormat, persistGeneratedAudioResponse } from '@/lib/generated-audio-storage';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-const UPLOAD_DIR = path.join(process.cwd(), 'public', 'generated-audio');
-
-async function ensureDir() {
-  try { await mkdir(UPLOAD_DIR, { recursive: true }); } catch {}
-}
-
 export async function POST(req: NextRequest) {
   const authResult = await requireApiAuthOrReject(req);
   if (authResult instanceof NextResponse) return authResult;
 
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
     const body = await req.json();
     const {
@@ -38,7 +31,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: '请输入要转换的文本' }, { status: 400 });
     }
 
-    await ensureDir();
+    if (!isGeneratedAudioFormat(format)) {
+      return NextResponse.json({ success: false, error: '请选择 MP3 或 WAV 音频格式' }, { status: 400 });
+    }
 
     // 从管理员配置中查找音频模型提供商
     const providers = await getApiProviders();
@@ -75,7 +70,8 @@ export async function POST(req: NextRequest) {
 
     // 直接调用TTS API - 尝试带/v1和不带/v1
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 55000);
+    timeoutId = setTimeout(() => controller.abort(), 55000);
+    const signal = AbortSignal.any([controller.signal, req.signal]);
 
     const baseUrl = provider.baseUrl.replace(/\/$/, '');
     const urls = [`${baseUrl}/v1/audio/speech`, `${baseUrl}/audio/speech`];
@@ -92,7 +88,7 @@ export async function POST(req: NextRequest) {
             'Authorization': `Bearer ${provider.apiKey}`,
           },
           body: JSON.stringify(ttsRequestBody),
-          signal: controller.signal,
+          signal,
         });
         if (ttsResponse.ok) break;
         if (ttsResponse.status !== 404) {
@@ -104,7 +100,6 @@ export async function POST(req: NextRequest) {
         if (url === urls[urls.length - 1]) throw e;
       }
     }
-    clearTimeout(timeoutId);
 
     if (!ttsResponse || !ttsResponse.ok) {
       let errorText = '';
@@ -116,22 +111,17 @@ export async function POST(req: NextRequest) {
       }, { status: 502 });
     }
 
-    const audioBuffer = Buffer.from(await ttsResponse.arrayBuffer());
-    const filename = `tts_${Date.now()}_${randomUUID().slice(0,8)}.${format}`;
-    const filepath = path.join(UPLOAD_DIR, filename);
-    await writeFile(filepath, audioBuffer);
-
-    const audioUrl = `/generated-audio/${filename}`;
+    const { filename, audioUrl, size } = await persistGeneratedAudioResponse(ttsResponse, format, signal);
     const estimatedDuration = Math.max(1, Math.ceil(text.length / 15));
 
-    console.log('[Audio] Generated:', { filename, size: audioBuffer.length });
+    console.log('[Audio] Generated:', { filename, size });
 
     return NextResponse.json({
       success: true,
       audioUrl,
       filename,
       format,
-      size: audioBuffer.length,
+      size,
       duration: estimatedDuration,
       model,
       provider: provider.name,
@@ -145,5 +135,7 @@ export async function POST(req: NextRequest) {
       success: false, 
       error: isTimeout ? '语音生成超时，请重试' : (err?.message || '语音生成失败，请检查TTS模型配置') 
     }, { status: 500 });
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
   }
 }

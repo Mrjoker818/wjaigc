@@ -1,9 +1,9 @@
 import {
   type CreatePlacementInput,
   type ResolveAssetReferenceInput,
-} from './service';
-import type { WorkspaceAssetReference } from './types';
-import type { WorkflowNode } from '../workflow-engine';
+} from '@/lib/asset-core/service';
+import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
+import type { WorkflowNode } from '@/lib/workflow-engine';
 import { resolveDocumentWorkspaceReference, resolvePersonalWorkspaceReference } from '@/lib/collaboration/document-workspace-reference';
 
 interface AssetReferenceResolver {
@@ -19,6 +19,8 @@ interface WorkflowInputContext {
   workspaceId: string;
   entityId: string;
   requireManagedAsset?: boolean;
+  /** Authorization-only source reads must not replace the output placement. */
+  bindPlacement?: boolean;
 }
 
 export async function resolveWorkflowInputImageForActor(
@@ -42,7 +44,7 @@ export async function resolveWorkflowInputImageForActor(
     // owner-owned placement or gain access to the owner's private asset graph.
     return { ...node.config, projectId, imageUrl: documentReference.url,
       assetId: documentReference.assetId, assetVersionId: documentReference.assetVersionId,
-      placementId: documentReference.placementId, _type: node.type };
+      placementId: documentReference.placementId, entityId: documentReference.entityId, _type: node.type };
   }
   if (!projectId || !assetVersionId) {
     if (context?.requireManagedAsset) throw new Error('工作流 Skill 图片输入必须使用项目资产');
@@ -56,15 +58,15 @@ export async function resolveWorkflowInputImageForActor(
   if (!resolver) {
     const reference = await resolvePersonalWorkspaceReference(actorUserId, {
       projectId, assetVersionId, ...(placementId ? { placementId } : {}),
-    }, context ? { workspaceId: context.workspaceId, entityId: context.entityId } : undefined);
+    }, context && context.bindPlacement !== false ? { workspaceId: context.workspaceId, entityId: context.entityId } : undefined);
     return { ...node.config, projectId, imageUrl: reference.url, assetId: reference.assetId,
-      assetVersionId: reference.assetVersionId, placementId: reference.placementId, _type: node.type };
+      assetVersionId: reference.assetVersionId, placementId: reference.placementId, entityId: reference.entityId, _type: node.type };
   }
 
   const reference = await resolver.resolveAssetReference({
     actorUserId, projectId, assetVersionId, ...(placementId ? { placementId } : {}),
   });
-  const workflowPlacement = context
+  const workflowPlacement = context && context.bindPlacement !== false
     ? await resolver.bindWorkflowInputPlacement({
         actorUserId,
         projectId,
@@ -82,6 +84,7 @@ export async function resolveWorkflowInputImageForActor(
     assetId: reference.assetId,
     assetVersionId: reference.assetVersionId,
     placementId: workflowPlacement?.placement.id || reference.placementId,
+    entityId: workflowPlacement ? context?.entityId : reference.entityId,
     _type: node.type,
   };
 }

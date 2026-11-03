@@ -4,6 +4,20 @@
    原文件超 500KB 触发 react-compiler deopt 不被分析；拆出后被分析触发规则。零行为变化，仅迁移渲染 JSX。 */
 
 import * as React from 'react';
+import { createPortal } from 'react-dom';
+
+const MOBILE_EDIT_PANEL_QUERY = '(width < 641px)';
+function subscribeMobileEditPanel(notify: () => void): () => void {
+  const query = window.matchMedia(MOBILE_EDIT_PANEL_QUERY);
+  query.addEventListener('change', notify);
+  return () => query.removeEventListener('change', notify);
+}
+function getMobileEditPanelSnapshot(): boolean {
+  return window.matchMedia(MOBILE_EDIT_PANEL_QUERY).matches;
+}
+function getServerEditPanelSnapshot(): boolean {
+  return false;
+}
 import { Check, ChevronDown, Palette, PenTool, Settings2, Sparkles, ZoomIn } from 'lucide-react';
 import {
   UPSCALE_TARGET_PRESETS,
@@ -144,7 +158,10 @@ export function CanvasEditUpscaleSvgPanel(props: CanvasEditUpscaleSvgPanelProps)
     return () => window.removeEventListener('resize', handleSvgPanelResize);
   }, [showSvgTracePanel, svgTraceFixedPosRef]);
 
-  return (
+  const isMobilePanel = React.useSyncExternalStore(
+    subscribeMobileEditPanel, getMobileEditPanelSnapshot, getServerEditPanelSnapshot,
+  );
+  const panels = (
     <>
 {/* ====== UPSCALE FLOATING CONTROL BAR ====== */}
         {editMode === 'upscale' && (() => {
@@ -173,13 +190,13 @@ export function CanvasEditUpscaleSvgPanel(props: CanvasEditUpscaleSvgPanelProps)
 
           return (
             <div
-              className="absolute z-[80] pointer-events-auto motion-reduce:transition-none max-[640px]:!fixed max-[640px]:!inset-x-3 max-[640px]:!bottom-20 max-[640px]:!top-auto max-[640px]:!transform-none"
+              className="absolute z-[80] pointer-events-auto motion-reduce:transition-none max-[641px]:!fixed max-[641px]:!inset-x-3 max-[641px]:!bottom-20 max-[641px]:!top-auto max-[641px]:!transform-none max-[641px]:max-h-[calc(100dvh-112px)] max-[641px]:overflow-y-auto max-[641px]:overscroll-contain max-[641px]:touch-pan-y max-[641px]:[&_button]:min-h-11 max-[641px]:[&_button]:min-w-11 max-[641px]:[&_select]:min-h-11"
               data-toolbar="edit-mode"
               style={{ left: panelX, top: panelY, transform: 'translate(-50%, -100%)' }}
               onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
             >
-              <div className={`${panelBaseClass} gap-2 max-[640px]:w-full max-[640px]:flex-wrap max-[640px]:justify-center`} onMouseDown={(e) => e.stopPropagation()}>
+              <div className={`${panelBaseClass} gap-2 max-[641px]:w-full max-[641px]:flex-wrap max-[641px]:justify-center`} onMouseDown={(e) => e.stopPropagation()}>
                 <ZoomIn size={14} className={isMonochrome ? 'text-blue-500' : 'text-gold'} />
                 <span className={panelLabelClass}>HD 高清放大</span>
                 <div className={panelDividerClass} />
@@ -201,7 +218,7 @@ export function CanvasEditUpscaleSvgPanel(props: CanvasEditUpscaleSvgPanelProps)
                     <ChevronDown size={10} />
                   </button>
                   {showUpscalePresetMenu && (
-                    <div className={`absolute top-full left-0 mt-1 py-1 rounded-lg border shadow-xl z-50 min-w-[190px] ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1e1e1e] border-[#444]'}`}>
+                    <div className={`absolute top-full left-0 mt-1 py-1 rounded-lg border shadow-xl z-50 min-w-[190px] max-[641px]:static max-[641px]:max-w-full ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1e1e1e] border-[#444]'}`}>
                       {UPSCALE_TARGET_PRESETS.map(preset => {
                         const pTarget = calculateUpscaleTargetDimensions(origW, origH, preset.id);
                         const presetUnavailable = isSizeLoaded && (
@@ -314,7 +331,7 @@ export function CanvasEditUpscaleSvgPanel(props: CanvasEditUpscaleSvgPanelProps)
                 <button
                   onClick={handleUpscaleConfirm}
                   disabled={(!canExecute && !isUpscaleSubmissionUnknown) || isUpscaleQuoteLoading || isUpscaleSubmitting}
-                  className={`${upscaleQuote || isUpscaleQuoteLoading || isUpscaleSubmitting ? 'min-w-8 px-2' : 'w-8'} h-8 max-[640px]:h-11 flex items-center justify-center gap-1 rounded-lg transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold ${
+                  className={`${upscaleQuote || isUpscaleQuoteLoading || isUpscaleSubmitting ? 'min-w-8 px-2' : 'w-8'} h-8 max-[641px]:h-11 flex items-center justify-center gap-1 rounded-lg transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold ${
                     (!canExecute && !isUpscaleSubmissionUnknown) || isUpscaleQuoteLoading || isUpscaleSubmitting
                       ? isMonochrome ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-[#333] text-gold-muted/50 cursor-not-allowed'
                       : isMonochrome ? 'bg-blue-500 text-white hover:bg-blue-600 active:scale-95' : 'bg-gold text-black hover:bg-[#e5c047] active:scale-95'
@@ -332,7 +349,7 @@ export function CanvasEditUpscaleSvgPanel(props: CanvasEditUpscaleSvgPanelProps)
                 </button>
                 <button disabled={isUpscaleSubmitting || isUpscaleSubmissionUnknown}
                   onClick={() => { onResetUpscaleQuote(); exitEditMode(); }}
-                  className={`${panelCancelBtnClass} max-[640px]:min-h-11 disabled:cursor-not-allowed disabled:opacity-50`}>取消</button>
+                  className={`${panelCancelBtnClass} max-[641px]:min-h-11 disabled:cursor-not-allowed disabled:opacity-50`}>取消</button>
               </div>
               {upscaleQuote && (
                 <div role="status" className={`mt-2 flex items-center justify-center gap-3 rounded-lg px-3 py-2 text-xs tabular-nums ${
@@ -343,7 +360,7 @@ export function CanvasEditUpscaleSvgPanel(props: CanvasEditUpscaleSvgPanelProps)
                     放大 {upscaleQuote.components.upscale} · 精修 {upscaleQuote.components.enhance}
                   </span>
                   <button type="button" onClick={onResetUpscaleQuote} disabled={isUpscaleSubmissionUnknown}
-                    className="px-2 max-[640px]:min-h-11 underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold">
+                    className="px-2 max-[641px]:min-h-11 underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold">
                     修改
                   </button>
                 </div>
@@ -379,7 +396,7 @@ export function CanvasEditUpscaleSvgPanel(props: CanvasEditUpscaleSvgPanelProps)
           return (
             <div
               data-floating-panel="svg-trace"
-              className="motion-reduce:transition-none"
+              className="motion-reduce:transition-none max-[641px]:!top-4 max-[641px]:!max-h-[calc(100dvh-112px-env(safe-area-inset-bottom))] max-[641px]:touch-pan-y max-[641px]:overscroll-contain max-[641px]:[&_button]:min-h-11 max-[641px]:[&_button]:min-w-11 max-[641px]:[&_input]:!h-11 max-[641px]:[&_input]:min-w-11"
               style={{
                 position: 'fixed',
                 left: pos.left,
@@ -450,7 +467,7 @@ export function CanvasEditUpscaleSvgPanel(props: CanvasEditUpscaleSvgPanelProps)
                       <span style={{ color: '#999', fontSize: 12 }}>矢量化引擎</span>
                       <span style={{ color: '#666', fontSize: 10 }}>自动选择最优</span>
                     </div>
-                    <div style={{ display: 'flex', gap: 6 }}>
+                    <div className="max-[641px]:!grid max-[641px]:grid-cols-3" style={{ display: 'flex', gap: 6 }}>
                       {([
                         { key: 'auto', label: '自动' },
                         { key: 'wasm-vtracer', label: 'WASM' },
@@ -594,4 +611,5 @@ export function CanvasEditUpscaleSvgPanel(props: CanvasEditUpscaleSvgPanelProps)
         })()}
     </>
   );
+  return isMobilePanel ? createPortal(panels, document.body) : panels;
 }

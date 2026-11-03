@@ -21,11 +21,11 @@ export async function GET(request: NextRequest) {
     const statsOnly = searchParams.get('stats') === 'true';
 
     if (statsOnly) {
-      const stats = await dbGetAuditStats();
+      const stats = await dbGetAuditStats({ throwOnError: true });
       return NextResponse.json({ success: true, stats });
     }
 
-    const result = await dbGetAuditLogs({ action, userId, startTime, endTime, limit, offset });
+    const result = await dbGetAuditLogs({ throwOnError: true, action, userId, startTime, endTime, limit, offset });
     return NextResponse.json({ success: true, ...result });
   } catch (error) {
     console.error('[admin/audit] GET error:', error);

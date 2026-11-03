@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useId } from 'react';
 import { constrainFloatingPanelPosition, getCenteredFloatingPanelPosition, getFloatingPanelViewport,
   subscribeFloatingPanelViewport, type FloatingPanelPosition, type FloatingPanelViewport } from '@/lib/floating-panel-position';
 import ReactDOM from 'react-dom';
@@ -180,6 +180,7 @@ export default function LogoSkillPanel({
   onOpenBrandDna,
   onOpenMainKv,
 }: LogoSkillPanelProps) {
+  const formId = useId();
   // ─── Panel position (draggable) ──────────────────────────────
   const panelRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<FloatingPanelPosition>({ x: 8, y: 8 });
@@ -870,10 +871,11 @@ export default function LogoSkillPanel({
         {/* ── 第一行：品牌名称 + 英文名 ── */}
         <div className="grid min-w-0 grid-cols-1 gap-4 min-[900px]:grid-cols-[minmax(0,1fr)_200px]">
           <div>
-            <label className={`block text-sm font-semibold mb-2 ${textPrimary}`}>
+            <label htmlFor={`${formId}-brand-name`} className={`block text-sm font-semibold mb-2 ${textPrimary}`}>
               品牌名称 <span className="text-red-500">*</span>
             </label>
             <input
+              id={`${formId}-brand-name`}
               value={brandName}
               onChange={e => setBrandName(e.target.value)}
               placeholder="中文品牌名称"
@@ -881,8 +883,9 @@ export default function LogoSkillPanel({
             />
           </div>
           <div>
-            <label className={`block text-sm font-semibold mb-2 ${textPrimary}`}>英文名</label>
+            <label htmlFor={`${formId}-english-name`} className={`block text-sm font-semibold mb-2 ${textPrimary}`}>英文名</label>
             <input
+              id={`${formId}-english-name`}
               value={englishName}
               onChange={e => setEnglishName(e.target.value)}
               placeholder="English Name"
@@ -893,10 +896,11 @@ export default function LogoSkillPanel({
 
         {/* ── 第二行：品牌简报 ── */}
         <div>
-          <label className={`block text-sm font-semibold mb-2 ${textPrimary}`}>
+          <label htmlFor={`${formId}-brand-brief`} className={`block text-sm font-semibold mb-2 ${textPrimary}`}>
             品牌简报 <span className="text-red-500">*</span>
           </label>
           <textarea
+            id={`${formId}-brand-brief`}
             value={brief}
             onChange={e => setBrief(e.target.value)}
             placeholder="描述你的品牌：做什么、服务谁、有什么独特价值..."
@@ -908,8 +912,9 @@ export default function LogoSkillPanel({
         {/* ── 第三行：受众 / 偏好风格 / 参考风格 ── */}
         <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-3">
           <div>
-            <label className={`block text-xs font-medium mb-2 ${textSecondary}`}>目标受众</label>
+            <label htmlFor={`${formId}-audience`} className={`block text-xs font-medium mb-2 ${textSecondary}`}>目标受众</label>
             <input
+              id={`${formId}-audience`}
               value={audience}
               onChange={e => setAudience(e.target.value)}
               placeholder="如：25-35岁都市白领"
@@ -917,8 +922,9 @@ export default function LogoSkillPanel({
             />
           </div>
           <div>
-            <label className={`block text-xs font-medium mb-2 ${textSecondary}`}>偏好风格</label>
+            <label htmlFor={`${formId}-preferred-style`} className={`block text-xs font-medium mb-2 ${textSecondary}`}>偏好风格</label>
             <input
+              id={`${formId}-preferred-style`}
               value={preferredStyle}
               onChange={e => setPreferredStyle(e.target.value)}
               placeholder="如：极简现代"
@@ -926,8 +932,9 @@ export default function LogoSkillPanel({
             />
           </div>
           <div>
-            <label className={`block text-xs font-medium mb-2 ${textSecondary}`}>参考风格</label>
+            <label htmlFor={`${formId}-reference-style`} className={`block text-xs font-medium mb-2 ${textSecondary}`}>参考风格</label>
             <input
+              id={`${formId}-reference-style`}
               value={referenceStyle}
               onChange={e => setReferenceStyle(e.target.value)}
               placeholder="色彩、布局、间距..."
@@ -1038,8 +1045,9 @@ export default function LogoSkillPanel({
             </button>
             {showSettings && (
               <div className={`mt-2.5 pt-2.5 border-t ${isMonochrome ? 'border-gray-200' : 'border-white/10'}`}>
-                <label className={`block text-[11px] font-medium mb-1.5 ${textSecondary}`}>目标平台</label>
+                <label htmlFor={`${formId}-target-platform`} className={`block text-[11px] font-medium mb-1.5 ${textSecondary}`}>目标平台</label>
                 <select
+                  id={`${formId}-target-platform`}
                   value={targetPlatform}
                   onChange={e => setTargetPlatform(e.target.value)}
                   className={`w-64 px-4 py-2 rounded-lg border text-sm ${inputBg} ${textPrimary} focus:outline-none cursor-pointer`}

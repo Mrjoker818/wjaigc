@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
 import { X, GripVertical, RefreshCw, ChevronDown, ChevronUp, CheckCircle2, XCircle, ImagePlus, Minus, Zap, FileText } from 'lucide-react';
 import { getPromptTemplates, searchTemplates } from '@/lib/prompt-templates';
 import { AgentProgressTimeline } from '@/components/agent-runtime/AgentProgressTimeline';
@@ -211,6 +211,24 @@ export function AgentEditor({
   const [templateSearch, setTemplateSearch] = useState('');
   const [templatePopupIndex, setTemplatePopupIndex] = useState(0);
   const filteredTemplates = templateSearch ? searchTemplates(templateSearch) : getPromptTemplates();
+  const visibleTemplates = filteredTemplates.slice(0, 20);
+  const templatePopupRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!showTemplatePopup || visibleTemplates.length === 0) return;
+    if (templatePopupIndex >= visibleTemplates.length) {
+      setTemplatePopupIndex(0);
+      return;
+    }
+    const popup = templatePopupRef.current;
+    const option = popup?.children[templatePopupIndex] as HTMLElement | undefined;
+    if (!popup || !option) return;
+    const popupRect = popup.getBoundingClientRect();
+    const optionRect = option.getBoundingClientRect();
+    const top = popupRect.top + popup.clientTop;
+    const bottom = top + popup.clientHeight;
+    if (optionRect.top < top) popup.scrollTop += optionRect.top - top;
+    else if (optionRect.bottom > bottom) popup.scrollTop += optionRect.bottom - bottom;
+  }, [showTemplatePopup, templatePopupIndex, templateSearch, visibleTemplates.length]);
   const runStorageKey = projectId && selectedEntityId
     ? `wujie_agent_run:${projectId}:${selectedEntityId}`
     : null;
@@ -1174,16 +1192,16 @@ export function AgentEditor({
               }
             }}
             onKeyDown={(e) => {
-              if (showTemplatePopup && filteredTemplates.length > 0) {
+              if (showTemplatePopup && visibleTemplates.length > 0) {
                 if (e.key === 'ArrowUp') {
                   e.preventDefault();
-                  setTemplatePopupIndex((i) => (i - 1 + filteredTemplates.length) % filteredTemplates.length);
+                  setTemplatePopupIndex((i) => (i - 1 + visibleTemplates.length) % visibleTemplates.length);
                 } else if (e.key === 'ArrowDown') {
                   e.preventDefault();
-                  setTemplatePopupIndex((i) => (i + 1) % filteredTemplates.length);
+                  setTemplatePopupIndex((i) => (i + 1) % visibleTemplates.length);
                 } else if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
-                  const tpl = filteredTemplates[templatePopupIndex];
+                  const tpl = visibleTemplates[templatePopupIndex];
                   if (tpl) {
                     const val = prompt;
                     const slashIdx = val.lastIndexOf('/');
@@ -1211,8 +1229,8 @@ export function AgentEditor({
             onPointerDown={stopPropagation}
           />
           {showTemplatePopup && filteredTemplates.length > 0 && (
-            <div className="absolute bottom-full left-3 right-3 mb-1 max-h-48 overflow-y-auto rounded-lg border border-white/10 bg-[#1a1a1a] shadow-xl z-50">
-              {filteredTemplates.slice(0, 20).map((tpl, i) => (
+            <div ref={templatePopupRef} className="absolute bottom-full left-3 right-3 mb-1 max-h-48 max-md:max-h-28 [@media(max-height:400px)]:max-h-28 overflow-y-auto rounded-lg border border-white/10 bg-[#1a1a1a] shadow-xl z-50">
+              {visibleTemplates.map((tpl, i) => (
                 <button
                   key={tpl.id}
                   onClick={() => {

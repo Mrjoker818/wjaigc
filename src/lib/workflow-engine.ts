@@ -11,14 +11,15 @@
  * - 节点自动布局
  */
 
-import { SHARED_ASPECT_RATIOS, calculateActualPixels } from './canvas-generation-group';
+import { WORKFLOW_IMAGE_SOURCE_OPTIONS } from '@/lib/workflow-image-source-options';
+import { SHARED_ASPECT_RATIOS, calculateActualPixels } from '@/lib/canvas-generation-group';
 
 /** getModelParamType: 判断模型的参数类型（resolution/quality/both/none） */
-import { getModelParamType } from './canvas-generation-group';
-import { toAgentModelCapabilitySet } from './agent-runtime/model-capability-set';
-import { withImageOutputPreference, type ImageBackgroundMode } from './image-generation-output';
-import { requiredSkillModelRoles, type SkillDefinition, type SkillInputField, type SkillModelBinding } from './skill-runtime/types';
-import type { TaskModelDescriptor } from './task-core/model-capability-contract';
+import { getModelParamType } from '@/lib/canvas-generation-group';
+import { toAgentModelCapabilitySet } from '@/lib/agent-runtime/model-capability-set';
+import { withImageOutputPreference, type ImageBackgroundMode } from '@/lib/image-generation-output';
+import { requiredSkillModelRoles, type SkillDefinition, type SkillInputField, type SkillModelBinding } from '@/lib/skill-runtime/types';
+import type { TaskModelDescriptor } from '@/lib/task-core/model-capability-contract';
 
 // ==================== 节点类型 ====================
 
@@ -827,9 +828,7 @@ export function getNodePropertyFields(type: NodeType): PropertyField[] {
 
   // ─── 输入节点 ───
   if (type === 'input-image') {
-    fields.push({ key: 'source', label: '来源', type: 'select', options: [
-      { label: '上传图片', value: 'upload' }, { label: 'URL地址', value: 'url' }, { label: '画布选图', value: 'canvas' }
-    ], defaultValue: 'upload' });
+    fields.push({ key: 'source', label: '来源', type: 'select', options: WORKFLOW_IMAGE_SOURCE_OPTIONS.map(option => ({ ...option })), defaultValue: 'upload' });
     fields.push({ key: 'imageUrl', label: '图片', type: 'image-upload', placeholder: '输入图片URL或上传图片' });
   }
 
@@ -1674,6 +1673,7 @@ export function getNodeInputs(
 
   // 从上游连线中获取输入 (按端口类型映射)
   const incomingConns = connections.filter(c => c.toNodeId === node.id);
+  const connectedVideoUrls: string[] = [];
   let connectedEditSourceAdopted = false;
   const appendImageInputs = (
     output: Record<string, unknown>,
@@ -1715,7 +1715,8 @@ export function getNodeInputs(
           && typeof output.placementId === 'string' && output.placementId.trim()) {
           inputs.assetVersionId = output.assetVersionId;
           inputs.placementId = output.placementId;
-          inputs.sourceEntityId = sourceNodeId;
+          inputs.sourceEntityId = typeof output.entityId === 'string' && output.entityId.trim().length > 0
+            ? output.entityId : sourceNodeId;
           if (typeof output.assetId === 'string') inputs.assetId = output.assetId;
         }
         connectedEditSourceAdopted = true;
@@ -1830,7 +1831,20 @@ export function getNodeInputs(
         if (typeof upstreamOutput.videoAssetVersionId === 'string') {
           inputs.videoAssetVersionId = upstreamOutput.videoAssetVersionId;
         }
-        if (Array.isArray(upstreamOutput.videoUrls)) inputs.videoUrls = upstreamOutput.videoUrls;
+        if (node.type === 'video-concat') {
+          const groupedUrls = Array.isArray(upstreamOutput.videoUrls)
+            ? upstreamOutput.videoUrls.filter((url): url is string => typeof url === 'string' && url.trim().length > 0)
+            : [];
+          if (groupedUrls.length > 0) connectedVideoUrls.push(...groupedUrls);
+          else if (typeof upstreamOutput.videoUrl === 'string' && upstreamOutput.videoUrl.trim()) {
+            connectedVideoUrls.push(upstreamOutput.videoUrl);
+          }
+        } else if (Array.isArray(upstreamOutput.videoUrls)) inputs.videoUrls = upstreamOutput.videoUrls;
+        break;
+      case 'audio':
+        if (typeof upstreamOutput.audioUrl === 'string' && upstreamOutput.audioUrl.trim()) {
+          inputs.audioUrl = upstreamOutput.audioUrl;
+        }
         break;
       case 'data':
         // 数据连线: 传递所有输出
@@ -1856,6 +1870,8 @@ export function getNodeInputs(
       }
     }
   }
+
+  if (node.type === 'video-concat' && connectedVideoUrls.length > 0) inputs.videoUrls = connectedVideoUrls;
 
   // P0: 解析[img:xxx]引用 — 替换为实际的图片URL
   for (const [key, val] of Object.entries(inputs)) {
@@ -2716,8 +2732,8 @@ export function buildNodeExecutionRequest(
         endpoint: '/api/video/tools',
         method: 'POST',
         body: {
-          action: 'concat',
-          videoUrls: config.videoUrls || inputs.videoUrls || [],
+          action: 'concat-videos',
+          videoUrls: getConfigStringArray(config, 'videoUrls'),
         }
       };
 
@@ -2792,7 +2808,7 @@ export function buildNodeExecutionRequest(
 
     // ─── 音频生成节点（TTS） ───
     case 'ai-audio': {
-      const text = getConfigString(config, 'text');
+      const text = getConfigString(config, 'text') || getConfigString(config, 'prompt');
       return {
         endpoint: '/api/audio/generate',
         method: 'POST',
@@ -2829,7 +2845,7 @@ export function buildNodeExecutionRequest(
         endpoint: '/api/video/tools',
         method: 'POST',
         body: {
-          action: audioUrl ? 'add-audio' : (videoUrls && videoUrls.length ? 'concat' : 'trim'),
+          action: audioUrl ? 'add-audio' : (videoUrls && videoUrls.length ? 'concat-videos' : 'trim'),
           videoUrl: videoUrls.length ? '' : videoUrl,
           videoUrls: videoUrls.length ? videoUrls : undefined,
           audioUrl,

@@ -15,6 +15,9 @@ import {
   parseWorkflowSketchDocumentReference, resolveInlineSubgraph, type WorkflowSketchDocumentReference,
   parseWorkflowSketchImageReference,
 } from '@/lib/workflow-engine';
+import { planWorkflowImageExtraction } from '../lib/workflow-image-graph';
+import { createWorkflowImageGridClient, type WorkflowGridClient, type WorkflowGridClientView } from '../lib/workflow-image-grid-client';
+import { readWorkflowImageRetryView, beginWorkflowImageRetry, acceptWorkflowImageRetry, finishWorkflowImageRetry, readWorkflowImageRetrySnapshot, workflowImageRetryRecord, type WorkflowImageRetryView, type WorkflowImageRetryResult } from '../lib/workflow-image-retry-view';
 import { SketchClient, sketchModels, DOCUMENT_PLACEMENT_REASON, SKETCH_DOCUMENT_SANDBOX, type SketchScope } from '@/lib/sketch-to-code/client';
 import { sketchImageModels } from '@/lib/sketch-to-code/image-contract';
 import { WorkflowSketchImageControls } from '@/components/workflow-sketch-image-controls';
@@ -24,13 +27,17 @@ import {
   createWorkflowClipboardSnapshot,
   createWorkflowEditorState,
   mergeExternalWorkflowWithPositions,
+  undoWorkflowCommandHistory,
+  redoWorkflowCommandHistory,
   reduceWorkflowEditorState,
   type WorkflowCommandResult,
+  type WorkflowEditorTransition,
   type WorkflowClipboardSnapshot,
   type WorkflowInteractionCommand,
   type WorkflowNodePosition,
 } from '@/lib/workflow-renderer/commands';
 import { resolveWorkflowRendererMode, type WorkflowRendererMode } from '@/lib/workflow-renderer/mode';
+import { createMinimapPointerTracker } from '@/lib/workflow-renderer/minimap-pointer';
 import {
   projectLegacyRenderModel,
   projectReactFlowRenderModel,
@@ -38,10 +45,15 @@ import {
 import { WorkflowLegacySurface, type WorkflowLegacyCardCallbacks } from '@/components/workflow/WorkflowLegacySurface';
 import { WorkflowReactFlowSurface } from '@/components/workflow/WorkflowReactFlowSurface';
 import { WorkflowShadowProbe } from '@/components/workflow/WorkflowShadowProbe';
+import { WorkflowLibraryContent } from '@/components/workflow/WorkflowLibraryContent';
+import { WorkflowContextMenu, type WorkflowMenuAction, type WorkflowMenuLocation } from '@/components/workflow/WorkflowContextMenu';
+import { ImageCompareDialog } from '@/components/image-compare-dialog';
 import { getModelDisplayName } from '@/lib/model-name-map';
+import { readWorkflowImageInputTransform } from '../lib/workflow-image-receiver';
 import { parseExactModelKey, resolvePersistedModelSelection } from '@/lib/model-defaults';
 import { computePortPosition } from '@/lib/node-port-position';
 import { getLegacyPortWorldPosition } from '@/lib/workflow-renderer/legacy-port-position';
+import { createLegacyMobilePointerController, type LegacyMobilePointerController, type LegacyMobilePointerOptions, type LegacyPortEndpoint } from '@/lib/workflow-renderer/legacy-mobile-pointer';
 import {
   createTaskModelCatalogIndex,
   taskModelKey,
@@ -100,7 +112,7 @@ import {
   Image as ImageIcon, Type, SlidersHorizontal, Wand2, Pencil, Maximize, Scissors,
   PenTool, Palette, Sun, GitBranch, GitMerge, Repeat, RefreshCw, Layers,
   Bot, MessageSquare, ImageDown, Save, Download, Play, Square,
-  FileInput,
+  FileInput, MoreHorizontal, GitCompare,
   ChevronDown, Plus, Trash2, ZoomIn, ZoomOut, RotateCcw,
   Settings, Upload, X, Check, AlertCircle, Loader2, BoxSelect, Group,
   Search, ScanSearch,
@@ -625,7 +637,13 @@ const WORKFLOW_PRESETS: WorkflowPreset[] = [
     ],
     connections: [
       { from: 0, to: 1, fromPort: 'out-prompt', toPort: 'in-prompt', type: 'prompt' },
-      { from: 1, to: 10, fromPort: 'out-text', toPort: 'in-video', type: 'video' },
+      { from: 1, to: 2, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
+      { from: 1, to: 3, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
+      { from: 1, to: 4, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
+      { from: 1, to: 5, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
+      { from: 1, to: 6, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
+      { from: 1, to: 7, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
+      { from: 1, to: 8, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
       { from: 2, to: 10, fromPort: 'out-video', toPort: 'in-video', type: 'video' },
       { from: 3, to: 10, fromPort: 'out-video', toPort: 'in-video', type: 'video' },
       { from: 4, to: 10, fromPort: 'out-video', toPort: 'in-video', type: 'video' },
@@ -1054,14 +1072,37 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
   const bcIgnoreRef = useRef(false); // 防止自己发的消息回触发
   const bcDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [workflowEditorState, dispatchWorkflowEditorTransition] = useReducer(reduceWorkflowEditorState,
+  const [workflowEditorState, dispatchWorkflowEditorTransitionBase] = useReducer(reduceWorkflowEditorState,
     workflow || createEmptyWorkflow('新工作流'),
     createWorkflowEditorState,
   );
+  // Invalidate a pending AI result synchronously when graph content may change.
+  // Automatic node measurement only adjusts layout and must not invalidate it.
+  const aiBuildContentEpochRef = useRef(0);
+  const dispatchWorkflowEditorTransition = useCallback((transition: WorkflowEditorTransition): void => {
+    if (transition.kind !== 'command' || transition.command.type !== 'node.measure') {
+      aiBuildContentEpochRef.current += 1;
+    }
+    dispatchWorkflowEditorTransitionBase(transition);
+  }, []);
   const wf = workflowEditorState.workflow;
+  const workflowEditorStateRef = useRef(workflowEditorState);
+  workflowEditorStateRef.current = workflowEditorState;
   const wfRef = useRef(wf);
   wfRef.current = wf;
   const editorTransactionCounterRef = useRef(0);
+  const materialInsertionCentersRef = useRef(new Map<string, { guard: ReturnType<typeof createWorkflowInputTransferGuard>;
+    transactionId: string; x: number; y: number; cx: number; cy: number; width: number; sourceImageId: string; geometryEpoch: number }>());
+  const materialGeometryEpochRef = useRef(new Map<string, number>());
+  const noteMaterialUserGeometry = useCallback((nodeId: string): void => {
+    if (materialInsertionCentersRef.current.has(nodeId)) materialGeometryEpochRef.current.set(nodeId, (materialGeometryEpochRef.current.get(nodeId) ?? 0) + 1);
+  }, []);
+  const noteChangedMaterialGeometry = useCallback((before: WorkflowData, after: WorkflowData): void => {
+    for (const nodeId of materialInsertionCentersRef.current.keys()) {
+      const oldNode = before.nodes.find(node => node.id === nodeId), newNode = after.nodes.find(node => node.id === nodeId);
+      if (!oldNode || !newNode || oldNode.x !== newNode.x || oldNode.y !== newNode.y || oldNode.width !== newNode.width || oldNode.height !== newNode.height) noteMaterialUserGeometry(nodeId);
+    }
+  }, [noteMaterialUserGeometry]);
   const [nodePromptPresets, setNodePromptPresets] = useState<{ id: string; name: string; text: string }[]>(() => {
     try {
       return JSON.parse(localStorage.getItem('wujie-node-presets') || '[]') as { id: string; name: string; text: string }[];
@@ -1082,13 +1123,14 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
     const current = wfRef.current;
     const next = typeof updater === 'function' ? updater(current) : updater;
     if (next === current) return;
+    noteChangedMaterialGeometry(current, next);
     wfRef.current = next;
     dispatchWorkflowEditorTransition({
       kind: 'user.update',
       workflow: next,
       transactionId: `editor-change:${++editorTransactionCounterRef.current}`,
     });
-  }, []);
+  }, [noteChangedMaterialGeometry]);
   const updateWorkflowSystem = useCallback((updater: (prev: WorkflowData) => WorkflowData) => {
     const workflow = updater(wfRef.current);
     if (workflow === wfRef.current) return;
@@ -1096,11 +1138,13 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
     dispatchWorkflowEditorTransition({ kind: 'system.update', workflow });
   }, []);
   const dispatchWorkflowStateCommand = useCallback((command: WorkflowInteractionCommand): WorkflowCommandResult => {
-    const result = applyWorkflowCommand(wfRef.current, command);
+    const before = wfRef.current;
+    const result = applyWorkflowCommand(before, command);
+    if (command.type !== 'node.measure') noteChangedMaterialGeometry(before, result.workflow);
     wfRef.current = result.workflow;
     dispatchWorkflowEditorTransition({ kind: 'command', command });
     return result;
-  }, []);
+  }, [noteChangedMaterialGeometry]);
   const saveNodePromptPreset = useCallback((name: string, text: string) => {
     if (!name.trim() || !text.trim()) return;
     setNodePromptPresets(previous => {
@@ -1146,6 +1190,11 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
   // 兼容：获取单个选中节点ID
   const selectedNodeId = useMemo(() => selectedNodeIds.size > 0 ? [...selectedNodeIds][0] : null, [selectedNodeIds]);
   const lastEmittedRef = useRef<WorkflowData | null>(null);
+  const aiBuildExternalWorkflowRef = useRef(workflow);
+  if (aiBuildExternalWorkflowRef.current !== workflow) {
+    aiBuildExternalWorkflowRef.current = workflow;
+    if (workflow !== lastEmittedRef.current) aiBuildContentEpochRef.current += 1;
+  }
   const hydrateExternalWorkflow = useCallback((externalWorkflow: WorkflowData) => {
     dispatchWorkflowStateCommand({
       type: 'workflow.hydrate',
@@ -1175,7 +1224,21 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
   const nodeDragInitialPositionsRef = useRef<Array<{ nodeId: string; position: { x: number; y: number } }>>([]);
   const nodeDragPositionRef = useRef<{ id: string; x: number; y: number } | null>(null);
   const nodeDragRafRef = useRef<number | null>(null);
+  const legacyNodePointerRef = useRef<{
+    pointerId: number; pointerType: string; owner: HTMLElement; scope: string;
+    clientX: number; clientY: number; moved: boolean;
+  } | null>(null);
+  const [legacyPropertiesDeferred, setLegacyPropertiesDeferred] = useState(false);
+  const legacyPointerScope = JSON.stringify([userId, projectId, workflow?.id ?? wf.id, canvasDocumentMode]);
+  const legacyPointerScopeRef = useRef(legacyPointerScope);
+  legacyPointerScopeRef.current = legacyPointerScope;
   const [draggingConn, setDraggingConn] = useState<DraggingConn | null>(null);
+  const draggingConnRef = useRef<DraggingConn | null>(null);
+  const connectionScopeRef = useRef<string | null>(null);
+  const legacyMobileOptionsRef = useRef<LegacyMobilePointerOptions | null>(null);
+  const legacyMobilePointerRef = useRef<LegacyMobilePointerController | null>(null);
+  const [portListOpen, setPortListOpen] = useState(false);
+  const [portListSource, setPortListSource] = useState<{ endpoint: LegacyPortEndpoint; type: PortType; scope: string } | null>(null);
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 0.8 });
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0, vx: 0, vy: 0 });
@@ -1189,6 +1252,8 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
   const nodeWheelRafRef = useRef<number | null>(null);
   const [nodeViewportSize, setNodeViewportSize] = useState({ width: 0, height: 0 });
   const [sidebarTab, setSidebarTab] = useState<'nodes' | 'props' | 'ai-build' | 'presets' | 'prompts' | 'assistant' | 'material' | 'prompt'>('nodes');
+  const [pendingPreset, setPendingPreset] = useState<{ preset: WorkflowPreset; scope: string } | null>(null);
+  useEffect(() => { setPendingPreset(null); }, [projectId, userId, wf.id]);
   const [searchQuery, setSearchQuery] = useState('');
   const [executionId, setExecutionId] = useState<string | null>(null);
   const [execStatus, setExecStatus] = useState<'idle' | 'running' | 'paused' | 'completed' | 'failed'>('idle');
@@ -1199,6 +1264,7 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
   const [skillQuote, setSkillQuote] = useState<{
     scope: WorkflowExecutionScope; quotes: WorkflowSkillQuote[]; projectId: string; expiresAt: number;
   } | null>(null);
+  const skillQuoteReturnFocusRef = useRef<HTMLElement | null>(null);
   const skillEstimateController = useRef<AbortController | null>(null);
   const skillExecutionLock = useRef(false);
   const skillWorkflowRef = useRef(wf);
@@ -1213,13 +1279,75 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
     }
   }, [skillQuote, wf.connections, wf.nodes]);
   const [execResults, setExecResults] = useState<Record<string, { status: string; output?: Record<string, unknown>; error?: string }>>({});
+  const execResultsRef = useRef(execResults);
+  execResultsRef.current = execResults;
+  const imageRetryViewRef = useRef<WorkflowImageRetryView | null>(null);
+  const imageRetryRequestRef = useRef<{ controller: AbortController; epoch: number } | null>(null);
+  const imageRetryEpochRef = useRef(0);
   const [skillObservationRevision, setSkillObservationRevision] = useState(0);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-  const [showMinimap, setShowMinimap] = useState(true);
+  const [showMinimap, setShowMinimap] = useState(false);
+  const minimapToggleRef = useRef<HTMLButtonElement>(null);
+  const toolbarRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const media = window.matchMedia('(min-width: 768px)');
+    const syncMinimapDefault = (): void => {
+      if (!media.matches) {
+        const toggle = minimapToggleRef.current;
+        const map = toggle?.closest('.node-editor-root')?.querySelector('[data-workflow-minimap]');
+        if (toggle && map?.contains(toggle.ownerDocument.activeElement)) toggle.focus();
+      }
+      setShowMinimap(media.matches);
+    };
+    syncMinimapDefault();
+    media.addEventListener('change', syncMinimapDefault);
+    return (): void => media.removeEventListener('change', syncMinimapDefault);
+  }, []);
+  useLayoutEffect(() => {
+    const toolbar = toolbarRef.current;
+    if (!toolbar || typeof ResizeObserver === 'undefined') return;
+    let resizeFrame: number | null = null;
+    const keepFocusedControlVisible = (): void => {
+      resizeFrame = null;
+      const active = toolbar.ownerDocument.activeElement;
+      if (!(active instanceof HTMLElement) || !toolbar.contains(active)) return;
+      const control = active.getBoundingClientRect();
+      const bounds = toolbar.getBoundingClientRect();
+      const width = toolbar.clientWidth;
+      if (width <= 0 || control.width <= 0) return;
+      const left = bounds.left + toolbar.clientLeft;
+      const right = left + width;
+      const shift = control.width > width
+        ? Math.floor(control.left - left)
+        : control.left < left
+          ? Math.floor(control.left - left) - 2
+          : control.right > right ? Math.ceil(control.right - right) + 2 : 0;
+      if (shift !== 0) toolbar.scrollLeft += shift;
+    };
+    const observer = new ResizeObserver(() => {
+      if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
+      resizeFrame = requestAnimationFrame(keepFocusedControlVisible);
+    });
+    observer.observe(toolbar);
+    return (): void => {
+      observer.disconnect();
+      if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
+    };
+  }, []);
+  const minimapPointer = useMemo(createMinimapPointerTracker, []);
+  useEffect(() => {
+    window.addEventListener('pointerdown', minimapPointer.clear, true);
+    window.addEventListener('blur', minimapPointer.clear);
+    return (): void => {
+      window.removeEventListener('pointerdown', minimapPointer.clear, true);
+      window.removeEventListener('blur', minimapPointer.clear);
+      minimapPointer.clear();
+    };
+  }, [minimapPointer]);
+  useEffect(() => { minimapPointer.clear(); }, [minimapPointer, showMinimap]);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [imagePreviewDownloadState, setImagePreviewDownloadState] = useState<'idle' | 'downloading' | 'error'>('idle');
   const [compareImages, setCompareImages] = useState<{ before: string; after: string } | null>(null);
-  const [comparePosition, setComparePosition] = useState(50);
   const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(new Set());
   const workflowInputTransferGuardRef = useRef(createWorkflowInputTransferGuard());
   const workflowInputScopeRef = useRef<string>('');
@@ -1240,6 +1368,26 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
       if (write && canvasDocumentMode) throw new Error(DOCUMENT_PLACEMENT_REASON);
     } }), [userId, projectId, canvasDocumentMode, workflowInputScope]);
 
+  const [gridClientView, setGridClientView] = useState<WorkflowGridClientView>({ phase: 'idle', message: '', canRetry: false });
+  const gridClientScopeRef = useRef({ actorId: userId || '', projectId: projectId || '', workflowId: wf.id, documentMode: canvasDocumentMode });
+  gridClientScopeRef.current = { actorId: userId || '', projectId: projectId || '', workflowId: wf.id, documentMode: canvasDocumentMode };
+  const gridClientRef = useRef<WorkflowGridClient | null>(null);
+  if (!gridClientRef.current) {
+    gridClientRef.current = createWorkflowImageGridClient({
+      snapshot: () => ({ ...gridClientScopeRef.current, workflow: wfRef.current, results: execResultsRef.current }),
+      guard: () => workflowInputTransferGuardRef.current,
+      fetcher: (input, init) => fetch(input, init),
+      apply: updateWorkflow,
+      onView: setGridClientView,
+    });
+  }
+  useEffect(() => {
+    const client = gridClientRef.current!;
+    client.reset();
+    setGridClientView({ phase: 'idle', message: '', canRetry: false });
+    return () => client.reset();
+  }, [workflowInputScope]);
+
   const toggleNodeCollapse = useCallback((nodeId: string) => {
     setCollapsedNodes(prev => {
       const next = new Set(prev);
@@ -1258,6 +1406,22 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
   const [aiBuildLoading, setAiBuildLoading] = useState(false);
   const [aiBuildError, setAiBuildError] = useState<string | null>(null);
   const [aiBuildOpen, setAiBuildOpen] = useState(false);
+  const aiBuildScope = JSON.stringify([userId, projectId, workflow?.id ?? null, wf.id, canvasDocumentMode]);
+  const aiBuildScopeRef = useRef({ key: aiBuildScope, epoch: 0 });
+  if (aiBuildScopeRef.current.key !== aiBuildScope) {
+    aiBuildScopeRef.current = { key: aiBuildScope, epoch: aiBuildScopeRef.current.epoch + 1 };
+  }
+  const aiBuildEpochRef = useRef(0);
+  const aiBuildPendingRef = useRef(false);
+  const aiBuildMountedRef = useRef(true);
+  useEffect(() => {
+    aiBuildMountedRef.current = true;
+    return () => { aiBuildMountedRef.current = false; aiBuildEpochRef.current += 1; };
+  }, []);
+  const closeAiBuild = useCallback(() => {
+    aiBuildEpochRef.current += 1;
+    setAiBuildOpen(false);
+  }, []);
 
   // P1: 执行日志
   const [execLogs, setExecLogs] = useState<WorkflowExecutionLog[]>([]);
@@ -1268,6 +1432,15 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
   const executionViewScopeRef = useRef(executionViewScope);
   executionViewScopeRef.current = executionViewScope;
   const previousExecutionViewScope = useRef(executionViewScope);
+  useEffect(() => {
+    imageRetryEpochRef.current += 1;
+    return () => {
+      imageRetryEpochRef.current += 1;
+      imageRetryRequestRef.current?.controller.abort();
+      imageRetryRequestRef.current = null;
+      imageRetryViewRef.current = null;
+    };
+  }, [executionViewScope]);
   useEffect(() => {
     if (previousExecutionViewScope.current === executionViewScope) return;
     previousExecutionViewScope.current = executionViewScope;
@@ -1285,23 +1458,118 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
       const saved = localStorage.getItem(WORKFLOW_EXEC_STATE_KEY);
       if (saved) {
         const state = JSON.parse(saved);
-        if (state.executionId && ['running', 'paused'].includes(state.execStatus)) {
+        const retryView = readWorkflowImageRetryView(state.imageRetry, state.executionId);
+        if (Object.hasOwn(state, 'imageRetry') && !retryView) return;
+        if (state.executionId && (['running', 'paused'].includes(state.execStatus)
+          || retryView && ['completed', 'failed'].includes(state.execStatus))) {
+          imageRetryViewRef.current = retryView;
+          const restoredStatus = retryView?.pending ? 'paused'
+            : retryView?.active && ['completed', 'failed'].includes(state.execStatus) ? 'running' : state.execStatus;
+          const restoredLogs = (Array.isArray(state.execLogs) ? state.execLogs : []).map((log: WorkflowExecutionLog) =>
+            retryView?.pending?.nodeId === log.nodeId ? { ...log, status: 'error', message: '重试回执待核对，请重试原节点' } : log);
           setExecutionId(state.executionId);
-          setExecStatus(state.execStatus);
-          setExecLogs(state.execLogs || []);
+          setExecStatus(restoredStatus);
+          setExecLogs(restoredLogs);
           const safeResults = safeSketchExecutionResults(state.execResults || {}, wfRef.current.nodes);
           setExecResults(safeResults);
-          if (JSON.stringify(safeResults) !== JSON.stringify(state.execResults || {})) localStorage.setItem(WORKFLOW_EXEC_STATE_KEY, JSON.stringify({ ...state, execResults: safeResults }));
           setExecutionNodeIds(Array.isArray(state.nodeIds) ? state.nodeIds : Object.keys(state.execResults || {}));
-          // running 由轮询重新持久化终态；paused 必须保留以支持刷新后继续审批。
-          if (state.execStatus === 'running') localStorage.removeItem(WORKFLOW_EXEC_STATE_KEY);
+          if (retryView || JSON.stringify(safeResults) !== JSON.stringify(state.execResults || {})) {
+            localStorage.setItem(WORKFLOW_EXEC_STATE_KEY, JSON.stringify({ ...state, execStatus: restoredStatus,
+              execResults: safeResults, execLogs: restoredLogs, ...(retryView ? { imageRetry: retryView } : {}) }));
+          }
+          if (state.execStatus === 'running' && !retryView) localStorage.removeItem(WORKFLOW_EXEC_STATE_KEY);
         }
       }
     } catch {}
   }, [WORKFLOW_EXEC_STATE_KEY, userId, projectId]);
+  const persistImageRetryState = useCallback((id: string, status: 'running' | 'paused' | 'completed' | 'failed',
+    results = execResultsRef.current, logs = execLogsRef.current): void => {
+    const retryView = imageRetryViewRef.current;
+    if (!retryView) return;
+    try {
+      localStorage.setItem(WORKFLOW_EXEC_STATE_KEY, JSON.stringify({ executionId: id, execStatus: status,
+        execResults: results, execLogs: logs, nodeIds: executionNodeIdsRef.current, imageRetry: retryView }));
+    } catch {
+      setExecLogs(previous => mergeExecutionLogs(previous, [{ time: Date.now(), nodeId: 'workflow', label: '任务记录',
+        status: 'error', message: '浏览器未能保存重试记录，请在刷新前保留当前任务信息' }]));
+    }
+  }, [WORKFLOW_EXEC_STATE_KEY]);
+  const setImageRetryLog = useCallback((nodeId: string, status: string, message: string): WorkflowExecutionLog[] => {
+    const entry: WorkflowExecutionLog = { time: Date.now(), nodeId, label: wfRef.current.nodes.find(node => node.id === nodeId)?.label || nodeId, status, message };
+    const previous = execLogsRef.current;
+    const logs = previous.some(log => log.nodeId === nodeId)
+      ? previous.map(log => log.nodeId === nodeId ? { ...log, ...entry } : log) : [...previous, entry];
+    execLogsRef.current = logs; setExecLogs(logs); return logs;
+  }, []);
+  const pauseImageRetry = useCallback((id: string, epoch: number, message: string): void => {
+    const retryView = imageRetryViewRef.current;
+    if (epoch !== imageRetryEpochRef.current || retryView?.active?.executionId !== id) return;
+    const logs = setImageRetryLog(retryView.active.nodeId, 'error', message);
+    setExecStatus('paused'); persistImageRetryState(id, 'paused', execResultsRef.current, logs);
+  }, [persistImageRetryState, setImageRetryLog]);
+  const applyImageRetrySnapshot = useCallback((raw: unknown, id: string, epoch: number): boolean => {
+    const retryView = imageRetryViewRef.current, active = retryView?.active;
+    if (epoch !== imageRetryEpochRef.current || !retryView || active?.executionId !== id) return true;
+    const snapshot = readWorkflowImageRetrySnapshot(raw, id, active.nodeId);
+    const result: WorkflowImageRetryResult = snapshot.result || { status: snapshot.status === 'paused' ? 'paused' : 'running' };
+    const results = { ...execResultsRef.current, [active.nodeId]: result };
+    execResultsRef.current = results; setExecResults(results);
+    const message = result.error || snapshot.error || (snapshot.status === 'paused' ? '结果待核对'
+      : result.status === 'success' ? '重试成功' : snapshot.status === 'running' ? '重试中...' : '重试未完成');
+    const logStatus = ['failed', 'error', 'cancelled', 'timeout'].includes(result.status) ? 'error'
+      : result.status === 'success' ? 'success' : snapshot.status === 'paused' ? 'error' : 'running';
+    const logs = setImageRetryLog(active.nodeId, logStatus, message);
+    if (['completed', 'failed', 'cancelled'].includes(snapshot.status)) {
+      imageRetryViewRef.current = finishWorkflowImageRetry(retryView);
+      const failed = snapshot.status !== 'completed' || Object.values(results).some(entry => ['failed', 'error', 'cancelled', 'timeout'].includes(entry.status));
+      const status = failed ? 'failed' : 'completed';
+      setExecStatus(status); persistImageRetryState(id, status, results, logs); return true;
+    }
+    setExecStatus(snapshot.status === 'paused' ? 'paused' : 'running');
+    persistImageRetryState(id, snapshot.status === 'paused' ? 'paused' : 'running', results, logs);
+    return snapshot.status === 'paused';
+  }, [persistImageRetryState, setImageRetryLog]);
   const [showContentStrip, setShowContentStrip] = useState(true);
+  const [compactContentExpanded, setCompactContentExpanded] = useState(false);
+  const [portLegendExpanded, setPortLegendExpanded] = useState(false);
   const [showLeftPanel, setShowLeftPanel] = useState(true);
+  const closeDirectoryOnMobile = useCallback((): void => {
+    if (window.matchMedia('(max-width: 767px)').matches) setShowLeftPanel(false);
+  }, []);
   const [showExecLog, setShowExecLog] = useState(false);
+  const executionDockRef = useRef<HTMLDivElement>(null);
+  const executionLogPanelRef = useRef<HTMLDivElement>(null);
+  useEffect((): void | (() => void) => {
+    const dock = executionDockRef.current;
+    const log = executionLogPanelRef.current;
+    if (!showExecLog || !dock || !log) return;
+    let disposed = false;
+    let dockRevealFrame = 0;
+    const revealLog = (): void => {
+      if (disposed) return;
+      cancelAnimationFrame(dockRevealFrame);
+      dockRevealFrame = requestAnimationFrame((): void => {
+        if (disposed || !window.matchMedia('(max-height: 400px)').matches
+          || dock.clientHeight <= 0 || dock.scrollHeight <= dock.clientHeight) return;
+        const dockBounds = dock.getBoundingClientRect();
+        const logBounds = log.getBoundingClientRect();
+        const visibleTop = dockBounds.top + dock.clientTop;
+        const visibleBottom = visibleTop + dock.clientHeight;
+        const logBottom = logBounds.top + Math.min(logBounds.height, dock.clientHeight);
+        const delta = logBounds.top < visibleTop ? logBounds.top - visibleTop
+          : logBottom > visibleBottom ? logBottom - visibleBottom : 0;
+        if (Number.isFinite(delta) && delta !== 0) dock.scrollTop += delta;
+      });
+    };
+    const observer = new ResizeObserver(revealLog);
+    observer.observe(dock);
+    revealLog();
+    return (): void => {
+      disposed = true;
+      observer.disconnect();
+      cancelAnimationFrame(dockRevealFrame);
+    };
+  }, [showExecLog]);
   const savedSkillRunKey = JSON.stringify(wf.nodes.filter(node => node.type === 'ai-skill' && node.config.runId)
     .map(node => [node.id, node.config.runId, node.config.skillId, node.config.version]));
   useEffect(() => {
@@ -1362,9 +1630,13 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
   }, [projectId, userId, wf.id, savedSkillRunKey, execStatus, skillObservationRevision]);
   const [clipboard, setClipboard] = useState<WorkflowClipboardSnapshot | null>(null);
   // 右键菜单状态
-  const [contextMenu, setContextMenu] = useState<{ type: 'canvas' | 'node'; x: number; y: number; nodeId?: string } | null>(null);
+  const [contextMenu, setContextMenu] = useState<WorkflowMenuLocation | null>(null);
   const [nodeAnnotationSession, setNodeAnnotationSession] = useState<NodeAnnotationSession | null>(null);
   const [nodeAnnotationError, setNodeAnnotationError] = useState<string | null>(null);
+  const [blockedNodeRetryNotice, setBlockedNodeRetryNotice] = useState(false);
+  const workflowInputActorRetries = useRef(new Map<string, { guard: ReturnType<typeof createWorkflowInputTransferGuard> }>());
+  const [workflowInputActorSourceChanged, setWorkflowInputActorSourceChanged] = useState<string | null>(null);
+  const [workflowInputActorReselectNode, setWorkflowInputActorReselectNode] = useState<string | null>(null);
   const [nodeAnnotationCandidates, setNodeAnnotationCandidates] = useState<NodeAnnotationCandidatePicker | null>(null);
 
   useEffect(() => {
@@ -1417,15 +1689,92 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
   // P2: JSON编辑器
   const [jsonEditorOpen, setJsonEditorOpen] = useState(false);
   const [jsonEditContent, setJsonEditContent] = useState('');
+  const [jsonEditorError, setJsonEditorError] = useState<string | null>(null);
+  const jsonDialogRef = useRef<HTMLDivElement>(null);
+  const jsonInputRef = useRef<HTMLTextAreaElement>(null);
+
+  useLayoutEffect(() => {
+    if (!jsonEditorOpen) return;
+    const dialog = jsonDialogRef.current;
+    if (!dialog) return;
+    const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusInput = (): void => {
+      (jsonInputRef.current ?? dialog).focus({ preventScroll: true });
+    };
+    const containFocus = (event: FocusEvent): void => {
+      if (event.target instanceof Node && !dialog.contains(event.target)) focusInput();
+    };
+    const handleModalKeyDown = (event: KeyboardEvent): void => {
+      if (event.isComposing) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        setJsonEditorOpen(false);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const controls = Array.from(dialog.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), textarea:not(:disabled), input:not(:disabled), select:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])',
+      )).filter(control => control.getClientRects().length > 0);
+      const first = controls[0], last = controls[controls.length - 1];
+      if (!first || !last) {
+        event.preventDefault();
+        focusInput();
+      } else if (!dialog.contains(document.activeElement)
+        || (event.shiftKey ? document.activeElement === first : document.activeElement === last)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus({ preventScroll: true });
+      }
+    };
+    document.addEventListener('focusin', containFocus);
+    document.addEventListener('keydown', handleModalKeyDown, true);
+    focusInput();
+    return () => {
+      document.removeEventListener('focusin', containFocus);
+      document.removeEventListener('keydown', handleModalKeyDown, true);
+      const active = document.activeElement;
+      if (returnFocus?.isConnected && (active === document.body || dialog.contains(active))) {
+        returnFocus.focus({ preventScroll: true });
+      }
+    };
+  }, [jsonEditorOpen]);
+
 
   // P2: 撤销/重做函数
+  const invalidateBlockedInputTransfers = useCallback((direction: 'undo' | 'redo') => {
+    const history = workflowEditorState.history;
+    if (direction === 'undo' ? history.index <= 0 : history.index >= history.entries.length) return;
+    const current = wfRef.current;
+    const next = direction === 'undo'
+      ? undoWorkflowCommandHistory(history, current).workflow
+      : redoWorkflowCommandHistory(history, current).workflow;
+    const transferIdentity = (node: WorkflowNode): string => {
+      const config = node.config;
+      return JSON.stringify([config.source, config.imageUrl, config.sourceImageId, config.sourceVersionId,
+        config.projectId, config.assetId, config.assetVersionId, config.placementId,
+        config.assetTransferPending, config.assetTransferError, config.assetTransferExpectedActorId, config.assetTransferExpectedProjectId,
+        config.assetTransferExpectedSource]);
+    };
+    for (const node of wfRef.current.nodes) {
+      if (node.type === 'input-image' && node.config.assetTransferPending === true
+        && (node.config.assetTransferError === 'ACTOR_SCOPE_CHANGED' || node.config.assetTransferError === 'TRANSFER_INTERRUPTED')) {
+        const restored = next.nodes.find(item => item.id === node.id);
+        if (!restored || restored.type !== 'input-image' || transferIdentity(node) !== transferIdentity(restored)) {
+          workflowInputTransferGuardRef.current.invalidate(node.id);
+          workflowInputActorRetries.current.delete(JSON.stringify([workflowInputScope, node.id]));
+        }
+      }
+    }
+  }, [workflowEditorState.history, workflowInputScope]);
   const handleUndo = useCallback(() => {
+    invalidateBlockedInputTransfers('undo');
     dispatchWorkflowEditorTransition({ kind: 'history.undo' });
-  }, []);
+  }, [invalidateBlockedInputTransfers]);
 
   const handleRedo = useCallback(() => {
+    invalidateBlockedInputTransfers('redo');
     dispatchWorkflowEditorTransition({ kind: 'history.redo' });
-  }, []);
+  }, [invalidateBlockedInputTransfers]);
 
   // P2: 保存提示词到库 - 同时保存到统一的提示词模板系统
   useCallback((text: string, tags: string[], category: string) => {
@@ -1780,16 +2129,69 @@ ${contextInfo}
 
   // P1-4: 上游图片URL缓存 — 避免每个NodeCard内联IIFE重复计算
   const upstreamImageUrls = useMemo(() => {
-    const m = new Map<string, string>();
+    const m = new Map<string, string>(), counts = new Map<string, number>();
+    const incoming = new Map<string, WorkflowConnection[]>(), resolved = new Map<string, string | null>();
+    for (const node of wf.nodes) counts.set(node.id, (counts.get(node.id) || 0) + 1);
     for (const c of wf.connections) {
+      const rows = incoming.get(c.toNodeId) || []; rows.push(c); incoming.set(c.toNodeId, rows);
+      const target = nodeById.get(c.toNodeId);
+      if (target?.type === 'input-image' && target.config.source === 'upstream') continue;
       if (c.type === 'image' || c.type === 'data') {
         const upNode = nodeById.get(c.fromNodeId);
         const url = (upNode?.config?.imageUrl as string) || (execResults[c.fromNodeId]?.output?.imageUrl as string);
         if (url) m.set(c.toNodeId, url);
       }
     }
+    // Resolve receivers through the same actual input/port rules as execution. This is preview only.
+    const receiverPreview = (initial: WorkflowNode): string | undefined => {
+      let node = initial, url: string | undefined;
+      const path: string[] = [], visited = new Set<string>();
+      while (true) {
+        if (resolved.has(node.id)) { url = resolved.get(node.id) || undefined; break; }
+        if (visited.has(node.id)) break;
+        visited.add(node.id); path.push(node.id);
+        if (counts.get(node.id) !== 1) break;
+        try { if (!readWorkflowImageInputTransform(node)) break; } catch { break; }
+        const ports = node.ports.filter(port => port.id === 'in-image'), blocked = node.config.blockedInputs;
+        if (ports.length !== 1 || ports[0].direction !== 'in' || ports[0].type !== 'image'
+          || blocked !== undefined && (!Array.isArray(blocked) || !blocked.every(value => typeof value === 'string' && value.trim().length > 0))) break;
+        const blockedIds = new Set((blocked || []) as string[]);
+        const candidates = (incoming.get(node.id) || []).filter(connection => connection.toPortId === 'in-image' && !blockedIds.has(connection.id));
+        if (candidates.length !== 1) break;
+        const connection = candidates[0], source = nodeById.get(connection.fromNodeId);
+        if (!source || source.id === node.id || counts.get(source.id) !== 1 || !connection.id.trim()) break;
+        const outputs = source.ports.filter(port => port.id === connection.fromPortId);
+        if (outputs.length !== 1 || outputs[0].direction !== 'out' || connection.type !== outputs[0].type || !canConnectPorts(outputs[0].type, 'image')) break;
+        if (source.type === 'input-image' && source.config.source === 'upstream') {
+          let transform;
+          try { transform = readWorkflowImageInputTransform(source); } catch { break; }
+          if (transform?.kind === 'identity') { node = source; continue; }
+          if (transform?.kind !== 'grid') break;
+          const result = execResults[source.id], imageInput = workflowImageRetryRecord(result?.output?.imageInput);
+          const cell = workflowImageRetryRecord(imageInput?.cell);
+          if (result?.status === 'success' && imageInput?.version === 1 && cell
+            && ['columns', 'rows', 'column', 'row'].every(key => cell[key] === transform[key as 'columns' | 'rows' | 'column' | 'row'])) {
+            const value = result.output?.imageUrl; if (typeof value === 'string' && value.trim()) url = value;
+          } else if (source.config.gridIndex === transform.row * transform.columns + transform.column + 1
+            && source.config.gridCol === transform.column + 1 && source.config.gridRow === transform.row + 1
+            && ['assetId', 'assetVersionId', 'placementId', 'projectId', 'imageUrl'].every(key => typeof source.config[key] === 'string' && Boolean(source.config[key]))) {
+            url = source.config.imageUrl as string;
+          }
+          break;
+        }
+        const value = execResults[source.id]?.output?.imageUrl || source.config.imageUrl;
+        if (typeof value === 'string' && value.trim()) url = value;
+        break;
+      }
+      for (const id of path) resolved.set(id, url || null);
+      return url;
+    };
+    for (const node of wf.nodes) {
+      if (node.type !== 'input-image' || node.config.source !== 'upstream') continue;
+      const url = receiverPreview(node); if (url) m.set(node.id, url);
+    }
     return m;
-  }, [wf.connections, nodeById, execResults]);
+  }, [wf.connections, wf.nodes, nodeById, execResults]);
 
   // 框选状态
   const [boxSelect, setBoxSelect] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
@@ -1816,8 +2218,8 @@ ${contextInfo}
   ): NodeAnnotationCandidate[] => {
     return collectNodeAnnotationCandidates({
       node,
-      nodes: wf.nodes,
-      connections: wf.connections,
+      nodes: wfRef.current.nodes,
+      connections: wfRef.current.connections,
       results: execResults,
       canvasImages: (canvasImages || []).map((image) => ({
         id: image.id,
@@ -1826,7 +2228,7 @@ ${contextInfo}
       })),
       existingBundle,
     });
-  }, [canvasImages, execResults, wf.connections, wf.nodes]);
+  }, [canvasImages, execResults]);
 
   const openNodeAnnotation = useCallback((
     sourceNode: WorkflowNode,
@@ -1870,7 +2272,7 @@ ${contextInfo}
       return;
     }
 
-    const connectionNode = wf.nodes.find(
+    const connectionNode = wfRef.current.nodes.find(
       (node) => node.id === candidate.sourceNodeId,
     );
     if (!connectionNode?.ports.some((port) =>
@@ -1901,9 +2303,11 @@ ${contextInfo}
     });
     setNodeAnnotationCandidates(null);
     setNodeAnnotationError(null);
-  }, [canvasImages, projectId, wf.nodes]);
+  }, [canvasImages, projectId]);
 
   const requestNodeAnnotation = useCallback((sourceNode: WorkflowNode | null) => {
+    const sourceNodeId = sourceNode?.id;
+    sourceNode = sourceNodeId !== undefined ? wfRef.current.nodes.find((node) => node.id === sourceNodeId) || null : null;
     if (!sourceNode) {
       setNodeAnnotationError('请选择包含单张图片的节点');
       return;
@@ -2097,16 +2501,110 @@ ${contextInfo}
   }, [handleWorkflowRenderCommand]);
   useEffect(() => { handleDeleteNodeRef.current = handleDeleteNode; }, [handleDeleteNode]);
 
+  const materialInsertionTransactionsRef = useRef(new Map<string, { transactionId: string;
+    guard: ReturnType<typeof createWorkflowInputTransferGuard>; shadow: WorkflowNode; image: CanvasImageRef }>());
+  // An interrupted insertion is owned by the exact originating scope and history entry.
+  const abandonedMaterialOriginsRef = useRef(new Map<string, { scope: string; actor: string; project: string;
+    transactionId: string; guard: ReturnType<typeof createWorkflowInputTransferGuard>;
+    token?: ReturnType<ReturnType<typeof createWorkflowInputTransferGuard>['begin']>; image: CanvasImageRef }>());
+  useEffect(() => () => { abandonedMaterialOriginsRef.current.clear(); }, []);
+  useEffect(() => () => { materialInsertionTransactionsRef.current.clear(); }, [workflowInputScope]);
+  const abandonedMaterialOrigin = (node: WorkflowNode) => {
+    const origin = abandonedMaterialOriginsRef.current.get(node.id);
+    if (!origin || origin.scope !== workflowInputScope || !userId || !projectId || origin.actor !== userId
+      || origin.project !== projectId || origin.guard === workflowInputTransferGuardRef.current
+      || node.type !== 'input-image' || node.config.assetTransferPending !== true || node.config.assetTransferError
+      || !workflowEditorState.history.entries.some(entry => entry.transactionId === origin.transactionId
+        && entry.redo.some(op => op.type === 'node.add' && op.node.id === node.id))) return undefined;
+    return origin;
+  };
+  const persistedInterruptedMaterial = (node: WorkflowNode): boolean => {
+    if (node.type !== 'input-image' || node.config.assetTransferPending !== true || node.config.assetTransferError
+      || !userId || !projectId || node.config.assetTransferExpectedActorId !== userId
+      || node.config.assetTransferExpectedProjectId !== projectId || !node.config.assetTransferExpectedSource) return false;
+    const active = abandonedMaterialOriginsRef.current.get(node.id);
+    return !active || active.scope !== workflowInputScope || active.guard !== workflowInputTransferGuardRef.current
+      || !active.token || !active.guard.isCurrent(active.token);
+  };
+  const recoveryDisplayNode = (node: WorkflowNode): WorkflowNode => {
+    const origin = abandonedMaterialOrigin(node);
+    if (!origin) return persistedInterruptedMaterial(node)
+      ? { ...node, config: { ...node.config, assetTransferError: 'TRANSFER_INTERRUPTED' } } : node;
+    const image = origin.image;
+    return { ...node, config: { ...node.config, assetTransferError: 'TRANSFER_INTERRUPTED',
+      assetTransferExpectedActorId: origin.actor, assetTransferExpectedProjectId: origin.project,
+      assetTransferExpectedSource: { id: image.id, url: image.url, projectId: image.projectId, versionId: image.versionId,
+        assetId: image.assetId, assetVersionId: image.assetVersionId, placementId: image.placementId } } };
+  };
+  useEffect(() => {
+    const ids = new Set(workflowEditorState.history.entries.map(entry => entry.transactionId));
+    for (const [id, insertion] of materialInsertionTransactionsRef.current) if (!ids.has(insertion.transactionId)) materialInsertionTransactionsRef.current.delete(id);
+  }, [workflowEditorState.history]);
+  const settleMaterialInsertion = useCallback((nodeId: string, before: WorkflowNode, after: WorkflowNode): void => {
+    const insertion = materialInsertionTransactionsRef.current.get(nodeId);
+    if (!insertion || insertion.guard !== workflowInputTransferGuardRef.current) return;
+    insertion.shadow = after;
+    const live = wfRef.current.nodes.find(node => node.id === nodeId);
+    if (live) {
+      if (live !== before) return;
+      wfRef.current = { ...wfRef.current, nodes: wfRef.current.nodes.map(node => node.id === nodeId ? after : node) };
+    }
+    dispatchWorkflowEditorTransition({ kind: 'insertion.settle', nodeId, transactionId: insertion.transactionId, before, after });
+  }, []);
   const transferCanvasImageToWorkflow = useCallback(async (
     nodeId: string,
     image: CanvasImageRef,
+    insertionTransactionId?: string,
   ): Promise<void> => {
+    const blocked = wfRef.current.nodes.find(node => node.id === nodeId);
+    if ((blocked?.config.assetTransferError === 'ACTOR_SCOPE_CHANGED' || blocked?.config.assetTransferError === 'TRANSFER_INTERRUPTED')
+      && (!userId || !projectId || blocked.config.assetTransferExpectedActorId !== userId
+        || blocked.config.assetTransferExpectedProjectId !== projectId)) return;
     const guard = workflowInputTransferGuardRef.current;
     const token = guard.begin(nodeId);
+    const origin = abandonedMaterialOriginsRef.current.get(nodeId);
+    if (origin && origin.scope === workflowInputScope && origin.guard === guard) origin.token = token;
     const isCurrent = (): boolean => guard === workflowInputTransferGuardRef.current && guard.isCurrent(token);
+    let actorScopeChanged = false;
+    const noteActorScopeChanged = async (response: Response): Promise<void> => {
+      if (response.status !== 409) return;
+      try {
+        const body: unknown = await response.clone().json();
+        actorScopeChanged = !!body && typeof body === 'object' && !Array.isArray(body)
+          && (body as { error?: unknown }).error === 'ACTOR_SCOPE_CHANGED';
+      } catch { /* Leave other failures on the existing fallback path. */ }
+    };
     const pendingReference = createPendingWorkflowInputReference(image);
+    const expectedSource = { id: image.id, url: image.url, projectId: image.projectId, versionId: image.versionId,
+      assetId: image.assetId, assetVersionId: image.assetVersionId, placementId: image.placementId };
+    let initialPendingRecorded = false;
+    const updateInputWorkflow = (updater: (prev: WorkflowData) => WorkflowData): void => {
+      if (!insertionTransactionId) { updateWorkflow(updater); return; }
+      const insertion = materialInsertionTransactionsRef.current.get(nodeId);
+      const historyPresent = workflowEditorStateRef.current.history.entries.some(entry => entry.transactionId === insertionTransactionId);
+      if (insertion && insertion.transactionId === insertionTransactionId && insertion.guard === guard
+        && (!initialPendingRecorded || historyPresent)) {
+        const before = wfRef.current.nodes.find(node => node.id === nodeId) ?? insertion.shadow;
+        const after = updater({ ...wfRef.current, nodes: [before] }).nodes[0];
+        if (after) settleMaterialInsertion(nodeId, before, after);
+        return;
+      }
+      // Hydration or bounded history eviction must not discard an authorised live receipt.
+      // The fallback never recreates a removed node or applies to a changed source or scope.
+      const current = wfRef.current.nodes.find(node => node.id === nodeId);
+      const expected = current?.config.assetTransferExpectedSource as Partial<CanvasImageRef> | undefined;
+      if (!initialPendingRecorded || !isCurrent() || !origin || origin.scope !== workflowInputScope
+        || origin.guard !== guard || origin.token !== token || origin.actor !== userId || origin.project !== projectId
+        || !current || current.type !== 'input-image' || current.config.assetTransferPending !== true || current.config.assetTransferError
+        || current.config.assetTransferExpectedActorId !== userId || current.config.assetTransferExpectedProjectId !== projectId
+        || current.config.source !== 'canvas' || current.config.sourceImageId !== image.id || current.config.imageUrl !== image.url
+        || current.config.sourceVersionId !== image.versionId || !expected || expected.id !== image.id || expected.url !== image.url
+        || expected.projectId !== image.projectId || expected.versionId !== image.versionId || expected.assetId !== image.assetId
+        || expected.assetVersionId !== image.assetVersionId || expected.placementId !== image.placementId) return;
+      updateWorkflowSystem(updater);
+    };
     const applyLegacyReference = (): void => {
-      updateWorkflow(prev => ({
+      updateInputWorkflow(prev => ({
         ...prev,
         nodes: prev.nodes.map(node => node.id === nodeId
           ? {
@@ -2115,6 +2613,7 @@ ${contextInfo}
                 ...node.config,
                 ...pendingReference,
                 assetTransferPending: false,
+                assetTransferExpectedActorId: undefined, assetTransferExpectedProjectId: undefined, assetTransferExpectedSource: undefined,
                 projectId: undefined,
                 assetId: undefined,
                 assetVersionId: undefined,
@@ -2124,7 +2623,7 @@ ${contextInfo}
           : node),
       }));
     };
-    updateWorkflow(prev => ({
+    updateInputWorkflow(prev => ({
       ...prev,
       nodes: prev.nodes.map(node => node.id === nodeId
         ? {
@@ -2132,6 +2631,10 @@ ${contextInfo}
             config: {
               ...node.config,
               ...pendingReference,
+              assetTransferPending: Boolean(projectId),
+              ...(userId && projectId ? { assetTransferExpectedActorId: node.config.assetTransferExpectedActorId || userId,
+                assetTransferExpectedProjectId: node.config.assetTransferExpectedProjectId || projectId,
+                assetTransferExpectedSource: expectedSource } : {}),
               projectId: undefined,
               assetId: undefined,
               assetVersionId: undefined,
@@ -2140,6 +2643,7 @@ ${contextInfo}
           }
         : node),
     }));
+    initialPendingRecorded = true;
     if (!projectId) {
       if (guard.isCurrent(token)) applyLegacyReference();
       return;
@@ -2157,7 +2661,10 @@ ${contextInfo}
             headers: { 'Content-Type': 'application/json', ...(userId ? { 'x-wujie-expected-actor-id': userId } : {}) },
             body: JSON.stringify({ projectId, assetVersionId: image.assetVersionId, placementId: image.placementId }),
           });
-          if (!response.ok) throw new Error(`Document input rejected (${response.status})`);
+          if (!response.ok) {
+            await noteActorScopeChanged(response);
+            throw new Error(`Document input rejected (${response.status})`);
+          }
           const reference = await response.json() as WorkspaceAssetReference;
           if (typeof reference.url !== 'string' || !reference.url.trim() || reference.assetVersionId !== image.assetVersionId
             || reference.placementId !== image.placementId) throw new Error('Document input identity changed');
@@ -2167,21 +2674,23 @@ ${contextInfo}
         if (!sourceReference.assetVersionId) {
           const adoptionResponse = await fetch('/api/assets/adopt-canvas-image', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...(userId ? { 'x-wujie-expected-actor-id': userId } : {}) },
             body: JSON.stringify({ projectId, imageId: image.id }),
           });
           if (!adoptionResponse.ok) {
+            await noteActorScopeChanged(adoptionResponse);
             throw new Error(`Legacy asset adoption failed (${adoptionResponse.status})`);
           }
           sourceReference = await adoptionResponse.json() as WorkspaceAssetReference;
           if (!sourceReference.assetVersionId) {
             throw new Error('Legacy asset adoption returned no version');
           }
-          onCanvasImageAssetReferenceAdopted?.(image.id, sourceReference);
+          if (isCurrent()) onCanvasImageAssetReferenceAdopted?.(image.id, sourceReference);
         }
+        if (!isCurrent()) throw new Error('Workflow input transfer is no longer current');
         const response = await fetch('/api/assets/transfer', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...(userId ? { 'x-wujie-expected-actor-id': userId } : {}) },
           body: JSON.stringify({
             sourceVersion: sourceReference.assetVersionId,
             targetProject: projectId,
@@ -2192,12 +2701,16 @@ ${contextInfo}
             metadata: { name: image.name, source: 'canvas', sourceImageId: image.id },
           }),
         });
-        if (!response.ok) throw new Error(`Asset transfer failed (${response.status})`);
+        if (!response.ok) {
+          await noteActorScopeChanged(response);
+          throw new Error(`Asset transfer failed (${response.status})`);
+        }
         return response.json() as Promise<WorkspaceAssetReference>;
       },
       onSuccess: transferred => {
         if (!isCurrent()) return;
-        updateWorkflow(prev => ({
+        setWorkflowInputActorSourceChanged(previous => previous === nodeId ? null : previous);
+        updateInputWorkflow(prev => ({
           ...prev,
           nodes: prev.nodes.map(node => node.id === nodeId
             ? {
@@ -2208,6 +2721,10 @@ ${contextInfo}
                   source: 'canvas',
                   sourceImageId: image.id,
                   assetTransferPending: false,
+                  assetTransferError: undefined,
+                  assetTransferExpectedActorId: undefined,
+                  assetTransferExpectedProjectId: undefined,
+                  assetTransferExpectedSource: undefined,
                   projectId,
                   assetId: transferred.assetId,
                   assetVersionId: transferred.assetVersionId,
@@ -2219,16 +2736,107 @@ ${contextInfo}
       },
       onFailure: () => {
         if (!isCurrent()) return;
+        const prior = wfRef.current.nodes.find(node => node.id === nodeId);
+        if (actorScopeChanged || (prior?.config.assetTransferError === 'ACTOR_SCOPE_CHANGED' || prior?.config.assetTransferError === 'TRANSFER_INTERRUPTED')) {
+          updateInputWorkflow(prev => ({ ...prev, nodes: prev.nodes.map(node => node.id === nodeId
+            ? { ...node, config: { ...node.config, assetTransferPending: true, assetTransferError: actorScopeChanged ? 'ACTOR_SCOPE_CHANGED' : node.config.assetTransferError,
+              assetTransferExpectedActorId: node.config.assetTransferExpectedActorId || userId || '',
+              assetTransferExpectedProjectId: (node.config.assetTransferError === 'ACTOR_SCOPE_CHANGED' || node.config.assetTransferError === 'TRANSFER_INTERRUPTED')
+                ? node.config.assetTransferExpectedProjectId : projectId,
+              assetTransferExpectedSource: expectedSource } } : node) }));
+          return;
+        }
         if (!canvasDocumentMode) { applyLegacyReference(); return; }
-        updateWorkflow(prev => ({ ...prev, nodes: prev.nodes.map(node => node.id === nodeId ? {
+        updateInputWorkflow(prev => ({ ...prev, nodes: prev.nodes.map(node => node.id === nodeId ? {
           ...node, config: { ...node.config, imageUrl: '', assetTransferPending: false,
+            assetTransferExpectedActorId: undefined, assetTransferExpectedProjectId: undefined, assetTransferExpectedSource: undefined,
             projectId: undefined, assetId: undefined, assetVersionId: undefined, placementId: undefined },
         } : node) }));
         setNodeAnnotationError('协作图片权限或版本已变化，请重新选择');
       },
     });
-  }, [canvasDocumentMode, onCanvasImageAssetReferenceAdopted, projectId, updateWorkflow, userId, wf.id]);
+  }, [canvasDocumentMode, onCanvasImageAssetReferenceAdopted, projectId, settleMaterialInsertion, updateWorkflow, updateWorkflowSystem, userId, wf.id, workflowInputScope]);
 
+
+  useEffect(() => () => { materialInsertionCentersRef.current.clear(); materialGeometryEpochRef.current.clear(); }, [workflowInputScope]);
+  useLayoutEffect(() => {
+    let disposed = false, frame = 0;
+    const removers: Array<() => void> = [];
+    const schedule = (): void => { cancelAnimationFrame(frame); frame = requestAnimationFrame(reconcile); };
+    function reconcile(): void {
+      if (disposed) return;
+      for (const [nodeId, anchor] of materialInsertionCentersRef.current) {
+        const state = workflowEditorStateRef.current;
+        const index = state.history.entries.findIndex(entry => entry.transactionId === anchor.transactionId);
+        if (anchor.guard !== workflowInputTransferGuardRef.current || index < 0
+          || (materialGeometryEpochRef.current.get(nodeId) ?? 0) !== anchor.geometryEpoch) { materialInsertionCentersRef.current.delete(nodeId); continue; }
+        const node = wfRef.current.nodes.find(current => current.id === nodeId);
+        if (!node) { if (index < state.history.index) materialInsertionCentersRef.current.delete(nodeId); continue; }
+        if (index >= state.history.index || node.x !== anchor.x || node.y !== anchor.y || Math.abs(node.width - anchor.width) > 2
+          || draggingNodeRef.current === nodeId || node.config.source !== 'canvas' || node.config.sourceImageId !== anchor.sourceImageId) {
+          materialInsertionCentersRef.current.delete(nodeId); continue;
+        }
+        if (node.config.assetTransferPending === true) continue;
+        if (!node.config.imageUrl) { materialInsertionCentersRef.current.delete(nodeId); continue; }
+        const element = canvasContainerRef.current && Array.from(canvasContainerRef.current.querySelectorAll<HTMLElement>('[data-node-id]')).find(item => item.dataset.nodeId === nodeId);
+        if (!element) continue;
+        if (element.classList.contains('collapsed')) { materialInsertionCentersRef.current.delete(nodeId); continue; }
+        const images = Array.from(element.querySelectorAll('img'));
+        if (images.some(image => image.complete && image.naturalWidth === 0)) { materialInsertionCentersRef.current.delete(nodeId); continue; }
+        const waiting = images.filter(image => !image.complete);
+        if (waiting.length) {
+          for (const image of waiting) { image.addEventListener('load', schedule, { once: true }); image.addEventListener('error', schedule, { once: true });
+            removers.push(() => { image.removeEventListener('load', schedule); image.removeEventListener('error', schedule); }); }
+          continue;
+        }
+        const rect = element.getBoundingClientRect(), zoom = viewportRef.current.zoom;
+        if (!Number.isFinite(zoom) || zoom <= 0 || rect.width <= 0 || rect.height <= 0) continue;
+        const width = rect.width / zoom, height = rect.height / zoom;
+        if (Math.abs(node.width - width) > 2 || Math.abs(node.height - height) > 2) continue;
+        materialInsertionCentersRef.current.delete(nodeId);
+        settleMaterialInsertion(nodeId, node, { ...node, x: anchor.cx - width / 2, y: anchor.cy - height / 2 });
+      }
+    }
+    schedule();
+    return () => { disposed = true; cancelAnimationFrame(frame); removers.forEach(remove => remove()); };
+  }, [wf.nodes, workflowEditorState.history, viewport.zoom, workflowInputScope, settleMaterialInsertion]);
+
+  const addCanvasImageNode = useCallback((imageUrl: string, cx: number, cy: number, refImage?: CanvasImageRef): void => {
+    const imgW = refImage?.width || 1024;
+    const imgH = refImage?.height || 1024;
+    const ratio = imgW / imgH;
+    const nodeW = Math.max(180, Math.min(320, 260 * Math.max(1, ratio)));
+    const nodeH = Math.max(140, Math.min(320, nodeW / ratio));
+
+    const node = createWorkflowNode('input-image', cx - nodeW / 2, cy - nodeH / 2);
+    node.config = refImage
+      ? { ...node.config, ...createPendingWorkflowInputReference(refImage) }
+      : { ...node.config, imageUrl, source: 'canvas-ref', assetTransferPending: false };
+    node.width = nodeW;
+    node.height = nodeH;
+    const transactionId = 'material-insert:' + (++editorTransactionCounterRef.current);
+    if (refImage) {
+      materialInsertionCentersRef.current.set(node.id, { guard: workflowInputTransferGuardRef.current, transactionId,
+        x: node.x, y: node.y, cx, cy, width: nodeW, sourceImageId: refImage.id, geometryEpoch: materialGeometryEpochRef.current.get(node.id) ?? 0 });
+      materialInsertionTransactionsRef.current.set(node.id, { transactionId, guard: workflowInputTransferGuardRef.current, shadow: node, image: refImage });
+      if (userId && projectId) abandonedMaterialOriginsRef.current.set(node.id, { scope: workflowInputScope,
+        actor: userId, project: projectId, transactionId, guard: workflowInputTransferGuardRef.current, image: structuredClone(refImage) });
+    }
+    const next = { ...wfRef.current, nodes: [...wfRef.current.nodes, node] };
+    wfRef.current = next;
+    dispatchWorkflowEditorTransition({ kind: 'user.update', workflow: next, transactionId });
+    setSelectedNodeIds(new Set([node.id]));
+    if (refImage) void transferCanvasImageToWorkflow(node.id, refImage, transactionId);
+  }, [projectId, transferCanvasImageToWorkflow, userId, workflowInputScope]);
+
+  const handleLibraryImage = useCallback((id: string): void => {
+    const image = (canvasImages || []).find(candidate => candidate.id === id);
+    const rect = canvasContainerRef.current?.getBoundingClientRect();
+    if (!image || !rect) return;
+    const vp = viewportRef.current;
+    addCanvasImageNode(image.url, (rect.width / 2 - vp.x) / vp.zoom, (rect.height / 2 - vp.y) / vp.zoom, image);
+    closeDirectoryOnMobile();
+  }, [addCanvasImageNode, canvasImages, closeDirectoryOnMobile]);
 
   // 从内容面板拖拽图片到画布 → 创建 input-image 节点
   const handleCanvasImageDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
@@ -2247,7 +2855,6 @@ ${contextInfo}
     const cx = (e.clientX - rect.left - vp.x) / vp.zoom;
     const cy = (e.clientY - rect.top - vp.y) / vp.zoom;
 
-    // 根据图片宽高比计算节点大小
     const refImage: CanvasImageRef | undefined = structuredReference
       ? {
           ...structuredReference,
@@ -2255,33 +2862,165 @@ ${contextInfo}
           description: structuredReference.name || '',
         }
       : undefined;
-    const imgW = refImage?.width || 1024;
-    const imgH = refImage?.height || 1024;
-    const ratio = imgW / imgH;
-    const nodeW = Math.max(180, Math.min(320, 260 * Math.max(1, ratio)));
-    const nodeH = Math.max(140, Math.min(320, nodeW / ratio));
+    addCanvasImageNode(imageUrl, cx, cy, refImage);
+  }, [addCanvasImageNode]);
 
-    const node = createWorkflowNode('input-image', cx - nodeW / 2, cy - nodeH / 2);
-    node.config = refImage
-      ? { ...node.config, ...createPendingWorkflowInputReference(refImage) }
-      : { ...node.config, imageUrl, source: 'canvas-ref', assetTransferPending: false };
-    node.width = nodeW;
-    node.height = nodeH;
-    updateWorkflow(prev => ({ ...prev, nodes: [...prev.nodes, node] }));
-    setSelectedNodeIds(new Set([node.id]));
-    if (refImage) void transferCanvasImageToWorkflow(node.id, refImage);
-  }, [transferCanvasImageToWorkflow, updateWorkflow]);
+  // Transient UI ownership only; the original transfer remains the authority.
+  const [materialTouchAvailable, setMaterialTouchAvailable] = useState(false);
+  const materialTouchClickRef = useRef<{ owner: HTMLButtonElement; pointerId: number } | null>(null);
+  const materialTouchScopeRef = useRef({ key: workflowInputScope, epoch: 0 });
+  if (materialTouchScopeRef.current.key !== workflowInputScope) {
+    materialTouchScopeRef.current = { key: workflowInputScope, epoch: materialTouchScopeRef.current.epoch + 1 };
+  }
+  const materialImagesRef = useRef(canvasImages);
+  materialImagesRef.current = canvasImages;
+  const materialTouchRef = useRef<{
+    pointerId: number; owner: HTMLButtonElement; epoch: number; image: CanvasImageRef;
+    startX: number; startY: number; moved: boolean;
+  } | null>(null);
+  const [materialTouchPreview, setMaterialTouchPreview] = useState<{ x: number; y: number; label: string } | null>(null);
+  const cancelMaterialTouch = useCallback((render = true, suppressClick = true): void => {
+    const active = materialTouchRef.current;
+    materialTouchRef.current = null;
+    if (active && suppressClick) materialTouchClickRef.current = { owner: active.owner, pointerId: active.pointerId };
+    if (render) setMaterialTouchPreview(null);
+    if (active?.owner.hasPointerCapture(active.pointerId)) {
+      try { active.owner.releasePointerCapture(active.pointerId); } catch { /* Removed DOM owner. */ }
+    }
+  }, []);
+  useEffect(() => {
+    const media = window.matchMedia('(any-pointer: coarse)');
+    const update = (): void => {
+      const available = navigator.maxTouchPoints > 0;
+      setMaterialTouchAvailable(available);
+      if (!available) cancelMaterialTouch();
+    };
+    update();
+    media.addEventListener('change', update); window.addEventListener('focus', update);
+    return () => { media.removeEventListener('change', update); window.removeEventListener('focus', update); };
+  }, [cancelMaterialTouch]);
+  const beginMaterialTouch = useCallback((event: React.PointerEvent<HTMLButtonElement>, image: CanvasImageRef): void => {
+    if (event.pointerType !== 'touch') { materialTouchClickRef.current = null; return; }
+    if (!event.isPrimary || event.button !== 0) return;
+    materialTouchClickRef.current = null;
+    event.preventDefault(); event.stopPropagation();
+    if (materialTouchRef.current || legacyNodePointerRef.current || legacyMobilePointerRef.current?.busy()) return;
+    if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return;
+    const owner = event.currentTarget;
+    try { owner.setPointerCapture(event.pointerId); } catch { return; }
+    if (!owner.hasPointerCapture(event.pointerId)) return;
+    materialTouchRef.current = { pointerId: event.pointerId, owner, epoch: materialTouchScopeRef.current.epoch,
+      image: { ...image }, startX: event.clientX, startY: event.clientY, moved: false };
+  }, []);
+  const moveMaterialTouch = useCallback((event: React.PointerEvent<HTMLButtonElement>): void => {
+    const active = materialTouchRef.current;
+    if (!active || event.pointerType !== 'touch' || active.pointerId !== event.pointerId || active.owner !== event.currentTarget) return;
+    event.preventDefault(); event.stopPropagation();
+    if (active.epoch !== materialTouchScopeRef.current.epoch || !Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) {
+      cancelMaterialTouch(); return;
+    }
+    active.moved ||= Math.hypot(event.clientX - active.startX, event.clientY - active.startY) >= 6;
+    if (active.moved) setMaterialTouchPreview({ x: Math.max(0, Math.min(event.clientX + 12, window.innerWidth - 160)),
+      y: Math.max(0, Math.min(event.clientY + 12, window.innerHeight - 44)), label: active.image.description || active.image.name || '素材' });
+  }, [cancelMaterialTouch]);
+  const finishMaterialTouch = useCallback((event: React.PointerEvent<HTMLButtonElement>): void => {
+    const active = materialTouchRef.current;
+    if (!active || event.pointerType !== 'touch' || active.pointerId !== event.pointerId || active.owner !== event.currentTarget) return;
+    event.preventDefault(); event.stopPropagation();
+    const currentImage = materialImagesRef.current?.find(image => image.id === active.image.id);
+    const sameImage = currentImage && (['id', 'url', 'projectId', 'assetId', 'assetVersionId', 'placementId', 'versionId', 'width', 'height'] as const)
+      .every(key => currentImage[key] === active.image[key]);
+    const root = canvasContainerRef.current;
+    const hit = Number.isFinite(event.clientX) && Number.isFinite(event.clientY) ? document.elementFromPoint(event.clientX, event.clientY) : null;
+    const valid = active.moved && active.epoch === materialTouchScopeRef.current.epoch && sameImage && root && hit
+      && root.contains(hit) && !hit.closest('[data-node-id], [data-workflow-ui-occlusion], button, input, textarea, select, [role="dialog"]');
+    const rect = root?.getBoundingClientRect(), vp = viewportRef.current;
+    if (!active.moved) {
+      cancelMaterialTouch(true, active.epoch !== materialTouchScopeRef.current.epoch || !sameImage);
+      return; // A fresh tap uses the button's standard click activation.
+    }
+    cancelMaterialTouch(); // Clear ownership before capture release or graph mutation.
+    if (!valid || !currentImage || !rect || !Number.isFinite(vp.zoom) || vp.zoom <= 0) return;
+    addCanvasImageNode(currentImage.url, (event.clientX - rect.left - vp.x) / vp.zoom,
+      (event.clientY - rect.top - vp.y) / vp.zoom, currentImage);
+  }, [addCanvasImageNode, cancelMaterialTouch]);
+  const activateMaterialTouchButton = useCallback((event: React.MouseEvent<HTMLButtonElement>, imageId: string): void => {
+    event.preventDefault(); event.stopPropagation();
+    const native = event.nativeEvent as MouseEvent & { pointerType?: string; pointerId?: number;
+      sourceCapabilities?: { firesTouchEvents?: boolean } | null };
+    const handled = materialTouchClickRef.current;
+    const touchCompatibility = native.detail > 0 && (native.pointerType === 'touch'
+      || native.sourceCapabilities?.firesTouchEvents === true || native.pointerType === undefined);
+    if (handled?.owner === event.currentTarget && touchCompatibility
+      && (native.pointerId === undefined || native.pointerId === handled.pointerId)) {
+      materialTouchClickRef.current = null;
+      return;
+    }
+    materialTouchClickRef.current = null;
+    handleLibraryImage(imageId);
+  }, [handleLibraryImage]);
+  const cancelMaterialTouchEvent = useCallback((event: React.PointerEvent<HTMLButtonElement>): void => {
+    const active = materialTouchRef.current;
+    if (active && active.pointerId === event.pointerId && active.owner === event.currentTarget) cancelMaterialTouch();
+  }, [cancelMaterialTouch]);
+  useEffect(() => {
+    const cancel = (): void => cancelMaterialTouch();
+    const anotherPointer = (event: PointerEvent): void => { if (materialTouchRef.current && materialTouchRef.current.pointerId !== event.pointerId) cancel(); };
+    const escape = (event: KeyboardEvent): void => { if (event.key === 'Escape') cancel(); };
+    window.addEventListener('blur', cancel); window.addEventListener('pointerdown', anotherPointer, true); window.addEventListener('keydown', escape);
+    return () => { window.removeEventListener('blur', cancel); window.removeEventListener('pointerdown', anotherPointer, true);
+      window.removeEventListener('keydown', escape); cancelMaterialTouch(false); };
+  }, [cancelMaterialTouch]);
+  useEffect(() => { cancelMaterialTouch(); }, [workflowInputScope, cancelMaterialTouch]);
 
-  const handleNodeUpdate = useCallback((nodeId: string, updates: Partial<WorkflowNode>) => {
-    const currentImageUrl = wf.nodes.find(node => node.id === nodeId)?.config?.imageUrl;
-    if (shouldInvalidateWorkflowInputTransfer(currentImageUrl, updates.config)) {
+  const handleNodeUpdate = useCallback((nodeId: string, updates: Partial<WorkflowNode>): void => {
+    const current = wf.nodes.find(node => node.id === nodeId);
+    const sourceChanged = current?.type === 'input-image' && typeof updates.config?.source === 'string'
+      && updates.config.source !== current.config.source;
+    let applied = updates;
+    if (sourceChanged) {
+      const config = { ...current.config, ...updates.config };
+      const insertion = materialInsertionTransactionsRef.current.get(nodeId);
+      if (current.config.assetTransferPending === true && !current.config.assetTransferError && insertion
+        && insertion.guard === workflowInputTransferGuardRef.current) {
+        const image = insertion.image;
+        const expectedSource = { id: image.id, url: image.url, projectId: image.projectId, versionId: image.versionId,
+          assetVersionId: image.assetVersionId, placementId: image.placementId };
+        Object.assign(config, { assetTransferPending: true, assetTransferError: 'TRANSFER_INTERRUPTED',
+          assetTransferExpectedActorId: userId || '', assetTransferExpectedProjectId: projectId,
+          assetTransferExpectedSource: expectedSource });
+        const live = wfRef.current.nodes.find(node => node.id === nodeId);
+        if (live) settleMaterialInsertion(nodeId, live, { ...live, config: { ...live.config,
+          assetTransferPending: true, assetTransferError: 'TRANSFER_INTERRUPTED',
+          assetTransferExpectedActorId: userId || '', assetTransferExpectedProjectId: projectId,
+          assetTransferExpectedSource: expectedSource } });
+      }
+      let ports = updates.ports || current.ports;
+      if (config.source === 'upstream') {
+        if (config.imageInputTransform === undefined) config.imageInputTransform = { version: 1, kind: 'identity' };
+        const inputs = ports.filter(port => port.id === 'in-image');
+        try {
+          readWorkflowImageInputTransform({ ...current, config });
+          if (inputs.length > 1 || inputs.some(port => port.type !== 'image' || port.direction !== 'in')) throw new Error('INVALID_IMAGE_RECEIVER_PORT');
+        } catch {
+          alert('图片接收设置无效，请检查接收端口和切分设置。');
+          return;
+        }
+        if (!inputs.length) ports = [...ports, { id: 'in-image', label: '上游图片', type: 'image', direction: 'in' }];
+      }
+      if (config.assetTransferPending === true && config.assetTransferError !== 'ACTOR_SCOPE_CHANGED' && config.assetTransferError !== 'TRANSFER_INTERRUPTED') config.assetTransferPending = false;
+      applied = { ...updates, config, ports };
+    }
+    if (sourceChanged || shouldInvalidateWorkflowInputTransfer(current?.config.imageUrl, applied.config)) {
       workflowInputTransferGuardRef.current.invalidate(nodeId);
+      workflowInputActorRetries.current.delete(JSON.stringify([workflowInputScope, nodeId]));
+      materialInsertionTransactionsRef.current.delete(nodeId);
     }
     updateWorkflow(prev => ({
       ...prev,
-      nodes: prev.nodes.map(n => n.id === nodeId ? mergeWorkflowNodeUpdate(n, updates) : n),
+      nodes: prev.nodes.map(n => n.id === nodeId ? mergeWorkflowNodeUpdate(n, applied) : n),
     }));
-  }, [updateWorkflow, wf.nodes]);
+  }, [projectId, settleMaterialInsertion, updateWorkflow, userId, wf.nodes, workflowInputScope]);
 
   // P0: LLM优化提示词
   const handleLlmOptimize = useCallback(async (nodeId: string, _prompt: string, model: string, systemPrompt: string, instruction: string) => {
@@ -2324,6 +3063,7 @@ ${contextInfo}
     tailNodeId?: string;
   }) => {
     const submissionViewScope = executionViewScope;
+    if (imageRetryRequestRef.current || imageRetryViewRef.current?.active || imageRetryViewRef.current?.pending) return;
     if (unavailableSketchModel(payload.nodes, modelCatalogIndex, modelsLoading) || (containsSketchNode(payload.nodes) && sketchScope.authority === 'unknown')) {
       setExecStatus('failed'); setExecLogs([{ time: Date.now(), nodeId: 'workflow', label: '工作流', status: 'error', message: '请在当前授权项目选择可用的同步视觉聊天模型' }]); setShowExecLog(true); return;
     }
@@ -2384,6 +3124,8 @@ ${contextInfo}
       }
       executionNodes.push({ ...node, config: { ...node.config, model: selection.compositeKey, providerId: selection.providerId } });
     }
+    imageRetryViewRef.current = null;
+    imageRetryEpochRef.current += 1;
     setExecutionNodeIds(executionNodes.map(node => node.id));
     setExecStatus('running');
     setExecutionId(null);
@@ -2526,45 +3268,29 @@ ${contextInfo}
 
   // P2: 抽取图片到上游源节点
   const handleExtractToSource = useCallback((nodeId: string) => {
-    const node = wf.nodes.find(n => n.id === nodeId);
+    const current = wfRef.current;
+    const node = current.nodes.find(n => n.id === nodeId);
     if (!node || node.type !== 'input-image') return;
-    const imageUrl = node.config?.imageUrl;
-    if (!imageUrl) return;
-    // 创建新的源节点
-    const sourceNode = createWorkflowNode('input-image', node.x - 280, node.y);
-    sourceNode.config = { ...sourceNode.config, imageUrl, label: '源图' };
-    const sourceConnection = createConnection(sourceNode.id, 'output-image', nodeId, 'input-image', 'image');
-    // 清空当前节点的图片
-    handleNodeUpdate(nodeId, { config: { ...node.config, imageUrl: '', label: '输出' } });
-    // 添加源节点和连线
-    updateWorkflow(prev => ({
-      ...prev,
-      nodes: [...prev.nodes, sourceNode],
-      connections: [...prev.connections, sourceConnection],
-    }));
-  }, [wf.nodes, handleNodeUpdate, updateWorkflow]);
+    if (node.config.assetTransferPending === true) { alert('图片正在载入，请稍后再试。'); return; }
+    try {
+      sketchScope.assertCurrent();
+      const planned = planWorkflowImageExtraction(current, nodeId, projectId!);
+      workflowInputTransferGuardRef.current.invalidate(nodeId);
+      // Source, receiver and edges form one history entry; keep the original
+      // preview, asset/version identity and all existing downstream connections.
+      updateWorkflow(planned);
+    } catch {
+      alert('无法抽取当前图片，请确认图片来源和上游连线后重试。');
+    }
+  }, [projectId, sketchScope, updateWorkflow]);
 
   // P2: 宫格切分
   const handleGridSplit = useCallback((nodeId: string, cols: number, rows: number) => {
-    // 在画布上创建 rows*cols 个新的图片节点
-    const node = wf.nodes.find(n => n.id === nodeId);
-    if (!node) return;
-    const newNodes: WorkflowNode[] = [];
-    const newConns: WorkflowConnection[] = [];
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const idx = r * cols + c + 1;
-        const newNode = createWorkflowNode('input-image', node.x + (c - 1) * 260, node.y + 260 + r * 200);
-        newNode.config = { ...newNode.config, label: `切分 ${idx}`, gridIndex: idx, gridRow: r + 1, gridCol: c + 1 };
-        newNodes.push(newNode);
-        newConns.push(createConnection(nodeId, 'output-image', newNode.id, 'input-image', 'image'));
-      }
-    }
-    updateWorkflow(prev => ({ ...prev, nodes: [...prev.nodes, ...newNodes], connections: [...prev.connections, ...newConns] }));
-  }, [updateWorkflow, wf.nodes]);
+    void gridClientRef.current!.run(nodeId, cols, rows);
+  }, []);
 
   // P2: 对比滑块 — 找到上游原图，与当前节点图片对比
-  const handleCompare = useCallback((nodeId: string) => {
+  const resolveCompareImages = useCallback((nodeId: string): { before: string; after: string } | undefined => {
     const node = wf.nodes.find(n => n.id === nodeId);
     if (!node) return;
     const imageUrl = (node.config?.imageUrl as string) || (execResults[nodeId]?.output?.imageUrl as string);
@@ -2577,9 +3303,18 @@ ${contextInfo}
       beforeUrl = (upNode?.config?.imageUrl as string) || (execResults[upstreamConn.fromNodeId]?.output?.imageUrl as string) || '';
     }
     if (!beforeUrl) return;
-    setCompareImages({ before: beforeUrl, after: imageUrl });
-    setComparePosition(50);
+    return { before: beforeUrl, after: imageUrl };
   }, [wf.nodes, wf.connections, execResults]);
+
+  const handleCompare = useCallback((nodeId: string): void => {
+    const images = resolveCompareImages(nodeId);
+    if (images) setCompareImages(images);
+  }, [resolveCompareImages]);
+
+  const selectedNodeCompareImages = useMemo(
+    () => selectedNode ? resolveCompareImages(selectedNode.id) : undefined,
+    [selectedNode, resolveCompareImages],
+  );
 
   const handleSendWorkflowResultToChat = useCallback(async (nodeId: string) => {
     if (!projectId || !executionId) {
@@ -2647,6 +3382,7 @@ ${contextInfo}
   // P1: 键盘快捷键 (复制/粘贴/删除)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (jsonEditorOpen) return;
       const event = e;
       const target = e.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable) return;
@@ -2716,49 +3452,60 @@ ${contextInfo}
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedNodeIds, selectedNodeId, selectedNode, clipboard, wf, handleWorkflowRenderCommand, handleUndo, handleRedo, nodeAnnotationCandidates, nodeAnnotationSession, requestNodeAnnotation]);
+  }, [jsonEditorOpen, selectedNodeIds, selectedNodeId, selectedNode, clipboard, wf, handleWorkflowRenderCommand, handleUndo, handleRedo, nodeAnnotationCandidates, nodeAnnotationSession, requestNodeAnnotation]);
 
   // ─── 连线操作 (含端口类型约束) ───
 
+  const clearLegacyConnection = useCallback((): void => {
+    draggingConnRef.current = null;
+    connectionScopeRef.current = null;
+    setDraggingConn(null);
+  }, []);
+
+  const completeLegacyConnection = useCallback((source: LegacyPortEndpoint, target: LegacyPortEndpoint, sourceType: PortType, scope: string): void => {
+    clearLegacyConnection();
+    if (scope !== legacyPointerScopeRef.current || source.direction !== 'out' || target.direction !== 'in' || source.nodeId === target.nodeId) return;
+    const current = wfRef.current;
+    const from = current.nodes.find(node => node.id === source.nodeId)?.ports.find(port => port.id === source.portId && port.direction === 'out');
+    const to = current.nodes.find(node => node.id === target.nodeId)?.ports.find(port => port.id === target.portId && port.direction === 'in');
+    if (!from || !to || from.type !== sourceType || !canConnectPorts(from.type, to.type)) return;
+    if (current.connections.some(connection => connection.fromNodeId === source.nodeId && connection.fromPortId === source.portId
+      && connection.toNodeId === target.nodeId && connection.toPortId === target.portId)) return;
+    const connection = createConnection(source.nodeId, source.portId, target.nodeId, target.portId, from.type);
+    handleWorkflowRenderCommand({ type: 'connection.create', connection, transactionId: `legacy-connection:${connection.id}` });
+  }, [clearLegacyConnection, handleWorkflowRenderCommand]);
+
+  const beginLegacyConnection = useCallback((source: LegacyPortEndpoint, element: HTMLElement): boolean => {
+    const node = wfRef.current.nodes.find(candidate => candidate.id === source.nodeId);
+    const port = node?.ports.find(candidate => candidate.id === source.portId && candidate.direction === 'out');
+    if (!node || !port || source.direction !== 'out') return false;
+    const local = getPortPositionLocalRef.current(node, port);
+    const layer = nodeViewportTransformRef.current;
+    const visualPort = element.hasAttribute('data-port-id') ? element : [...(layer?.querySelectorAll<HTMLElement>('[data-port-id]') ?? [])].find(candidate =>
+      candidate.dataset.workflowPortNode === source.nodeId && candidate.dataset.workflowPortKey === source.portId && candidate.dataset.workflowPortDirection === 'out');
+    const pos = getLegacyPortWorldPosition(visualPort ?? element, layer)
+      ?? (local ? { x: node.x + local.x, y: node.y + local.y } : null);
+    if (!pos) return false;
+    const next = { fromNodeId: node.id, fromPortId: port.id, fromX: pos.x, fromY: pos.y, toX: pos.x, toY: pos.y, portType: port.type };
+    connectionScopeRef.current = legacyPointerScopeRef.current;
+    draggingConnRef.current = next;
+    setDraggingConn(next);
+    return true;
+  }, []);
+
   const handlePortMouseDown = useCallback((e: React.MouseEvent, nodeId: string, port: NodePort) => {
     e.stopPropagation();
-    if (port.direction !== 'out') return;
-    const node = wf.nodes.find(n => n.id === nodeId);
-    if (!node) return;
-    const local = getPortPositionLocalRef.current(node, port);
-    const pos = getLegacyPortWorldPosition(e.currentTarget as HTMLElement, nodeViewportTransformRef.current)
-      ?? (local ? { x: node.x + local.x, y: node.y + local.y } : null);
-    if (!pos) return;
-    setDraggingConn({ fromNodeId: nodeId, fromPortId: port.id, fromX: pos.x, fromY: pos.y, toX: pos.x, toY: pos.y, portType: port.type });
-  }, [wf.nodes]);
+    if (legacyNodePointerRef.current || legacyMobilePointerRef.current?.busy() || legacyMobilePointerRef.current?.suppressesMouse()) return;
+    beginLegacyConnection({ nodeId, portId: port.id, direction: port.direction }, e.currentTarget as HTMLElement);
+  }, [beginLegacyConnection]);
 
   const handlePortMouseUp = useCallback((nodeId: string, port: NodePort) => {
-    if (!draggingConn || port.direction !== 'in') return;
-    if (draggingConn.fromNodeId === nodeId) return; // 不允许自连
-
-    // P0: 端口类型约束检查
-    if (!canConnectPorts(draggingConn.portType, port.type)) {
-      console.warn(`[NodeEditor] 端口类型不兼容: ${draggingConn.portType} → ${port.type}`);
-      setDraggingConn(null);
-      return;
-    }
-
-    // 不允许重复连线
-    const exists = wf.connections.some(c =>
-      c.fromNodeId === draggingConn.fromNodeId && c.fromPortId === draggingConn.fromPortId &&
-      c.toNodeId === nodeId && c.toPortId === port.id
-    );
-    if (exists) { setDraggingConn(null); return; }
-
-    // 确定连线类型 (取输出端口类型)
-    const connType = draggingConn.portType;
-
-    const conn = createConnection(draggingConn.fromNodeId, draggingConn.fromPortId, nodeId, port.id, connType);
-    handleWorkflowRenderCommand({
-      type: 'connection.create', connection: conn, transactionId: `legacy-connection:${conn.id}`,
-    });
-    setDraggingConn(null);
-  }, [draggingConn, handleWorkflowRenderCommand, wf.connections]);
+    if (legacyMobilePointerRef.current?.busy() || legacyMobilePointerRef.current?.suppressesMouse()) return;
+    const drag = draggingConnRef.current, scope = connectionScopeRef.current;
+    if (!drag || !scope || port.direction !== 'in') return;
+    completeLegacyConnection({ nodeId: drag.fromNodeId, portId: drag.fromPortId, direction: 'out' },
+      { nodeId, portId: port.id, direction: 'in' }, drag.portType, scope);
+  }, [completeLegacyConnection]);
 
   // ─── 画布交互 ───
 
@@ -2772,6 +3519,7 @@ ${contextInfo}
   }, [updateWorkflowSystem]);
 
   const handleCanvasMouseDown = useCallback((e: React.MouseEvent) => {
+    if (legacyNodePointerRef.current || legacyMobilePointerRef.current?.busy() || legacyMobilePointerRef.current?.suppressesMouse()) return;
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
       // 中键或Alt+左键 = 平移
       const vp = viewportRef.current;
@@ -2810,6 +3558,8 @@ ${contextInfo}
       const my = (e.clientY - canvasRect.top - vp.y) / vp.zoom;
       const nodeId = draggingNodeRef.current;
       const offset = dragOffsetRef.current;
+      const initial = nodeDragInitialPositionsRef.current.find(position => position.nodeId === nodeId)?.position;
+      if (initial && (mx - offset.x !== initial.x || my - offset.y !== initial.y)) noteMaterialUserGeometry(nodeId);
       nodeDragPositionRef.current = { id: nodeId, x: mx - offset.x, y: my - offset.y };
       if (nodeDragRafRef.current === null) {
         nodeDragRafRef.current = requestAnimationFrame(() => {
@@ -2824,7 +3574,10 @@ ${contextInfo}
       const vp = viewportRef.current;
       const mx = (e.clientX - canvasRect.left - vp.x) / vp.zoom;
       const my = (e.clientY - canvasRect.top - vp.y) / vp.zoom;
-      setDraggingConn(prev => prev ? { ...prev, toX: mx, toY: my } : null);
+      const previous = draggingConnRef.current;
+      const next = previous ? { ...previous, toX: mx, toY: my } : null;
+      draggingConnRef.current = next;
+      setDraggingConn(next);
     } else if (isBoxSelectingRef.current && boxSelect) {
       // 更新框选范围
       const canvasRect = canvasContainerRef.current?.getBoundingClientRect();
@@ -2834,9 +3587,10 @@ ${contextInfo}
       const my = (e.clientY - canvasRect.top - vp.y) / vp.zoom;
       setBoxSelect(prev => prev ? { ...prev, endX: mx, endY: my } : null);
     }
-  }, [applyNodeDragPosition, isPanning, draggingConn, boxSelect, panStart.vx, panStart.x, panStart.vy, panStart.y, updateNodePanPreview]);
+  }, [applyNodeDragPosition, isPanning, draggingConn, boxSelect, panStart.vx, panStart.x, panStart.vy, panStart.y, updateNodePanPreview, noteMaterialUserGeometry]);
 
   const handleCanvasMouseUp = useCallback(() => {
+    if (legacyNodePointerRef.current || legacyMobilePointerRef.current?.busy() || legacyMobilePointerRef.current?.suppressesMouse()) return;
     if (isPanning) {
       if (nodePanRafRef.current !== null) {
         cancelAnimationFrame(nodePanRafRef.current);
@@ -2872,7 +3626,7 @@ ${contextInfo}
       // 让外部同步由 effect 在本次拖拽状态提交后执行，避免在状态更新器中触发父组件更新。
       setWorkflowSyncRevision(revision => revision + 1);
     }
-    setDraggingConn(null);
+    clearLegacyConnection();
     // 完成框选：选中框内所有节点
     if (isBoxSelectingRef.current && boxSelect) {
       const minX = Math.min(boxSelect.startX, boxSelect.endX);
@@ -2893,9 +3647,199 @@ ${contextInfo}
     }
     setBoxSelect(null);
     isBoxSelectingRef.current = false;
-  }, [applyNodeViewportPreview, boxSelect, dispatchWorkflowStateCommand, finishWorkflowDrag, isPanning, wf.nodes]);
+  }, [applyNodeViewportPreview, boxSelect, clearLegacyConnection, dispatchWorkflowStateCommand, finishWorkflowDrag, isPanning, wf.nodes]);
+
+  const cancelLegacyNodePointer = useCallback((restorePreview = true, revealProperties = false): void => {
+    const pointer = legacyNodePointerRef.current;
+    if (!pointer) return;
+    legacyNodePointerRef.current = null;
+    if (nodeDragRafRef.current !== null) cancelAnimationFrame(nodeDragRafRef.current);
+    nodeDragRafRef.current = null;
+    const initialPositions = nodeDragInitialPositionsRef.current;
+    nodeDragPositionRef.current = null;
+    draggingNodeRef.current = null;
+    nodeDragInitialPositionsRef.current = [];
+    if (restorePreview && pointer.scope === legacyPointerScopeRef.current) {
+      updateWorkflowSystem(current => ({ ...current, nodes: current.nodes.map(node => {
+        const initial = initialPositions.find(position => position.nodeId === node.id);
+        return initial ? { ...node, x: initial.position.x, y: initial.position.y } : node;
+      }) }));
+    }
+    finishWorkflowDrag([]);
+    if (restorePreview) setLegacyPropertiesDeferred(!revealProperties);
+    if (pointer.owner.hasPointerCapture?.(pointer.pointerId)) {
+      try { pointer.owner.releasePointerCapture(pointer.pointerId); } catch { /* already lost */ }
+    }
+  }, [finishWorkflowDrag, updateWorkflowSystem]);
+
+  const handleLegacyNodePointerMove = useCallback((event: React.PointerEvent): void => {
+    const pointer = legacyNodePointerRef.current;
+    if (!pointer || pointer.pointerId !== event.pointerId || pointer.pointerType !== event.pointerType || event.target !== pointer.owner) return;
+    if (pointer.scope !== legacyPointerScopeRef.current) { cancelLegacyNodePointer(); return; }
+    if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return;
+    event.preventDefault();
+    pointer.moved ||= Math.hypot(event.clientX - pointer.clientX, event.clientY - pointer.clientY) >= 3;
+    if (pointer.moved) handleCanvasMouseMove(event);
+  }, [cancelLegacyNodePointer, handleCanvasMouseMove]);
+
+  const handleLegacyNodePointerUp = useCallback((event: React.PointerEvent): void => {
+    const pointer = legacyNodePointerRef.current;
+    if (!pointer || pointer.pointerId !== event.pointerId || pointer.pointerType !== event.pointerType || event.target !== pointer.owner) return;
+    if (pointer.scope !== legacyPointerScopeRef.current || !Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) {
+      cancelLegacyNodePointer(); return;
+    }
+    handleLegacyNodePointerMove(event);
+    if (!pointer.moved) { cancelLegacyNodePointer(true, true); return; }
+    // Settle once before releasing capture; its lost event cannot cancel a committed drag.
+    legacyNodePointerRef.current = null;
+    handleCanvasMouseUp();
+    if (pointer.owner.hasPointerCapture?.(pointer.pointerId)) {
+      try { pointer.owner.releasePointerCapture(pointer.pointerId); } catch { /* already lost */ }
+    }
+  }, [cancelLegacyNodePointer, handleCanvasMouseUp, handleLegacyNodePointerMove]);
+
+  const handleLegacyNodePointerCancel = useCallback((event: React.PointerEvent): void => {
+    const pointer = legacyNodePointerRef.current;
+    if (pointer?.pointerId === event.pointerId && pointer.pointerType === event.pointerType && event.target === pointer.owner) cancelLegacyNodePointer();
+  }, [cancelLegacyNodePointer]);
+
+  useEffect(() => {
+    const blur = (): void => cancelLegacyNodePointer();
+    window.addEventListener('blur', blur);
+    return (): void => { window.removeEventListener('blur', blur); cancelLegacyNodePointer(false); };
+  }, [cancelLegacyNodePointer]);
+  useEffect(() => {
+    if (legacyNodePointerRef.current && legacyNodePointerRef.current.scope !== legacyPointerScopeRef.current) cancelLegacyNodePointer();
+  }, [cancelLegacyNodePointer, legacyPointerScope]);
+
+  legacyMobileOptionsRef.current = {
+    getScope: () => legacyPointerScopeRef.current,
+    getViewport: () => viewportRef.current,
+    getCanvasRect: () => canvasContainerRef.current?.getBoundingClientRect() ?? null,
+    isExternalGestureBusy: () => Boolean(legacyNodePointerRef.current || draggingNodeRef.current || portListSource),
+    isWithinOwner: (owner, target) => owner instanceof HTMLElement && target instanceof Node && owner.contains(target),
+    onPortBegin: (source, _point, owner) => owner instanceof HTMLElement && beginLegacyConnection(source, owner),
+    onPortMove: (_source, point) => {
+      const drag = draggingConnRef.current, rect = canvasContainerRef.current?.getBoundingClientRect(), vp = viewportRef.current;
+      if (!drag || !rect || connectionScopeRef.current !== legacyPointerScopeRef.current) return;
+      const next = { ...drag, toX: (point.x - rect.left - vp.x) / vp.zoom, toY: (point.y - rect.top - vp.y) / vp.zoom };
+      draggingConnRef.current = next;
+      setDraggingConn(next);
+    },
+    onPortEnd: (source, target) => {
+      const drag = draggingConnRef.current, scope = connectionScopeRef.current;
+      if (drag && scope && drag.fromNodeId === source.nodeId && drag.fromPortId === source.portId) completeLegacyConnection(source, target, drag.portType, scope);
+      else clearLegacyConnection();
+    },
+    onPortCancel: clearLegacyConnection,
+    resolvePortAt: point => {
+      const element = document.elementFromPoint(point.x, point.y)?.closest<HTMLElement>('[data-workflow-port-node][data-workflow-port-key][data-workflow-port-direction]');
+      if (!element || !canvasContainerRef.current?.contains(element)) return null;
+      const nodeId = element.dataset.workflowPortNode, portId = element.dataset.workflowPortKey, direction = element.dataset.workflowPortDirection;
+      if (!nodeId || !portId || (direction !== 'in' && direction !== 'out')) return null;
+      const port = wfRef.current.nodes.find(node => node.id === nodeId)?.ports.find(candidate => candidate.id === portId && candidate.direction === direction);
+      return port ? { nodeId, portId, direction } : null;
+    },
+    onViewportBegin: initial => { nodePanPreviewRef.current = initial; setNodePanViewport(initial); setIsPanning(true); },
+    onViewportPreview: updateNodePanPreview,
+    onViewportEnd: (next, commit, restore) => {
+      if (nodePanRafRef.current !== null) cancelAnimationFrame(nodePanRafRef.current);
+      nodePanRafRef.current = null;
+      if (restore) {
+        nodePanPreviewRef.current = next;
+        applyNodeViewportPreview(next);
+        setNodePanViewport(next);
+        // View changes never enter node/connection history.
+        if (commit || viewportRef.current.x !== next.x || viewportRef.current.y !== next.y || viewportRef.current.zoom !== next.zoom) setViewport(next);
+      }
+      setIsPanning(false);
+    },
+    onBlankTap: () => { setSelectedNodeIds(new Set()); setSidebarTab('nodes'); },
+    onLongPress: point => {
+      const root = canvasContainerRef.current;
+      if (!root) return;
+      const target = document.elementFromPoint(point.x, point.y)?.closest<HTMLElement>('[data-node-id]');
+      const nodeId = target && root.contains(target) ? target.dataset.nodeId : undefined;
+      const node = wfRef.current.nodes.find(candidate => candidate.id === nodeId);
+      setContextMenu({ type: node ? 'node' : 'canvas', nodeId: node?.id, x: point.x, y: point.y,
+        scope: legacyPointerScopeRef.current, returnFocus: node && target ? target : root });
+    },
+  };
+  if (!legacyMobilePointerRef.current) {
+    // Stable owner, fresh host callbacks: no gesture captures an old workflow closure.
+    const current = (): LegacyMobilePointerOptions => legacyMobileOptionsRef.current!;
+    legacyMobilePointerRef.current = createLegacyMobilePointerController({
+      getScope: () => current().getScope(), getViewport: () => current().getViewport(), getCanvasRect: () => current().getCanvasRect(),
+      isExternalGestureBusy: () => current().isExternalGestureBusy(), isWithinOwner: (owner, target) => current().isWithinOwner(owner, target),
+      onPortBegin: (source, point, owner) => current().onPortBegin(source, point, owner), onPortMove: (source, point) => current().onPortMove(source, point),
+      onPortEnd: (source, target) => current().onPortEnd(source, target), onPortCancel: () => current().onPortCancel(), resolvePortAt: point => current().resolvePortAt(point),
+      onViewportBegin: initial => current().onViewportBegin(initial), onViewportPreview: next => current().onViewportPreview(next),
+      onViewportEnd: (next, commit, restore) => current().onViewportEnd(next, commit, restore), onBlankTap: () => current().onBlankTap(),
+      onLongPress: (point, target) => current().onLongPress(point, target),
+    });
+  }
+  const handleLegacySurfacePointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
+    const controller = legacyMobilePointerRef.current!;
+    controller.freshPointer(event);
+    if (workflowRendererMode === 'react-flow-v2' || event.pointerType !== 'touch') return;
+    const target = event.target;
+    if (!(target instanceof Element) || !event.currentTarget.contains(target)) return;
+    if (target.closest('button, input, textarea, select, a, [role="button"], [contenteditable="true"], .port-dot, [data-workflow-port-key]')) {
+      if (controller.hasViewport()) controller.cancelAll();
+      return;
+    }
+    if (!controller.hasViewport() && target.closest('[data-workflow-node-drag-handle]')) return;
+    const kind = target.closest('[data-node-id], [data-edge-id]') ? 'image' : 'blank';
+    if (controller.beginViewport(event.currentTarget, event, kind)) { event.preventDefault(); event.stopPropagation(); }
+  };
+  const requestLegacyPortList = useCallback((endpoint: LegacyPortEndpoint): void => {
+    const port = wfRef.current.nodes.find(node => node.id === endpoint.nodeId)?.ports.find(candidate => candidate.id === endpoint.portId && candidate.direction === endpoint.direction);
+    if (!port || legacyNodePointerRef.current) return;
+    legacyMobilePointerRef.current?.cancelAll();
+    clearLegacyConnection();
+    setSelectedNodeIds(new Set([endpoint.nodeId])); setSidebarTab('props'); setLegacyPropertiesDeferred(false);
+    setPortListSource(endpoint.direction === 'out' ? { endpoint, type: port.type, scope: legacyPointerScopeRef.current } : null);
+    setPortListOpen(true);
+  }, [clearLegacyConnection]);
+  const handleLegacyPortPointerDown = (event: React.PointerEvent<HTMLElement>, nodeId: string, port: NodePort): void => {
+    if (workflowRendererMode === 'react-flow-v2') return;
+    if (event.pointerType === 'touch' && !event.currentTarget.hasAttribute('data-workflow-direct-port-target')
+      && window.matchMedia('(any-pointer: coarse)').matches && event.isPrimary && event.button === 0) {
+      event.preventDefault(); event.stopPropagation();
+      requestLegacyPortList({ nodeId, portId: port.id, direction: port.direction });
+      return;
+    }
+    if (legacyMobilePointerRef.current!.beginPort(event.currentTarget, event, { nodeId, portId: port.id, direction: port.direction })) {
+      event.preventDefault(); event.stopPropagation();
+    }
+  };
+  useLayoutEffect(() => {
+    legacyMobilePointerRef.current?.cancelAll();
+    clearLegacyConnection();
+    setPortListSource(null);
+    setPortListOpen(false);
+    setContextMenu(null);
+  }, [clearLegacyConnection, legacyPointerScope]);
+  useEffect(() => {
+    const root = canvasContainerRef.current;
+    const controller = legacyMobilePointerRef.current!;
+    const guard = (event: TouchEvent): void => {
+      if (!root || !controller.blocksNativeTouch() || !event.cancelable || event.touches.length === 0) return;
+      const touches = Array.from(event.touches);
+      if (!controller.matchesNativeTouchTargets(touches.map(touch => touch.target))) { controller.cancelAll(); return; }
+      const safe = touches.every(touch => touch.target instanceof Element && root.contains(touch.target)
+        && !touch.target.closest('button, input, textarea, select, a, [role="button"], [contenteditable="true"]'));
+      if (safe) event.preventDefault();
+    };
+    const blur = (): void => controller.cancelAll();
+    root?.addEventListener('touchstart', guard, { passive: false });
+    root?.addEventListener('touchmove', guard, { passive: false });
+    window.addEventListener('blur', blur);
+    return () => { root?.removeEventListener('touchstart', guard); root?.removeEventListener('touchmove', guard); window.removeEventListener('blur', blur); controller.cancelAll(); };
+  }, []);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
+    if (legacyMobilePointerRef.current?.busy() || legacyNodePointerRef.current) return;
     e.preventDefault();
     nodeWheelDeltaRef.current += e.deltaY;
     if (nodeWheelRafRef.current !== null) return;
@@ -2914,13 +3858,15 @@ ${contextInfo}
   // ─── 右键菜单 ───
   const handleCanvasContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
-    setContextMenu({ type: 'canvas', x: e.clientX, y: e.clientY });
+    legacyMobilePointerRef.current?.cancelAll();
+    setContextMenu({ type: 'canvas', x: e.clientX, y: e.clientY, scope: legacyPointerScopeRef.current, returnFocus: e.currentTarget instanceof HTMLElement ? e.currentTarget : undefined });
   }, []);
 
   const handleNodeContextMenu = useCallback((e: React.MouseEvent, nodeId: string) => {
     e.preventDefault();
     e.stopPropagation();
-    setContextMenu({ type: 'node', x: e.clientX, y: e.clientY, nodeId });
+    legacyMobilePointerRef.current?.cancelAll();
+    setContextMenu({ type: 'node', x: e.clientX, y: e.clientY, nodeId, scope: legacyPointerScopeRef.current, returnFocus: e.currentTarget instanceof HTMLElement ? e.currentTarget : undefined });
   }, []);
 
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
@@ -2934,6 +3880,7 @@ ${contextInfo}
 
   const handleContextAction = useCallback((action: string) => {
     if (!contextMenu) return;
+    if (contextMenu.scope && contextMenu.scope !== legacyPointerScopeRef.current) { closeContextMenu(); return; }
     if (contextMenu?.type === 'canvas') {
       switch (action) {
         case 'add-node': {
@@ -2973,9 +3920,18 @@ ${contextInfo}
       }
     } else if (contextMenu?.type === 'node' && contextMenu.nodeId) {
       const nodeId = contextMenu.nodeId;
+      if (!wfRef.current.nodes.some(node => node.id === nodeId)) { closeContextMenu(); return; }
+      // These are the same callbacks and grid values used by the card controls.
+      if (action === 'extract-source') handleExtractToSource(nodeId);
+      else if (action === 'grid-split-current') {
+        const node = wfRef.current.nodes.find(candidate => candidate.id === nodeId)!;
+        handleGridSplit(nodeId, Number(node.config?.gridCols || 2), Number(node.config?.gridRows || 2));
+      } else if (action === 'run-chain') void handleCascadeRun(nodeId);
+      else if (action === 'send-chat') void handleSendWorkflowResultToChat(nodeId);
+      else if (action === 'compare-image') handleCompare(nodeId);
       switch (action) {
         case 'annotate': {
-          requestNodeAnnotation(wf.nodes.find((node) => node.id === nodeId) || null);
+          requestNodeAnnotation(wfRef.current.nodes.find((node) => node.id === nodeId) || null);
           break;
         }
         case 'copy': {
@@ -3016,7 +3972,7 @@ ${contextInfo}
       }
     }
     closeContextMenu();
-  }, [contextMenu, closeContextMenu, clipboard, wf, selectedNodeIds, requestNodeAnnotation, dispatchWorkflowStateCommand, updateWorkflow]);
+  }, [contextMenu, closeContextMenu, clipboard, wf, selectedNodeIds, requestNodeAnnotation, dispatchWorkflowStateCommand, updateWorkflow, handleExtractToSource, handleGridSplit, handleCascadeRun, handleSendWorkflowResultToChat, handleCompare]);
 
   // ─── 执行工作流 ───
 
@@ -3026,51 +3982,125 @@ ${contextInfo}
   }, [startWorkflowExecution]);
 
   const handleStopWorkflow = useCallback(async () => {
+    const active = imageRetryViewRef.current?.active, epoch = imageRetryEpochRef.current;
+    if (active?.executionId === executionId) {
+      if (imageRetryRequestRef.current) return;
+      const request = { controller: new AbortController(), epoch }; imageRetryRequestRef.current = request;
+      const current = (): boolean => imageRetryRequestRef.current === request && imageRetryEpochRef.current === epoch;
+      try {
+        await fetch('/api/workflow/execute', { method: 'POST', signal: request.controller.signal,
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'cancel', executionId: active.executionId }) });
+        if (!current()) return;
+        // A completed winner or uncertain cancel is resolved by an authoritative
+        // read. Do not clear the identity or invent a cancelled node result.
+        const response = await fetch('/api/workflow/execute', { method: 'POST', signal: request.controller.signal,
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'status', executionId: active.executionId }) });
+        const raw: unknown = await response.json(); if (!current()) return;
+        if (!response.ok) throw new Error(String(workflowImageRetryRecord(raw)?.error || '取消结果待核对'));
+        applyImageRetrySnapshot(raw, active.executionId, epoch);
+      } catch (error) {
+        if (current()) pauseImageRetry(active.executionId, epoch, error instanceof Error ? error.message : '取消结果待核对');
+      } finally { if (imageRetryRequestRef.current === request) imageRetryRequestRef.current = null; }
+      return;
+    }
     if (executionId) {
-      const response = await fetch('/api/workflow/execute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'cancel', executionId }),
-      });
+      const response = await fetch('/api/workflow/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'cancel', executionId }) });
       const data = await response.json().catch(() => ({})) as { error?: string };
+      if (imageRetryEpochRef.current !== epoch) return;
       if (!response.ok) {
         setExecStatus('running');
-        setExecLogs(previous => [...previous, {
-          time: Date.now(),
-          nodeId: 'workflow',
-          label: '工作流',
-          status: 'error',
-          message: data.error || '取消工作流失败',
-        }]);
+        setExecLogs(previous => [...previous, { time: Date.now(), nodeId: 'workflow', label: '工作流', status: 'error', message: data.error || '取消工作流失败' }]);
         return;
       }
     }
-    setExecStatus('idle');
-    setExecutionId(null);
-    localStorage.removeItem(WORKFLOW_EXEC_STATE_KEY);
-  }, [executionId, WORKFLOW_EXEC_STATE_KEY]);
+    if (imageRetryEpochRef.current !== epoch) return;
+    setExecStatus('idle'); setExecutionId(null); localStorage.removeItem(WORKFLOW_EXEC_STATE_KEY);
+  }, [executionId, WORKFLOW_EXEC_STATE_KEY, applyImageRetrySnapshot, pauseImageRetry]);
 
-  // B2: 节点一键重试 — 仅重试单个失败节点，不重跑全流程
-  const handleRetryNode = useCallback(async (nodeId: string) => {
-    if (!executionId) return;
-    setExecLogs(prev => prev.map(l => l.nodeId === nodeId && l.status === 'error' ? { ...l, status: 'running', message: '重试中...' } : l));
+  const handleReconcileImageRetry = useCallback(async (): Promise<void> => {
+    const active = imageRetryViewRef.current?.active;
+    if (!active || active.executionId !== executionId || imageRetryRequestRef.current) return;
+    const request = { controller: new AbortController(), epoch: imageRetryEpochRef.current };
+    const submissionScope = executionViewScope; imageRetryRequestRef.current = request;
+    const current = (): boolean => imageRetryRequestRef.current === request && imageRetryEpochRef.current === request.epoch
+      && executionViewScopeRef.current === submissionScope && imageRetryViewRef.current?.active?.executionId === active.executionId;
     try {
-      const res = await fetch('/api/workflow/execute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'retry', executionId, nodeId, nodes: wf.nodes, connections: wf.connections }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setExecLogs(prev => prev.map(l => l.nodeId === nodeId && l.status === 'running' ? { ...l, status: 'success', message: '重试成功', time: Date.now() } : l));
-        setExecResults(prev => ({ ...prev, [nodeId]: { status: 'success', output: data.output } }));
-      } else {
-        setExecLogs(prev => prev.map(l => l.nodeId === nodeId && l.status === 'running' ? { ...l, status: 'error', message: data.error || '重试失败', time: Date.now() } : l));
+      setImageRetryLog(active.nodeId, 'running', '正在核对原任务…');
+      const response = await fetch('/api/workflow/execute', { method: 'POST', signal: request.controller.signal,
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'status', executionId: active.executionId, reconcile: true }) });
+      const raw: unknown = await response.json(); if (!current()) return;
+      if (!response.ok) throw new Error(String(workflowImageRetryRecord(raw)?.error || '结果仍待核对'));
+      applyImageRetrySnapshot(raw, active.executionId, request.epoch);
+    } catch (error) {
+      if (current()) pauseImageRetry(active.executionId, request.epoch, error instanceof Error ? error.message : '结果仍待核对');
+    } finally { if (imageRetryRequestRef.current === request) imageRetryRequestRef.current = null; }
+  }, [executionId, executionViewScope, setImageRetryLog, applyImageRetrySnapshot, pauseImageRetry]);
+
+  const handleRetryNode = useCallback(async (nodeId: string) => {
+    if (!executionId || imageRetryRequestRef.current || imageRetryViewRef.current?.active) return;
+    if (imageRetryViewRef.current?.pending && imageRetryViewRef.current.pending.nodeId !== nodeId) return;
+    if (wfRef.current.nodes.some(entry => entry.type === 'input-image'
+      && entry.config.assetTransferPending === true && (entry.config.assetTransferError === 'ACTOR_SCOPE_CHANGED' || entry.config.assetTransferError === 'TRANSFER_INTERRUPTED' || (!entry.config.assetTransferError && !entry.config.assetTransferExpectedActorId && !entry.config.assetTransferExpectedProjectId && !entry.config.assetTransferExpectedSource)))) {
+      setBlockedNodeRetryNotice(true);
+      return;
+    }
+    setBlockedNodeRetryNotice(false);
+    const request = { controller: new AbortController(), epoch: imageRetryEpochRef.current };
+    imageRetryRequestRef.current = request;
+    const submissionScope = executionViewScope;
+    const current = (): boolean => imageRetryRequestRef.current === request && imageRetryEpochRef.current === request.epoch
+      && executionViewScopeRef.current === submissionScope;
+    const node = wfRef.current.nodes.find(entry => entry.id === nodeId);
+    const imageReceiver = node?.type === 'input-image' && node.config.source === 'upstream';
+    let sourceExecutionId = imageRetryViewRef.current?.contextExecutionId || executionId;
+    try {
+      if (imageReceiver) {
+        const retryView = beginWorkflowImageRetry(imageRetryViewRef.current, executionId, nodeId);
+        imageRetryViewRef.current = retryView; sourceExecutionId = retryView.pending!.sourceExecutionId;
+        const logs = setImageRetryLog(nodeId, 'running', '重试中...');
+        setExecStatus('paused'); persistImageRetryState(executionId, 'paused', execResultsRef.current, logs);
+      } else setImageRetryLog(nodeId, 'running', '重试中...');
+      const latest = wfRef.current;
+      const nodes = latest.nodes.map(entry => entry.type === 'input-image' ? { ...entry, config: Object.fromEntries(Object.entries(entry.config)
+        .filter(([key]) => !['sourceImageId', 'sourceVersionId', 'assetTransferPending'].includes(key))) } : entry);
+      const response = await fetch('/api/workflow/execute', { method: 'POST', signal: request.controller.signal,
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'retry', executionId: sourceExecutionId,
+          nodeId, projectId, workflowId: latest.id, nodes, connections: latest.connections }) });
+      const raw: unknown = await response.json(); if (!current()) return;
+      const data = workflowImageRetryRecord(raw);
+      if (imageReceiver && response.ok && data?.executionId) {
+        const retryView = imageRetryViewRef.current;
+        if (!retryView?.pending || retryView.pending.sourceExecutionId !== sourceExecutionId) throw new Error('重试身份已变化');
+        const accepted = acceptWorkflowImageRetry(retryView, data.executionId, data.nodeId);
+        imageRetryViewRef.current = accepted;
+        const results = { ...execResultsRef.current, [nodeId]: { status: 'running' } };
+        execResultsRef.current = results; setExecResults(results);
+        const logs = setImageRetryLog(nodeId, 'running', '重试中...');
+        setExecutionId(accepted.active!.executionId); setExecStatus('running');
+        persistImageRetryState(accepted.active!.executionId, 'running', results, logs);
+        return;
+      }
+      if (!imageReceiver && response.ok && data?.success === true) {
+        setImageRetryLog(nodeId, 'success', '重试成功');
+        setExecResults(previous => ({ ...previous, [nodeId]: { status: 'success', output: workflowImageRetryRecord(data.output) } }));
+        return;
+      }
+      const message = typeof data?.error === 'string' ? data.error : imageReceiver ? '重试回执待核对，请重试原节点' : '重试失败';
+      const logs = setImageRetryLog(nodeId, 'error', message);
+      if (imageReceiver) {
+        if ([400, 403, 409, 422].includes(response.status)) {
+          const retryView = imageRetryViewRef.current; if (retryView) { const { pending: omitted, ...settled } = retryView; void omitted; imageRetryViewRef.current = settled; }
+        }
+        const status = imageRetryViewRef.current?.pending ? 'paused' : 'failed';
+        setExecStatus(status); persistImageRetryState(executionId, status, execResultsRef.current, logs);
       }
     } catch {
-      setExecLogs(prev => prev.map(l => l.nodeId === nodeId && l.status === 'running' ? { ...l, status: 'error', message: '重试网络错误', time: Date.now() } : l));
-    }
-  }, [executionId, wf]);
+      if (!current()) return;
+      const logs = setImageRetryLog(nodeId, 'error', imageReceiver ? '重试网络错误，回执待核对，请重试原节点' : '重试网络错误');
+      if (imageReceiver) { setExecStatus('paused'); persistImageRetryState(executionId, 'paused', execResultsRef.current, logs); }
+    } finally { if (imageRetryRequestRef.current === request) imageRetryRequestRef.current = null; }
+  }, [executionId, executionViewScope, projectId, persistImageRetryState, setImageRetryLog]);
 
   const handleWorkflowSkillApproval = useCallback(async (
     nodeId: string,
@@ -3127,7 +4157,8 @@ ${contextInfo}
   // 轮询执行状态
   useEffect(() => {
     if (execStatus !== 'running' || !executionId) return;
-    const executionProjectId = projectId;
+    const executionProjectId = projectId, pollEpoch = imageRetryEpochRef.current;
+    const activeImageRetry = imageRetryViewRef.current?.active?.executionId === executionId ? imageRetryViewRef.current.active : undefined;
     const controller = new AbortController();
     let pollCount = 0;
     let timerId: ReturnType<typeof setTimeout> | null = null;
@@ -3141,6 +4172,16 @@ ${contextInfo}
           body: JSON.stringify({ action: 'status', executionId }),
         });
         const data = await res.json();
+        if (controller.signal.aborted || imageRetryEpochRef.current !== pollEpoch) return;
+        if (activeImageRetry) {
+          if (!res.ok) { pauseImageRetry(executionId, pollEpoch, String(workflowImageRetryRecord(data)?.error || '图片重试状态读取失败')); return; }
+          const done = applyImageRetrySnapshot(data, executionId, pollEpoch);
+          if (!done) {
+            if (pollCount >= 180) { pauseImageRetry(executionId, pollEpoch, '图片重试读取超时，请核对原任务'); return; }
+            timerId = setTimeout(poll, pollCount <= 5 ? 1000 : pollCount <= 15 ? 1500 : 2000);
+          }
+          return;
+        }
         if (data.results) data.results = safeSketchExecutionResults(data.results, wfRef.current.nodes);
         if (controller.signal.aborted || !isWorkspaceResultScopeCurrent(executionProjectId, projectIdRef.current)) return;
         if (data.results && typeof data.results === 'object') {
@@ -3189,7 +4230,7 @@ ${contextInfo}
           if (data.results) {
             finalLogs = Object.entries(data.results as Record<string, { status: string; output?: Record<string, unknown>; error?: string }>).map(([nodeId, result]) => {
               const node = completedWorkflow.nodes.find(n => n.id === nodeId);
-              return { time: Date.now(), nodeId, label: node?.label || nodeId, status: result.status, message: result.error || (result.output ? '完成' : '未知') };
+              return { time: Date.now(), nodeId, label: node?.label || nodeId, status: ['failed', 'error', 'cancelled', 'timeout'].includes(result.status) ? 'error' : result.status, message: result.error || (result.output ? '完成' : '未知') };
             });
             setExecLogs(prev => mergeExecutionLogs(prev, finalLogs));
           }
@@ -3313,12 +4354,13 @@ ${contextInfo}
             .filter(([, result]) => result.status === 'success' || result.status === 'failed')
             .map(([nodeId, result]) => {
               const node = wf.nodes.find(n => n.id === nodeId);
-              return { time: Date.now(), nodeId, label: node?.label || nodeId, status: result.status, message: result.error || (result.output ? '完成' : '运行中') };
+              return { time: Date.now(), nodeId, label: node?.label || nodeId, status: ['failed', 'error', 'cancelled', 'timeout'].includes(result.status) ? 'error' : result.status, message: result.error || (result.output ? '完成' : '运行中') };
             });
           if (newLogs.length > 0) setExecLogs(prev => mergeExecutionLogs(prev, newLogs));
         }
       } catch (err) {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || imageRetryEpochRef.current !== pollEpoch) return;
+        if (activeImageRetry) { pauseImageRetry(executionId, pollEpoch, err instanceof Error ? err.message : '图片重试状态待核对'); return; }
         // 临时网络错误不直接终止轮询，允许重试
         console.error('[workflow-poll] Error polling workflow status:', err);
         const delay = pollCount <= 5 ? 1000 : pollCount <= 15 ? 1500 : 2000;
@@ -3340,7 +4382,7 @@ ${contextInfo}
     };
     poll();
     return () => { controller.abort(); if (timerId) clearTimeout(timerId); };
-  }, [canvasDocumentMode, execStatus, executionId, onAddImages, projectId, updateWorkflowSystem, wf.connections, wf.id, wf.nodes, WORKFLOW_EXEC_STATE_KEY]);
+  }, [canvasDocumentMode, execStatus, executionId, onAddImages, projectId, updateWorkflowSystem, wf.connections, wf.id, wf.nodes, WORKFLOW_EXEC_STATE_KEY, applyImageRetrySnapshot, pauseImageRetry]);
 
   // ─── 保存工作流 ───
 
@@ -3467,7 +4509,11 @@ ${contextInfo}
   // ─── AI自然语言建图 ───
 
   const handleAiBuild = useCallback(async () => {
-        if (!aiBuildInput.trim()) return;
+        if (!aiBuildInput.trim() || aiBuildPendingRef.current) return;
+        aiBuildPendingRef.current = true;
+        const requestEpoch = ++aiBuildEpochRef.current;
+        const requestScope = aiBuildScopeRef.current;
+        const requestContentEpoch = aiBuildContentEpochRef.current;
         setAiBuildLoading(true);
         setAiBuildError(null);
         try {
@@ -3477,7 +4523,12 @@ ${contextInfo}
             body: JSON.stringify({ description: aiBuildInput }),
           });
           const data = await res.json();
+          if (!aiBuildMountedRef.current || aiBuildEpochRef.current !== requestEpoch || aiBuildScopeRef.current !== requestScope) return;
           if (data.success && data.workflow) {
+            if (aiBuildContentEpochRef.current !== requestContentEpoch) {
+              setAiBuildError('工作流已更改，未应用本次 AI 建图结果；请检查当前工作流后重新生成。');
+              return;
+            }
             updateWorkflow(data.workflow);
             setSelectedNodeIds(new Set());
             setSidebarTab('nodes');
@@ -3487,16 +4538,19 @@ ${contextInfo}
             setAiBuildError(data.error || 'AI建图失败，请重试');
           }
         } catch (e) {
-          setAiBuildError('网络错误，请重试');
-          console.error('[NodeEditor] AI建图失败:', e);
+          if (aiBuildMountedRef.current && aiBuildEpochRef.current === requestEpoch && aiBuildScopeRef.current === requestScope) {
+            setAiBuildError('网络错误，请重试');
+            console.error('[NodeEditor] AI建图失败:', e);
+          }
         } finally {
-          setAiBuildLoading(false);
+          aiBuildPendingRef.current = false;
+          if (aiBuildMountedRef.current) setAiBuildLoading(false);
         }
       }, [aiBuildInput, updateWorkflow]);
 
   // ─── 加载预设模板 ───
 
-  useCallback((preset: WorkflowPreset) => {
+  const handleLoadPreset = useCallback((preset: WorkflowPreset) => {
         const newWf = createEmptyWorkflow(preset.name);
         newWf.description = preset.description;
 
@@ -3527,7 +4581,32 @@ ${contextInfo}
         updateWorkflow(layouted);
         setSelectedNodeIds(new Set());
         setSidebarTab('nodes');
-      }, [updateWorkflow]);
+        closeDirectoryOnMobile();
+      }, [closeDirectoryOnMobile, updateWorkflow]);
+
+  const handleLibraryPrompt = useCallback((id: string): void => {
+    const template = promptTemplates.find(candidate => candidate.id === id);
+    const rect = canvasContainerRef.current?.getBoundingClientRect();
+    if (!template || !rect) return;
+    const vp = viewportRef.current;
+    const node = createWorkflowNode('input-text', 0, 0, template.name);
+    node.x = (rect.width / 2 - vp.x) / vp.zoom - node.width / 2;
+    node.y = (rect.height / 2 - vp.y) / vp.zoom - node.height / 2;
+    node.config = { ...node.config, text: template.content };
+    updateWorkflow(previous => ({ ...previous, nodes: [...previous.nodes, node] }));
+    setSelectedNodeIds(new Set([node.id]));
+    setSidebarTab('props');
+    closeDirectoryOnMobile();
+  }, [closeDirectoryOnMobile, promptTemplates, updateWorkflow]);
+
+  const handleLibraryPreset = useCallback((id: string): void => {
+    const preset = WORKFLOW_PRESETS.find(candidate => candidate.id === id);
+    if (!preset) return;
+    const current = wfRef.current;
+    if (current.nodes.length || current.connections.length) {
+      setPendingPreset({ preset, scope: JSON.stringify([userId, projectId, current.id]) });
+    } else handleLoadPreset(preset);
+  }, [handleLoadPreset, projectId, userId]);
 
   // ─── 自动布局 ───
 
@@ -3627,6 +4706,8 @@ ${contextInfo}
     onSavePromptPreset: saveNodePromptPreset,
     onDeletePromptPreset: deleteNodePromptPreset,
     onSelect: (nodeId, event) => {
+      if (legacyNodePointerRef.current || legacyMobilePointerRef.current?.busy() || (event && legacyMobilePointerRef.current?.suppressesMouse())) return;
+      setLegacyPropertiesDeferred(Boolean(event && 'pointerId' in event));
       if (event && (event.ctrlKey || event.metaKey)) {
         setSelectedNodeIds(previous => {
           const next = new Set(previous);
@@ -3644,9 +4725,19 @@ ${contextInfo}
       setHoveredNodeId(nodeId);
     },
     onDragStart: (nodeId, event) => {
+      if (legacyNodePointerRef.current || legacyMobilePointerRef.current?.busy() || legacyMobilePointerRef.current?.suppressesMouse()) return;
       const node = wfRef.current.nodes.find(candidate => candidate.id === nodeId);
       const canvasRect = canvasContainerRef.current?.getBoundingClientRect();
       if (!node || !canvasRect) return;
+      if ('pointerId' in event) {
+        const pointer = event as React.PointerEvent<HTMLElement>;
+        if (!pointer.isPrimary || pointer.button !== 0 || !Number.isInteger(pointer.pointerId)
+          || !['mouse', 'touch', 'pen'].includes(pointer.pointerType)) return;
+        const owner = pointer.currentTarget;
+        try { owner.setPointerCapture(pointer.pointerId); } catch { setLegacyPropertiesDeferred(true); return; }
+        legacyNodePointerRef.current = { pointerId: pointer.pointerId, pointerType: pointer.pointerType, owner,
+          scope: legacyPointerScopeRef.current, clientX: pointer.clientX, clientY: pointer.clientY, moved: false };
+      }
       const currentViewport = viewportRef.current;
       const mouseX = (event.clientX - canvasRect.left - currentViewport.x) / currentViewport.zoom;
       const mouseY = (event.clientY - canvasRect.top - currentViewport.y) / currentViewport.zoom;
@@ -3660,6 +4751,8 @@ ${contextInfo}
     },
     onPortMouseDown: handlePortMouseDown,
     onPortMouseUp: handlePortMouseUp,
+    onPortPointerDown: handleLegacyPortPointerDown,
+    mobileActionMenu: workflowRendererMode !== 'react-flow-v2',
     onDelete: () => undefined,
     onDeselect: () => setSelectedNodeIds(new Set()),
     onPreviewImage: setImagePreviewUrl,
@@ -3674,25 +4767,82 @@ ${contextInfo}
     },
   };
 
+  const contextNode = contextMenu?.type === 'node' ? wf.nodes.find(node => node.id === contextMenu.nodeId) : null;
+  const extraNodeActions: WorkflowMenuAction[] = [];
+  if (contextNode) {
+    const image = execResults[contextNode.id]?.output?.imageUrl || contextNode.config?.imageUrl;
+    const inputImage = contextNode.type === 'input-image', inputText = contextNode.type === 'input-text';
+    if (inputImage && image) {
+      extraNodeActions.push({ action: 'extract-source', label: '抽取为源节点', icon: ImageDown });
+      extraNodeActions.push({ action: 'grid-split-current', label: `宫格切分 ${Number(contextNode.config?.gridCols || 2)}×${Number(contextNode.config?.gridRows || 2)}`, icon: Scissors });
+      if (upstreamImageUrls.get(contextNode.id)) extraNodeActions.push({ action: 'compare-image', label: '对比原图', icon: GitCompare });
+    }
+    if (inputText || (inputImage && image) || (!inputText && !inputImage && !image && !contextNode.type.startsWith('condition-') && !(contextNode.type.startsWith('ai-') || contextNode.type === 'output-image'))) {
+      extraNodeActions.push({ action: 'run-chain', label: '运行此链', icon: Play });
+    }
+    const output = execResults[contextNode.id]?.output;
+    if (contextNode.type === 'output-image' && ((Array.isArray(output?.imageUrls) && output.imageUrls.length > 0) || image)) {
+      extraNodeActions.push({ action: 'send-chat', label: '发送到智能对话', icon: MessageSquare });
+    }
+  }
+
+  const imageRetryReconciliation = Boolean(imageRetryViewRef.current?.active || imageRetryViewRef.current?.pending);
+  const canStopExecution = execStatus === 'running' || execStatus === 'paused' && Boolean(imageRetryViewRef.current?.active);
   // ─── 渲染 ───
 
   return (
     <>
-    <Dialog open={Boolean(skillQuote)} onOpenChange={open => { if (!open) setSkillQuote(null); }}>
-      <DialogContent className="max-w-md" data-modal="true">
+    <style>{`@media (max-width:767px), (any-pointer:coarse) {
+      .node-editor-root [data-workflow-mobile-action-menu] button[title="抽取为源节点"],
+      .node-editor-root [data-workflow-mobile-action-menu] button[title="宫格切分"],
+      .node-editor-root [data-workflow-mobile-action-menu] button[title="运行此链"],
+      .node-editor-root [data-workflow-mobile-action-menu] button[title="发送到智能对话"],
+      .node-editor-root [data-workflow-mobile-action-menu] button[title="对比原图"] { display:none; }
+    }`}</style>
+    <Dialog open={Boolean(pendingPreset)} onOpenChange={open => { if (!open) setPendingPreset(null); }}>
+      <DialogContent className="max-h-[calc(100dvh-32px)] max-w-md overflow-y-auto" data-modal="true" showCloseButton={false}>
         <DialogHeader>
+          <DialogTitle>替换当前工作流</DialogTitle>
+          <DialogDescription>加载“{pendingPreset?.preset.name}”将替换当前节点与连线。取消保留原内容；替换后可撤销恢复。</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <button type="button" className="min-h-11 min-w-11 rounded-md border border-border bg-muted px-4 text-foreground focus-visible:ring-2 focus-visible:ring-primary" onClick={() => setPendingPreset(null)}>取消</button>
+          <button type="button" className="min-h-11 min-w-11 rounded-md border border-primary bg-muted px-4 font-semibold text-foreground focus-visible:ring-2 focus-visible:ring-primary" onClick={() => {
+            const pending = pendingPreset;
+            setPendingPreset(null);
+            if (pending && pending.scope === JSON.stringify([userId, projectId, wfRef.current.id])) handleLoadPreset(pending.preset);
+          }}>替换工作流</button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <Dialog open={Boolean(skillQuote)} onOpenChange={open => { if (!open) setSkillQuote(null); }}>
+      <DialogContent
+        onOpenAutoFocus={(): void => {
+          const active = document.activeElement;
+          skillQuoteReturnFocusRef.current = active instanceof HTMLElement ? active : null;
+        }}
+        onCloseAutoFocus={(event: Event): void => {
+          const target = skillQuoteReturnFocusRef.current;
+          skillQuoteReturnFocusRef.current = null;
+          if (target?.isConnected) {
+            event.preventDefault();
+            target.focus({ preventScroll: true });
+          }
+        }}
+        className="flex max-h-[calc(100dvh-32px)] w-[calc(100%-2rem)] max-w-md flex-col overflow-hidden [&_[data-slot=dialog-close]]:top-2 [&_[data-slot=dialog-close]]:right-2 [&_[data-slot=dialog-close]]:inline-flex [&_[data-slot=dialog-close]]:min-h-11 [&_[data-slot=dialog-close]]:min-w-11 [&_[data-slot=dialog-close]]:items-center [&_[data-slot=dialog-close]]:justify-center" data-modal="true">
+        <DialogHeader className="shrink-0 pr-10">
           <DialogTitle>Skill 费用预估</DialogTitle>
           <DialogDescription>以下为各 Skill 单次调用积分，其他节点及循环重复调用另计。实际结算以执行时价格为准。</DialogDescription>
         </DialogHeader>
-        <ul className="max-h-64 overflow-y-auto space-y-2 text-sm">
+        <ul className="min-h-0 max-h-64 flex-1 overflow-y-auto overscroll-contain space-y-2 text-sm">
           {skillQuote?.quotes.map(quote => <li key={quote.nodeId} className="flex items-start justify-between gap-4">
             <span className="min-w-0 break-words">{quote.label}</span>
             <span className="shrink-0">{quote.minimum === quote.maximum ? quote.maximum : `${quote.minimum}–${quote.maximum}`} 积分</span>
           </li>)}
         </ul>
-        <DialogFooter>
-          <button className="px-3 py-2 rounded-md border" onClick={() => setSkillQuote(null)}>取消</button>
-          <button className="px-3 py-2 rounded-md bg-primary text-primary-foreground" onClick={confirmSkillExecution}>确认执行</button>
+        <DialogFooter className="shrink-0">
+          <button className="min-h-11 min-w-11 whitespace-nowrap px-3 py-2 rounded-md border focus-visible:ring-2 focus-visible:ring-primary" onClick={() => setSkillQuote(null)}>取消</button>
+          <button className="min-h-11 min-w-11 whitespace-nowrap px-3 py-2 rounded-md bg-primary text-primary-foreground focus-visible:ring-2 focus-visible:ring-primary" onClick={confirmSkillExecution}>确认执行</button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -3701,7 +4851,7 @@ ${contextInfo}
       {/* 全局图片上传 (foreignObject内input.click()不可靠, 统一由外部触发) */}
       <input ref={imageFileInputRef} type="file" accept="image/*" className="hidden" onChange={handleGlobalImageUpload} />
       {/* ═══ 顶部工具栏 - 全宽, 与原型对齐 ═══ */}
-      <header className="bg-card min-h-12 flex items-center justify-between gap-3 overflow-x-auto px-3 py-0.5 border-b border-border/20 z-50 shrink-0" role="toolbar" aria-label="工作流工具栏">
+      <header ref={toolbarRef} className="[&_button]:min-h-11 [&_button]:min-w-11 bg-card min-h-12 flex items-center justify-between gap-3 overflow-x-auto px-3 py-0.5 border-b border-border/20 z-50 shrink-0" role="toolbar" aria-label="工作流工具栏">
         {/* 左侧：工作流操作 */}
         <div className="flex min-w-max items-center gap-1" role="group" aria-label="工作流操作">
           {onBack && (
@@ -3718,15 +4868,22 @@ ${contextInfo}
           </button>
           {/* 执行/停止 */}
           <button
-            onClick={execStatus === 'running' ? handleStopWorkflow : handleRunWorkflow}
-            disabled={execStatus === 'paused' || (execStatus !== 'running' && sketchModelsUnavailable)}
+            onClick={canStopExecution ? handleStopWorkflow : handleRunWorkflow}
+            disabled={Boolean(imageRetryRequestRef.current) || execStatus === 'paused' && !canStopExecution || (!canStopExecution && sketchModelsUnavailable)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${execStatus === 'running' ? 'bg-destructive/10 text-destructive hover:bg-destructive/20' : 'bg-[var(--color-success,#3fb950)]/10 text-[var(--color-success,#3fb950)] hover:bg-[var(--color-success,#3fb950)]/20'}`}
-            title={execStatus === 'running' ? '停止执行 (Ctrl+.)' : execStatus === 'paused' ? '请先确认视频脚本' : '执行工作流 (Ctrl+Enter)'}
-            aria-label={execStatus === 'running' ? '停止执行' : execStatus === 'paused' ? '等待脚本确认' : '执行工作流'}
+            title={canStopExecution ? '停止执行 (Ctrl+.)' : execStatus === 'paused' ? imageRetryReconciliation ? '请核对图片重试结果' : '请先确认视频脚本' : '执行工作流 (Ctrl+Enter)'}
+            aria-label={canStopExecution ? '停止执行' : execStatus === 'paused' ? imageRetryReconciliation ? '等待结果核对' : '等待脚本确认' : '执行工作流'}
           >
-            {execStatus === 'running' ? <Square size={16} /> : <Play size={16} />}
-            <span>{execStatus === 'running' ? '停止' : execStatus === 'paused' ? '待确认' : '执行'}</span>
+            {canStopExecution ? <Square size={16} /> : <Play size={16} />}
+            <span>{canStopExecution ? '停止' : execStatus === 'paused' ? '待确认' : '执行'}</span>
           </button>
+          {execStatus === 'paused' && imageRetryViewRef.current?.active && (
+            <button type="button" aria-label="核对图片重试结果" onClick={() => { void handleReconcileImageRetry(); }}
+              disabled={Boolean(imageRetryRequestRef.current)}
+              className="inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-md border border-primary/40 bg-primary/10 px-3 text-sm text-primary hover:bg-primary/20 disabled:cursor-wait disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary">
+              {imageRetryRequestRef.current ? '核对中…' : '核对结果'}
+            </button>
+          )}
           <button
             type="button"
             data-toolbar="node-annotation-entry"
@@ -3756,7 +4913,7 @@ ${contextInfo}
           </button>
           <div className="w-px h-6 bg-border/20 mx-1" aria-hidden="true" />
           {/* 预设 */}
-          <button className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted text-sm transition-colors cursor-pointer" title="预设工作流模板 (Ctrl+P)" aria-label="预设工作流" onClick={() => setSidebarTab(sidebarTab === 'presets' ? 'nodes' : 'presets')}>
+          <button className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors cursor-pointer ${showLeftPanel && sidebarTab === 'presets' ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`} title="预设工作流模板 (Ctrl+P)" aria-label="预设工作流" aria-pressed={showLeftPanel && sidebarTab === 'presets'} onClick={() => { setSidebarTab(showLeftPanel && sidebarTab === 'presets' ? 'nodes' : 'presets'); setShowLeftPanel(true); }}>
             <LayoutGrid size={16} />
             <span>预设</span>
           </button>
@@ -3790,7 +4947,7 @@ ${contextInfo}
           {/* JSON编辑器 (build_mode下隐藏) */}
           {!isBuildMode && (
             <button
-              onClick={() => { setJsonEditContent(JSON.stringify({ nodes: wf.nodes, connections: wf.connections }, null, 2)); setJsonEditorOpen(true); }}
+              onClick={() => { setJsonEditContent(JSON.stringify({ nodes: wf.nodes, connections: wf.connections }, null, 2)); setJsonEditorError(null); setJsonEditorOpen(true); }}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted text-sm transition-colors cursor-pointer" title="查看/编辑JSON"
             >
               <Settings size={16} />
@@ -3809,12 +4966,13 @@ ${contextInfo}
               {execStatus === 'completed' && <Check size={12} className="text-green-400" />}
               {execStatus === 'failed' && <AlertCircle size={12} className="text-red-400" />}
               <span className={execStatus === 'running' ? 'text-primary' : execStatus === 'paused' ? 'text-[#d4af37]' : execStatus === 'completed' ? 'text-green-400' : 'text-red-400'}>
-                {execStatus === 'running' ? '执行中' : execStatus === 'paused' ? '等待脚本确认' : execStatus === 'completed' ? '执行完成' : '执行失败'}
+                {execStatus === 'running' ? '执行中' : execStatus === 'paused' ? imageRetryReconciliation ? '等待结果核对' : '等待脚本确认' : execStatus === 'completed' ? '执行完成' : '执行失败'}
               </span>
               <span className="text-muted-foreground">{executionNodeIds.filter(id => ['success', 'error', 'failed', 'timeout', 'skipped', 'cancelled'].includes(execResults[id]?.status)).length}/{executionNodeIds.length}</span>
               <button
                 type="button"
-                onClick={() => { setExecStatus('idle'); setExecResults({}); setExecLogs([]); }}
+                disabled={imageRetryReconciliation}
+                onClick={() => { if (imageRetryReconciliation) return; setExecStatus('idle'); setExecResults({}); setExecLogs([]); }}
                 className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
                 aria-label="关闭执行状态"
               >
@@ -3835,17 +4993,48 @@ ${contextInfo}
             <Maximize size={16} />
           </button>
           <div className="w-px h-6 bg-border/20 mx-1" aria-hidden="true" />
+          <button
+            ref={minimapToggleRef}
+            type="button"
+            className={`inline-flex h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 text-sm focus-visible:ring-2 focus-visible:ring-primary ${showMinimap ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
+            title="小地图"
+            aria-label="切换小地图"
+            aria-controls="workflow-minimap"
+            aria-pressed={showMinimap}
+            aria-expanded={showMinimap}
+            onClick={() => setShowMinimap(visible => !visible)}
+          >
+            <LayoutGrid size={16} aria-hidden="true" />
+            <span>小地图</span>
+          </button>
+          <button
+            type="button"
+            aria-label="画布菜单"
+            aria-haspopup="menu"
+            aria-controls="workflow-context-menu"
+            aria-expanded={contextMenu?.type === 'canvas'}
+            className="inline-flex h-11 shrink-0 items-center gap-1.5 whitespace-nowrap rounded px-2.5 text-sm text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+            onClick={event => {
+              const anchor = event.currentTarget.getBoundingClientRect();
+              const canvas = canvasContainerRef.current?.getBoundingClientRect();
+              setContextMenu({ type: 'canvas', x: canvas ? canvas.left + canvas.width / 2 : anchor.left,
+                y: canvas ? canvas.top + canvas.height / 2 : anchor.bottom,
+                menuX: anchor.left, menuY: anchor.bottom, scope: legacyPointerScopeRef.current, returnFocus: event.currentTarget });
+            }}
+          >
+            <MoreHorizontal size={16} aria-hidden="true" /><span>画布菜单</span>
+          </button>
           {/* 面板切换按钮组 - 与原型对齐 */}
-          <button className={`p-1.5 rounded-lg transition-colors cursor-pointer ${showLeftPanel ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`} title="节点库" aria-label="切换节点库面板" aria-pressed={showLeftPanel} onClick={() => setShowLeftPanel(!showLeftPanel)}>
+          <button className={`p-1.5 rounded-lg transition-colors cursor-pointer ${showLeftPanel && sidebarTab === 'nodes' ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`} title="节点库" aria-label="切换节点库面板" aria-pressed={showLeftPanel && sidebarTab === 'nodes'} onClick={() => { if (showLeftPanel && sidebarTab === 'nodes') setShowLeftPanel(false); else { setSidebarTab('nodes'); setShowLeftPanel(true); } }}>
             <Blocks size={16} />
           </button>
-          <button className={`p-1.5 rounded-lg transition-colors cursor-pointer ${sidebarTab === 'material' ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`} title="素材库" aria-label="切换素材库面板" aria-pressed={sidebarTab === 'material'} onClick={() => setSidebarTab(sidebarTab === 'material' ? 'nodes' : 'material')}>
+          <button className={`p-1.5 rounded-lg transition-colors cursor-pointer ${showLeftPanel && sidebarTab === 'material' ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`} title="素材库" aria-label="切换素材库面板" aria-pressed={showLeftPanel && sidebarTab === 'material'} onClick={() => { setSidebarTab(showLeftPanel && sidebarTab === 'material' ? 'nodes' : 'material'); setShowLeftPanel(true); }}>
             <FolderOpen size={16} />
           </button>
           <button className={`p-1.5 rounded-lg transition-colors cursor-pointer ${showContentStrip ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`} title="内容窗口" aria-label="切换内容窗口" aria-pressed={showContentStrip} onClick={() => setShowContentStrip(!showContentStrip)}>
             <LayoutGrid size={16} />
           </button>
-          <button className={`p-1.5 rounded-lg transition-colors cursor-pointer ${sidebarTab === 'prompts' ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`} title="提示词库" aria-label="切换提示词库面板" aria-pressed={sidebarTab === 'prompts'} onClick={() => setSidebarTab(sidebarTab === 'prompts' ? 'nodes' : 'prompts')}>
+          <button className={`p-1.5 rounded-lg transition-colors cursor-pointer ${showLeftPanel && sidebarTab === 'prompts' ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`} title="提示词库" aria-label="切换提示词库面板" aria-pressed={showLeftPanel && sidebarTab === 'prompts'} onClick={() => { setSidebarTab(showLeftPanel && sidebarTab === 'prompts' ? 'nodes' : 'prompts'); setShowLeftPanel(true); }}>
             <BookOpen size={16} />
           </button>
           <button className={`p-1.5 rounded-lg transition-colors cursor-pointer ${showExecLog ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`} title="执行日志" aria-label="切换执行日志面板" aria-pressed={showExecLog} onClick={() => setShowExecLog(!showExecLog)}>
@@ -3853,12 +5042,39 @@ ${contextInfo}
           </button>
         </div>
       </header>
+      {gridClientView.phase !== 'idle' && (
+        <div data-workflow-ui-occlusion className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/20 bg-card px-3 py-1 text-sm">
+          <span role={gridClientView.phase === 'unknown' || gridClientView.phase === 'error' ? 'alert' : 'status'} className="min-w-0 flex-1 basis-48 break-words">
+            {gridClientView.message}
+          </span>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            {gridClientView.phase === 'preparing' && (
+              <button type="button" onClick={() => gridClientRef.current!.stop()} className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center whitespace-nowrap rounded border border-border px-3 focus-visible:ring-2 focus-visible:ring-primary">停止等待</button>
+            )}
+            {gridClientView.canRetry && (
+              <button type="button" onClick={() => { void gridClientRef.current!.retry(); }} className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center whitespace-nowrap rounded bg-primary px-3 text-primary-foreground focus-visible:ring-2 focus-visible:ring-primary">{gridClientView.phase === 'unknown' ? '核对结果' : '重试'}</button>
+            )}
+            {gridClientView.phase !== 'preparing' && (
+              <button type="button" aria-label="关闭切分提示" onClick={() => gridClientRef.current!.dismiss()} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary"><X size={16} /></button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ═══ 主体三栏布局 - 与原型对齐 ═══ */}
-      <div className="relative flex flex-1 min-h-0">
+      <div className="relative isolate flex flex-1 min-h-0 [@media(max-height:400px)]:min-h-[114px]">
       {/* ═══ 左侧节点库面板 - 与原型对齐: w-64, 搜索+分类列表 ═══ */}
       {showLeftPanel && (
-      <aside className="absolute inset-y-0 left-0 z-40 flex w-[min(18rem,85vw)] shrink-0 flex-col overflow-hidden border-r border-border/20 bg-card shadow-2xl md:relative md:z-auto md:w-64 md:shadow-none">
+      <aside aria-label={sidebarTab === 'material' ? '素材库' : sidebarTab === 'prompts' ? '提示词库' : sidebarTab === 'presets' ? '预设工作流' : '节点库'} className="[&_button]:min-h-11 [&_button]:min-w-11 [&_input]:min-h-11 [&_input]:text-base absolute inset-y-0 left-0 z-[60] flex w-[min(18rem,85vw)] shrink-0 flex-col overflow-hidden border-r border-border/20 bg-card shadow-2xl md:relative md:z-auto md:w-64 md:shadow-none">
+        <div className="flex min-h-14 shrink-0 items-center justify-between gap-2 border-b border-border/20 px-3">
+          <h2 className="min-w-0 text-sm font-semibold text-foreground">{sidebarTab === 'material' ? '素材库' : sidebarTab === 'prompts' ? '提示词库' : sidebarTab === 'presets' ? '预设工作流' : '节点库'}</h2>
+          <button type="button" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary" aria-label="关闭目录面板" onClick={() => setShowLeftPanel(false)}><X size={18} /></button>
+        </div>
+        {sidebarTab === 'material' || sidebarTab === 'prompts' || sidebarTab === 'presets' ? (
+          <WorkflowLibraryContent tab={sidebarTab} images={canvasImages || []} prompts={promptTemplates}
+            presets={WORKFLOW_PRESETS.map(preset => ({ id: preset.id, name: preset.name, description: preset.description, tags: preset.tags, nodeCount: preset.nodes.length }))}
+            onUseImage={handleLibraryImage} onUsePrompt={handleLibraryPrompt} onUsePreset={handleLibraryPreset} />
+        ) : <>
         {/* 搜索框 */}
         <div className="p-3 sticky top-0 z-10 bg-card border-b border-border/10">
           <div className="relative">
@@ -3899,6 +5115,7 @@ ${contextInfo}
             </div>
           ))}
         </div>
+        </>}
       </aside>
       )}
 
@@ -3912,13 +5129,20 @@ ${contextInfo}
         {/* 画布容器 - HTML架构 (SVG连线层 + HTML节点层, 与原型对齐) */}
         <div
           ref={canvasContainerRef}
+          tabIndex={-1}
           className="w-full h-full relative overflow-hidden canvas-bg"
           style={{
             cursor: isPanning ? 'grabbing' : draggingConn ? 'crosshair' : 'default',
             background: T.nodeBg === '#161b22' ? '#0d1117' : '#f8fafc',
           }}
           onMouseDown={handleCanvasMouseDown}
-          onMouseMove={handleCanvasMouseMove}
+          onMouseMove={event => { if (!legacyNodePointerRef.current && !legacyMobilePointerRef.current?.busy() && !legacyMobilePointerRef.current?.suppressesMouse()) handleCanvasMouseMove(event); }}
+          onPointerDownCapture={handleLegacySurfacePointerDown}
+          onPointerMove={event => { if (legacyMobilePointerRef.current!.move(event)) event.preventDefault(); else handleLegacyNodePointerMove(event); }}
+          onPointerUp={event => { if (legacyMobilePointerRef.current!.up(event)) event.preventDefault(); else handleLegacyNodePointerUp(event); }}
+          onPointerCancel={event => { if (legacyMobilePointerRef.current!.cancel(event)) event.preventDefault(); else handleLegacyNodePointerCancel(event); }}
+          onLostPointerCapture={event => { if (!legacyMobilePointerRef.current!.cancel(event)) handleLegacyNodePointerCancel(event); }}
+          onClickCapture={event => { if (event.detail !== 0 && legacyMobilePointerRef.current?.suppressesMouse()) { event.preventDefault(); event.stopPropagation(); } }}
           onMouseUp={handleCanvasMouseUp}
           onMouseLeave={handleCanvasMouseUp}
           onWheel={handleWheel}
@@ -3937,7 +5161,7 @@ ${contextInfo}
             <WorkflowReactFlowSurface
               model={reactFlowWorkflowRenderModel}
               onCommand={handleWorkflowRenderCommand}
-              onNodeDragStart={beginWorkflowDrag}
+              onNodeDragStart={positions => { positions.forEach(position => noteMaterialUserGeometry(position.nodeId)); beginWorkflowDrag(); }}
               onNodeDragEnd={finishWorkflowDrag}
               onViewportChange={setViewport}
               visibleNodeIds={visibleNodeIds}
@@ -3994,6 +5218,12 @@ ${contextInfo}
               });
             }}
             cardCallbacks={workflowCardCallbacks}
+            onDirectPortPointerDown={(event, endpoint) => {
+              const port = wfRef.current.nodes.find(node => node.id === endpoint.nodeId)?.ports.find(candidate => candidate.id === endpoint.portId && candidate.direction === endpoint.direction);
+              if (port) handleLegacyPortPointerDown(event, endpoint.nodeId, port);
+            }}
+            onPortListRequest={requestLegacyPortList}
+            disablePortTargets={isPanning || Boolean(legacyNodePointerRef.current)}
           />
           {workflowRendererMode === 'shadow' ? (
             <WorkflowShadowProbe
@@ -4005,6 +5235,152 @@ ${contextInfo}
           )}
         </div>
 
+        {(wf.nodes.some(node => node.type === 'input-image' && node.config.assetTransferPending === true
+          && !node.config.assetTransferError && !node.config.assetTransferExpectedActorId
+          && !node.config.assetTransferExpectedProjectId && !node.config.assetTransferExpectedSource)
+          || wf.nodes.map(recoveryDisplayNode).some(node => node.config.assetTransferError === 'ACTOR_SCOPE_CHANGED' || node.config.assetTransferError === 'TRANSFER_INTERRUPTED')) && (
+          <div className="absolute bottom-14 left-1/2 z-30 max-h-[min(200px,40vh)] w-max max-w-[min(420px,calc(100vw-32px))] -translate-x-1/2 space-y-2 overflow-y-auto rounded-md border border-destructive/40 bg-card px-3 py-2 text-xs text-destructive shadow-lg">
+          {wf.nodes.filter(node => node.type === 'input-image' && node.config.assetTransferPending === true
+            && !node.config.assetTransferError && !node.config.assetTransferExpectedActorId
+            && !node.config.assetTransferExpectedProjectId && !node.config.assetTransferExpectedSource).map(node => (
+          <div key={'legacy-pending:' + node.id} role="alert">
+            图片接收未完成，无法确认原账号、项目或素材。请重新选择当前项目的图片；接收完成前无法运行。
+            <button type="button" className="min-h-11 px-2 underline" onClick={() => {
+              setWorkflowInputActorReselectNode(previous => previous === node.id ? null : node.id);
+            }}>重新选择图片</button>
+            {workflowInputActorReselectNode === node.id && (
+              <div>
+                {!userId || !projectId ? '请先登录并打开项目。' : !(canvasImages?.length) ? '当前画布没有可选择的图片。'
+                  : canvasImages.map(image => (
+                    <button type="button" key={image.id} className="block min-h-11 w-full px-2 text-left underline" onClick={() => {
+                      const current = wfRef.current.nodes.find(entry => entry.id === node.id);
+                      const source = canvasImages.find(entry => entry.id === image.id);
+                      if (workflowInputScopeRef.current !== workflowInputScope || !userId || !projectId || !current
+                        || current.type !== 'input-image' || current.config.assetTransferPending !== true
+                        || current.config.assetTransferError || current.config.assetTransferExpectedActorId
+                        || current.config.assetTransferExpectedProjectId || current.config.assetTransferExpectedSource || !source) return;
+                      const guard = workflowInputTransferGuardRef.current;
+                      const retryKey = JSON.stringify([workflowInputScope, node.id]);
+                      if (workflowInputActorRetries.current.get(retryKey)?.guard === guard) return;
+                      const retry = { guard };
+                      workflowInputActorRetries.current.set(retryKey, retry);
+                      const expectedSource = { id: source.id, url: source.url, projectId: source.projectId, versionId: source.versionId,
+                        assetId: source.assetId, assetVersionId: source.assetVersionId, placementId: source.placementId };
+                      updateWorkflow(previous => ({ ...previous, nodes: previous.nodes.map(entry => entry.id === node.id
+                        ? { ...entry, config: { ...entry.config, ...createPendingWorkflowInputReference(source), assetTransferPending: true,
+                          assetTransferError: 'TRANSFER_INTERRUPTED', assetTransferExpectedActorId: userId,
+                          assetTransferExpectedProjectId: projectId, assetTransferExpectedSource: expectedSource,
+                          projectId: undefined, assetId: undefined, assetVersionId: undefined, placementId: undefined } } : entry) }));
+                      setWorkflowInputActorReselectNode(null);
+                      void transferCanvasImageToWorkflow(node.id, source).finally(() => {
+                        if (workflowInputActorRetries.current.get(retryKey) === retry) workflowInputActorRetries.current.delete(retryKey);
+                      });
+                    }}>{image.description || image.name || '画布图片'}</button>
+                  ))}
+              </div>
+            )}
+          </div>
+          ))}
+          {wf.nodes.map(recoveryDisplayNode).filter(node => (node.config.assetTransferError === 'ACTOR_SCOPE_CHANGED' || node.config.assetTransferError === 'TRANSFER_INTERRUPTED')).map(node => (
+          <div key={node.id} role="alert">
+            {!node.config.assetTransferExpectedProjectId
+              ? '无法确认原目标项目，旧图片接收已暂停。本节点保留原内容；可在当前项目的新工作流中重新选择图片。'
+              : node.config.assetTransferExpectedProjectId !== projectId
+                ? '图片接收属于原项目，请切回原项目重试；也可在当前项目的新工作流中重新选择图片。'
+                : workflowInputActorSourceChanged === node.id ? '素材或节点已变化，请重新选择图片。' : node.config.assetTransferError === 'TRANSFER_INTERRUPTED' ? '图片接收已中断，请在原账号和项目重试接收或重新选择图片。' : '账号已切换或不一致，图片尚未接收。请切回原账号后重试接收或重新选择图片。'}
+            <button type="button" className="min-h-11 px-2 underline" onClick={() => {
+              const current = wfRef.current.nodes.find(entry => entry.id === node.id);
+              const origin = current ? abandonedMaterialOrigin(current) : undefined;
+              const expected = (origin ? recoveryDisplayNode(current!).config.assetTransferExpectedSource : current?.config.assetTransferExpectedSource) as Partial<CanvasImageRef> | undefined;
+              const source = canvasImages?.find(image => image.id === expected?.id);
+              const expectedActor = origin?.actor || current?.config.assetTransferExpectedActorId;
+              const expectedProject = origin?.project || current?.config.assetTransferExpectedProjectId;
+              if (!current || !userId || !projectId || expectedActor !== userId || expectedProject !== projectId) return;
+              if (current.config.source !== 'canvas') {
+                setWorkflowInputActorSourceChanged(node.id);
+                return;
+              }
+              if (current.config.assetTransferPending !== true || !expected || !source
+                || current.config.sourceImageId !== expected.id || current.config.imageUrl !== expected.url
+                || source.url !== expected.url || source.projectId !== expected.projectId
+                || source.versionId !== expected.versionId || (expected.assetId !== undefined && source.assetId !== expected.assetId)
+                || source.assetVersionId !== expected.assetVersionId || source.placementId !== expected.placementId
+                || ((origin || persistedInterruptedMaterial(current)) && (!expected.assetVersionId || !expected.projectId
+                  || current.config.sourceVersionId !== expected.versionId))) {
+                setWorkflowInputActorSourceChanged(node.id);
+                return;
+              }
+              const retryKey = JSON.stringify([workflowInputScope, node.id]);
+              const guard = workflowInputTransferGuardRef.current;
+              if (workflowInputActorRetries.current.get(retryKey)?.guard === guard) return;
+              const retry = { guard };
+              workflowInputActorRetries.current.set(retryKey, retry);
+              if (origin || persistedInterruptedMaterial(current)) {
+                if (origin) origin.guard = guard;
+                updateWorkflowSystem(previous => ({ ...previous, nodes: previous.nodes.map(entry => entry.id === node.id
+                  ? { ...entry, config: { ...entry.config, assetTransferPending: true, assetTransferError: 'TRANSFER_INTERRUPTED',
+                    assetTransferExpectedActorId: expectedActor, assetTransferExpectedProjectId: expectedProject,
+                    assetTransferExpectedSource: expected } } : entry) }));
+              }
+              void transferCanvasImageToWorkflow(node.id, source).finally(() => {
+                if (workflowInputActorRetries.current.get(retryKey) === retry) workflowInputActorRetries.current.delete(retryKey);
+              });
+            }}>重试接收图片</button>
+            {node.config.source === 'upstream' && node.config.assetTransferPending === true && !!userId && !!projectId
+              && node.config.assetTransferExpectedActorId === userId && node.config.assetTransferExpectedProjectId === projectId && (
+              <button type="button" className="min-h-11 px-2 underline" onClick={() => {
+                const current = wfRef.current.nodes.find(entry => entry.id === node.id);
+                if (!current || current.type !== 'input-image' || current.config.source !== 'upstream'
+                  || current.config.assetTransferPending !== true || (current.config.assetTransferError !== 'ACTOR_SCOPE_CHANGED' && current.config.assetTransferError !== 'TRANSFER_INTERRUPTED')
+                  || !userId || !projectId || current.config.assetTransferExpectedActorId !== userId
+                  || current.config.assetTransferExpectedProjectId !== projectId) return;
+                try { readWorkflowImageInputTransform(current); } catch {
+                  setNodeAnnotationError('图片接收设置无效，请检查接收端口和切分设置。');
+                  return;
+                }
+                workflowInputTransferGuardRef.current.invalidate(node.id);
+                workflowInputActorRetries.current.delete(JSON.stringify([workflowInputScope, node.id]));
+                setWorkflowInputActorSourceChanged(previous => previous === node.id ? null : previous);
+                updateWorkflow(previous => ({ ...previous, nodes: previous.nodes.map(entry => entry.id === node.id
+                  ? { ...entry, config: { ...entry.config, imageUrl: '', sourceImageId: undefined, sourceVersionId: undefined,
+                    projectId: undefined, assetId: undefined, assetVersionId: undefined, placementId: undefined,
+                    assetTransferPending: false, assetTransferError: undefined, assetTransferExpectedActorId: undefined,
+                    assetTransferExpectedProjectId: undefined, assetTransferExpectedSource: undefined } } : entry) }));
+              }}>确认使用上游图片</button>
+            )}
+            <button type="button" className="min-h-11 px-2 underline" onClick={() => {
+              setWorkflowInputActorReselectNode(previous => previous === node.id ? null : node.id);
+            }}>重新选择图片</button>
+            {workflowInputActorReselectNode === node.id && (
+              <div>
+                {(!userId || !projectId || node.config.assetTransferExpectedActorId !== userId
+                  || node.config.assetTransferExpectedProjectId !== projectId)
+                  ? '请先切回原账号并确认已打开项目。'
+                  : !(canvasImages?.length) ? '当前画布没有可选择的图片。'
+                  : canvasImages.map(image => (
+                    <button type="button" key={image.id} className="block min-h-11 w-full px-2 text-left underline" onClick={() => {
+                      const current = wfRef.current.nodes.find(entry => entry.id === node.id);
+                      const source = canvasImages.find(item => item.id === image.id);
+                      if (!current || current.type !== 'input-image' || (current.config.assetTransferError !== 'ACTOR_SCOPE_CHANGED' && current.config.assetTransferError !== 'TRANSFER_INTERRUPTED')
+                        || current.config.assetTransferPending !== true || !userId || !projectId
+                        || current.config.assetTransferExpectedActorId !== userId
+                        || current.config.assetTransferExpectedProjectId !== projectId || !source) return;
+                      setWorkflowInputActorReselectNode(null);
+                      void transferCanvasImageToWorkflow(node.id, source);
+                    }}>{image.description || image.name || '画布图片'}</button>
+                  ))}
+              </div>
+            )}
+          </div>
+          ))}
+          </div>
+        )}
+        {blockedNodeRetryNotice && wf.nodes.some(node => node.type === 'input-image'
+          && node.config.assetTransferPending === true && (node.config.assetTransferError === 'ACTOR_SCOPE_CHANGED' || node.config.assetTransferError === 'TRANSFER_INTERRUPTED' || (!node.config.assetTransferError && !node.config.assetTransferExpectedActorId && !node.config.assetTransferExpectedProjectId && !node.config.assetTransferExpectedSource))) && (
+          <div role="alert" className="absolute top-14 left-1/2 z-30 max-w-[min(420px,calc(100vw-32px))] -translate-x-1/2 rounded-md border border-destructive/40 bg-card px-3 py-2 text-xs text-destructive shadow-lg">
+            有图片尚未接收，当前无法重试节点；请先处理图片的账号或项目提示。
+          </div>
+        )}
         {nodeAnnotationError && !nodeAnnotationSession && (
           <div
             className="absolute bottom-14 left-1/2 z-30 max-w-[min(420px,calc(100vw-32px))] -translate-x-1/2 rounded-md border border-destructive/40 bg-card px-3 py-2 text-xs text-destructive shadow-lg"
@@ -4014,19 +5390,23 @@ ${contextInfo}
           </div>
         )}
 
-        {/* 端口类型图例 */}
+        <div className="pointer-events-none absolute inset-x-3 bottom-3 z-20 flex h-[146px] max-h-[calc(100%-1.5rem)] items-end justify-between gap-3">
+        {/* 端口类型图例：与地图分区，短屏时可独立滚动查看全部类型。 */}
         {selectedNodeIds.size === 0 && (
-          <div className="absolute bottom-3 left-3 pointer-events-none bg-card/90 border border-border rounded px-3 py-2 flex items-center gap-3 text-xs">
+          <div data-workflow-port-legend data-workflow-ui-occlusion className="pointer-events-auto flex max-h-full min-w-0 flex-wrap items-center gap-x-3 gap-y-1 overflow-y-auto overscroll-contain rounded border border-border bg-card/90 px-3 py-2 text-xs max-md:[@media(max-height:400px)]:p-0">
+            <button type="button" aria-label="端口图例" aria-expanded={portLegendExpanded} onClick={() => setPortLegendExpanded(value => !value)} className="hidden min-h-11 min-w-11 items-center justify-center px-2 text-sm font-medium text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary max-md:[@media(max-height:400px)]:inline-flex">图例</button>
+            <div data-workflow-port-legend-items className={`contents ${portLegendExpanded ? 'max-md:[@media(max-height:400px)]:flex max-md:[@media(max-height:400px)]:max-h-16 max-md:[@media(max-height:400px)]:flex-wrap max-md:[@media(max-height:400px)]:gap-x-3 max-md:[@media(max-height:400px)]:gap-y-1 max-md:[@media(max-height:400px)]:overflow-y-auto max-md:[@media(max-height:400px)]:overscroll-contain max-md:[@media(max-height:400px)]:px-3 max-md:[@media(max-height:400px)]:pt-1 max-md:[@media(max-height:400px)]:pb-2' : 'max-md:[@media(max-height:400px)]:hidden'}`}>
             {Object.entries(PORT_COLORS).map(([type, color]) => (
-              <div key={type} className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
+              <div key={type} data-workflow-port-type className="flex shrink-0 items-center gap-1.5 whitespace-nowrap">
+                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
                 <span className="text-muted-foreground">{type}</span>
               </div>
             ))}
+            </div>
           </div>
         )}
 
-        {/* 小地图（P2增强：视口指示+点击导航） */}
+        {/* 小地图：SVG内容与视口使用同一坐标系，不估算窗口比例。 */}
         {showMinimap && (() => {
           const padding = 100;
           const allX = wf.nodes.map(n => n.x);
@@ -4037,37 +5417,74 @@ ${contextInfo}
           const maxY = Math.max(800, ...allY.map((y, i) => y + wf.nodes[i].height)) + padding;
           const vw = maxX - minX;
           const vh = maxY - minY;
-          const scale = Math.min(160 / vw, 100 / vh);
-          // 视口框坐标（相对于小地图）
-          const vpScreenW = (typeof window !== 'undefined' ? window.innerWidth * 0.65 : 800) / viewport.zoom;
-          const vpScreenH = (typeof window !== 'undefined' ? window.innerHeight * 0.85 : 600) / viewport.zoom;
-          const vpX = (-viewport.x / viewport.zoom - minX) * scale;
-          const vpY = (-viewport.y / viewport.zoom - minY) * scale;
-          const vpW = vpScreenW * scale;
-          const vpH = vpScreenH * scale;
+          const centerOn = (x: number, y: number): void => {
+            const rect = canvasContainerRef.current?.getBoundingClientRect();
+            if (!rect || rect.width <= 0 || rect.height <= 0 || !Number.isFinite(x) || !Number.isFinite(y)) return;
+            setViewport(current => ({ ...current, x: rect.width / 2 - x * current.zoom, y: rect.height / 2 - y * current.zoom }));
+          };
           return (
             <div
+              id="workflow-minimap"
               data-workflow-minimap
               data-workflow-ui-occlusion
-              className="absolute bottom-3 right-3 hidden h-[100px] w-[160px] cursor-pointer overflow-hidden rounded border border-border bg-card/90 md:block"
-              onClick={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect();
-                const clickX = e.clientX - rect.left;
-                const clickY = e.clientY - rect.top;
-                // 点击位置对应的画布坐标
-                const canvasX = clickX / scale + minX;
-                const canvasY = clickY / scale + minY;
-                setViewport(v => ({
-                  ...v,
-                  x: -(canvasX * v.zoom - (typeof window !== 'undefined' ? window.innerWidth * 0.65 : 800) / 2),
-                  y: -(canvasY * v.zoom - (typeof window !== 'undefined' ? window.innerHeight * 0.85 : 600) / 2),
-                }));
-              }}
+              className="pointer-events-auto ml-auto flex h-full w-28 min-[360px]:w-40 shrink-0 flex-col overflow-hidden rounded border border-border bg-card/90"
             >
-              <svg viewBox={`${minX} ${minY} ${vw} ${vh}`} className="w-full h-full">
-                <defs>
-                  <style>{`@keyframes fadeOut { from { stroke-opacity: 0.6; } to { stroke-opacity: 0; } }`}</style>
-                </defs>
+              <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border px-2">
+                <span className="text-sm font-medium text-foreground">小地图</span>
+                <button
+                  type="button"
+                  aria-label="关闭小地图"
+                  onClick={() => { setShowMinimap(false); minimapToggleRef.current?.focus(); }}
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+                >
+                  <X size={16} aria-hidden="true" />
+                </button>
+              </div>
+              <svg
+                viewBox={`${minX} ${minY} ${vw} ${vh}`}
+                role="button"
+                tabIndex={0}
+                aria-label="小地图导航"
+                aria-describedby="workflow-minimap-help"
+                className="min-h-0 w-full flex-1 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+                onPointerDown={event => minimapPointer.begin(event.currentTarget, event.nativeEvent)}
+                onPointerUp={event => minimapPointer.end(event.currentTarget, event.nativeEvent)}
+                onPointerCancel={minimapPointer.clear}
+                onLostPointerCapture={minimapPointer.captureLost}
+                onClick={event => {
+                  const client = minimapPointer.consume(event.currentTarget, event.nativeEvent);
+                  if (!client) return;
+                  const matrix = event.currentTarget.getScreenCTM();
+                  if (!matrix) return;
+                  const point = new DOMPoint(client.clientX, client.clientY).matrixTransform(matrix.inverse());
+                  centerOn(point.x, point.y);
+                }}
+                onKeyDown={event => {
+                  minimapPointer.clear();
+                  if (event.altKey || event.ctrlKey || event.metaKey) return;
+                  const deltas: Record<string, { x: number; y: number }> = {
+                    ArrowLeft: { x: 40, y: 0 }, ArrowRight: { x: -40, y: 0 },
+                    ArrowUp: { x: 0, y: 40 }, ArrowDown: { x: 0, y: -40 },
+                  };
+                  const delta = deltas[event.key];
+                  if (!delta && !['Enter', ' ', 'Home'].includes(event.key)) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (delta) setViewport(current => ({ ...current, x: current.x + delta.x, y: current.y + delta.y }));
+                  else centerOn(minX + vw / 2, minY + vh / 2);
+                }}
+              >
+                <title id="workflow-minimap-help">点击定位；方向键移动画布；Enter、空格或 Home 定位到全图中心。</title>
+                <rect
+                  data-workflow-minimap-viewport
+                  x={-nodeRenderViewport.x / nodeRenderViewport.zoom}
+                  y={-nodeRenderViewport.y / nodeRenderViewport.zoom}
+                  width={nodeViewportSize.width / nodeRenderViewport.zoom}
+                  height={nodeViewportSize.height / nodeRenderViewport.zoom}
+                  className="pointer-events-none fill-primary/10 stroke-primary/60"
+                  strokeWidth={1}
+                  vectorEffect="non-scaling-stroke"
+                />
                 {wf.connections.map(conn => {
                   const from = wf.nodes.find(n => n.id === conn.fromNodeId);
                   const to = wf.nodes.find(n => n.id === conn.toNodeId);
@@ -4075,49 +5492,107 @@ ${contextInfo}
                   return <line key={conn.id} x1={from.x + from.width / 2} y1={from.y + from.height / 2} x2={to.x + to.width / 2} y2={to.y + to.height / 2} stroke={PORT_COLORS[conn.type] || T.connColor} strokeWidth={2} opacity={0.6} />;
                 })}
                 {wf.nodes.map(n => (
-                  <rect key={n.id} x={n.x} y={n.y} width={n.width} height={n.height} rx={4}
+                  <rect key={n.id} data-workflow-minimap-node={n.id} x={n.x} y={n.y} width={n.width} height={n.height} rx={4}
                     fill={selectedNodeIds.has(n.id) ? 'var(--ne-accent)' : NODE_TYPE_COLORS[getNodeCategory(n.type)]}
                     fillOpacity={0.6} stroke="none"
                   />
                 ))}
               </svg>
-              {/* 视口指示框 */}
-              <div
-                className="absolute border border-primary/60 bg-primary/10 rounded-sm pointer-events-none"
-                style={{
-                  left: Math.max(0, vpX),
-                  top: Math.max(0, vpY),
-                  width: Math.min(160, vpW),
-                  height: Math.min(100, vpH),
-                }}
-              />
-              <button onClick={(e) => { e.stopPropagation(); setShowMinimap(false); }} className="absolute top-0.5 right-0.5 text-muted-foreground hover:text-muted-foreground cursor-pointer z-10">
-                <X size={10} />
-              </button>
             </div>
           );
         })()}
+        </div>
 
       </div>{/* 主画布 end */}
 
       {/* ═══ 右侧属性面板 - 与原型对齐: w-72, 始终可见 ═══ */}
       <aside
         data-workflow-ui-occlusion
-        className={`${selectedNode ? 'absolute inset-y-0 right-0 z-50 flex w-[min(20rem,90vw)] shadow-2xl' : 'hidden'} shrink-0 flex-col overflow-hidden border-l border-border/20 bg-card md:relative md:inset-auto md:z-auto md:flex md:w-72 md:shadow-none`}
+        className={`${selectedNode && !legacyPropertiesDeferred ? 'absolute inset-y-0 right-0 z-50 flex w-[min(20rem,90vw)] shadow-2xl' : 'hidden'} shrink-0 flex-col overflow-hidden border-l border-border/20 bg-card md:relative md:inset-auto md:z-auto md:flex md:w-72 md:shadow-none`}
       >
-        <div className="flex items-center justify-between px-4 h-11 border-b border-border/10">
-          <span className="text-[11px] uppercase tracking-[0.12em] font-bold text-muted-foreground">节点属性</span>
+        <div className="workflow-node-properties-header flex shrink-0 items-center gap-1 px-3 h-11 border-b border-border/10">
+          <span className="min-w-0 truncate whitespace-nowrap text-[11px] uppercase tracking-[0.12em] font-bold text-muted-foreground">节点属性</span>
+          {selectedNode && (
+            <button type="button" aria-label="节点菜单" aria-haspopup="menu" aria-controls="workflow-context-menu"
+              aria-expanded={contextMenu?.type === 'node' && contextMenu.nodeId === selectedNode.id}
+              className="ml-auto inline-flex h-11 shrink-0 items-center gap-1 whitespace-nowrap rounded px-2 text-sm text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+              onClick={event => {
+                const anchor = event.currentTarget.getBoundingClientRect();
+                setContextMenu({ type: 'node', nodeId: selectedNode.id, x: anchor.left, y: anchor.bottom,
+                  scope: legacyPointerScopeRef.current, returnFocus: event.currentTarget });
+              }}>
+              <MoreHorizontal size={16} aria-hidden="true" /><span>节点菜单</span>
+            </button>
+          )}
+          {selectedNode && !selectedNode.type.startsWith('condition-') && (
+            <button
+              type="button"
+              className="workflow-touch-node-action h-11 w-11 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+              aria-label={collapsedNodes.has(selectedNode.id) ? '展开节点' : '折叠节点'}
+              title={collapsedNodes.has(selectedNode.id) ? '展开节点' : '折叠节点'}
+              aria-expanded={!collapsedNodes.has(selectedNode.id)}
+              onClick={() => toggleNodeCollapse(selectedNode.id)}
+            >
+              <ChevronDown size={16} aria-hidden="true" style={{ transform: collapsedNodes.has(selectedNode.id) ? 'rotate(0deg)' : 'rotate(180deg)' }} />
+            </button>
+          )}
           <button
             type="button"
-            className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:hidden"
+            className="workflow-node-property-close inline-flex h-11 w-11 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary md:hidden"
             aria-label="关闭节点属性"
-            onClick={() => setSelectedNodeIds(new Set())}
+            disabled={!selectedNode}
+            onClick={() => { setSelectedNodeIds(new Set()); setPortListOpen(false); setPortListSource(null); }}
           >
             <X size={16} />
           </button>
         </div>
         <div className="flex-1 overflow-y-auto">
           {selectedNode ? (
+            <>
+            {workflowRendererMode !== 'react-flow-v2' && (
+              <section className="border-b border-border/20 p-3" aria-label="端口连接">
+                <button type="button" className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-border px-3 text-sm focus-visible:ring-2 focus-visible:ring-primary"
+                  aria-expanded={portListOpen} onClick={() => { setPortListOpen(open => !open); setPortListSource(null); }}>
+                  连接端口
+                </button>
+                {portListOpen && (
+                  <div className="mt-2 flex min-w-0 flex-col gap-2" onKeyDown={event => {
+                    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setPortListSource(null); setPortListOpen(false); }
+                  }}>
+                    <p className="text-sm text-muted-foreground" role="status">{portListSource ? '选择兼容的输入端口' : '选择输出端口'}</p>
+                    {wf.nodes.flatMap(node => node.ports.filter(port => port.direction === (portListSource ? 'in' : 'out')).map(port => {
+                      const label = portListSource ? `连接至 ${node.label} ${port.label} ${port.type}` : `从 ${node.label} ${port.label} ${port.type} 连接`;
+                      const disabled = Boolean(portListSource && (node.id === portListSource.endpoint.nodeId || !canConnectPorts(portListSource.type, port.type)));
+                      return <button key={JSON.stringify([node.id, port.direction, port.id])} type="button" aria-label={label} disabled={disabled}
+                        className="min-h-11 w-full rounded-md border border-border px-3 py-2 text-left text-sm [overflow-wrap:anywhere] focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"
+                        onClick={() => {
+                          const endpoint: LegacyPortEndpoint = { nodeId: node.id, portId: port.id, direction: port.direction };
+                          if (!portListSource) {
+                            const fresh = wfRef.current.nodes.find(candidate => candidate.id === node.id)?.ports.find(candidate => candidate.id === port.id && candidate.direction === 'out');
+                            if (fresh) setPortListSource({ endpoint, type: fresh.type, scope: legacyPointerScopeRef.current });
+                          } else {
+                            const source = portListSource;
+                            setPortListSource(null); setPortListOpen(false);
+                            completeLegacyConnection(source.endpoint, endpoint, source.type, source.scope);
+                          }
+                        }}>{label}</button>;
+                    }))}
+                    <button type="button" className="min-h-11 rounded-md border border-border px-3 text-sm focus-visible:ring-2 focus-visible:ring-primary"
+                      onClick={() => { setPortListSource(null); setPortListOpen(false); }}>取消连接</button>
+                  </div>
+                )}
+              </section>
+            )}
+            {selectedNodeCompareImages && (
+              <div className="border-b border-border/20 p-3">
+                <button type="button" aria-label="对比原图" title="对比原图"
+                  className="inline-flex min-h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-md border border-border bg-muted px-3 py-2 text-sm text-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+                  onMouseDown={event => event.stopPropagation()}
+                  onClick={event => { event.stopPropagation(); handleCompare(selectedNode.id); }}>
+                  <GitCompare size={16} aria-hidden="true" /><span>对比原图</span>
+                </button>
+              </div>
+            )}
             <PropertyPanel
               node={selectedNode}
               models={models}
@@ -4142,6 +5617,7 @@ ${contextInfo}
               } : undefined}
               onSkillApproval={handleWorkflowSkillApproval}
             />
+            </>
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
               <MousePointer2 size={24} className="opacity-40" />
@@ -4153,23 +5629,29 @@ ${contextInfo}
       </div>{/* 中间区域 end */}
       </div>{/* 主体水平行 end */}
 
+      {materialTouchPreview && <div data-workflow-material-ghost aria-hidden="true"
+        className="pointer-events-none fixed z-[300] flex h-11 w-40 items-center rounded border border-primary bg-card px-2 text-xs text-foreground shadow-lg"
+        style={{ left: materialTouchPreview.x, top: materialTouchPreview.y }}><span className="truncate">{materialTouchPreview.label}</span></div>}
       {/* ═══ 底部面板: 内容条 + 执行日志 - 与原型对齐: 全宽底部 ═══ */}
-      <div data-workflow-ui-occlusion className="shrink-0 border-t border-border/20 bg-card">
+      <div ref={executionDockRef} data-workflow-ui-occlusion className="shrink-0 border-t border-border/20 bg-card [@media(max-height:400px)]:shrink [@media(max-height:400px)]:max-h-[45dvh] [@media(max-height:400px)]:overflow-y-auto [@media(max-height:400px)]:overscroll-y-contain">
         {/* 内容条 */}
         {showContentStrip && (
         <div className="block border-b border-border/10">
-          <div className="flex items-center justify-between px-4 h-8">
+          <div className="flex items-center justify-between px-4 h-8 max-md:[@media(max-height:400px)]:h-11">
             <div className="flex items-center gap-2">
               <FolderOpen size={12} className="text-primary" />
               <span className="text-[11px] uppercase tracking-[0.12em] font-bold text-muted-foreground">内容</span>
               <span className="text-[10px] text-muted-foreground/60">{canvasImages?.length || 0}</span>
             </div>
             <div className="flex items-center gap-1">
+              <button type="button" aria-label={compactContentExpanded ? '收起内容素材' : '展开内容素材'} aria-expanded={compactContentExpanded}
+                className="hidden min-h-11 items-center justify-center px-2 text-sm text-foreground focus-visible:ring-2 focus-visible:ring-primary max-md:[@media(max-height:400px)]:inline-flex"
+                onClick={() => setCompactContentExpanded(expanded => !expanded)}>{compactContentExpanded ? '收起素材' : '展开素材'}</button>
               <button className="text-muted-foreground hover:text-foreground cursor-pointer p-0.5"><Download size={10} /></button>
               <button onClick={() => setShowContentStrip(false)} className="text-muted-foreground hover:text-foreground cursor-pointer p-0.5"><ChevronDown size={10} /></button>
             </div>
           </div>
-          <div className="flex gap-2 px-4 pb-2 overflow-x-auto">
+          <div data-workflow-content-items className={`flex gap-2 px-4 pb-2 overflow-x-auto ${compactContentExpanded ? '' : 'max-md:[@media(max-height:400px)]:hidden'}`}>
             {(canvasImages || []).map((img, i) => (
               <div
                 key={img.id}
@@ -4181,13 +5663,25 @@ ${contextInfo}
                   event.dataTransfer.setData('text/uri-list', img.url);
                   event.dataTransfer.setData('text/plain', img.url);
                 }}
-                className="shrink-0 w-14 h-14 rounded border border-border/20 overflow-hidden bg-muted/30 relative group cursor-grab active:cursor-grabbing"
+                className="shrink-0 w-14 flex flex-col group"
                 title={img.description || img.name || `图片 ${i+1}`}
               >
+                <div className="h-14 w-14 relative overflow-hidden rounded border border-border/20 bg-muted/30 cursor-grab active:cursor-grabbing">
                 <NextImage unoptimized width={1} height={1} src={img.url} alt="" className="w-full h-full object-cover" />
                 <span className="absolute bottom-0 left-0 right-0 text-[7px] text-center text-muted-foreground bg-card/80 py-px">
                   {(img.url?.split('.').pop() || 'PNG').toUpperCase()}
                 </span>
+                </div>
+                {materialTouchAvailable && <button type="button" data-workflow-material-drag={img.id}
+                  aria-label={'拖动素材 '+(img.description || img.name || '图片 '+(i+1))+' 到画布'}
+                  title="激活时居中添加；触屏按住拖动可选择落点。"
+                  className="mt-1 flex min-h-11 w-full items-center justify-center rounded border border-primary/40 bg-primary/10 px-1 text-[10px] text-foreground focus-visible:ring-2 focus-visible:ring-primary"
+                  style={{ touchAction: 'none' }}
+                  onPointerDown={event => beginMaterialTouch(event, img)} onPointerMove={moveMaterialTouch}
+                  onPointerUp={finishMaterialTouch} onPointerCancel={cancelMaterialTouchEvent} onLostPointerCapture={cancelMaterialTouchEvent}
+                  onClick={event => activateMaterialTouchButton(event, img.id)}
+                  onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { materialTouchClickRef.current = null; event.stopPropagation(); if (event.key === 'Enter' && event.repeat) event.preventDefault(); } }}
+                >按住拖入</button>}
               </div>
             ))}
             <button className="shrink-0 w-14 h-14 rounded border border-dashed border-border/30 flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary/30 transition-colors cursor-pointer">
@@ -4199,16 +5693,16 @@ ${contextInfo}
 
         {/* 执行日志 */}
         {showExecLog && (
-        <div>
-          <div className="flex items-center justify-between px-4 h-8">
+        <div ref={executionLogPanelRef}>
+          <div className="flex min-h-11 flex-wrap items-center justify-between gap-2 px-3 py-1">
             <div className="flex items-center gap-2">
               <ScrollText size={12} className="text-primary" />
               <span className="text-[11px] uppercase tracking-[0.12em] font-bold text-muted-foreground">执行日志</span>
               <span className="text-[10px] text-muted-foreground/60">{execLogs.length}条记录</span>
             </div>
             <div className="flex items-center gap-1">
-              <button onClick={() => setExecLogs([])} className="text-muted-foreground hover:text-foreground cursor-pointer p-0.5"><Trash2 size={10} /></button>
-              <button onClick={() => setShowExecLog(false)} className="text-muted-foreground hover:text-foreground cursor-pointer p-0.5"><ChevronDown size={10} /></button>
+              <button type="button" aria-label="清空执行日志" onClick={() => setExecLogs([])} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-muted-foreground hover:text-foreground cursor-pointer focus-visible:ring-2 focus-visible:ring-primary"><Trash2 size={10} /></button>
+              <button type="button" aria-label="收起执行日志" onClick={() => setShowExecLog(false)} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-muted-foreground hover:text-foreground cursor-pointer focus-visible:ring-2 focus-visible:ring-primary"><ChevronDown size={10} /></button>
             </div>
           </div>
           <div className="max-h-[120px] overflow-y-auto text-[10px] px-4 pb-2">
@@ -4216,15 +5710,16 @@ ${contextInfo}
               <div className="text-muted-foreground/50 py-2 text-center">暂无执行记录</div>
             ) : (
               execLogs.map((log, i) => (
-                <div key={i} className={`flex items-center gap-2 py-1 group ${log.status === 'error' ? 'text-red-400/80' : ''}`}>
+                <div key={i} className={`flex max-md:flex-wrap items-center gap-2 py-1 group ${log.status === 'error' ? 'text-red-400/80' : ''}`}>
                   {log.status === 'success' ? <Check size={8} className="text-green-400 shrink-0" /> : log.status === 'running' ? <Loader2 size={8} className="text-yellow-400 shrink-0 animate-spin" /> : <AlertCircle size={8} className="text-red-400 shrink-0" />}
-                  <span className="text-foreground/80 shrink-0 font-medium">{log.label}</span>
-                  <span className={`flex-1 truncate ${log.status === 'success' ? 'text-green-400/60' : log.status === 'running' ? 'text-yellow-400/60' : 'text-red-400/60'}`}>{log.message}</span>
+                  <span className="text-foreground/80 shrink-0 max-md:order-last max-md:basis-full max-md:break-all font-medium">{log.label}</span>
+                  <span className={`flex-1 truncate max-md:order-last max-md:basis-full max-md:break-all max-md:overflow-visible max-md:text-clip max-md:whitespace-normal ${log.status === 'success' ? 'text-green-400/60' : log.status === 'running' ? 'text-yellow-400/60' : 'text-red-400/60'}`}>{log.message}</span>
                   {log.duration != null && <span className="text-muted-foreground/40 shrink-0 tabular-nums">{log.duration >= 1000 ? `${(log.duration / 1000).toFixed(1)}s` : `${log.duration}ms`}</span>}
                   {/* B2: 失败节点一键重试 */}
                   {log.status === 'error' && (
-                    <button onClick={(e) => { e.stopPropagation(); handleRetryNode(log.nodeId); }} className="opacity-0 group-hover:opacity-100 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-all cursor-pointer shrink-0" title="重试此节点">
-                      <RefreshCw size={10} />
+                    <button type="button" aria-label="重试此节点" disabled={Boolean(imageRetryRequestRef.current || imageRetryViewRef.current?.active || imageRetryViewRef.current?.pending && imageRetryViewRef.current.pending.nodeId !== log.nodeId)} onClick={(e) => { e.stopPropagation(); handleRetryNode(log.nodeId); }} className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1 whitespace-nowrap rounded px-2 text-xs bg-primary/10 text-primary hover:bg-primary/20 focus-visible:ring-2 focus-visible:ring-primary cursor-pointer shrink-0" title="重试此节点">
+                      <RefreshCw size={14} aria-hidden="true" />
+                      <span>重试</span>
                     </button>
                   )}
                 </div>
@@ -4252,7 +5747,7 @@ ${contextInfo}
               </h2>
               <button
                 type="button"
-                className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary lg:h-6 lg:w-6"
                 onClick={() => setNodeAnnotationCandidates(null)}
                 aria-label="关闭图片选择"
               >
@@ -4316,7 +5811,7 @@ ${contextInfo}
           role="dialog"
           aria-modal="true"
           aria-labelledby="ai-build-title"
-          onClick={() => setAiBuildOpen(false)}
+          onClick={closeAiBuild}
         >
           <div
             data-modal
@@ -4330,7 +5825,7 @@ ${contextInfo}
               </div>
               <button
                 type="button"
-                onClick={() => setAiBuildOpen(false)}
+                onClick={closeAiBuild}
                 className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 aria-label="关闭 AI 建图"
                 title="关闭"
@@ -4349,7 +5844,7 @@ ${contextInfo}
             <div className="mt-4 flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setAiBuildOpen(false)}
+                onClick={closeAiBuild}
                 className="rounded px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
                 取消
@@ -4411,11 +5906,11 @@ ${contextInfo}
                   setImagePreviewDownloadState('error');
                 }
               }}
-              className="absolute -top-2 right-8 p-1 bg-muted rounded-full text-muted-foreground hover:text-foreground cursor-pointer disabled:cursor-wait disabled:opacity-60"
+              className="absolute -top-2 right-12 inline-flex h-11 w-11 items-center justify-center bg-muted rounded-full text-muted-foreground hover:text-foreground cursor-pointer disabled:cursor-wait disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-primary"
             >
               {imagePreviewDownloadState === 'downloading' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
             </button>
-            <button type="button" aria-label="关闭预览" onClick={() => setImagePreviewUrl(null)} className="absolute -top-2 -right-2 p-1 bg-muted rounded-full text-muted-foreground hover:text-foreground cursor-pointer">
+            <button type="button" aria-label="关闭预览" onClick={() => setImagePreviewUrl(null)} className="absolute -top-2 -right-2 inline-flex h-11 w-11 items-center justify-center bg-muted rounded-full text-muted-foreground hover:text-foreground cursor-pointer focus-visible:ring-2 focus-visible:ring-primary">
               <X size={14} />
             </button>
             {imagePreviewDownloadState === 'error' && (
@@ -4427,74 +5922,81 @@ ${contextInfo}
         </div>
       )}
 
-      {/* P2: 对比滑块弹窗 */}
+      {/* 节点结果复用统一图片对比窗口，原图与结果仍由 handleCompare 解析。 */}
       {compareImages && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center" onClick={() => setCompareImages(null)}>
-          <div className="relative w-[80vw] max-w-[900px] aspect-video bg-black rounded-lg overflow-hidden" onClick={e => e.stopPropagation()}>
-            {/* Before 图片 (底层, 完整显示) */}
-            <NextImage unoptimized width={1} height={1} src={compareImages.before} alt="原图" className="absolute inset-0 w-full h-full object-contain" />
-            {/* After 图片 (顶层, clip 裁切) */}
-            <div className="absolute inset-0" style={{ clipPath: `inset(0 0 0 ${comparePosition}%)` }}>
-              <NextImage unoptimized width={1} height={1} src={compareImages.after} alt="结果" className="w-full h-full object-contain" />
-            </div>
-            {/* 滑块线 */}
-            <div className="absolute top-0 bottom-0 w-0.5 bg-white/80" style={{ left: `${comparePosition}%` }}>
-              <div className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-white rounded-full flex items-center justify-center shadow-lg cursor-ew-resize"
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  const startX = e.clientX;
-                  const startPos = comparePosition;
-                  const container = (e.target as HTMLElement).closest('.relative')!;
-                  const containerRect = container.getBoundingClientRect();
-                  const onMove = (ev: MouseEvent) => {
-                    const delta = ev.clientX - startX;
-                    const pct = startPos + (delta / containerRect.width) * 100;
-                    setComparePosition(Math.max(0, Math.min(100, pct)));
-                  };
-                  const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
-                  document.addEventListener('mousemove', onMove);
-                  document.addEventListener('mouseup', onUp);
-                }}>
-                <span className="text-black text-xs font-bold">⟺</span>
-              </div>
-            </div>
-            {/* 标签 */}
-            <div className="absolute top-2 left-2 px-2 py-0.5 bg-black/60 text-white text-xs rounded">原图</div>
-            <div className="absolute top-2 right-2 px-2 py-0.5 bg-black/60 text-white text-xs rounded">结果</div>
-            <button onClick={() => setCompareImages(null)} className="absolute -top-2 -right-2 p-1 bg-muted rounded-full text-muted-foreground hover:text-foreground cursor-pointer z-10">
-              <X size={14} />
-            </button>
-          </div>
-        </div>
+        <ImageCompareDialog
+          leftImage={{ url: compareImages.before }}
+          rightImage={{ url: compareImages.after }}
+          isMonochrome={themeStyle === 'monochrome'}
+          onClose={() => setCompareImages(null)}
+        />
       )}
 
       {/* P2: JSON编辑器弹窗 */}
       {jsonEditorOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center" onClick={() => setJsonEditorOpen(false)}>
-          <div className="w-[640px] max-h-[80vh] bg-card border border-border rounded-lg flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-4 py-2 border-b border-border">
-              <span className="text-sm font-semibold text-primary">工作流 JSON 编辑器</span>
-              <button onClick={() => setJsonEditorOpen(false)} className="text-muted-foreground hover:text-foreground cursor-pointer"><X size={14} /></button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3" onClick={() => setJsonEditorOpen(false)}>
+          <div ref={jsonDialogRef} role="dialog" aria-modal="true" tabIndex={-1} aria-labelledby="workflow-json-editor-title" onKeyDown={event => event.stopPropagation()} className="flex h-[min(80dvh,40rem)] max-h-[calc(100dvh-1.5rem)] min-h-0 w-full max-w-[640px] flex-col overflow-hidden rounded-lg border border-border bg-card" onClick={e => e.stopPropagation()}>
+            <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-1">
+              <span id="workflow-json-editor-title" className="min-w-0 text-sm font-semibold text-primary">工作流 JSON 编辑器</span>
+              <button type="button" aria-label="关闭 JSON 编辑器" onClick={() => setJsonEditorOpen(false)} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground cursor-pointer focus-visible:ring-2 focus-visible:ring-primary"><X size={14} /></button>
             </div>
             <textarea
-              value={jsonEditContent}
-              onChange={e => setJsonEditContent(e.target.value)}
-              className="flex-1 min-h-[400px] bg-muted text-green-400/80 font-mono text-[10px] p-3 focus:outline-none resize-none"
+              ref={jsonInputRef} aria-label="工作流 JSON 内容" value={jsonEditContent}
+              aria-invalid={jsonEditorError ? true : undefined}
+              aria-describedby={jsonEditorError ? "workflow-json-editor-error" : undefined}
+              onChange={e => { setJsonEditContent(e.target.value); setJsonEditorError(null); }}
+              className="min-h-0 w-full flex-1 resize-none overflow-auto overscroll-contain bg-muted p-3 font-mono text-base leading-relaxed text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
               spellCheck={false}
             />
-            <div className="flex justify-end gap-2 px-4 py-2 border-t border-border">
-              <button onClick={() => setJsonEditorOpen(false)} className="px-3 py-1.5 text-xs rounded bg-muted text-muted-foreground hover:text-foreground cursor-pointer">取消</button>
+            {jsonEditorError && (
+              <p id="workflow-json-editor-error" role="alert" className="shrink-0 border-t border-border px-3 py-2 text-sm text-destructive">
+                {jsonEditorError}
+              </p>
+            )}
+            <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-border px-3 py-2">
+              <button type="button" onClick={() => setJsonEditorOpen(false)} className="inline-flex min-h-11 min-w-11 items-center justify-center whitespace-nowrap rounded bg-muted px-3 py-2 text-sm text-muted-foreground hover:text-foreground cursor-pointer focus-visible:ring-2 focus-visible:ring-primary">取消</button>
               <button
                 onClick={() => {
+                  let parsedSuccessfully = false;
                   try {
                     const parsed = JSON.parse(jsonEditContent);
+                    parsedSuccessfully = true;
+                    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)
+                      || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.connections)) {
+                      setJsonEditorError('工作流结构错误：nodes 和 connections 必须为数组。');
+                      return;
+                    }
+                    const isRecord = (value: unknown): value is Record<string, unknown> =>
+                      value !== null && typeof value === 'object' && !Array.isArray(value);
+                    const hasStrings = (value: Record<string, unknown>, keys: readonly string[]): boolean =>
+                      keys.every(key => typeof value[key] === 'string');
+                    const hasNodeShape = (value: unknown): boolean =>
+                      isRecord(value) && hasStrings(value, ['id', 'type', 'label'])
+                      && [value.x, value.y, value.width, value.height].every(
+                        (number: unknown): boolean => typeof number === 'number' && Number.isFinite(number))
+                      && isRecord(value.config) && Array.isArray(value.ports)
+                      && value.ports.every((port: unknown): boolean =>
+                        isRecord(port) && hasStrings(port, ['id', 'label', 'type'])
+                        && (port.direction === 'in' || port.direction === 'out'));
+                    const hasConnectionShape = (value: unknown): boolean =>
+                      isRecord(value) && hasStrings(value,
+                        ['id', 'fromNodeId', 'fromPortId', 'toNodeId', 'toPortId', 'type']);
+                    if (!parsed.nodes.every(hasNodeShape) || !parsed.connections.every(hasConnectionShape)) {
+                      setJsonEditorError('节点、端口、配置或连线的数据类型不正确，请检查后重试。');
+                      return;
+                    }
                     if (parsed.nodes && parsed.connections) {
                       updateWorkflow(prev => ({ ...prev, nodes: parsed.nodes, connections: parsed.connections }));
+                      setJsonEditorError(null);
                       setJsonEditorOpen(false);
                     }
-                  } catch { /* JSON解析失败，不关闭 */ }
+                  } catch {
+                    setJsonEditorError(parsedSuccessfully
+                      ? '未能应用更改，请检查内容后重试。'
+                      : 'JSON 格式错误，请检查括号、引号和逗号后重新应用。');
+                  }
                 }}
-                className="px-3 py-1 text-[10px] rounded bg-primary/20 text-primary hover:bg-primary/30 cursor-pointer"
+                type="button" className="inline-flex min-h-11 min-w-11 items-center justify-center whitespace-nowrap rounded bg-primary/20 px-3 py-2 text-sm text-primary hover:bg-primary/30 cursor-pointer focus-visible:ring-2 focus-visible:ring-primary"
               >
                 应用更改
               </button>
@@ -4503,59 +6005,11 @@ ${contextInfo}
         </div>
       )}
 
-      {/* ═══ 右键菜单 — 与原型对齐 ═══ */}
+      {/* 菜单只负责可视位置和输入；业务动作仍走原 handleContextAction。 */}
       {contextMenu && (
-        <div className="fixed inset-0 z-[199]" onClick={closeContextMenu} onContextMenu={(e) => { e.preventDefault(); closeContextMenu(); }}>
-          <div
-            className="context-menu"
-            style={{ left: contextMenu.x, top: contextMenu.y }}
-            onClick={e => e.stopPropagation()}
-          >
-            {contextMenu.type === 'canvas' ? (
-              <>
-                <div className="context-menu-item" onClick={() => handleContextAction('add-node')}>
-                  <Plus size={16} className="text-muted-foreground" />
-                  添加节点
-                </div>
-                <div className={`context-menu-item ${!clipboard ? 'opacity-40 pointer-events-none' : ''}`} onClick={() => handleContextAction('paste')}>
-                  <Clipboard size={16} className="text-muted-foreground" />
-                  粘贴
-                </div>
-                <div className="context-menu-divider" />
-                <div className="context-menu-item" onClick={() => handleContextAction('select-all')}>
-                  <BoxSelect size={16} className="text-muted-foreground" />
-                  全选
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="context-menu-item" onClick={() => handleContextAction('annotate')}>
-                  <MessageSquare size={16} className="text-muted-foreground" />
-                  批注修改
-                </div>
-                <div className="context-menu-divider" />
-                <div className="context-menu-item" onClick={() => handleContextAction('copy')}>
-                  <Copy size={16} className="text-muted-foreground" />
-                  复制
-                </div>
-                <div className="context-menu-item" onClick={() => handleContextAction('duplicate')}>
-                  <CopyPlus size={16} className="text-muted-foreground" />
-                  副本
-                </div>
-                <div className="context-menu-divider" />
-                <div className="context-menu-item" onClick={() => handleContextAction('disconnect')}>
-                  <Unlink size={16} className="text-muted-foreground" />
-                  断开连线
-                </div>
-                <div className="context-menu-divider" />
-                <div className="context-menu-item danger" onClick={() => handleContextAction('delete')}>
-                  <Trash2 size={16} />
-                  删除节点
-                </div>
-              </>
-            )}
-          </div>
-        </div>
+        <WorkflowContextMenu menu={contextMenu} hasClipboard={!!clipboard}
+          extraNodeActions={extraNodeActions}
+          onAction={handleContextAction} onClose={closeContextMenu} />
       )}
     </div>
     </>
@@ -4593,6 +6047,7 @@ interface PropertyPanelProps {
 }
 
 function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflowSkills, workflowSkillsLoading, workflowSkillsError, boundSourceVersionIds, onUpdate, onDelete, onImageUpload, canvasImages, onCanvasImageSelect, projectId, execResult, onSkillApproval, sketchScope, onSketchInsert }: PropertyPanelProps) {
+  const fieldScopeId = React.useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [localTextValues, setLocalTextValues] = useState<Record<string, string>>({});
   const [focusedField, setFocusedField] = useState<string | null>(null);
@@ -4612,6 +6067,8 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
   const cat = getNodeCategory(node.type);
   const color = NODE_TYPE_COLORS[cat];
   const fields = getNodePropertyFields(node.type);
+  const controlId = (key: string, fieldIndex: number): string => `${fieldScopeId}-workflow-node-${node.id}-${fieldIndex}-${key}`;
+  const fieldLabelId = (key: string, fieldIndex: number): string => `${controlId(key, fieldIndex)}-label`;
   const isCanvasFeature = ['ai-font-design', 'ai-refine-engine', 'ai-human-repair', 'ai-brand-ecommerce', 'ai-segment', 'ai-multi-angle', 'ai-3d-model'].includes(node.type);
   const configuredModel = String(node.config?.model || '');
   const configuredModelSeparator = configuredModel.indexOf('::');
@@ -4651,7 +6108,7 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
     });
   };
 
-  const renderField = (field: PropertyField) => {
+  const renderField = (field: PropertyField, fieldIndex: number) => {
     const externalValue = node.config?.[field.key] ?? (node as unknown as Record<string, unknown>)[field.key] ?? field.defaultValue ?? '';
     const serializedExternalValue = (
       externalValue
@@ -4699,6 +6156,7 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
       case 'text':
         return (
           <input
+            id={controlId(field.key, fieldIndex)}
             type="text"
             value={displayValue}
             onChange={e => onChangeText(e.target.value)}
@@ -4716,6 +6174,7 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
         return (
           <div className="relative">
             <textarea
+              id={controlId(field.key, fieldIndex)}
               value={displayValue}
               onChange={e => {
                 onChangeText(e.target.value);
@@ -4801,6 +6260,7 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
       case 'number':
         return (
           <input
+            id={controlId(field.key, fieldIndex)}
             type="number"
             value={externalValue !== undefined && externalValue !== '' ? Number(externalValue) : (field.defaultValue != null ? Number(field.defaultValue) : '')}
             onChange={e => onUpdate(node.id, { config: { [field.key]: e.target.value === '' ? '' : Number(e.target.value) } })}
@@ -4842,9 +6302,10 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
         }
         return (
           <select
+            id={controlId(field.key, fieldIndex)}
             value={String(externalValue)}
             onChange={e => onUpdate(node.id, { config: { [field.key]: e.target.value } })}
-            className="w-full bg-muted border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary/50"
+            className="min-h-11 w-full bg-muted border border-border rounded px-3 py-2 text-base text-foreground focus:outline-none focus:border-primary/50"
           >
             {dynamicOptions?.map(opt => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -4854,10 +6315,12 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
       }
 
       case 'slider': {
-        const numVal = Number(externalValue) || Number(field.defaultValue) || 0;
+        const numericValue = Number(externalValue);
+        const numVal = externalValue === '' || Number.isNaN(numericValue) ? Number(field.defaultValue) || 0 : numericValue;
         return (
           <div className="flex items-center gap-2">
             <input
+              id={controlId(field.key, fieldIndex)}
               type="range"
               value={numVal}
               onChange={e => onUpdate(node.id, { config: { [field.key]: Number(e.target.value) } })}
@@ -4876,9 +6339,16 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
         return (
           <button
             onClick={() => onUpdate(node.id, { config: { [field.key]: !boolVal } })}
-            className={`relative w-9 h-5 rounded-full transition-colors cursor-pointer ${boolVal ? 'bg-primary' : 'bg-muted'}`}
+            id={controlId(field.key, fieldIndex)}
+            type="button"
+            role="switch"
+            aria-labelledby={fieldLabelId(field.key, fieldIndex)}
+            aria-checked={boolVal}
+            className="inline-flex h-11 w-11 items-center justify-center rounded-md focus-visible:ring-2 focus-visible:ring-primary"
           >
-            <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${boolVal ? 'translate-x-4' : ''}`} />
+            <span className={`relative block h-5 w-9 rounded-full transition-colors ${boolVal ? 'bg-primary' : 'bg-muted'}`}>
+              <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${boolVal ? 'translate-x-4' : ''}`} />
+            </span>
           </button>
         );
       }
@@ -4894,7 +6364,7 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
           const label = visionRole ? '草图生图视觉模型' : '草图生图图像模型';
           const empty = visionRole ? '暂无可用的同步视觉聊天模型，请检查模型授权与视觉能力。' : '暂无支持参考图的图像模型，请检查模型授权与参考图能力。';
           return <div className="min-w-0 space-y-1">
-            <select aria-label={label} value={eligible.some(model => `${model.providerId}::${model.modelId}` === exact) ? exact : ''}
+            <select id={controlId(field.key, fieldIndex)} aria-label={label} value={eligible.some(model => `${model.providerId}::${model.modelId}` === exact) ? exact : ''}
               disabled={modelsLoading || !eligible.length} onChange={event => {
                 const selected = eligible.find(model => `${model.providerId}::${model.modelId}` === event.target.value);
                 onUpdate(node.id, { config: { [field.key]: selected ? event.target.value : '', [providerKey]: selected?.providerId || '' } });
@@ -4909,7 +6379,7 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
           const eligible = sketchModels([...modelCatalogIndex.values()]);
           const configured = String(externalValue || '');
           const exact = configured.includes('::') ? configured : `${String(node.config.providerId || '')}::${configured}`;
-          return <select aria-label="草图视觉模型" value={eligible.some(m => `${m.providerId}::${m.modelId}` === exact) ? exact : ''} disabled={modelsLoading}
+          return <select id={controlId(field.key, fieldIndex)} aria-label="草图视觉模型" value={eligible.some(m => `${m.providerId}::${m.modelId}` === exact) ? exact : ''} disabled={modelsLoading}
             onChange={event => { const model = eligible.find(m => `${m.providerId}::${m.modelId}` === event.target.value); if (model) onUpdate(node.id, { config: { model: event.target.value, providerId: model.providerId } }); }}
             className="w-full bg-muted border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary/50 disabled:opacity-50">
             <option value="">{modelsLoading ? '模型目录暂不可用' : '选择同步视觉聊天模型'}</option>
@@ -4930,6 +6400,7 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
         ).compositeKey || '';
         return (
           <select
+            id={controlId(field.key, fieldIndex)}
             value={currentCompositeValue}
             onChange={e => {
               const selectedValue = e.target.value;
@@ -4995,6 +6466,9 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
       }
 
       case 'image-upload':
+        if (node.type === 'input-image' && node.config.source === 'upstream') {
+          return <p className="text-xs leading-relaxed text-muted-foreground">使用上游图片，请连接图片输入端口。</p>;
+        }
         return (
           <div className="space-y-2">
             {node.config?.imageUrl ? (
@@ -5006,17 +6480,21 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
               </div>
             ) : (
               <div className="flex gap-1.5">
-                <div
+                <button
+                  type="button"
+                  aria-label="上传图片"
                   onClick={() => fileInputRef.current?.click()}
                   className="flex-1 h-16 border-2 border-dashed border-border rounded flex flex-col items-center justify-center cursor-pointer hover:border-primary/50 transition-colors text-muted-foreground hover:text-muted-foreground"
                 >
                   <Upload size={14} />
                   <span className="text-[10px] mt-0.5">上传</span>
-                </div>
+                </button>
                 {canvasImages && canvasImages.length > 0 && (
                   <div className="relative flex-1 group/canvas">
-                    <div
-                      className="flex-1 h-16 border-2 border-dashed border-border rounded flex flex-col items-center justify-center cursor-pointer hover:border-primary/50 transition-colors text-muted-foreground hover:text-muted-foreground"
+                    <button
+                      type="button"
+                      aria-label="从画布选择图片"
+                      className="w-full h-16 border-2 border-dashed border-border rounded flex flex-col items-center justify-center cursor-pointer hover:border-primary/50 transition-colors text-muted-foreground hover:text-muted-foreground"
                       onClick={(e) => {
                         const dropdown = (e.currentTarget.nextElementSibling as HTMLElement);
                         if (dropdown) dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
@@ -5024,7 +6502,7 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
                     >
                       <ImageIcon size={14} />
                       <span className="text-[10px] mt-0.5">画布</span>
-                    </div>
+                    </button>
                     <div style={{ display: 'none' }} className="absolute right-0 top-full mt-1 w-64 max-h-40 overflow-y-auto bg-muted border border-border rounded shadow-lg z-50">
                       {canvasImages.map((img, idx) => (
                         <button
@@ -5050,6 +6528,7 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
               if (file) onImageUpload(node.id, file);
             }} />
             <input
+              id={controlId(field.key, fieldIndex)}
               type="text"
               value={String(externalValue || '')}
               onChange={e => onUpdate(node.id, { config: { [field.key]: e.target.value } })}
@@ -5062,6 +6541,7 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
       default:
         return (
           <input
+            id={controlId(field.key, fieldIndex)}
             type="text"
             value={String(externalValue)}
             onChange={e => onUpdate(node.id, { config: { [field.key]: e.target.value } })}
@@ -5116,7 +6596,7 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
                   runId: undefined,
                 } });
               }}
-              className="w-full bg-muted border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary/50"
+              className="min-h-11 w-full bg-muted border border-border rounded px-3 py-2 text-base text-foreground focus:outline-none focus:border-primary/50"
             >
               <option value="">{workflowSkillsLoading ? '加载中...' : '选择 Skill'}</option>
               {workflowSkills.map(skill => <option key={`${skill.id}:${skill.version}`} data-workflow-skill-id={skill.id} value={skill.id}>{skill.name}</option>)}
@@ -5128,6 +6608,12 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
               <SkillInputFields
                 fields={selectedSkill.inputs}
                 values={displayedSkillInputs}
+                capabilityDescriptors={{
+                  video: modelCatalogIndex.get(taskModelKey(
+                    configuredSkillBindings.video?.providerId ?? '',
+                    configuredSkillBindings.video?.modelId ?? '',
+                  )),
+                }}
                 onChange={(key, value) => onUpdate(node.id, { config: {
                   inputValues: { ...configuredSkillInputs, [key]: value },
                 } })}
@@ -5153,7 +6639,7 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
                           ),
                         } });
                       }}
-                      className="w-full bg-muted border border-border rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary/50"
+                      className="min-h-11 w-full bg-muted border border-border rounded px-3 py-2 text-base text-foreground focus:outline-none focus:border-primary/50"
                     >
                       <option value="">选择模型</option>
                       {options.map(model => (
@@ -5190,31 +6676,31 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
       )}
 
       {/* 属性字段 — 与原型对齐: 逐字段垂直排列, px-4 py-2 间距 */}
-      {fields.map(field => (
-        <div key={field.key} data-node-field={field.key} className="px-4 py-2">
-          <label className="block text-xs font-medium text-muted-foreground mb-1.5">{field.label}</label>
+      {fields.map((field, fieldIndex) => (
+        <div key={controlId(field.key, fieldIndex)} data-node-field={field.key} className="min-w-0 px-4 py-2 [&_button]:min-h-11 [&_button]:min-w-11 [&_input]:min-h-11 [&_input]:min-w-0 [&_input]:text-base [&_textarea]:text-base [&_select]:min-h-11 [&_select]:text-base">
+          <label id={fieldLabelId(field.key, fieldIndex)} htmlFor={field.key === 'aspectRatio' || (field.key === 'quality' && field.type === 'select') ? undefined : controlId(field.key, fieldIndex)} className="block text-xs font-medium text-muted-foreground mb-1.5">{field.label}</label>
           {field.key === 'aspectRatio' ? (
             /* 比例选择器 — 与原型对齐: 4列grid + ratio-btn样式 */
-            <div className="grid grid-cols-4 gap-2">
+            <div role="group" aria-labelledby={fieldLabelId(field.key, fieldIndex)} className="grid grid-cols-4 gap-2">
               {(configuredDescriptor?.allowedRatios.map(value => ({ value, label: value })) || field.options || []).map(opt => {
                 const isActive = String(node.config?.aspectRatio ?? field.defaultValue ?? '1:1') === opt.value;
                 const ratioMap: Record<string, { w: number; h: number }> = { '1:1': { w: 20, h: 20 }, '4:3': { w: 24, h: 18 }, '16:9': { w: 28, h: 16 }, '9:16': { w: 14, h: 24 }, '3:4': { w: 18, h: 24 }, '3:2': { w: 24, h: 16 }, '2:3': { w: 16, h: 24 } };
                 const dim = ratioMap[opt.value] || { w: 20, h: 20 };
                 return (
-                  <button key={opt.value} className={`ratio-btn ${isActive ? 'active' : ''}`} onClick={() => onUpdate(node.id, { config: { aspectRatio: opt.value } })}>
+                  <button key={opt.value} className={`ratio-btn ${isActive ? 'active' : ''}`} aria-pressed={isActive} onClick={() => onUpdate(node.id, { config: { aspectRatio: opt.value } })}>
                     <div className="ratio-preview" style={{ width: dim.w, height: dim.h }} />
                     <span className="text-[10px] text-muted-foreground">{opt.label}</span>
                   </button>
                 );
               })}
             </div>
-          ) : field.key === 'quality' ? (
+          ) : field.key === 'quality' && field.type === 'select' ? (
             /* 质量选择器 — 与原型对齐: 3按钮横排 */
-            <div className="flex gap-2">
+            <div role="group" aria-labelledby={fieldLabelId(field.key, fieldIndex)} className="grid grid-cols-2 gap-2">
               {(configuredDescriptor?.qualityOptions.map(value => ({ value, label: value })) || field.options || []).map(opt => {
                 const isActive = String(node.config?.quality ?? field.defaultValue ?? 'hd') === opt.value;
                 return (
-                  <button key={opt.value} className={`quality-btn flex-1 ${isActive ? 'active' : ''}`} onClick={() => onUpdate(node.id, { config: { quality: opt.value } })}>
+                  <button key={opt.value} className={`quality-btn min-w-0 px-2 ${isActive ? 'active' : ''}`} aria-pressed={isActive} onClick={() => onUpdate(node.id, { config: { quality: opt.value } })}>
                     {opt.label}
                   </button>
                 );
@@ -5224,6 +6710,7 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
             /* 种子输入 — 与原型对齐: 输入框 + 随机按钮 */
             <div className="flex gap-2">
               <input
+                id={controlId(field.key, fieldIndex)}
                 type="text"
                 value={String(node.config?.seed ?? field.defaultValue ?? '')}
                 onChange={e => onUpdate(node.id, { config: { seed: e.target.value } })}
@@ -5242,6 +6729,7 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
             /* CFG/引导系数 — 与原型对齐: 滑块 + 数值显示 */
             <div className="flex items-center gap-3">
               <input
+                id={controlId(field.key, fieldIndex)}
                 type="range"
                 min={Number(field.min) || 1}
                 max={Number(field.max) || 20}
@@ -5253,7 +6741,7 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
               <span className="text-xs font-mono text-foreground w-8 text-right">{Number(node.config?.[field.key] ?? field.defaultValue ?? 7)}</span>
             </div>
           ) : (
-            renderField(field)
+            renderField(field, fieldIndex)
           )}
         </div>
       ))}
@@ -5284,7 +6772,7 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
       <div className="px-4 py-3">
         <button
           onClick={() => onDelete(node.id)}
-          className="w-full py-2 rounded-md text-sm text-red-400 hover:bg-red-900/20 transition-colors cursor-pointer flex items-center justify-center gap-1.5 border border-dashed border-red-400/20"
+          className="min-h-11 w-full py-2 rounded-md text-sm text-red-300 [.node-editor-root[data-theme=monochrome]_&]:text-red-800 hover:bg-red-900/20 transition-colors cursor-pointer flex items-center justify-center gap-1.5 border border-dashed border-red-400/20"
         >
           <Trash2 size={12} /> 删除节点
         </button>

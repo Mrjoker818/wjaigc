@@ -333,11 +333,14 @@ export function CanvasMinimap({
       data-popup
       data-testid="canvas-minimap"
       data-theme={theme}
+      role="region"
+      aria-label="画布小地图"
       onPointerDown={stopPropagation}
       onWheel={stopPropagation}
       style={{
         width: 192,
         bottom: 'var(--canvas-minimap-bottom, 76px)',
+        marginBottom: 'max(0px, calc(var(--canvas-bottom-toolbar-offset, 0px) - var(--canvas-minimap-bottom, 76px)))',
         right: Math.max(12, Number.isFinite(rightOffset) ? rightOffset : 12),
         borderRadius: 8,
         backgroundColor: themeStyles.panelBackground,
@@ -347,7 +350,12 @@ export function CanvasMinimap({
     >
       <div className="flex items-center justify-between px-2 py-1">
         <span className="text-xs font-medium">小地图</span>
-        <button type="button" aria-label="关闭小地图" onClick={close}>
+        <button
+          type="button"
+          aria-label="关闭小地图"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current"
+          onClick={close}
+        >
           <X size={14} aria-hidden="true" />
         </button>
       </div>

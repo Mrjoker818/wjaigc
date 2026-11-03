@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef, useId, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import AdminTabs, { type AdminGroup as AdminTabsGroup, type AdminProvider as AdminTabsProvider, type AdminUser as AdminTabsUser } from './admin-tabs';
 import DataManagerTab from './data-manager-tab';
 import DesktopAdminTab from './desktop-admin-tab';
 import UserSettingsTab from './user-settings-tab';
+import type { WorkspaceThemePreference } from '@/hooks/use-workspace-theme';
 import UserCreditsTab from './user-credits-tab';
 import MediaGatewayAdmin from './media-gateway-admin';
 import { formatPaymentTimestamp } from '@/lib/payment-order-time';
@@ -37,6 +38,7 @@ import {
   resolveModelAuthorizationNamespace,
 } from '@/lib/model-type-classification';
 import { getModelDisplayName } from '@/lib/model-name-map';
+import { readDashboardProjects, type DashboardReadKind } from '@/lib/simple-chat-dashboard-read';
 import { loadSimpleChatDashboardProjects } from '@/lib/simple-chat-sync-client';
 import { createIndexedDbSimpleChatEnvelopeStore } from '@/lib/simple-chat-sync-storage';
 import { reconcileImageBatchDeletion } from '@/lib/asset-core/batch-placement-delete';
@@ -281,12 +283,15 @@ const userPermissionLabels: Record<UserPermissionKey, string> = {
 };
 
 interface DashboardViewProps {
+  renameDraftStore?: Map<string, { value: string; error: string | null }>;
   user: User;
   onOpenProject: (project: Project) => void;
   onNewProject: () => void;
   onLogout?: () => void;
   isMonochrome?: boolean;
   onSetIsMonochrome?: (value: boolean) => void;
+  themePreference?: WorkspaceThemePreference;
+  onSetThemePreference?: (preference: WorkspaceThemePreference) => void;
   onSetFavoriteParams?: (params: { prompt: string; model?: string; aspectRatio?: string; quality?: string; negativePrompt?: string }) => void;
 }
 
@@ -296,13 +301,22 @@ interface PromptEntry {
   projectName: string;
 }
 
-export default function DashboardView({ user, onOpenProject, onNewProject, onLogout, isMonochrome, onSetIsMonochrome, onSetFavoriteParams }: DashboardViewProps) {
+export default function DashboardView({ user, onOpenProject, onNewProject, onLogout, isMonochrome, onSetIsMonochrome, themePreference, onSetThemePreference, onSetFavoriteParams, renameDraftStore: externalRenameDraftStore }: DashboardViewProps) {
+  const dashboardFormId = useId();
   const isAdmin = user.role === 'admin';
 
   // ─── Navigation state ───
   // Chat-only users start on chat tab, others on projects
   const defaultTab: TabType = (user.productType?.includes('chat') && !user.productType?.includes('canvas')) ? 'chat' : 'projects';
-  const [activeTab, setActiveTab] = useState<TabType>(defaultTab);
+  const [requestedTab, setActiveTab] = useState<TabType>(defaultTab);
+  const hasChatProduct = Boolean(user.productType?.includes('chat'));
+  const hasCanvasProduct = Boolean(user.productType?.includes('canvas'));
+  const requestedTabUnavailable = (requestedTab === 'chat' && !hasChatProduct)
+    || (['projects', 'templates', 'assets', 'stats'].includes(requestedTab) && !hasCanvasProduct)
+    || (!isAdmin && ['overview', 'users', 'groups', 'audit', 'apis', 'media-gateway', 'desktop-admin', 'connector-admin', 'data', 'payment-config', 'ecom-templates'].includes(requestedTab));
+  const activeTab: TabType = requestedTabUnavailable
+    ? hasCanvasProduct ? 'projects' : hasChatProduct ? 'chat' : 'settings'
+    : requestedTab;
   const [mobileNavOpen, setMobileNavOpen] = useState<boolean>(false);
   const mobileNavTriggerRef = useRef<HTMLButtonElement>(null);
   const [desktopAdminData, setDesktopAdminData] = useState<{
@@ -340,7 +354,13 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [copiedIdx, setCopiedIdx] = useState<string | number | null>(null);
   const [showUserProfile, setShowUserProfile] = useState(false);
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState('');
+  const [renameActorId, setRenameActorId] = useState<string | null>(null);
+  const localRenameDraftStore = useRef(new Map<string, { value: string; error: string | null }>());
+  const renameDraftStore = externalRenameDraftStore ?? localRenameDraftStore.current;
+  const [renameDrafts, setRenameDrafts] = useState<Record<string, { value: string; error: string | null }>>({});
+  const renameDraftKey = renameActorId && renamingProjectId ? JSON.stringify([renameActorId, renamingProjectId]) : null;
+  const renameValue = renameDraftKey ? renameDrafts[renameDraftKey]?.value ?? '' : '';
+  const renameError = renameDraftKey ? renameDrafts[renameDraftKey]?.error ?? null : null;
 
   // ─── Admin: User management state ───
   const [adminUsers, setAdminUsers] = useState<User[]>([]);
@@ -351,7 +371,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [editName, setEditName] = useState('');
   const [resetPwdUser, setResetPwdUser] = useState<string | null>(null);
   const [newPassword, setNewPassword] = useState('');
-  const [confirmDlg, setConfirmDlg] = useState<{ open: boolean; title: string; message: string; variant?: 'danger' | 'warning'; onConfirm: () => void; onCancel: () => void }>({ open: false, title: '', message: '', onConfirm: () => {}, onCancel: () => {} });
+  const [confirmDlg, setConfirmDlg] = useState<{ open: boolean; title: string; message: string; details?: ReactNode; variant?: 'danger' | 'warning'; onConfirm: () => void; onCancel: () => void }>({ open: false, title: '', message: '', onConfirm: () => {}, onCancel: () => {} });
 
   // ─── Admin: API management state ───
   const [providers, setProviders] = useState<AdminProvider[]>([]);
@@ -376,17 +396,94 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   
   // ─── Admin: Group management state ───
   const [adminGroups, setAdminGroups] = useState<Array<{ id: string; name: string; product_types: string[]; credit_quota: number; is_active: boolean; created_at: number; updated_at: number }>>([]);
+  const [adminGroupsReadState, setAdminGroupsReadState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const adminGroupsReadScope = useRef<{ revision: number } | null>(null);
+  const groupWriteLocks = useRef(new Map<string, { phase: 'pending' | 'unknown' }>());
+  const groupWriteActor = useRef<string | null>(null);
+  const [groupWriteState, setGroupWriteState] = useState<'idle' | 'pending' | 'unknown'>('idle');
+  useLayoutEffect(() => {
+    groupWriteActor.current = isAdmin ? user.id : null;
+    setGroupWriteState(isAdmin ? groupWriteLocks.current.get(user.id)?.phase ?? 'idle' : 'idle');
+    if (!isAdmin) {
+      adminGroupsReadScope.current = null;
+      setAdminGroups([]);
+      setAdminGroupsReadState('loading');
+      return;
+    }
+    const scope = { revision: 0 };
+    adminGroupsReadScope.current = scope;
+    setAdminGroups([]);
+    setAdminGroupsReadState('loading');
+    return () => {
+      if (adminGroupsReadScope.current === scope) adminGroupsReadScope.current = null;
+      if (groupWriteActor.current === user.id) groupWriteActor.current = null;
+    };
+  }, [isAdmin, user.id]);
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupProductTypes, setNewGroupProductTypes] = useState<string[]>(['canvas']);
 
   // ─── Chat projects state ───
-  const [chatProjects, setChatProjects] = useState<Array<{ id: string; name: string; emoji: string; taskCount: number; updatedAt: number }>>([]);
+  const [chatProjectsState, setChatProjectsState] = useState<{
+    userId: string;
+    kind: DashboardReadKind;
+    slow?: boolean;
+    projects: Array<{ id: string; name: string; emoji: string; taskCount: number; updatedAt: number }>;
+  } | null>(null);
+  const chatProjectsLoaded = chatProjectsState?.userId === user.id;
+  const chatProjects = chatProjectsLoaded ? chatProjectsState.projects : [];
+  const chatProjectsKind = chatProjectsLoaded ? chatProjectsState.kind : null;
+  const chatProjectsSlow = chatProjectsLoaded && chatProjectsState.slow === true;
+  const chatProjectsAvailable = chatProjectsKind === 'available' || chatProjectsKind === 'local';
+  const chatRefreshRef = useRef<(() => void) | null>(null);
   const [newGroupCreditQuota, setNewGroupCreditQuota] = useState(0);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [editGroupName, setEditGroupName] = useState('');
   const [editGroupProductTypes, setEditGroupProductTypes] = useState<string[]>([]);
   const [editGroupCreditQuota, setEditGroupCreditQuota] = useState(0);
   const [editGroupActive, setEditGroupActive] = useState(true);
+  const groupDrafts = useRef(new Map<string, {
+    name: string; productTypes: string[]; creditQuota: number;
+    edit?: { id: string; name: string; productTypes: string[]; creditQuota: number; isActive: boolean };
+  }>());
+  const updateGroupDraft = (patch: Partial<{
+    name: string; productTypes: string[]; creditQuota: number;
+    edit: { id: string; name: string; productTypes: string[]; creditQuota: number; isActive: boolean } | undefined;
+  }>): void => {
+    const actor = groupWriteActor.current;
+    if (!actor) return;
+    const draft = groupDrafts.current.get(actor) ?? { name: '', productTypes: ['canvas'], creditQuota: 0 };
+    groupDrafts.current.set(actor, { ...draft, ...patch });
+  };
+  const updateEditingGroupDraft = (patch: Partial<NonNullable<ReturnType<typeof groupDrafts.current.get>>['edit']>): void => {
+    const actor = groupWriteActor.current;
+    const edit = actor ? groupDrafts.current.get(actor)?.edit : undefined;
+    if (edit) updateGroupDraft({ edit: { ...edit, ...patch } });
+  };
+  useLayoutEffect(() => {
+    const draft = isAdmin ? groupDrafts.current.get(user.id) : undefined;
+    setNewGroupName(draft?.name ?? '');
+    setNewGroupProductTypes(draft?.productTypes ?? ['canvas']);
+    setNewGroupCreditQuota(draft?.creditQuota ?? 0);
+    setEditingGroupId(draft?.edit?.id ?? null);
+    setEditGroupName(draft?.edit?.name ?? '');
+    setEditGroupProductTypes(draft?.edit?.productTypes ?? []);
+    setEditGroupCreditQuota(draft?.edit?.creditQuota ?? 0);
+    setEditGroupActive(draft?.edit?.isActive ?? true);
+  }, [isAdmin, user.id]);
+  const newGroupDraftRevision = useRef(0);
+  const editGroupDraftRevision = useRef(0);
+  const groupViewScope = useRef<object | null>(null);
+  const groupConfirmation = useRef<(() => void) | null>(null);
+  useLayoutEffect(() => {
+    const previousConfirmation = groupConfirmation.current;
+    if (previousConfirmation) {
+      groupConfirmation.current = null;
+      setConfirmDlg(previous => previous.onConfirm === previousConfirmation ? { ...previous, open: false } : previous);
+    }
+    const scope = {};
+    groupViewScope.current = scope;
+    return () => { if (groupViewScope.current === scope) groupViewScope.current = null; };
+  }, [user.id, activeTab]);
   const [groupMenuOpenId, setGroupMenuOpenId] = useState<string | null>(null);
   
   // 模型搜索筛选计算
@@ -458,18 +555,12 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   const [showUserDrawer, setShowUserDrawer] = useState(false);
   const [showUserAddDrawer, setShowUserAddDrawer] = useState(false);
 
-  // ─── Admin: System settings state ───
-  const [systemSettings, setSystemSettings] = useState<{
-    defaultImageModel: string; defaultChatModel: string; maxConcurrentTasks: number; imageMaxSizeMB: number; announcement: string;
-  }>({ defaultImageModel: '', defaultChatModel: '', maxConcurrentTasks: 15, imageMaxSizeMB: 20, announcement: '' });
-
   // ─── Admin: Credits management enhanced state ───
   const [creditsSubTab, setCreditsSubTab] = useState<'overview' | 'consumption' | 'stats' | 'packages'>('overview');
   const [creditsConsumptionData, setCreditsConsumptionData] = useState<Array<{ userId: string; userName: string; model: string; credits: number; type: string; createdAt: number }>>([]);
 
   // ─── Admin: Audit log state ───
   const [auditLogs, setAuditLogs] = useState<Array<{ id: string; userId: string; userName: string; action: string; targetType: string | null; targetId: string | null; detail: string | null; ipAddress: string | null; createdAt: number }>>([]);
-  const [auditStats, setAuditStats] = useState<{ totalActions: number; todayActions: number; uniqueUsers: number; actionBreakdown: Record<string, number>; todayCount?: number; weekCount?: number; totalCount?: number; } | null>(null);
   const [auditFilterAction, setAuditFilterAction] = useState<string>('all');
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditTotal, setAuditTotal] = useState(0);
@@ -790,10 +881,24 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
   const handleBatchDeleteProjects = useCallback(() => {
     if (selectedProjectIds.size === 0 || projectDeleteLoading) return;
+    const selectedProjects = Array.from(selectedProjectIds, id => ({
+      id,
+      name: projects.find(project => project.id === id)?.name || '名称不可用',
+    }));
     setConfirmDlg({
       open: true,
       title: '批量删除项目',
       message: `确定删除选中的 ${selectedProjectIds.size} 个项目吗？此操作不可恢复。`,
+      details: (
+        <ul className="space-y-2 text-sm text-[#bbb]">
+          {selectedProjects.map(project => (
+            <li key={project.id} className="break-all">
+              <span className="text-white">{project.name}</span>
+              <span className="block text-xs text-[#aaa]">项目 ID：{project.id}</span>
+            </li>
+          ))}
+        </ul>
+      ),
       variant: 'danger',
       onConfirm: async () => {
         setProjectDeleteLoading(true);
@@ -826,7 +931,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       },
       onCancel: () => setConfirmDlg(dialog => ({ ...dialog, open: false })),
     });
-  }, [mgr, projectDeleteLoading, selectedProjectIds]);
+  }, [mgr, projectDeleteLoading, selectedProjectIds, projects]);
 
   const handleUseTemplate = useCallback((template: { name: string }) => {
     const newProject = mgr.createProject(template.name);
@@ -967,18 +1072,62 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     }
   }, [selectedAssetIds.size, filteredImages]);
 
-  const handleRenameProject = useCallback((projectId: string, currentName: string) => {
-    setRenamingProjectId(projectId);
-    setRenameValue(currentName);
+  const closeRenameProject = useCallback(() => {
+    setRenamingProjectId(null);
+    setRenameActorId(null);
   }, []);
 
-  const handleConfirmRename = useCallback(() => {
-    if (renamingProjectId && renameValue.trim()) {
-      mgr.updateProject(renamingProjectId, { name: renameValue.trim() });
+  useEffect(() => {
+    closeRenameProject();
+  }, [user.id, closeRenameProject]);
+
+  const cancelRenameProject = useCallback(() => {
+    if (renameDraftKey) {
+      renameDraftStore.delete(renameDraftKey);
+      setRenameDrafts(previous => {
+        const next = { ...previous };
+        delete next[renameDraftKey];
+        return next;
+      });
     }
-    setRenamingProjectId(null);
-    setRenameValue('');
-  }, [mgr, renamingProjectId, renameValue]);
+    closeRenameProject();
+  }, [renameDraftKey, renameDraftStore, closeRenameProject]);
+
+  const handleRenameProject = useCallback((projectId: string, currentName: string) => {
+    const key = JSON.stringify([user.id, projectId]);
+    const saved = renameDraftStore.get(key);
+    setRenameDrafts(previous => previous[key] ? previous : { ...previous, [key]: saved ?? { value: currentName, error: null } });
+    setRenamingProjectId(projectId);
+    setRenameActorId(user.id);
+  }, [user.id, renameDraftStore]);
+
+  const handleConfirmRename = useCallback(() => {
+    if (!renamingProjectId || renameActorId !== user.id || !renameDraftKey) return;
+    if (!renameValue.trim()) {
+      cancelRenameProject();
+      return;
+    }
+    const setError = (error: string) => {
+      const draft = { value: renameDraftStore.get(renameDraftKey)?.value ?? renameValue, error };
+      renameDraftStore.set(renameDraftKey, draft);
+      setRenameDrafts(previous => ({ ...previous, [renameDraftKey]: draft }));
+    };
+    try {
+      if (mgr.getCurrentUserId() !== user.id) {
+        setError('当前账户已变化，未更新项目；请确认账户后重试。');
+        return;
+      }
+      const updated = mgr.updateProject(renamingProjectId, { name: renameValue.trim() });
+      if (!updated) {
+        setError('未能确认项目名称更新，请检查项目后重试。');
+        return;
+      }
+      setProjectRevision(value => value + 1);
+      cancelRenameProject();
+    } catch {
+      setError('未能确认项目名称更新，请检查项目后重试。');
+    }
+  }, [mgr, renamingProjectId, renameActorId, renameDraftKey, renameValue, user.id, renameDraftStore, cancelRenameProject]);
 
   const handleExportProject = useCallback(async (project: Project) => {
     try {
@@ -1022,6 +1171,11 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
   // ─── Admin: Data fetching ───
   const refreshAdmin = useCallback(async (signal?: AbortSignal) => {
+    const groupsScope = adminGroupsReadScope.current;
+    const groupsRevision = groupsScope ? ++groupsScope.revision : 0;
+    const groupsReadCurrent = (): boolean => !!groupsScope && adminGroupsReadScope.current === groupsScope
+      && groupsScope.revision === groupsRevision && !signal?.aborted;
+    if (groupsReadCurrent()) setAdminGroupsReadState('loading');
     try {
       const response = await fetch('/api/admin/users', { cache: 'no-store', credentials: 'include', signal });
       if (response.ok) {
@@ -1047,13 +1201,63 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
         setProvidersLoadError(`HTTP ${response.status}`);
       }
     } catch (error) { if (error instanceof DOMException && error.name === 'AbortError') return; setProvidersLoadError(errorMessage(error, '网络请求失败')); }
+    if (!groupsReadCurrent()) return;
     try {
       const gRes = await fetch('/api/admin/groups', { cache: 'no-store', credentials: 'include', signal });
-      if (gRes.ok) {
-        const gData = await gRes.json();
-        if (gData.success && Array.isArray(gData.groups)) setAdminGroups(gData.groups);
+      if (!gRes.ok) throw new Error('GROUPS_READ_FAILED');
+      const gData = await gRes.json();
+      if (!groupsReadCurrent()) return;
+      if (!gData.success || !Array.isArray(gData.groups)) throw new Error('GROUPS_READ_INVALID');
+      setAdminGroups(previous => groupsReadCurrent() ? gData.groups : previous);
+      setAdminGroupsReadState(previous => groupsReadCurrent() ? 'ready' : previous);
+    } catch {
+      if (groupsReadCurrent()) setAdminGroupsReadState(previous => groupsReadCurrent() ? 'error' : previous);
+    }
+  }, []);
+
+  const submitAdminGroup = useCallback(async (payload: {
+    action: 'create' | 'update' | 'delete'; id?: string; name?: string;
+    productTypes?: string[]; creditQuota?: number; isActive?: boolean;
+  }): Promise<boolean> => {
+    const actor = groupWriteActor.current;
+    if (!actor || !adminGroupsReadScope.current || groupWriteLocks.current.has(actor)) return false;
+    const lock: { phase: 'pending' | 'unknown' } = { phase: 'pending' };
+    groupWriteLocks.current.set(actor, lock);
+    setGroupWriteState('pending');
+    const ownsLock = (): boolean => groupWriteLocks.current.get(actor) === lock;
+    let outcome: 'confirmed' | 'rejected' | 'unknown' = 'unknown';
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+    try {
+      const response = await fetch('/api/admin/groups', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify(payload), signal: controller.signal,
+      });
+      const data = await response.json().catch(() => null) as { success?: boolean } | null;
+      if (response.ok && data?.success === true) outcome = 'confirmed';
+      else if ([400, 401, 403, 404].includes(response.status) && data?.success === false) outcome = 'rejected';
+    } catch {
+      // A transport failure does not prove the server rolled back the operation.
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (!ownsLock()) return false;
+    if (outcome === 'unknown') {
+      lock.phase = 'unknown';
+      if (groupWriteActor.current === actor) {
+        setGroupWriteState('unknown');
+        toast.warning('分组操作结果尚未确认，请先核对，勿重复提交。');
       }
-    } catch { /* ignore */ }
+      return false;
+    }
+    groupWriteLocks.current.delete(actor);
+    if (groupWriteActor.current !== actor) return false;
+    setGroupWriteState('idle');
+    if (outcome === 'rejected') {
+      toast.error('分组操作被拒绝，输入已保留。');
+      return false;
+    }
+    return true;
   }, []);
 
   const refreshBalances = useCallback(async (signal?: AbortSignal) => {
@@ -1105,34 +1309,62 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     finally { setProductionReadinessLoading(false); }
   }, []);
 
-  const loadChatProjects = useCallback(async () => {
-    const projects = await loadSimpleChatDashboardProjects({
+  const loadChatProjects = useCallback(async (signal?: AbortSignal, onSlow?: () => void) => {
+    const result = await readDashboardProjects({
       userId: user.id,
       store: createIndexedDbSimpleChatEnvelopeStore(),
+      signal,
+      onSlow,
+      loader: options => loadSimpleChatDashboardProjects({ ...options }),
     });
-    return projects.map((project) => ({
+    return { kind: result.kind, projects: result.projects.map((project) => ({
         id: project.id,
         name: project.name,
         emoji: project.emoji || '💬',
         taskCount: Array.isArray(project.tasks) ? project.tasks.length : 0,
         updatedAt: project.updatedAt || 0,
-      }));
+      })) };
   }, [user.id]);
 
   useEffect(() => {
-    if (!user.productType?.includes('chat')) return;
+    if (!hasChatProduct) {
+      setChatProjectsState(null);
+      return;
+    }
     let cancelled = false;
+    let latestRequest = 0;
+    let controller: AbortController | null = null;
     const refresh = async (): Promise<void> => {
-      const loaded = await loadChatProjects();
-      if (!cancelled) setChatProjects(loaded);
+      const request = ++latestRequest;
+      controller?.abort();
+      controller = new AbortController();
+      setChatProjectsState(current => {
+        if (cancelled || request !== latestRequest) return current;
+        if (current?.userId === user.id && (current.kind === 'available' || current.kind === 'local')) {
+          return current.slow ? { ...current, slow: false } : current;
+        }
+        return null;
+      });
+      const loaded = await loadChatProjects(controller.signal, () => {
+        if (!cancelled && request === latestRequest) setChatProjectsState(current => {
+          if (cancelled || request !== latestRequest) return current;
+          if (current?.userId === user.id && (current.kind === 'available' || current.kind === 'local')) return { ...current, slow: true };
+          return { userId: user.id, kind: 'timeout', projects: [], slow: true };
+        });
+      });
+      if (!cancelled && request === latestRequest && loaded.kind !== 'cancelled') setChatProjectsState({ userId: user.id, ...loaded });
     };
+    chatRefreshRef.current = () => { void refresh(); };
     void refresh();
     window.addEventListener('focus', refresh);
     return () => {
       cancelled = true;
+      chatRefreshRef.current = null;
+      controller?.abort();
       window.removeEventListener('focus', refresh);
+      setChatProjectsState(null);
     };
-  }, [loadChatProjects, user.productType]);
+  }, [loadChatProjects, user.id, hasChatProduct]);
 
   // ─── Filtered providers for API management ───
   const filteredProviders = useMemo(() => {
@@ -1437,7 +1669,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     void refreshAdmin(controller.signal);
     void refreshBalances(controller.signal);
     return () => controller.abort();
-  }, [isAdmin, refreshAdmin, refreshBalances]);
+  }, [isAdmin, user.id, refreshAdmin, refreshBalances]);
 
   // ─── Load dashboard stats (admin overview) ───
   const loadDashboardStats = useCallback(async () => {
@@ -1468,16 +1700,6 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
     } catch { /* ignore */ }
     setAuditLoading(false);
   }, [auditFilterAction]);
-
-  const loadAuditStats = useCallback(async () => {
-    try {
-      const res = await fetch('/api/admin/audit?stats=true', { credentials: 'include' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success) setAuditStats(data.stats);
-      }
-    } catch { /* ignore */ }
-  }, []);
 
   // ─── Load user detail (drawer) ───
   const loadUserDetail = useCallback(async (userId: string) => {
@@ -1510,19 +1732,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   useEffect(() => {
     if (!isAdmin) return;
     if (activeTab === 'overview') void loadDashboardStats();
-    if (activeTab === 'audit') { void loadAuditLogs(0); void loadAuditStats(); }
-    if (activeTab === 'settings') {
-      void (async () => {
-        try {
-          const res = await fetch('/api/admin/settings', { credentials: 'include' });
-          if (res.ok) {
-            const data = await res.json();
-            if (data.success && data.settings) setSystemSettings(prev => ({ ...prev, ...data.settings }));
-          }
-        } catch { /* ignore */ }
-      })();
-    }
-  }, [isAdmin, activeTab, loadDashboardStats, loadAuditLogs, loadAuditStats]);
+    if (activeTab === 'audit') { void loadAuditLogs(0); }
+  }, [isAdmin, activeTab, loadDashboardStats, loadAuditLogs]);
 
   // Close "more" dropdown on outside click
   useEffect(() => {
@@ -2239,7 +2450,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
             <div className={`mt-3 rounded-xl p-3 space-y-2.5 ${isDark ? 'bg-[#12121e] border border-white/5' : 'bg-gray-50 border border-gray-100'}`}>
               <div className="flex items-center justify-between">
                 <span className={`text-[10px] uppercase tracking-wider font-semibold ${textSecondary}`}>账户信息</span>
-                <button onClick={(e) => { e.stopPropagation(); setShowUserProfile(false); }} className={`p-0.5 rounded ${isDark ? 'hover:bg-white/10' : 'hover:bg-gray-200'}`}><X className={`w-3 h-3 ${textSecondary}`} /></button>
+                <button type="button" aria-label="关闭账户信息" onClick={(e) => { e.stopPropagation(); setShowUserProfile(false); }} className={`p-0.5 rounded inline-flex items-center justify-center max-md:min-h-11 max-md:min-w-11 ${isDark ? 'hover:bg-white/10' : 'hover:bg-gray-200'}`}><X className={`w-3 h-3 ${textSecondary}`} /></button>
               </div>
               <div className={`text-[11px] space-y-1.5 ${textSecondary}`}>
                 <div className="flex items-center gap-2"><Mail className="w-3 h-3 shrink-0" /><span className="truncate">{user.email || '未设置邮箱'}</span></div>
@@ -2277,12 +2488,12 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               { key: 'stats' as TabType, label: '统计', icon: BarChart3, count: null },
             ] : []),
             ...(user.productType?.includes('chat') ? [
-              { key: 'chat' as TabType, label: '智能对话', icon: MessageSquareMore, count: chatProjects.length },
+              { key: 'chat' as TabType, label: '智能对话', icon: MessageSquareMore, count: chatProjectsAvailable ? chatProjects.length : null },
             ] : []),
             { key: 'settings' as TabType, label: '设置', icon: Settings, count: null },
             { key: 'credits' as TabType, label: '积分', icon: Wallet, count: creditsBalance > 0 ? creditsBalance : null },
           ].map(item => (
-            <button key={item.key} onClick={() => { setActiveTab(item.key); if (mobileNavOpen) { setMobileNavOpen(false); mobileNavTriggerRef.current?.focus(); } }} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${activeTab === item.key ? `${accentBgLight} ${accentClass}` : `${textSecondary} ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-100'}`}`}>
+            <button key={item.key} onClick={() => { setActiveTab(item.key); if (mobileNavOpen) { setMobileNavOpen(false); mobileNavTriggerRef.current?.focus(); } }} className={`w-full min-h-11 flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${activeTab === item.key ? `${accentBgLight} ${accentClass}` : `${textSecondary} ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-100'}`}`}>
               <item.icon className="w-4.5 h-4.5" />
               <span className="flex-1 text-left">{item.label}</span>
               {item.count !== null && <span className={`text-xs ${activeTab === item.key ? accentClass : textSecondary}`}>{item.count}</span>}
@@ -2309,7 +2520,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 { key: 'payment-config' as TabType, label: '支付配置', icon: CreditCard, count: null },
                 { key: 'ecom-templates' as TabType, label: '电商模板', icon: ShoppingBag, count: ecomTemplates.length },
               ].map(item => (
-                <button key={item.key} onClick={() => { setActiveTab(item.key); if (mobileNavOpen) { setMobileNavOpen(false); mobileNavTriggerRef.current?.focus(); } }} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${activeTab === item.key ? `${accentBgLight} ${accentClass}` : `${textSecondary} ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-100'}`}`}>
+                <button key={item.key} onClick={() => { setActiveTab(item.key); if (mobileNavOpen) { setMobileNavOpen(false); mobileNavTriggerRef.current?.focus(); } }} className={`w-full min-h-11 flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${activeTab === item.key ? `${accentBgLight} ${accentClass}` : `${textSecondary} ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-100'}`}`}>
                   <item.icon className="w-4.5 h-4.5" />
                   <span className="flex-1 text-left">{item.label}</span>
                   {item.count !== null && <span className={`text-xs ${activeTab === item.key ? accentClass : textSecondary}`}>{item.count}</span>}
@@ -2346,7 +2557,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                   <h1 className={`text-2xl font-bold ${textPrimary}`}>我的项目</h1>
                   <p className={`text-sm mt-1 ${textSecondary}`}>{projects.length} 个项目 · {allImages.length} 张图片</p>
                 </div>
-                 <div className="flex w-full lg:w-auto min-w-0 flex-wrap items-center gap-2 md:gap-3">
+                 <div className="flex w-full lg:w-auto min-w-0 flex-wrap items-center gap-2 md:gap-3 [@media(any-pointer:coarse)]:[&_button]:min-h-11 [@media(any-pointer:coarse)]:[&_button]:min-w-11">
                    <div className="relative w-full sm:w-auto">
                      <Search className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${textSecondary}`} />
                      <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="搜索项目..." className={`min-h-11 min-w-11 md:min-h-0 md:min-w-0 pl-9 pr-4 py-2 rounded-xl text-sm ${isDark ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-gray-200'} border focus:outline-none focus:ring-1 ${accentRingClass} w-full sm:w-56`} />
@@ -2383,7 +2594,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 </div>
               </div>
               {/* Filters */}
-              <div className="flex gap-2 mt-4">
+              <div className="flex gap-2 mt-4 [@media(any-pointer:coarse)]:[&_button]:min-h-11 [@media(any-pointer:coarse)]:[&_button]:min-w-11">
                 {(['all', 'recent', 'starred'] as const).map(f => (
                   <button key={f} onClick={() => setProjectFilter(f)} className={`min-h-11 min-w-11 md:min-h-0 md:min-w-0 whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer ${projectFilter === f ? `${accentBgLight} ${accentClass}` : `${textSecondary} ${isDark ? 'hover:bg-white/5' : 'hover:bg-gray-100'}`}`}>
                     {{ all: '全部', recent: '最近', starred: '收藏' }[f]}
@@ -2403,7 +2614,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                    {filteredProjects.map(project => {
                      const imgs = project.canvasImages || [];
                      const thumb = imgs.length > 0 ? imgs[imgs.length - 1]?.url : null;
-                     const isRenaming = renamingProjectId === project.id;
+                     const isRenaming = renamingProjectId === project.id && renameActorId === user.id;
                      const isSelected = selectedProjectIds.has(project.id);
                      return (
                        <div
@@ -2428,9 +2639,19 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                         {/* Info */}
                         <div className="p-3">
                           {isRenaming ? (
+                            <div>
                             <div className="flex items-center gap-1">
-                              <input value={renameValue} onChange={e => setRenameValue(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleConfirmRename(); if (e.key === 'Escape') { setRenamingProjectId(null); setRenameValue(''); } }} onClick={e => e.stopPropagation()} autoFocus className={`flex-1 h-7 px-2 rounded text-sm ${inputClass}`} />
-                              <Check className="w-4 h-4 text-green-400 cursor-pointer" onClick={(e) => { e.stopPropagation(); handleConfirmRename(); }} />
+                              <input value={renameValue} onChange={e => { const value = e.target.value; if (renameDraftKey) { const draft = { value, error: null }; renameDraftStore.set(renameDraftKey, draft); setRenameDrafts(previous => ({ ...previous, [renameDraftKey]: draft })); } }} onKeyDown={e => { if (e.key === 'Enter') handleConfirmRename(); if (e.key === 'Escape') cancelRenameProject(); }} onClick={e => e.stopPropagation()} aria-label={'项目名称：' + project.name} autoFocus className={`min-w-0 flex-1 min-h-11 px-2 rounded text-base ${inputClass}`} />
+                              <button
+                                type="button"
+                                aria-label={'保存项目名称：' + project.name}
+                                className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded text-green-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                onClick={(e) => { e.stopPropagation(); handleConfirmRename(); }}
+                              >
+                                <Check className="w-4 h-4" aria-hidden="true" />
+                              </button>
+                            </div>
+                            {renameError && <p role="alert" className="mt-1 text-xs text-destructive">{renameError}</p>}
                             </div>
                           ) : (
                             <h3 className={`text-sm font-semibold truncate ${textPrimary}`}>{project.name}</h3>
@@ -2486,13 +2707,13 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 <div key={t.id} className={`group rounded-xl border overflow-hidden cursor-pointer transition-all hover:shadow-lg ${accentShadowClass} ${isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'} ${accentHoverBorderClass}`} onClick={() => handleUseTemplate(t)}>
                   <div className="relative h-40 overflow-hidden">
                     <img src={t.image} alt={t.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                    <div className="absolute top-2 left-2"><span className={`text-[10px] px-2 py-0.5 rounded-full ${accentBgLight} ${accentClass} font-medium`}>{t.category}</span></div>
-                    <div className="absolute top-2 right-2"><span className={`text-[10px] px-2 py-0.5 rounded-full ${isDark ? 'bg-black/50 text-white' : 'bg-white/80 text-gray-700'}`}>{t.usage} 次使用</span></div>
+                    <div className="absolute top-2 left-2"><span className={`text-[10px] [@media(any-pointer:coarse)]:text-xs px-2 py-0.5 rounded-full ${accentBgLight} ${accentClass} font-medium`}>{t.category}</span></div>
+                    <div className="absolute top-2 right-2"><span className={`text-[10px] [@media(any-pointer:coarse)]:text-xs px-2 py-0.5 rounded-full ${isDark ? 'bg-black/50 text-white' : 'bg-white/80 text-gray-700'}`}>{t.usage} 次使用</span></div>
                   </div>
                   <div className="p-3">
                     <h3 className={`text-sm font-semibold ${textPrimary}`}>{t.name}</h3>
                     <p className={`text-xs mt-1 ${textSecondary}`}>{t.desc}</p>
-                    <button className={`mt-2 w-full py-1.5 rounded-lg text-xs font-medium ${accentBgLight} ${accentClass} ${isMonochrome ? 'hover:bg-[#3b82f6]/20' : 'hover:bg-[#d4af37]/20'} transition-colors`}>使用模板</button>
+                    <button className={`mt-2 w-full [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11 py-1.5 rounded-lg text-xs font-medium ${accentBgLight} ${accentClass} ${isMonochrome ? 'hover:bg-[#3b82f6]/20' : 'hover:bg-[#d4af37]/20'} transition-colors`}>使用模板</button>
                   </div>
                 </div>
               ))}
@@ -2502,7 +2723,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
         {/* ── Tab: Assets ── */}
         {activeTab === 'assets' && (
-          <div className="h-full flex flex-col">
+          <div className="h-full flex flex-col [@media(any-pointer:coarse)]:[&_button]:min-h-11 [@media(any-pointer:coarse)]:[&_button]:min-w-11 [@media(any-pointer:coarse)]:[&_button]:whitespace-nowrap">
             <div className={`px-4 pt-4 sm:px-8 sm:pt-8 pb-4 ${isDark ? 'bg-[#0a0a0f]' : 'bg-gray-50'}`}>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-2">
@@ -2562,15 +2783,27 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                   /* Grid mode */
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 mt-4">
                     {filteredImages.map((img, idx) => (
-                      <div key={img.id || idx} className={`group rounded-xl border overflow-hidden ${assetManageMode && selectedAssetIds.has(img.id) ? `${accentBorderClass} ring-1 ring-primary/30` : isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'} ${assetManageMode ? 'cursor-pointer' : ''}`} onClick={() => assetManageMode && toggleAssetSelection(img.id)}>
+                      <div key={img.id || idx} className={`group relative rounded-xl border overflow-hidden ${assetManageMode && selectedAssetIds.has(img.id) ? `${accentBorderClass} ring-1 ring-primary/30` : isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'} ${assetManageMode ? 'cursor-pointer' : ''}`} onClick={() => assetManageMode && toggleAssetSelection(img.id)}>
                         {assetManageMode && (
-                          <div className="absolute top-2 left-2 z-10">
-                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${selectedAssetIds.has(img.id) ? `${accentBgLight} ${accentClass} border-primary` : 'border-gray-400 bg-black/30'}`}>
-                              {selectedAssetIds.has(img.id) && <span className="text-[10px]">✓</span>}
-                            </div>
-                          </div>
+                          <label className="absolute top-2 left-2 z-10 flex h-11 w-11 cursor-pointer items-center justify-center rounded-md focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ring" onClick={(event: React.MouseEvent<HTMLLabelElement>): void => event.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              aria-label={'选择素材：' + (img.prompt || '未命名素材')}
+                              checked={selectedAssetIds.has(img.id)}
+                              onChange={(): void => toggleAssetSelection(img.id)}
+                              className="h-5 w-5 cursor-pointer accent-[var(--dash-accent)]"
+                            />
+                          </label>
                         )}
-                        <div className="h-28 overflow-hidden relative"><img src={img.url} alt="" className="w-full h-full object-cover" />{img.mediaType === 'video' && <div className="absolute inset-0 flex items-center justify-center bg-black/30"><Film className="w-6 h-6 text-white" /></div>}</div>
+                        <div className="h-28 overflow-hidden relative">
+                          {img.mediaAvailability === 'missing' || img.mediaAvailability === 'recovering' || img.mediaAvailability === 'unrecoverable' ? (
+                            <div role="status" className="flex h-full w-full items-center justify-center bg-muted px-2 text-center text-xs leading-relaxed text-muted-foreground">
+                              {img.mediaAvailability === 'recovering' ? '媒体恢复中' : '媒体暂不可用'}
+                            </div>
+                          ) : (
+                            <><img src={img.url} alt="" className="w-full h-full object-cover" />{img.mediaType === 'video' && <div className="absolute inset-0 flex items-center justify-center bg-black/30"><Film className="w-6 h-6 text-white" /></div>}</>
+                          )}
+                        </div>
                         <div className="p-2">
                           {(img.prompt || img.model) && (
                             <p className={`text-[10px] line-clamp-2 mb-1 ${textSecondary}`}>{img.prompt || '(无提示词)'}</p>
@@ -2597,13 +2830,23 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     {filteredImages.map((img, idx) => (
                       <div key={img.id || idx} className={`group flex gap-3 rounded-xl border p-3 ${assetManageMode && selectedAssetIds.has(img.id) ? `${accentBorderClass} ring-1 ring-primary/30` : isDark ? 'bg-[#1a1a2e]/80 border-primary/20' : 'bg-white border-gray-200'} ${assetManageMode ? 'cursor-pointer' : ''}`} onClick={() => assetManageMode && toggleAssetSelection(img.id)}>
                         {assetManageMode && (
-                          <div className="flex items-center">
-                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${selectedAssetIds.has(img.id) ? `${accentBgLight} ${accentClass} border-primary` : 'border-gray-400'}`}>
-                              {selectedAssetIds.has(img.id) && <span className="text-[10px]">✓</span>}
-                            </div>
-                          </div>
+                          <label className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center self-center rounded-md focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ring" onClick={(event: React.MouseEvent<HTMLLabelElement>): void => event.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              aria-label={'选择素材：' + (img.prompt || '未命名素材')}
+                              checked={selectedAssetIds.has(img.id)}
+                              onChange={(): void => toggleAssetSelection(img.id)}
+                              className="h-5 w-5 cursor-pointer accent-[var(--dash-accent)]"
+                            />
+                          </label>
                         )}
-                        <div className="w-16 h-16 rounded-lg overflow-hidden shrink-0"><img src={img.url} alt="" className="w-full h-full object-cover" /></div>
+                        <div className="w-16 h-16 rounded-lg overflow-hidden shrink-0">
+                          {img.mediaAvailability === 'missing' || img.mediaAvailability === 'recovering' || img.mediaAvailability === 'unrecoverable' ? (
+                            <div role="status" className="flex h-full w-full items-center justify-center bg-muted px-2 text-center text-xs leading-relaxed text-muted-foreground">
+                              {img.mediaAvailability === 'recovering' ? '媒体恢复中' : '媒体暂不可用'}
+                            </div>
+                          ) : <img src={img.url} alt="" className="w-full h-full object-cover" />}
+                        </div>
                         <div className="flex-1 min-w-0">
                           {(img.prompt || img.model) && (
                             <p className={`text-xs line-clamp-2 ${textPrimary}`}>{img.prompt || '(无提示词)'}</p>
@@ -2691,7 +2934,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               </div>
             </div>
             {/* 核心统计卡片 */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
               {[
                 { label: '项目总数', value: projectCount, icon: FolderOpen, desc: '画布项目' },
                 { label: '图片总数', value: projectImageCount, icon: Image, desc: '画布中图片' },
@@ -2767,13 +3010,14 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
           <UserSettingsTab
             isDark={!isMonochrome}
             isMonochrome={!!isMonochrome}
-            onToggleTheme={(_theme) => {
-              // Theme toggle resets monochrome mode
-              if (onSetIsMonochrome) onSetIsMonochrome(false);
+            themePreference={themePreference}
+            onToggleTheme={(theme) => {
+              if (onSetThemePreference) onSetThemePreference(theme);
+              else onSetIsMonochrome?.(theme === 'light');
             }}
             userName={user?.name || ''}
             userRole={user?.role || 'user'}
-            onToast={(msg) => toast.success(msg)}
+            onToast={(msg, type) => toast[type](msg)}
           />
         )}
 
@@ -2781,13 +3025,14 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
           <UserCreditsTab
             userId={user.id}
             isDark={!isMonochrome}
-            onToast={(msg) => toast.success(msg)}
+            onToast={(msg, type) => toast[type](msg)}
           />
         )}
 
         {/* ── Admin Tabs Component ── */}
         {['overview', 'audit', 'users', 'groups', 'credits', 'settings'].includes(activeTab) && isAdmin && (
           <AdminTabs
+            key={user.id}
             activeTab={activeTab}
             adminUsers={adminUsers.map((u): AdminTabsUser => ({
               id: u.id,
@@ -2977,75 +3222,96 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
         {/* ── Tab: Group Management ── */}
         {activeTab === 'groups' && isAdmin && (
-          <div className="h-full overflow-y-auto p-6 relative">
-            <div className="flex items-center justify-between mb-4">
-              <div>
+          <div className="h-full overflow-y-auto p-4 sm:p-6 relative">
+            <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+              <div className="min-w-0">
                 <h1 className="text-xl font-bold text-foreground">分组管理</h1>
                 <p className="text-sm text-muted-foreground">管理用户分组，统一设置产品权限与积分配额</p>
               </div>
-              <button onClick={async () => { await refreshAdmin(); }} className="text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"><RefreshCw className="w-3.5 h-3.5" />刷新</button>
+              <button onClick={async () => { await refreshAdmin(); }} className="min-h-[44px] min-w-[44px] text-sm px-3 py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"><RefreshCw className="w-3.5 h-3.5" />刷新</button>
             </div>
 
             {/* Create Group */}
             <div className="bg-card rounded-xl border border-border p-4 mb-4">
               <h3 className="text-sm font-semibold text-foreground mb-3">新建分组</h3>
-              <div className="flex items-end gap-3 flex-wrap">
+              <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-[minmax(10rem,1fr)_auto_7rem_auto]">
                 <div>
-                  <label className="text-[10px] text-muted-foreground block mb-1">分组名称</label>
-                  <input type="text" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} placeholder="如：品牌部、广告部" className={`px-3 py-2 rounded-lg text-sm w-40 border border-border bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/30`} />
+                  <label htmlFor="admin-group-name" className="text-sm text-muted-foreground block mb-1">分组名称</label>
+                  <input id="admin-group-name" type="text" value={newGroupName} onChange={e => { newGroupDraftRevision.current++; updateGroupDraft({ name: e.target.value }); setNewGroupName(e.target.value); }} placeholder="如：品牌部、广告部" className={`px-3 py-2 rounded-lg text-base md:text-sm w-full min-w-0 min-h-[44px] border border-border bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/30`} />
                 </div>
                 <div>
-                  <label className="text-[10px] text-muted-foreground block mb-1">产品权限</label>
-                  <div className="flex gap-1">
+                  <span id="admin-group-products-label" className="text-sm text-muted-foreground block mb-1">产品权限</span>
+                  <div role="group" aria-labelledby="admin-group-products-label" className="flex flex-wrap gap-2">
                     {['canvas', 'chat'].map(pt => (
-                      <button key={pt} onClick={() => setNewGroupProductTypes(prev => prev.includes(pt) ? prev.filter(p => p !== pt) : [...prev, pt])} className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${newGroupProductTypes.includes(pt) ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'}`}>
+                      <button key={pt} aria-pressed={newGroupProductTypes.includes(pt)} onClick={() => { const current = groupDrafts.current.get(user.id)?.productTypes ?? newGroupProductTypes; const next = current.includes(pt) ? current.filter(p => p !== pt) : [...current, pt]; newGroupDraftRevision.current++; updateGroupDraft({ productTypes: next }); setNewGroupProductTypes(next); }} className={`min-h-[44px] min-w-[44px] px-3 py-2.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${newGroupProductTypes.includes(pt) ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'}`}>
                         {pt === 'canvas' ? '无限画布' : '智能对话'}
                       </button>
                     ))}
                   </div>
                 </div>
                 <div>
-                  <label className="text-[10px] text-muted-foreground block mb-1">积分配额</label>
-                  <input type="number" value={newGroupCreditQuota} onChange={e => setNewGroupCreditQuota(Number(e.target.value))} min={0} className={`px-3 py-2 rounded-lg text-sm w-28 border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30`} />
+                  <label htmlFor="admin-group-credit-quota" className="text-sm text-muted-foreground block mb-1">积分配额</label>
+                  <input id="admin-group-credit-quota" type="number" value={newGroupCreditQuota} onChange={e => { const value = Number(e.target.value); newGroupDraftRevision.current++; updateGroupDraft({ creditQuota: value }); setNewGroupCreditQuota(value); }} min={0} className={`px-3 py-2 rounded-lg text-base md:text-sm w-full min-w-0 min-h-[44px] lg:w-28 border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30`} />
                 </div>
                 <button
                   onClick={async () => {
                     if (!newGroupName.trim()) return;
-                    const res = await fetch('/api/admin/groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ action: 'create', name: newGroupName.trim(), productTypes: newGroupProductTypes, creditQuota: newGroupCreditQuota, isActive: true }) });
-                    if (res.ok) { setNewGroupName(''); setNewGroupProductTypes(['canvas']); setNewGroupCreditQuota(0); await refreshAdmin(); toast.success('分组已创建'); }
+                    const scope = groupViewScope.current;
+                    const revision = newGroupDraftRevision.current;
+                    if (!await submitAdminGroup({ action: 'create', name: newGroupName.trim(), productTypes: newGroupProductTypes, creditQuota: newGroupCreditQuota, isActive: true })) return;
+                    if (!scope || groupViewScope.current !== scope) return;
+                    if (newGroupDraftRevision.current === revision) {
+                      updateGroupDraft({ name: '', productTypes: ['canvas'], creditQuota: 0 });
+                      setNewGroupName(''); setNewGroupProductTypes(['canvas']); setNewGroupCreditQuota(0);
+                    }
+                    await refreshAdmin();
+                    if (groupViewScope.current === scope) toast.success('分组已创建');
                   }}
-                  disabled={!newGroupName.trim()}
-                  className="px-4 py-2 rounded-lg text-sm font-semibold cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  disabled={!newGroupName.trim() || groupWriteState !== 'idle'}
+                  className="min-h-[44px] w-full lg:w-auto self-end px-4 py-2.5 rounded-lg text-sm font-semibold cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 ><Plus className="w-3.5 h-3.5 inline mr-1" />创建</button>
               </div>
             </div>
 
             {/* Group List */}
-            {adminGroups.length === 0 ? (
+            {groupWriteState === 'unknown' && (
+              <p role="alert" className="mb-3 text-sm text-destructive">分组操作结果尚未确认，请先核对分组和审计记录，勿重复提交。</p>
+            )}
+            {adminGroupsReadState === 'error' && (
+              <p role="alert" className="mb-3 text-sm text-destructive">未能读取最新分组，请重试；现有列表可能不是最新状态。</p>
+            )}
+            {adminGroups.length === 0 && adminGroupsReadState === 'loading' ? (
+              <p role="status" className="py-8 text-center text-sm text-muted-foreground">正在读取分组…</p>
+            ) : adminGroups.length === 0 && adminGroupsReadState === 'ready' ? (
               <div className="text-center py-16 text-muted-foreground">
                 <Layers className="w-10 h-10 mx-auto mb-3 opacity-30" />
                 <p className="text-sm">暂无分组，请创建第一个分组</p>
               </div>
-            ) : (
+            ) : adminGroups.length > 0 ? (
               <div className="space-y-2">
                 {adminGroups.map(group => (
-                  <div key={group.id} className="bg-card rounded-xl border border-border p-4 flex items-center gap-4">
+                  <div key={group.id} className="bg-card rounded-xl border border-border p-4 flex min-w-0 flex-col items-stretch gap-3 lg:flex-row lg:items-center">
                     {editingGroupId === group.id ? (
                       <>
-                        <input type="text" value={editGroupName} onChange={e => setEditGroupName(e.target.value)} className={`px-3 py-2 rounded-lg text-sm flex-1 border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30`} />
-                        <div className="flex gap-1">
+                        <input aria-label="分组名称（编辑）" type="text" value={editGroupName} onChange={e => { editGroupDraftRevision.current++; updateEditingGroupDraft({ name: e.target.value }); setEditGroupName(e.target.value); }} className={`px-3 py-2 rounded-lg text-base md:text-sm min-h-[44px] w-full min-w-0 lg:flex-1 border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30`} />
+                        <div role="group" aria-label="编辑分组产品权限" className="flex shrink-0 flex-wrap gap-2">
                           {['canvas', 'chat'].map(pt => (
-                            <button key={pt} onClick={() => setEditGroupProductTypes(prev => prev.includes(pt) ? prev.filter(p => p !== pt) : [...prev, pt])} className={`px-2 py-1 rounded text-[10px] font-medium transition-colors cursor-pointer ${editGroupProductTypes.includes(pt) ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
+                            <button key={pt} aria-pressed={editGroupProductTypes.includes(pt)} onClick={() => { const current = groupDrafts.current.get(user.id)?.edit?.productTypes ?? editGroupProductTypes; const next = current.includes(pt) ? current.filter(p => p !== pt) : [...current, pt]; editGroupDraftRevision.current++; updateEditingGroupDraft({ productTypes: next }); setEditGroupProductTypes(next); }} className={`min-h-[44px] min-w-[44px] px-3 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${editGroupProductTypes.includes(pt) ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
                               {pt === 'canvas' ? '画布' : '对话'}
                             </button>
                           ))}
                         </div>
-                        <input type="number" value={editGroupCreditQuota} onChange={e => setEditGroupCreditQuota(Number(e.target.value))} min={0} className={`px-3 py-2 rounded-lg text-sm w-24 border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30`} />
-                        <button onClick={() => setEditingGroupId(null)} className="text-xs text-muted-foreground hover:text-foreground cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+                        <input aria-label="积分配额（编辑）" type="number" value={editGroupCreditQuota} onChange={e => { const value = Number(e.target.value); editGroupDraftRevision.current++; updateEditingGroupDraft({ creditQuota: value }); setEditGroupCreditQuota(value); }} min={0} className={`px-3 py-2 rounded-lg text-base md:text-sm min-h-[44px] w-full min-w-0 lg:w-24 lg:shrink-0 border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30`} />
+                        <button aria-label={`取消编辑分组：${group.name}`} onClick={() => { editGroupDraftRevision.current++; updateGroupDraft({ edit: undefined }); setEditingGroupId(null); }} className="min-h-[44px] min-w-[44px] flex items-center justify-center text-sm text-muted-foreground hover:text-foreground cursor-pointer"><X className="w-3.5 h-3.5" /></button>
                         <button onClick={async () => {
-                          await fetch('/api/admin/groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ action: 'update', id: group.id, name: editGroupName.trim(), productTypes: editGroupProductTypes, creditQuota: editGroupCreditQuota, isActive: editGroupActive }) });
-                          setEditingGroupId(null); await refreshAdmin(); toast.success('分组已更新');
-                        }} className="px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90"><Save className="w-3 h-3 inline mr-0.5" />保存</button>
+                          const scope = groupViewScope.current;
+                          const revision = editGroupDraftRevision.current;
+                          if (!await submitAdminGroup({ action: 'update', id: group.id, name: editGroupName.trim(), productTypes: editGroupProductTypes, creditQuota: editGroupCreditQuota, isActive: editGroupActive })) return;
+                          if (!scope || groupViewScope.current !== scope) return;
+                          if (editGroupDraftRevision.current === revision) { updateGroupDraft({ edit: undefined }); setEditingGroupId(null); }
+                          await refreshAdmin();
+                          if (groupViewScope.current === scope) toast.success('分组已更新');
+                        }} disabled={groupWriteState !== 'idle'} className="min-h-[44px] min-w-[44px] px-3 py-2.5 rounded-lg text-sm font-semibold cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40"><Save className="w-3 h-3 inline mr-0.5" />保存</button>
                       </>
                     ) : (
                       <>
@@ -3053,11 +3319,11 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                           <Layers className={`w-5 h-5 ${group.is_active ? 'text-primary' : 'text-destructive'}`} />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-semibold text-foreground">{group.name}</span>
+                          <div className="flex min-w-0 flex-wrap items-center gap-2">
+                            <span className="min-w-0 break-all text-sm font-semibold text-foreground">{group.name}</span>
                             {!group.is_active && <span className="text-[10px] px-1.5 py-0.5 rounded bg-destructive/15 text-destructive">已停用</span>}
                           </div>
-                          <div className="flex items-center gap-2 mt-1">
+                          <div className="flex min-w-0 flex-wrap items-center gap-2 mt-1">
                             <span className="text-[11px] text-muted-foreground">产品：</span>
                             {group.product_types && group.product_types.length > 0 ? group.product_types.map(pt => (
                               <span key={pt} className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{pt === 'canvas' ? '无限画布' : '智能对话'}</span>
@@ -3066,35 +3332,47 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                             <span className="text-[10px] text-muted-foreground ml-2">用户数：{adminUsers.filter(u => u.groupId === group.id).length}</span>
                           </div>
                         </div>
-                        <div className="flex items-center gap-1">
-                          <button onClick={() => { setEditingGroupId(group.id); setEditGroupName(group.name); setEditGroupProductTypes([...group.product_types || []]); setEditGroupCreditQuota(group.credit_quota || 0); setEditGroupActive(group.is_active); }} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"><Pencil className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => {
-                            setConfirmDlg({ open: true, title: '删除分组', message: `确定删除分组「${group.name}」吗？`, onConfirm: async () => { await fetch('/api/admin/groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ action: 'delete', id: group.id }) }); await refreshAdmin(); setConfirmDlg(prev => ({ ...prev, open: false })); toast.success('分组已删除'); }, onCancel: () => setConfirmDlg(prev => ({ ...prev, open: false })) });
-                          }} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+                        <div className="flex shrink-0 items-center justify-end gap-2">
+                          <button aria-label={`编辑分组：${group.name}`} onClick={() => { editGroupDraftRevision.current++; updateGroupDraft({ edit: { id: group.id, name: group.name, productTypes: [...group.product_types || []], creditQuota: group.credit_quota || 0, isActive: group.is_active } }); setEditingGroupId(group.id); setEditGroupName(group.name); setEditGroupProductTypes([...group.product_types || []]); setEditGroupCreditQuota(group.credit_quota || 0); setEditGroupActive(group.is_active); }} className="min-h-[44px] min-w-[44px] flex items-center justify-center p-2.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"><Pencil className="w-3.5 h-3.5" /></button>
+                          <button aria-label={`删除分组：${group.name}`} onClick={() => {
+                            const scope = groupViewScope.current;
+                            const confirm = async (): Promise<void> => {
+                              if (!scope || groupViewScope.current !== scope) return;
+                              if (!await submitAdminGroup({ action: 'delete', id: group.id }) || groupViewScope.current !== scope) return;
+                              await refreshAdmin();
+                              if (groupViewScope.current === scope && groupConfirmation.current === confirm) {
+                                groupConfirmation.current = null;
+                                setConfirmDlg(prev => prev.onConfirm === confirm ? { ...prev, open: false } : prev);
+                                toast.success('分组已删除');
+                              }
+                            };
+                            groupConfirmation.current = confirm;
+                            setConfirmDlg({ open: true, title: '删除分组', message: `确定删除分组「${group.name}」吗？`, onConfirm: confirm, onCancel: () => { if (groupConfirmation.current === confirm) groupConfirmation.current = null; setConfirmDlg(prev => prev.onConfirm === confirm ? { ...prev, open: false } : prev); } });
+                          }} disabled={groupWriteState !== 'idle'} className="min-h-[44px] min-w-[44px] flex items-center justify-center p-2.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer disabled:opacity-40"><Trash2 className="w-3.5 h-3.5" /></button>
                         </div>
                       </>
                     )}
                   </div>
                 ))}
               </div>
-            )}
+            ) : null}
           </div>
         )}
 
         {/* ── Tab: Chat (智能对话) ── */}
         {activeTab === 'chat' && (
-          <div className="h-full overflow-y-auto p-6" onMouseEnter={loadChatProjects}>
+          <div className="h-full overflow-y-auto p-6">
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h1 className="text-2xl font-bold text-foreground">智能对话</h1>
                 <p className={`text-sm mt-1 ${textSecondary}`}>
-                  {chatProjects.length} 个对话项目
+                  {chatProjectsAvailable ? `${chatProjects.length} 个对话项目` : chatProjectsSlow || !chatProjectsLoaded ? '正在读取项目' : '无法读取项目'}
                 </p>
               </div>
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => window.location.href = '/simple-chat'}
-                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${accentBgLight} ${accentClass} hover:opacity-90`}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11 ${accentBgLight} ${accentClass} hover:opacity-90`}
                 >
                   <Plus className="w-4 h-4" />
                   新建对话
@@ -3102,7 +3380,20 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               </div>
             </div>
 
-            {chatProjects.length === 0 ? (
+            {chatProjectsLoaded && (chatProjectsKind !== 'available' || chatProjectsSlow) && (
+              <div role={chatProjectsKind === 'local' || chatProjectsSlow ? 'status' : 'alert'} className="mb-4 space-y-2 text-sm text-muted-foreground">
+                {chatProjectsKind === 'local' && <p>同步暂不可用，当前显示本机副本，远端状态未确认。</p>}
+                {chatProjectsKind === 'auth' && <p>当前账号无法读取对话项目，请检查登录状态后重试。</p>}
+                {chatProjectsKind === 'storage' && <p>本机数据读取失败，请检查浏览器存储后重试。</p>}
+                {chatProjectsKind === 'unavailable' && <p>读取超时或服务不可用，请重试。</p>}
+                {chatProjectsSlow && chatProjectsAvailable && <p>正在刷新对话项目。</p>}
+                {chatProjectsSlow && <p>读取较慢，仍在进行；完成后会自动显示，也可以重试。</p>}
+                <button type="button" className="min-h-[44px] min-w-[44px] rounded border px-3 focus-visible:outline-2 focus-visible:outline-offset-2" onClick={() => chatRefreshRef.current?.()}>重试读取</button>
+              </div>
+            )}
+            {!chatProjectsLoaded ? (
+              <p role="status" className={`py-20 text-center text-sm ${textSecondary}`}>正在加载对话项目…</p>
+            ) : !chatProjectsAvailable ? null : chatProjects.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 text-center">
                 <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-4">
                   <MessageSquareMore className="w-8 h-8 text-muted-foreground/40" />
@@ -3110,7 +3401,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 <p className={`text-sm ${textSecondary}`}>暂无对话项目</p>
                 <button
                   onClick={() => window.location.href = '/simple-chat'}
-                  className={`mt-4 px-4 py-2 rounded-xl text-sm font-medium transition-all cursor-pointer ${accentBgLight} ${accentClass} hover:opacity-90`}
+                  className={`mt-4 px-4 py-2 rounded-xl text-sm font-medium transition-all cursor-pointer [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11 ${accentBgLight} ${accentClass} hover:opacity-90`}
                 >
                   开始第一个对话
                 </button>
@@ -3118,10 +3409,10 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {chatProjects.map(project => (
-                  <div
+                  <a
                     key={project.id}
-                    onClick={() => window.location.href = `/simple-chat?projectId=${project.id}`}
-                    className="group cursor-pointer rounded-xl border border-border bg-card hover:shadow-lg transition-all duration-200 overflow-hidden"
+                    href={`/simple-chat?projectId=${project.id}`}
+                    className="group block cursor-pointer rounded-xl border border-border bg-card hover:shadow-lg transition-all duration-200 overflow-hidden focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                   >
                     <div className="p-5">
                       <div className="flex items-start justify-between mb-3">
@@ -3141,7 +3432,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                         })()}
                       </p>
                     </div>
-                  </div>
+                  </a>
                 ))}
               </div>
             )}
@@ -3150,7 +3441,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
         {/* ── Tab: API Management ── */}
         {activeTab === 'apis' && isAdmin && (
-          <div className="h-full overflow-y-auto p-4 sm:p-6 relative" onMouseEnter={() => { if (!productionReadiness && !productionReadinessLoading) void refreshProductionReadiness(); if (!cloudTasks.length && !cloudTasksLoading) void refreshCloudTasks(); if (!Object.keys(providerTaskSummary).length) void refreshProviderTaskSummary(); }}>
+          <div className="h-full overflow-y-auto p-4 sm:p-6 relative [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:whitespace-nowrap [&_svg]:shrink-0" onMouseEnter={() => { if (!productionReadiness && !productionReadinessLoading) void refreshProductionReadiness(); if (!cloudTasks.length && !cloudTasksLoading) void refreshCloudTasks(); if (!Object.keys(providerTaskSummary).length) void refreshProviderTaskSummary(); }}>
             {/* ── Header with add button ── */}
             <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
               <div className="min-w-0">
@@ -3231,18 +3522,18 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
             {/* ── Filter bar ── */}
             <div className="flex flex-wrap items-center gap-2 mb-3 p-2 rounded-xl bg-muted/50 border border-border">
-              <select className="h-8 px-2.5 rounded-lg text-xs bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer" value={apiFilterType} onChange={e => setApiFilterType(e.target.value as ApiKind | 'all')}>
+              <select aria-label="API类型筛选" className="h-11 min-w-0 max-w-full px-2.5 rounded-lg text-base md:text-xs bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer" value={apiFilterType} onChange={e => setApiFilterType(e.target.value as ApiKind | 'all')}>
                 <option value="all">全部类型</option>
                 {(Object.keys(apiKindLabels) as ApiKind[]).map(k => <option key={k} value={k}>{apiKindLabels[k]}</option>)}
               </select>
-              <select className="h-8 px-2.5 rounded-lg text-xs bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer" value={apiFilterStatus} onChange={e => setApiFilterStatus(e.target.value as 'all' | 'enabled' | 'disabled')}>
+              <select aria-label="API状态筛选" className="h-11 min-w-0 max-w-full px-2.5 rounded-lg text-base md:text-xs bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer" value={apiFilterStatus} onChange={e => setApiFilterStatus(e.target.value as 'all' | 'enabled' | 'disabled')}>
                 <option value="all">全部状态</option>
                 <option value="enabled">已启用</option>
                 <option value="disabled">已停用</option>
               </select>
               <div className="relative min-w-0 basis-full sm:basis-auto flex-1">
                 <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <input type="text" placeholder="搜索 API 名称或 URL..." value={apiSearchQuery} onChange={e => setApiSearchQuery(e.target.value)} className="w-full h-8 pl-8 pr-3 rounded-lg text-xs bg-background border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                <input type="text" placeholder="搜索 API 名称或 URL..." value={apiSearchQuery} onChange={e => setApiSearchQuery(e.target.value)} className="w-full h-11 pl-8 pr-3 rounded-lg text-base md:text-xs bg-background border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" />
               </div>
             </div>
 
@@ -3264,13 +3555,13 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                   <div className="flex items-start gap-3">
                     <input type="checkbox" checked={selectedProviderIds.has(p.id)} onChange={() => setSelectedProviderIds(prev => { const next = new Set(prev); if (next.has(p.id)) next.delete(p.id); else next.add(p.id); return next; })} className="mt-1 accent-primary" />
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="font-semibold text-sm truncate text-foreground">{p.displayName || p.name}</span>
+                      <div className="flex flex-wrap items-center gap-2 mb-1">
+                        <span className="font-semibold text-sm min-w-0 max-w-full [overflow-wrap:anywhere] text-foreground">{p.displayName || p.name}</span>
                         {p.displayName && p.name !== p.displayName && <span className="text-[10px] text-muted-foreground truncate">({p.name})</span>}
                         <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${p.isEnabled !== false ? 'bg-emerald-500/15 text-emerald-500' : 'bg-destructive/15 text-destructive'}`}>{p.isEnabled !== false ? '启用' : '停用'}</span>
                       </div>
                       <div className="text-[11px] text-muted-foreground mb-1">{apiKindLabels[p.modelType as ApiKind] || p.modelType || '通用'}</div>
-                      <div className="text-[10px] text-muted-foreground truncate mb-2">{p.baseUrl}</div>
+                      <div className="text-[11px] text-muted-foreground [overflow-wrap:anywhere] mb-2">{p.baseUrl}</div>
                       {p.balance !== undefined && p.balance !== null && (
                         <div className="text-[10px] text-primary/80">余额: ${typeof p.balance === 'number' ? (p.balance as number).toFixed(2) : String(p.balance)}</div>
                       )}
@@ -3439,11 +3730,11 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 {/* 遮罩层 */}
                 <div className="fixed inset-0 bg-black/40 z-[199] backdrop-blur-sm" onClick={() => { if (!isSubmitting) { resetApiForm(); setShowApiDrawer(false); setEditingProviderId(null); } }} />
                 {/* 抽屉面板 */}
-                <div className="fixed right-0 top-0 bottom-0 w-[520px] max-w-[92vw] z-[200] bg-card border-l border-border flex flex-col shadow-2xl">
+                <div role="dialog" aria-label={editingProviderId ? '编辑 API 配置' : '添加新 API 配置'} className="fixed right-0 top-0 bottom-0 w-full max-w-full sm:w-[520px] sm:max-w-[92vw] z-[200] bg-card border-l border-border flex flex-col shadow-2xl">
                   {/* 抽屉头部 */}
-                  <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/30">
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
+                  <div className="flex items-center justify-between gap-2 px-4 sm:px-6 py-3 border-b border-border bg-muted/30">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <div className="w-9 h-9 shrink-0 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
                         {editingProviderId ? <Settings className="w-4.5 h-4.5" /> : <Plus className="w-4.5 h-4.5" />}
                       </div>
                       <div>
@@ -3451,13 +3742,13 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                         <p className="text-xs text-muted-foreground mt-0.5">{editingProviderId ? '修改 API 提供商设置' : '配置新的 AI 模型服务'}</p>
                       </div>
                     </div>
-                    <button onClick={() => { if (!isSubmitting) { resetApiForm(); setShowApiDrawer(false); setEditingProviderId(null); } }} className="p-2 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground cursor-pointer">
+                    <button onClick={() => { if (!isSubmitting) { resetApiForm(); setShowApiDrawer(false); setEditingProviderId(null); } }} aria-label="关闭API配置" className="shrink-0 p-2 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground cursor-pointer">
                       <X className="w-5 h-5" />
                     </button>
                   </div>
                   {/* 抽屉内容 (可滚动) */}
-                  <div className="flex-1 overflow-y-auto">
-                    <div className="px-6 py-5 space-y-6">
+                  <div className="min-h-0 flex-1 overflow-y-auto [overflow-wrap:anywhere]">
+                    <div className="px-4 sm:px-6 py-5 space-y-6">
 
                       {/* ===== 基础配置区域 ===== */}
                       <div>
@@ -3467,46 +3758,46 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                         </div>
                         <div className="space-y-4">
                           {/* 配置名称 + 显示名称 */}
-                          <div className="grid grid-cols-2 gap-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
-                              <label className="text-sm font-medium text-foreground mb-1.5 block">配置名称 <span className="text-destructive">*</span></label>
-                              <input type="text" placeholder="例如：我的OpenAI" value={apiName} onChange={e => setApiName(e.target.value)} className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
+                              <label htmlFor="api-config-name" className="text-sm font-medium text-foreground mb-1.5 block">配置名称 <span className="text-destructive">*</span></label>
+                              <input id="api-config-name" type="text" placeholder="例如：我的OpenAI" value={apiName} onChange={e => setApiName(e.target.value)} className="w-full h-11 min-w-0 px-3 rounded-lg bg-background border border-border text-base md:text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
                             </div>
                             <div>
-                              <label className="text-sm font-medium text-foreground mb-1.5 block">显示名称</label>
-                              <input type="text" placeholder="前端展示别名" value={apiDisplayName} onChange={e => setApiDisplayName(e.target.value)} className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
+                              <label htmlFor="api-display-name" className="text-sm font-medium text-foreground mb-1.5 block">显示名称</label>
+                              <input id="api-display-name" type="text" placeholder="前端展示别名" value={apiDisplayName} onChange={e => setApiDisplayName(e.target.value)} className="w-full h-11 min-w-0 px-3 rounded-lg bg-background border border-border text-base md:text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
                             </div>
                           </div>
                           {/* API 类型 */}
                           <div>
-                            <label className="text-sm font-medium text-foreground mb-1.5 block">API 类型 <span className="text-destructive">*</span></label>
-                            <select className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors cursor-pointer" value={apiKind} onChange={e => setApiKind(e.target.value as ApiKind)}>
+                            <label htmlFor="api-config-kind" className="text-sm font-medium text-foreground mb-1.5 block">API 类型 <span className="text-destructive">*</span></label>
+                            <select id="api-config-kind" className="w-full h-11 min-w-0 px-3 rounded-lg bg-background border border-border text-base md:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors cursor-pointer" value={apiKind} onChange={e => setApiKind(e.target.value as ApiKind)}>
                               {(Object.keys(apiKindLabels) as ApiKind[]).map(k => <option key={k} value={k}>{apiKindLabels[k]}</option>)}
                             </select>
                           </div>
                           {/* API Base URL */}
                           <div>
-                            <label className="text-sm font-medium text-foreground mb-1.5 block">API Base URL <span className="text-destructive">*</span></label>
+                            <label htmlFor="api-base-url" className="text-sm font-medium text-foreground mb-1.5 block">API Base URL <span className="text-destructive">*</span></label>
                             <div className="relative">
                               <Link2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                              <input type="text" placeholder="https://api.openai.com/v1" value={apiBaseUrl} onChange={e => setApiBaseUrl(e.target.value)} className="w-full h-10 pl-10 pr-3 rounded-lg bg-background border border-border text-sm text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
+                              <input id="api-base-url" type="text" placeholder="https://api.openai.com/v1" value={apiBaseUrl} onChange={e => setApiBaseUrl(e.target.value)} className="w-full h-11 min-w-0 pl-10 pr-3 rounded-lg bg-background border border-border text-base md:text-sm text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
                             </div>
                           </div>
                           {/* API Key */}
                           <div>
-                            <label className="text-sm font-medium text-foreground mb-1.5 block">API Key {!editingProviderId && <span className="text-destructive">*</span>}</label>
+                            <label htmlFor="api-config-key" className="text-sm font-medium text-foreground mb-1.5 block">API Key {!editingProviderId && <span className="text-destructive">*</span>}</label>
                             <div className="relative">
                               <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                              <input type={showApiKey ? 'text' : 'password'} placeholder={editingProviderId ? "留空则保留原密钥不变" : "sk-xxxxxxxxxxxxxxxxxxxxxxxx"} value={apiKey} onChange={e => setApiKey(e.target.value)} className="w-full h-10 pl-10 pr-12 rounded-lg bg-background border border-border text-sm text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
-                              <button type="button" onClick={() => setShowApiKey(v => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground cursor-pointer">
+                              <input id="api-config-key" type={showApiKey ? 'text' : 'password'} placeholder={editingProviderId ? "留空则保留原密钥不变" : "sk-xxxxxxxxxxxxxxxxxxxxxxxx"} value={apiKey} onChange={e => setApiKey(e.target.value)} className="w-full h-11 min-w-0 pl-10 pr-12 rounded-lg bg-background border border-border text-base md:text-sm text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
+                              <button type="button" aria-label={showApiKey ? '隐藏密钥' : '显示密钥'} onClick={() => setShowApiKey(v => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground cursor-pointer">
                                 {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                               </button>
                             </div>
                           </div>
                           {/* 请求风格 */}
                           <div>
-                            <label className="text-sm font-medium text-foreground mb-1.5 block">请求风格</label>
-                            <select className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors cursor-pointer" value={compatProfile} onChange={e => setCompatProfile(e.target.value)}>
+                            <label htmlFor="api-request-style" className="text-sm font-medium text-foreground mb-1.5 block">请求风格</label>
+                            <select id="api-request-style" className="w-full h-11 min-w-0 px-3 rounded-lg bg-background border border-border text-base md:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors cursor-pointer" value={compatProfile} onChange={e => setCompatProfile(e.target.value)}>
                               <option value="auto">自动推断（推荐）</option>
                               <option value="openai">OpenAI 标准格式</option>
                               <option value="openai-async">OpenAI 异步轮询</option>
@@ -3631,17 +3922,17 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
                       {/* ===== 模型管理区域 ===== */}
                       <div>
-                        <div className="flex items-center justify-between mb-3">
-                          <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                          <div className="flex shrink-0 items-center gap-2">
                             <div className="w-1 h-5 rounded-full bg-emerald-500" />
-                            <span className="text-sm font-semibold text-foreground">模型管理</span>
+                            <span className="whitespace-nowrap text-sm font-semibold text-foreground">模型管理</span>
                             {discoveredModels.length > 0 && (
                               <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium">
                                 {selectedModels.length}/{discoveredModels.length}
                               </span>
                             )}
                           </div>
-                          <div className="flex items-center gap-1">
+                          <div className="flex flex-wrap items-center gap-1">
                             <button onClick={() => setSelectedModels(discoveredModels.map(m => m.id))} disabled={discoveredModels.length === 0} className="text-xs px-2.5 py-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30 cursor-pointer transition-colors">全选</button>
                             <button onClick={() => setSelectedModels([])} disabled={selectedModels.length === 0} className="text-xs px-2.5 py-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30 cursor-pointer transition-colors">清空</button>
                             <button onClick={() => { setEditingModel(null); setModelFormName(''); setModelFormId(''); setModelFormContext(''); setShowModelDialog(true); }} className="text-xs px-2.5 py-1 rounded-md bg-primary/10 text-primary hover:bg-primary/20 flex items-center gap-1 cursor-pointer transition-colors font-medium">
@@ -3657,14 +3948,16 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                               <input
                                 type="text"
                                 placeholder="搜索模型名称或ID..."
+                                aria-label="搜索模型"
                                 value={modelSearchQuery}
                                 onChange={(e) => setModelSearchQuery(e.target.value)}
-                                className="w-full pl-9 pr-3 py-2 rounded-lg bg-muted/50 border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 transition-all"
+                                className="w-full h-11 min-w-0 pl-9 pr-14 py-2 rounded-lg bg-muted/50 border border-border text-base md:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 transition-all"
                               />
                               {modelSearchQuery && (
                                 <button
                                   onClick={() => setModelSearchQuery('')}
-                                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                                  aria-label="清空模型搜索"
+                                  className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center justify-center p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
                                 >
                                   <X className="w-3.5 h-3.5" />
                                 </button>
@@ -3690,25 +3983,27 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                             <p className="text-xs mt-1">尝试其他关键词或清空搜索</p>
                           </div>
                         ) : (
-                          <div className="rounded-lg overflow-hidden border border-border">
-                            <div className="max-h-64 overflow-y-auto">
+                          <div role="group" aria-label="已发现模型" className="rounded-lg overflow-hidden border border-border">
+                            <div className="max-h-none overflow-y-visible md:max-h-64 md:overflow-y-auto">
                               {filteredModels.map((m, idx) => {
                                 const isSelected = selectedModels.includes(m.id);
                                 return (
-                                  <div key={m.id} className={`flex items-center gap-3 px-4 py-2.5 ${idx % 2 === 0 ? 'bg-muted/30' : ''} hover:bg-muted/60 transition-colors group`}>
-                                    <input type="checkbox" checked={isSelected} onChange={() => { setSelectedModels(prev => prev.includes(m.id) ? prev.filter(x => x !== m.id) : [...prev, m.id]); }} className="w-4 h-4 rounded accent-primary cursor-pointer" />
+                                  <div key={m.id} className={`grid grid-cols-[44px_minmax(0,1fr)] items-start gap-x-3 gap-y-1 px-3 py-2.5 md:flex md:items-center md:gap-3 md:px-4 ${idx % 2 === 0 ? 'bg-muted/30' : ''} hover:bg-muted/60 transition-colors group`}>
+                                    <label className="inline-flex h-11 w-11 row-span-2 shrink-0 items-center justify-center rounded-md cursor-pointer"><input type="checkbox" checked={isSelected} onChange={() => { setSelectedModels(prev => prev.includes(m.id) ? prev.filter(x => x !== m.id) : [...prev, m.id]); }} aria-label={'选择模型 ' + (m.displayName || m.name || m.id)} className="w-4 h-4 rounded accent-primary cursor-pointer" /></label>
                                     <div className="flex-1 min-w-0">
-                                      <div className={`text-sm truncate ${isSelected ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>{m.displayName || m.name || m.id}</div>
-                                      <div className="text-xs font-mono truncate text-muted-foreground/60">{m.id}</div>
+                                      <div className={`text-sm [overflow-wrap:anywhere] ${isSelected ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>{m.displayName || m.name || m.id}</div>
+                                      <div className="text-xs font-mono [overflow-wrap:anywhere] text-muted-foreground/60">{m.id}</div>
                                     </div>
+                                    <div className="col-start-2 flex items-center justify-end gap-2 md:contents">
                                     {m.contextWindow && (
                                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium shrink-0">
                                         {m.contextWindow >= 1000 ? `${(m.contextWindow / 1000).toFixed(0)}K` : m.contextWindow}
                                       </span>
                                     )}
-                                    <button onClick={() => { setEditingModel(m); setModelFormName(m.displayName || m.name || ''); setModelFormId(m.id); setModelFormContext(m.contextWindow ? String(m.contextWindow) : ''); setShowModelDialog(true); }} className="p-1.5 rounded-md opacity-0 group-hover:opacity-100 hover:bg-muted text-muted-foreground hover:text-foreground transition-all cursor-pointer">
+                                    <button aria-label={'编辑模型 ' + (m.displayName || m.name || m.id)} onClick={() => { setEditingModel(m); setModelFormName(m.displayName || m.name || ''); setModelFormId(m.id); setModelFormContext(m.contextWindow ? String(m.contextWindow) : ''); setShowModelDialog(true); }} className="p-1.5 rounded-md shrink-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 hover:bg-muted text-muted-foreground hover:text-foreground transition-all cursor-pointer">
                                       <Edit3 className="w-3.5 h-3.5" />
                                     </button>
+                                    </div>
                                   </div>
                                 );
                               })}
@@ -3716,8 +4011,6 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                           </div>
                         )}
                       </div>
-                    </div>
-                  </div>
                   <ModelCapabilityEditor
                     models={buildCapabilityEditorModels(
                       discoveredModels,
@@ -3728,12 +4021,14 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     value={taskModelCapabilities}
                     onChange={setTaskModelCapabilities}
                   />
+                    </div>
+                  </div>
                   {/* 抽屉底部按钮区 */}
-                  <div className="px-6 py-4 border-t border-border bg-muted/20 flex items-center justify-between gap-3">
+                  <div className="shrink-0 px-4 sm:px-6 py-3 border-t border-border bg-muted/20 flex flex-wrap items-center justify-between gap-3">
                     <p className="text-xs text-muted-foreground">
                       {editingProviderId ? '修改后点击保存' : '添加后需要勾选启用的模型'}
                     </p>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button onClick={() => { if (!isSubmitting) { resetApiForm(); setShowApiDrawer(false); setEditingProviderId(null); } }} disabled={isSubmitting} className="px-5 py-2 rounded-md text-sm font-medium bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-colors disabled:opacity-50 cursor-pointer">取消</button>
                       <button onClick={() => { if (editingProviderId) { void handleUpdateApi(); } else { void handleAddApi(); } }} disabled={!apiName || !apiBaseUrl || isSubmitting} className="px-6 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 flex items-center gap-2 transition-colors disabled:opacity-50 cursor-pointer">
                         {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : (editingProviderId ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />)}
@@ -3747,28 +4042,28 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 {showModelDialog && (
                   <>
                     <div className="fixed inset-0 bg-black/50 z-[210]" onClick={() => setShowModelDialog(false)} />
-                    <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] z-[211] bg-card border border-border rounded-xl shadow-2xl">
-                      <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+                    <div role="dialog" aria-label={editingModel ? '编辑模型' : '添加新模型'} className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] max-w-[calc(100vw-2rem)] max-h-[calc(100dvh-2rem)] z-[211] bg-card border border-border rounded-xl shadow-2xl flex flex-col">
+                      <div className="shrink-0 flex items-center justify-between gap-3 px-4 sm:px-5 py-3 border-b border-border">
                         <h3 className="text-sm font-semibold text-foreground">{editingModel ? '编辑模型' : '添加新模型'}</h3>
-                        <button onClick={() => setShowModelDialog(false)} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer transition-colors">
+                        <button aria-label="关闭模型窗口" onClick={() => setShowModelDialog(false)} className="inline-flex h-11 w-11 shrink-0 items-center justify-center p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer transition-colors">
                           <X className="w-4 h-4" />
                         </button>
                       </div>
-                      <div className="px-5 py-4 space-y-4">
+                      <div className="min-h-0 overflow-y-auto px-4 sm:px-5 py-4 space-y-4">
                         <div>
-                          <label className="text-sm font-medium text-foreground mb-1.5 block">显示名称</label>
-                          <input type="text" placeholder="模型显示名称，如：GPT-4o" value={modelFormName} onChange={e => setModelFormName(e.target.value)} className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
+                          <label htmlFor="api-model-display-name" className="text-sm font-medium text-foreground mb-1.5 block">显示名称</label>
+                          <input id="api-model-display-name" type="text" placeholder="模型显示名称，如：GPT-4o" value={modelFormName} onChange={e => setModelFormName(e.target.value)} className="w-full h-11 min-w-0 px-3 rounded-lg bg-background border border-border text-base md:text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
                         </div>
                         <div>
-                          <label className="text-sm font-medium text-foreground mb-1.5 block">模型 ID</label>
-                          <input type="text" placeholder="模型标识，如：gpt-4o-2024-08-06" value={modelFormId} onChange={e => setModelFormId(e.target.value)} className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
+                          <label htmlFor="api-model-id" className="text-sm font-medium text-foreground mb-1.5 block">模型 ID</label>
+                          <input id="api-model-id" aria-required="true" type="text" placeholder="模型标识，如：gpt-4o-2024-08-06" value={modelFormId} onChange={e => setModelFormId(e.target.value)} className="w-full h-11 min-w-0 px-3 rounded-lg bg-background border border-border text-base md:text-sm text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
                         </div>
                         <div>
-                          <label className="text-sm font-medium text-foreground mb-1.5 block">上下文窗口 (tokens)</label>
-                          <input type="number" placeholder="例如：128000" value={modelFormContext} onChange={e => setModelFormContext(e.target.value)} className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
+                          <label htmlFor="api-model-context" className="text-sm font-medium text-foreground mb-1.5 block">上下文窗口 (tokens)</label>
+                          <input id="api-model-context" type="number" placeholder="例如：128000" value={modelFormContext} onChange={e => setModelFormContext(e.target.value)} className="w-full h-11 min-w-0 px-3 rounded-lg bg-background border border-border text-base md:text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
                         </div>
                       </div>
-                      <div className="px-5 py-3 border-t border-border flex justify-end gap-2">
+                      <div className="shrink-0 px-4 sm:px-5 py-3 border-t border-border flex flex-wrap justify-end gap-2">
                         <button onClick={() => setShowModelDialog(false)} className="px-4 py-2 rounded-md text-sm font-medium bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-colors cursor-pointer">取消</button>
                         <button onClick={() => {
                           const displayNameValue = modelFormName.trim();
@@ -3795,7 +4090,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                             }
                           }
                           setShowModelDialog(false);
-                        }} className="px-4 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer">
+                        }} disabled={!modelFormId.trim()} className="px-4 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50">
                           {editingModel ? '保存' : '确认添加'}
                         </button>
                       </div>
@@ -3838,13 +4133,13 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     navigator.clipboard?.writeText(typeof window !== 'undefined' ? window.location.origin : '');
                     toast.success('云端地址已复制');
                   }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${softClass} ${textPrimary}`}
+                  className={`inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-medium ${softClass} ${textPrimary}`}
                 >
                   <Link size={12} /> 复制云端地址
                 </button>
                 <button
                   onClick={() => loadConnectorStatus()}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${softClass} ${textPrimary}`}
+                  className={`inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-medium ${softClass} ${textPrimary}`}
                 >
                   <RefreshCw size={12} className={connectorStatus.loading ? 'animate-spin' : ''} />
                   刷新检测
@@ -4059,25 +4354,25 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
         {/* ── Tab: Ecom Templates ── */}
         {activeTab === 'ecom-templates' && isAdmin && (
-          <div className="h-full overflow-y-auto p-6">
-            <div className="flex items-center justify-between mb-6">
+          <div className="h-full overflow-y-auto p-4 sm:p-6 [overflow-wrap:anywhere] [&_.grid>*]:min-w-0 [&_svg]:shrink-0 max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11 max-md:[&_input:not([type=checkbox])]:min-h-11 max-md:[&_input:not([type=checkbox])]:text-base max-md:[&_select]:min-h-11 max-md:[&_select]:text-base max-md:[&_textarea]:text-base">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
               <div><h1 className={`text-xl font-bold ${textPrimary}`}>电商模板管理</h1><p className={`text-sm ${textSecondary}`}>管理品牌电商生成模板</p></div>
               <button onClick={() => { setEditingEcomTpl({ id: `tpl_${Date.now()}`, name: '', icon: '📄', description: '', prompt_template: '', negative_prompt: 'low quality, blurry, distorted, deformed, watermark', aspect_ratio: '1:1', category: 'product', fidelity_anchor: '', sort_order: ecomTemplates.length + 1, is_enabled: true }); setShowNewEcomTpl(true); }} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${accentBgClass} ${accentTextOnBgClass} ${accentHoverBgClass} transition-colors cursor-pointer`}><Plus size={12} /> 新增模板</button>
             </div>
             <div className="space-y-2 max-h-[500px] overflow-y-auto">
               {ecomTemplates.length === 0 ? (<div className={`text-center py-8 text-sm ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>暂无自定义模板，点击&ldquo;新增模板&rdquo;添加</div>) : ecomTemplates.map((tpl, idx) => (
-                <div key={tpl.id as string} className={`flex items-center gap-3 rounded-lg px-4 py-3 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-white hover:bg-gray-50'} transition-colors`}>
+                <div key={tpl.id as string} className={`flex flex-wrap items-center gap-3 rounded-lg px-4 py-3 ${isDark ? 'bg-white/5 hover:bg-white/10' : 'bg-white hover:bg-gray-50'} transition-colors`}>
                   <span className="text-lg">{tpl.icon as string || '📄'}</span>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium truncate">{tpl.name as string || '未命名'}</span>
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <span className="text-sm font-medium truncate max-md:whitespace-normal max-md:overflow-visible">{tpl.name as string || '未命名'}</span>
                       <span className={`text-[10px] px-1.5 py-0.5 rounded ${tpl.is_enabled ? (isDark ? 'bg-green-500/20 text-green-400' : 'bg-green-50 text-green-600') : (isDark ? 'bg-[#333] text-[#666]' : 'bg-gray-100 text-gray-400')}`}>{tpl.is_enabled ? '启用' : '禁用'}</span>
                       <span className={`text-[10px] px-1.5 py-0.5 rounded ${isMonochrome ? 'bg-[#3b82f6]/20 text-[#3b82f6]' : isDark ? 'bg-[#d4af37]/20 text-[#d4af37]' : 'bg-blue-50 text-blue-600'}`}>{(tpl.category as string) || 'product'}</span>
                       <span className={`text-[10px] ${isDark ? 'text-[#555]' : 'text-gray-400'}`}>{tpl.aspect_ratio as string}</span>
                     </div>
-                    <div className={`text-xs mt-0.5 truncate ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>{tpl.description as string || '无描述'}</div>
+                    <div className={`text-xs mt-0.5 truncate max-md:whitespace-normal max-md:overflow-visible ${isDark ? 'text-[#666]' : 'text-gray-400'}`}>{tpl.description as string || '无描述'}</div>
                   </div>
-                  <div className="flex items-center gap-1 shrink-0">
+                  <div className="flex max-md:w-full max-md:justify-end flex-wrap items-center gap-1 shrink-0">
                     <button onClick={() => void moveEcomTemplateOrder(tpl.id as string, 'up')} disabled={idx === 0} className={`p-1 rounded transition-colors cursor-pointer disabled:opacity-30 ${isDark ? 'hover:bg-white/10 text-[#888]' : 'hover:bg-gray-100 text-gray-500'}`} title="上移"><ArrowUp size={12} /></button>
                     <button onClick={() => void moveEcomTemplateOrder(tpl.id as string, 'down')} disabled={idx === ecomTemplates.length - 1} className={`p-1 rounded transition-colors cursor-pointer disabled:opacity-30 ${isDark ? 'hover:bg-white/10 text-[#888]' : 'hover:bg-gray-100 text-gray-500'}`} title="下移"><ArrowDown size={12} /></button>
                     <button onClick={() => void toggleEcomTemplateEnabled(tpl.id as string, !tpl.is_enabled)} className={`p-1 rounded transition-colors cursor-pointer ${isDark ? 'hover:bg-[#2a2a2a]' : 'hover:bg-gray-100'}`} title={tpl.is_enabled ? '禁用' : '启用'}>{tpl.is_enabled ? <CheckCircle2 size={12} className="text-green-400" /> : <Ban size={12} className={isDark ? 'text-[#555]' : 'text-gray-300'} />}</button>
@@ -4090,14 +4385,14 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
             {(showNewEcomTpl || editingEcomTpl) && (
               <div className={`mt-4 rounded-xl border p-4 ${softClass}`}>
                 <h4 className="text-sm font-semibold mb-3">{showNewEcomTpl ? '新增模板' : `编辑模板: ${editingEcomTpl?.name || ''}`}</h4>
-                <div className="grid grid-cols-2 gap-3">
-                  <div><label className={labelClass}>模板名称 *</label><input className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="如：白底主图" value={(editingEcomTpl?.name as string) || ''} onChange={e => setEditingEcomTpl(prev => prev ? { ...prev, name: e.target.value } : null)} /></div>
-                  <div><label className={labelClass}>图标</label><input className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="如：📦" value={(editingEcomTpl?.icon as string) || ''} onChange={e => setEditingEcomTpl(prev => prev ? { ...prev, icon: e.target.value } : null)} /></div>
-                  <div><label className={labelClass}>分类</label><select className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} value={(editingEcomTpl?.category as string) || 'product'} onChange={e => setEditingEcomTpl(prev => prev ? { ...prev, category: e.target.value } : null)}><option value="product">商品展示</option><option value="scene">场景氛围</option><option value="model">模特展示</option><option value="graphic">平面设计</option><option value="detail">细节展示</option></select></div>
-                  <div><label className={labelClass}>画面比例</label><select className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} value={(editingEcomTpl?.aspect_ratio as string) || '1:1'} onChange={e => setEditingEcomTpl(prev => prev ? { ...prev, aspect_ratio: e.target.value } : null)}><option value="1:1">1:1</option><option value="4:3">4:3</option><option value="3:4">3:4</option><option value="16:9">16:9</option><option value="9:16">9:16</option><option value="3:2">3:2</option><option value="2:3">2:3</option></select></div>
-                  <div className="col-span-2"><label className={labelClass}>描述</label><input className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="简短描述此模板的用途" value={(editingEcomTpl?.description as string) || ''} onChange={e => setEditingEcomTpl(prev => prev ? { ...prev, description: e.target.value } : null)} /></div>
-                  <div className="col-span-2"><label className={labelClass}>提示词模板 *</label><textarea className={`w-full h-28 px-3 py-2 rounded-lg border text-sm ${inputClass} resize-y`} placeholder="使用 {SUBJECT} {brand_color_prompt} {style_extra} 等占位符" value={(editingEcomTpl?.prompt_template as string) || ''} onChange={e => setEditingEcomTpl(prev => prev ? { ...prev, prompt_template: e.target.value } : null)} /></div>
-                  <div className="col-span-2"><label className={labelClass}>反向提示词</label><textarea className={`w-full h-16 px-3 py-2 rounded-lg border text-sm ${inputClass} resize-y`} placeholder="排除的低质量描述" value={(editingEcomTpl?.negative_prompt as string) || ''} onChange={e => setEditingEcomTpl(prev => prev ? { ...prev, negative_prompt: e.target.value } : null)} /></div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div><label htmlFor={`${dashboardFormId}-ecom-name`} className={labelClass}>模板名称 *</label><input id={`${dashboardFormId}-ecom-name`} className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="如：白底主图" value={(editingEcomTpl?.name as string) || ''} onChange={e => setEditingEcomTpl(prev => prev ? { ...prev, name: e.target.value } : null)} /></div>
+                  <div><label htmlFor={`${dashboardFormId}-ecom-icon`} className={labelClass}>图标</label><input id={`${dashboardFormId}-ecom-icon`} className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="如：📦" value={(editingEcomTpl?.icon as string) || ''} onChange={e => setEditingEcomTpl(prev => prev ? { ...prev, icon: e.target.value } : null)} /></div>
+                  <div><label htmlFor={`${dashboardFormId}-ecom-category`} className={labelClass}>分类</label><select id={`${dashboardFormId}-ecom-category`} className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} value={(editingEcomTpl?.category as string) || 'product'} onChange={e => setEditingEcomTpl(prev => prev ? { ...prev, category: e.target.value } : null)}><option value="product">商品展示</option><option value="scene">场景氛围</option><option value="model">模特展示</option><option value="graphic">平面设计</option><option value="detail">细节展示</option></select></div>
+                  <div><label htmlFor={`${dashboardFormId}-ecom-ratio`} className={labelClass}>画面比例</label><select id={`${dashboardFormId}-ecom-ratio`} className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} value={(editingEcomTpl?.aspect_ratio as string) || '1:1'} onChange={e => setEditingEcomTpl(prev => prev ? { ...prev, aspect_ratio: e.target.value } : null)}><option value="1:1">1:1</option><option value="4:3">4:3</option><option value="3:4">3:4</option><option value="16:9">16:9</option><option value="9:16">9:16</option><option value="3:2">3:2</option><option value="2:3">2:3</option></select></div>
+                  <div className="sm:col-span-2"><label htmlFor={`${dashboardFormId}-ecom-description`} className={labelClass}>描述</label><input id={`${dashboardFormId}-ecom-description`} className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`} placeholder="简短描述此模板的用途" value={(editingEcomTpl?.description as string) || ''} onChange={e => setEditingEcomTpl(prev => prev ? { ...prev, description: e.target.value } : null)} /></div>
+                  <div className="sm:col-span-2"><label htmlFor={`${dashboardFormId}-ecom-prompt`} className={labelClass}>提示词模板 *</label><textarea id={`${dashboardFormId}-ecom-prompt`} className={`w-full h-28 px-3 py-2 rounded-lg border text-sm ${inputClass} resize-y`} placeholder="使用 {SUBJECT} {brand_color_prompt} {style_extra} 等占位符" value={(editingEcomTpl?.prompt_template as string) || ''} onChange={e => setEditingEcomTpl(prev => prev ? { ...prev, prompt_template: e.target.value } : null)} /></div>
+                  <div className="sm:col-span-2"><label htmlFor={`${dashboardFormId}-ecom-negative`} className={labelClass}>反向提示词</label><textarea id={`${dashboardFormId}-ecom-negative`} className={`w-full h-16 px-3 py-2 rounded-lg border text-sm ${inputClass} resize-y`} placeholder="排除的低质量描述" value={(editingEcomTpl?.negative_prompt as string) || ''} onChange={e => setEditingEcomTpl(prev => prev ? { ...prev, negative_prompt: e.target.value } : null)} /></div>
                 </div>
                 <div className="flex items-center gap-2 mt-3">
                   <button onClick={() => editingEcomTpl && void saveEcomTemplate(editingEcomTpl)} disabled={isEcomTplSaving || !(editingEcomTpl?.name) || !(editingEcomTpl?.prompt_template)} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium ${accentBgClass} ${accentTextOnBgClass} ${accentHoverBgClass} transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed`}>{isEcomTplSaving ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}{isEcomTplSaving ? '保存中...' : '保存模板'}</button>
@@ -4110,23 +4405,23 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
         {/* ── Tab: Payment Config ── */}
         {activeTab === 'payment-config' && isAdmin && (
-          <div className="h-full overflow-y-auto p-6">
-            <div className="flex items-center justify-between mb-6">
+          <div className="h-full overflow-y-auto p-4 sm:p-6 [overflow-wrap:anywhere] [&_.grid>*]:min-w-0 [&_svg]:shrink-0 max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11 max-md:[&_input:not([type=checkbox])]:min-h-11 max-md:[&_input:not([type=checkbox])]:text-base max-md:[&_select]:min-h-11 max-md:[&_select]:text-base max-md:[&_textarea]:text-base">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
               <div>
                 <h1 className={`text-xl font-bold ${textPrimary}`}>人工收款审核</h1>
                 <p className={`text-sm ${textSecondary}`}>上传微信或支付宝收款码；用户付款后提交订单，管理员确认到账后发放积分</p>
               </div>
-              <div className="flex items-center gap-2">
-                {paymentStatus.wechat && <span className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-green-500/15 text-green-400"><CheckCircle2 size={12}/> 微信已配置</span>}
-                {paymentStatus.alipay && <span className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-blue-500/15 text-blue-400"><CheckCircle2 size={12}/> 支付宝已配置</span>}
-                {!paymentStatus.wechat && !paymentStatus.alipay && <span className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full bg-red-500/15 text-red-400"><AlertTriangle size={12}/> 未配置收款码或支付链接</span>}
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                {paymentStatus.wechat && <span className="flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] px-2 py-1 rounded-full bg-green-500/15 text-green-400"><CheckCircle2 size={12}/> 微信已配置</span>}
+                {paymentStatus.alipay && <span className="flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] px-2 py-1 rounded-full bg-blue-500/15 text-blue-400"><CheckCircle2 size={12}/> 支付宝已配置</span>}
+                {!paymentStatus.wechat && !paymentStatus.alipay && <span className="flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] px-2 py-1 rounded-full bg-red-500/15 text-red-400"><AlertTriangle size={12}/> 未配置收款码或支付链接</span>}
               </div>
             </div>
 
             <div className="space-y-6 max-w-3xl">
               {/* 微信收款码 */}
               <div className={`rounded-xl border p-5 ${softClass}`}>
-                <div className="flex items-center gap-3 mb-4">
+                <div className="flex flex-wrap items-center gap-3 mb-4">
                   <div className="w-9 h-9 rounded-lg bg-green-500/15 flex items-center justify-center">
                     <svg viewBox="0 0 24 24" className="w-5 h-5 text-green-400" fill="currentColor"><path d="M8.691 2.188C3.891 2.188 0 5.476 0 9.53c0 2.212 1.17 4.203 3.002 5.55a.59.59 0 01.213.665l-.39 1.48c-.019.07-.048.141-.048.213 0 .163.13.295.29.295a.326.326 0 00.167-.054l1.903-1.114a.864.864 0 01.717-.098 10.16 10.16 0 002.837.403c.276 0 .543-.027.811-.05-.857-2.578.157-4.972 1.932-6.446 1.703-1.415 3.882-1.98 5.853-1.838-.576-3.583-4.196-6.348-8.596-6.348zM5.785 5.991c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 01-1.162 1.178A1.17 1.17 0 014.623 7.17c0-.651.52-1.18 1.162-1.18zm5.813 0c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 01-1.162 1.178 1.17 1.17 0 01-1.162-1.178c0-.651.52-1.18 1.162-1.18zm3.97 3.258c-2.031 0-3.898.767-5.309 1.944-1.66 1.386-2.622 3.277-2.622 5.343 0 1.56.564 3.023 1.538 4.234a.466.466 0 01.168.527l-.308 1.172c-.016.055-.037.11-.037.169 0 .13.104.234.231.234.057 0 .107-.019.155-.046l1.499-.881a.679.679 0 01.567-.078 8.064 8.064 0 002.418.369c4.156 0 7.53-2.915 7.53-6.498s-3.374-6.498-7.53-6.498v-.001zm-2.573 3.492c.509 0 .923.42.923.938a.93.93 0 01-.923.938.93.93 0 01-.923-.938c0-.518.414-.938.923-.938zm5.146 0c.509 0 .923.42.923.938a.93.93 0 01-.923.938.93.93 0 01-.923-.938c0-.518.414-.938.923-.938z"/></svg>
                   </div>
@@ -4134,12 +4429,12 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     <h3 className={`text-sm font-semibold ${textPrimary}`}>微信收款码</h3>
                     <p className={`text-xs ${textSecondary}`}>上传微信个人收款码图片</p>
                   </div>
-                  {paymentConfig.wechatQrUrl && <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/15 text-green-400 ml-auto">已配置</span>}
+                  {paymentConfig.wechatQrUrl && <span className="whitespace-nowrap text-[10px] px-2 py-0.5 rounded-full bg-green-500/15 text-green-400 ml-auto">已配置</span>}
                 </div>
                 <div className="space-y-3">
                   <div>
-                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>微信支付链接（可选）</label>
-                    <input
+                    <label htmlFor={`${dashboardFormId}-wechat-link`} className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>微信支付链接（可选）</label>
+                    <input id={`${dashboardFormId}-wechat-link`}
                       className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`}
                       placeholder="wxp://xxxxx 微信收款链接，用户点击后直接跳转付款"
                       value={paymentConfig.wechatPayLink || ''}
@@ -4148,8 +4443,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     <p className={`text-[10px] ${textSecondary} mt-1`}>收款码可独立使用；填写链接仅用于移动端一键跳转，系统会尝试从上传图片中自动识别。</p>
                   </div>
                   <div>
-                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>收款码图片URL（备用）</label>
-                    <input
+                    <label htmlFor={`${dashboardFormId}-wechat-url`} className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>收款码图片URL（备用）</label>
+                    <input id={`${dashboardFormId}-wechat-url`}
                       className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`}
                       placeholder="粘贴微信收款码图片URL，或上传图片后自动填入"
                       value={paymentConfig.wechatQrUrl}
@@ -4157,8 +4452,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     />
                   </div>
                   <div>
-                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>上传收款码图片</label>
-                    <input
+                    <label htmlFor={`${dashboardFormId}-wechat-file`} className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>上传收款码图片</label>
+                    <input id={`${dashboardFormId}-wechat-file`}
                       type="file"
                       accept="image/*"
                       onChange={async (e) => {
@@ -4194,7 +4489,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                           }
                         } catch { alert('上传失败：网络错误'); }
                       }}
-                      className={`w-full text-sm ${textSecondary} file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:cursor-pointer ${isDark ? 'file:bg-green-500/20 file:text-green-400' : 'file:bg-green-50 file:text-green-600'}`}
+                      className={`w-full min-h-11 text-base ${textSecondary} file:min-h-11 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:cursor-pointer ${isDark ? 'file:bg-green-500/20 file:text-green-400' : 'file:bg-green-50 file:text-green-600'}`}
                     />
                   </div>
                   {paymentConfig.wechatQrUrl && (
@@ -4207,7 +4502,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
               {/* 支付宝收款码 */}
               <div className={`rounded-xl border p-5 ${softClass}`}>
-                <div className="flex items-center gap-3 mb-4">
+                <div className="flex flex-wrap items-center gap-3 mb-4">
                   <div className="w-9 h-9 rounded-lg bg-blue-500/15 flex items-center justify-center">
                     <svg viewBox="0 0 24 24" className="w-5 h-5 text-blue-400" fill="currentColor"><path d="M21.422 15.358c-3.32-1.326-6.092-2.786-6.092-2.786s1.439-3.667 1.853-5.927H13.01V4.78h5.06V3.273h-5.06V.5h-2.494s-.073.003-.073.077V3.273H5.385v1.508h5.058v1.865H7.755v1.508h8.206c-.326 1.695-1.078 3.513-1.078 3.513s-3.858-1.732-6.592-2.18c-3.592-.594-6.291.802-6.47 3.286-.178 2.483 2.407 4.09 5.246 4.284 2.838.195 5.59-1.113 7.55-2.856 2.696 1.456 7.484 3.373 9.982 3.94.464-.867 1.657-3.063 1.657-3.063s-2.733-.59-4.834-1.48zm-12.84 2.275c-2.296-.157-3.71-1.463-3.588-2.838.123-1.375 1.843-2.352 4.139-2.195 2.06.141 4.332 1.103 5.698 2.053-1.63 1.402-3.953 3.137-6.249 2.98z"/></svg>
                   </div>
@@ -4215,12 +4510,12 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     <h3 className={`text-sm font-semibold ${textPrimary}`}>支付宝收款码</h3>
                     <p className={`text-xs ${textSecondary}`}>上传支付宝个人收款码图片</p>
                   </div>
-                  {paymentConfig.alipayQrUrl && <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 ml-auto">已配置</span>}
+                  {paymentConfig.alipayQrUrl && <span className="whitespace-nowrap text-[10px] px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 ml-auto">已配置</span>}
                 </div>
                 <div className="space-y-3">
                   <div>
-                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>支付宝支付链接（可选）</label>
-                    <input
+                    <label htmlFor={`${dashboardFormId}-alipay-link`} className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>支付宝支付链接（可选）</label>
+                    <input id={`${dashboardFormId}-alipay-link`}
                       className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`}
                       placeholder="https://qr.alipay.com/xxxxx 支付宝收款链接，用户点击后直接跳转付款"
                       value={paymentConfig.alipayPayLink || ''}
@@ -4229,8 +4524,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     <p className={`text-[10px] ${textSecondary} mt-1`}>收款码可独立使用；填写链接仅用于移动端一键跳转，系统会尝试从上传图片中自动识别。</p>
                   </div>
                   <div>
-                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>收款码图片URL（备用）</label>
-                    <input
+                    <label htmlFor={`${dashboardFormId}-alipay-url`} className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>收款码图片URL（备用）</label>
+                    <input id={`${dashboardFormId}-alipay-url`}
                       className={`w-full h-9 px-3 rounded-lg border text-sm ${inputClass}`}
                       placeholder="粘贴支付宝收款码图片URL，或上传图片后自动填入"
                       value={paymentConfig.alipayQrUrl}
@@ -4238,8 +4533,8 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     />
                   </div>
                   <div>
-                    <label className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>上传收款码图片</label>
-                    <input
+                    <label htmlFor={`${dashboardFormId}-alipay-file`} className={`text-[11px] font-medium ${textSecondary} mb-1 block`}>上传收款码图片</label>
+                    <input id={`${dashboardFormId}-alipay-file`}
                       type="file"
                       accept="image/*"
                       onChange={async (e) => {
@@ -4275,7 +4570,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                           }
                         } catch { alert('上传失败：网络错误'); }
                       }}
-                      className={`w-full text-sm ${textSecondary} file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:cursor-pointer ${isDark ? 'file:bg-blue-500/20 file:text-blue-400' : 'file:bg-blue-50 file:text-blue-600'}`}
+                      className={`w-full min-h-11 text-base ${textSecondary} file:min-h-11 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:cursor-pointer ${isDark ? 'file:bg-blue-500/20 file:text-blue-400' : 'file:bg-blue-50 file:text-blue-600'}`}
                     />
                   </div>
                   {paymentConfig.alipayQrUrl && (
@@ -4306,9 +4601,9 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 </div>
                   <div className="space-y-2 max-h-60 overflow-y-auto">
                     {auditOrders.map((order) => (
-                      <div key={order.id} className={`flex items-center justify-between px-3 py-2.5 rounded-lg ${cardBg} border ${borderColor}`}>
+                      <div key={order.id} className={`flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-3 py-2.5 rounded-lg ${cardBg} border ${borderColor}`}>
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
+                          <div className="flex min-w-0 flex-wrap items-center gap-2">
                             <span className={`text-sm font-medium ${textPrimary}`}>¥{(typeof order.priceCny === 'number' ? order.priceCny : Number(order.priceCny) || 0).toFixed(2)}</span>
                             <span className={`text-xs ${textSecondary}`}>({order.amount}积分)</span>
                             <span className={`text-[10px] px-1.5 py-0.5 rounded ${order.paymentMethod === 'wechat' ? 'bg-green-500/15 text-green-400' : 'bg-blue-500/15 text-blue-400'}`}>
@@ -4352,7 +4647,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
           returnFocusTarget={collaborationReturnFocusTarget} onOpenChange={setCollaborationOpen} />
       )}
 
-      <ConfirmDialog open={confirmDlg.open} title={confirmDlg.title} message={confirmDlg.message} variant={confirmDlg.variant} onConfirm={confirmDlg.onConfirm} onCancel={confirmDlg.onCancel} />
+      <ConfirmDialog open={confirmDlg.open} title={confirmDlg.title} message={confirmDlg.message} details={confirmDlg.details} variant={confirmDlg.variant} onConfirm={confirmDlg.onConfirm} onCancel={confirmDlg.onCancel} />
     </div>
   );
 }

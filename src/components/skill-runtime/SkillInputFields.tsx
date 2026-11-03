@@ -196,7 +196,7 @@ export function SkillInputFields({
   };
 
   return (
-    <div className="space-y-3">
+    <div className="min-w-0 space-y-3">
       {fields.map(field => {
         const value = effectiveValue(field, values);
         const inputId = `${instanceId}-${field.key}`;
@@ -213,7 +213,7 @@ export function SkillInputFields({
           required: field.required,
           'aria-invalid': error ? true : undefined,
           'aria-describedby': describedBy,
-          className: 'w-full rounded border px-2 py-1.5 text-sm',
+          className: 'min-h-11 w-full min-w-0 rounded border border-border bg-transparent px-3 py-2 text-base text-inherit focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed',
         } as const;
 
         let control: React.ReactNode;
@@ -309,7 +309,7 @@ export function SkillInputFields({
                     return parsed;
                   })}
                 />
-                <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+                <label aria-disabled={disabled} className={`inline-flex min-h-11 min-w-11 items-center gap-2 rounded border border-border px-3 py-2 text-sm text-inherit focus-within:ring-2 focus-within:ring-primary ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-muted'}`}>
                   <Upload aria-hidden="true" size={14} />
                   导入 CSV/JSON
                   <input
@@ -349,7 +349,7 @@ export function SkillInputFields({
                     .slice(0, 5) as Record<string, unknown>[];
                   const columns = [...new Set(rows.flatMap(row => Object.keys(row)))].slice(0, 8);
                   return (
-                    <div className="max-w-full overflow-x-auto rounded border" aria-label={`${field.label}预览`}>
+                    <div className="min-w-0 max-w-full overflow-x-auto rounded border" aria-label={`${field.label}预览`}>
                       <div className="px-2 py-1 text-xs text-muted-foreground">共 {value.length} 行，预览前 {rows.length} 行</div>
                       <table className="min-w-full text-left text-xs">
                         <thead><tr>{columns.map(column => <th className="border-t px-2 py-1 font-medium" key={column}>{column}</th>)}</tr></thead>
@@ -399,7 +399,7 @@ export function SkillInputFields({
                 id={inputId}
                 aria-invalid={error ? true : undefined}
                 aria-describedby={describedBy}
-                className="space-y-1"
+                className="min-w-0 space-y-1"
               >
                 <legend className="text-sm font-medium">
                   {field.label}
@@ -408,9 +408,10 @@ export function SkillInputFields({
                 {(field.options || []).map(option => {
                   const checked = selected.includes(option);
                   return (
-                    <label key={option} className="flex items-center gap-2 text-sm">
+                    <label key={option} className="flex min-h-11 w-full items-center gap-2 rounded px-2 py-2 text-sm focus-within:ring-2 focus-within:ring-primary">
                       <input
                         type="checkbox"
+                        className="h-5 w-5 shrink-0 accent-primary"
                         checked={checked}
                         disabled={disabled || (atLimit && !checked)}
                         onChange={() => commitValue(field, checked
@@ -451,6 +452,7 @@ export function SkillInputFields({
               <input
                 id={inputId}
                 type="checkbox"
+                className="h-5 w-5 shrink-0 accent-primary"
                 disabled={disabled}
                 checked={value === true}
                 aria-label={field.label}
@@ -463,15 +465,22 @@ export function SkillInputFields({
         }
 
         return (
-          <div key={field.key} className="space-y-1">
+          <div key={field.key} className="min-w-0 space-y-1">
+            {field.kind === 'boolean' ? (
+              <label htmlFor={inputId} className="flex min-h-11 w-full items-center gap-2 rounded px-2 py-2 text-sm font-medium focus-within:ring-2 focus-within:ring-primary">
+                {control}
+                <span className="min-w-0 break-words">{field.label}{field.required && <span aria-hidden="true"> *</span>}</span>
+              </label>
+            ) : <>
             {field.kind !== 'multi-select' && (
-              <label htmlFor={inputId} className="block text-sm font-medium">
+              <label htmlFor={inputId} className="block break-words text-sm font-medium">
                 {field.label}
                 {field.required && <span aria-hidden="true"> *</span>}
               </label>
             )}
             {control}
-            {error && <div id={errorId} role="alert" className="text-xs text-destructive">{error}</div>}
+            </>}
+            {error && <div id={errorId} role="alert" className="break-words text-xs text-destructive">{error}</div>}
           </div>
         );
       })}

@@ -11,6 +11,26 @@ const DEFAULT_RECOVERY_POLL_ATTEMPTS = 300;
 const RECOVERY_REQUEST_TIMEOUT_MS = 15_000;
 const DEFAULT_RECOVERY_MAX_DURATION_MS = 5 * 60_000;
 const activeRecoveryPolls = new Map<string, Promise<CanvasMediaRecoveryResult>>();
+const recoverySignalIds = new WeakMap<AbortSignal, number>();
+let nextRecoverySignalId = 0;
+
+function recoveryAbortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException('Media recovery cancelled', 'AbortError');
+}
+
+function throwIfRecoveryAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw recoveryAbortReason(signal);
+}
+
+async function waitForRecovery(promise: Promise<void>, signal?: AbortSignal): Promise<void> {
+  if (!signal) return promise;
+  if (signal.aborted) { void promise.catch(() => undefined); throw recoveryAbortReason(signal); }
+  await new Promise<void>((resolve, reject) => {
+    const onAbort = (): void => { signal.removeEventListener('abort', onAbort); reject(recoveryAbortReason(signal)); };
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(() => { signal.removeEventListener('abort', onAbort); resolve(); }, error => { signal.removeEventListener('abort', onAbort); reject(error); });
+  });
+}
 
 interface CanvasMediaRecoveryIdentity {
   assetId?: string;
@@ -35,6 +55,7 @@ export async function recoverCanvasMedia<TImage extends CanvasMediaRecoveryIdent
   fetcher?: Fetcher;
   statusOnly?: boolean;
   requestTimeoutMs?: number;
+  signal?: AbortSignal;
 }): Promise<CanvasMediaRecoveryResult> {
   const { assetId, assetVersionId, placementId } = input.image;
   if (!input.projectId || !assetId || !assetVersionId || !placementId) {
@@ -42,28 +63,47 @@ export async function recoverCanvasMedia<TImage extends CanvasMediaRecoveryIdent
   }
 
   const query = new URLSearchParams({ projectId: input.projectId, assetId, assetVersionId, placementId });
-  const response = await (input.fetcher ?? fetch)(input.statusOnly
-    ? `/api/assets/media/recover?${query}`
-    : '/api/assets/media/recover', {
-    method: input.statusOnly ? 'GET' : 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    ...(input.statusOnly ? {} : { body: JSON.stringify({
-      projectId: input.projectId,
-      assetId,
-      assetVersionId,
-      placementId,
-    }) }),
-    signal: AbortSignal.timeout(input.requestTimeoutMs ?? RECOVERY_REQUEST_TIMEOUT_MS),
-  });
-  const data = await response.json().catch(() => ({})) as CanvasMediaRecoveryResult;
-  if (!response.ok) {
-    throw new Error(data.error || `ASSET_RECOVERY_FAILED_${response.status}`);
+  throwIfRecoveryAborted(input.signal);
+  const timeoutSignal = AbortSignal.timeout(input.requestTimeoutMs ?? RECOVERY_REQUEST_TIMEOUT_MS);
+  const controller = input.signal ? new AbortController() : null;
+  const onScopeAbort = (): void => { if (input.signal) controller?.abort(recoveryAbortReason(input.signal)); };
+  const onTimeout = (): void => { controller?.abort(recoveryAbortReason(timeoutSignal)); };
+  input.signal?.addEventListener('abort', onScopeAbort, { once: true });
+  timeoutSignal.addEventListener('abort', onTimeout, { once: true });
+  try {
+    throwIfRecoveryAborted(input.signal);
+    const response = await (input.fetcher ?? fetch)(input.statusOnly
+      ? `/api/assets/media/recover?${query}`
+      : '/api/assets/media/recover', {
+      method: input.statusOnly ? 'GET' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      ...(input.statusOnly ? {} : { body: JSON.stringify({
+        projectId: input.projectId,
+        assetId,
+        assetVersionId,
+        placementId,
+      }) }),
+      signal: controller?.signal ?? timeoutSignal,
+    });
+    throwIfRecoveryAborted(input.signal);
+    throwIfRecoveryAborted(timeoutSignal);
+    const data = await response.json().catch(() => ({})) as CanvasMediaRecoveryResult;
+    throwIfRecoveryAborted(input.signal);
+    throwIfRecoveryAborted(timeoutSignal);
+    if (!response.ok) {
+      throw new Error(data.error || `ASSET_RECOVERY_FAILED_${response.status}`);
+    }
+    return data;
+  } finally {
+    input.signal?.removeEventListener('abort', onScopeAbort);
+    timeoutSignal.removeEventListener('abort', onTimeout);
   }
-  return data;
 }
 
 export async function recoverCanvasMediaUntilTerminal<TImage extends CanvasMediaRecoveryIdentity>(input: {
   projectId: string;
+  actorId?: string;
+  signal?: AbortSignal;
   image: TImage;
   fetcher?: Fetcher;
   wait?: (delayMs: number) => Promise<void>;
@@ -72,8 +112,14 @@ export async function recoverCanvasMediaUntilTerminal<TImage extends CanvasMedia
   maxDurationMs?: number;
   now?: () => number;
 }): Promise<CanvasMediaRecoveryResult> {
-  const { assetVersionId } = input.image;
-  const pollKey = assetVersionId ? `${input.projectId}:${assetVersionId}` : '';
+  const { assetId, assetVersionId, placementId } = input.image;
+  throwIfRecoveryAborted(input.signal);
+  let signalId: number | null = null;
+  if (input.signal) {
+    signalId = recoverySignalIds.get(input.signal) ?? ++nextRecoverySignalId;
+    recoverySignalIds.set(input.signal, signalId);
+  }
+  const pollKey = assetVersionId ? JSON.stringify([input.actorId ?? null, input.projectId, assetId ?? null, assetVersionId, placementId ?? null, signalId]) : '';
   const existing = pollKey ? activeRecoveryPolls.get(pollKey) : undefined;
   if (existing) return existing;
 
@@ -85,6 +131,7 @@ export async function recoverCanvasMediaUntilTerminal<TImage extends CanvasMedia
     const deadline = now() + (input.maxDurationMs ?? DEFAULT_RECOVERY_MAX_DURATION_MS);
     let result: CanvasMediaRecoveryResult | undefined;
     for (let attempt = 0; attempt < maxAttempts && now() <= deadline; attempt += 1) {
+      throwIfRecoveryAborted(input.signal);
       const requestBudgetMs = Math.min(RECOVERY_REQUEST_TIMEOUT_MS, Math.max(1, deadline - now()));
       result = await recoverCanvasMedia({
         ...input,
@@ -93,7 +140,7 @@ export async function recoverCanvasMediaUntilTerminal<TImage extends CanvasMedia
       });
       if (result.availability !== 'recovering' || !result.deferred) return result;
       const remainingMs = deadline - now();
-      if (attempt < maxAttempts - 1 && remainingMs > 0) await wait(Math.min(pollIntervalMs, remainingMs));
+      if (attempt < maxAttempts - 1 && remainingMs > 0) await waitForRecovery(wait(Math.min(pollIntervalMs, remainingMs)), input.signal);
     }
     return result ?? { recovered: false, availability: 'recovering', deferred: true };
   })();

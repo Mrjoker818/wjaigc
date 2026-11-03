@@ -1291,7 +1291,18 @@ input[type="range"]::-moz-range-thumb {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition-duration: 0s !important;
+  }
+  /* Dialogs must be fully sized and visible as soon as reduced-motion users open them. */
+  [data-slot="dialog-content"],
+  [data-slot="dialog-overlay"] {
+    animation: none !important;
+    transition: none !important;
+  }
+  /* Keep interactive viewport geometry synchronous when motion is reduced. */
+  [data-workflow-legacy-node-layer],
+  [data-workflow-legacy-edge-layer] > g {
+    transition-property: none !important;
   }
   .ne-node-enter,
   .ne-menu-pop,
@@ -1360,61 +1371,6 @@ input[type="range"]::-moz-range-thumb {
 .brand-ip-workspace .bi-shell > .flex-1 { min-height: 0; }
 .brand-ip-workspace .bi-shell .overflow-y-auto { overscroll-behavior: contain; }
 
-@media (max-width: 767px) {
-  .brand-ip-workspace {
-    inset: 0;
-    pointer-events: auto;
-  }
-
-  .brand-ip-workspace .bi-shell {
-    inset: 0 !important;
-    width: 100vw;
-    height: 100dvh;
-    min-height: 0;
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
-  }
-
-  .brand-ip-workspace .bi-topbar {
-    padding-right: 10px;
-  }
-
-  .brand-ip-workspace .bi-topbar-center,
-  .brand-ip-workspace .bi-drag-handle {
-    display: none;
-  }
-
-  .brand-ip-workspace .bi-product {
-    padding: 16px 14px 28px !important;
-  }
-
-  .brand-ip-workspace .bi-product-header {
-    align-items: flex-start;
-    gap: 12px;
-  }
-
-  .brand-ip-workspace .bi-header-actions {
-    flex: 0 0 auto;
-  }
-
-  .brand-ip-workspace .bi-stage-nav {
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  .brand-ip-workspace .bi-stage-nav::-webkit-scrollbar {
-    display: none;
-  }
-
-  .brand-ip-workspace .bi-stage-nav button {
-    flex: 0 0 auto;
-  }
-
-  .brand-ip-workspace .bi-content-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
 
 /* Topbar */
 .brand-ip-workspace .bi-topbar {
@@ -1707,6 +1663,49 @@ input[type="range"]::-moz-range-thumb {
   .brand-ip-workspace .bi-preview-column { grid-column:auto;grid-template-columns:1fr; }
 }
 
+@media (max-width: 767px) {
+  .brand-ip-workspace { inset: 0; }
+  .brand-ip-workspace .bi-shell {
+    inset: 0 !important; width: 100vw; height: 100dvh; min-height: 0;
+    border: 0; border-radius: 0; box-shadow: none;
+  }
+  .brand-ip-workspace .bi-shell.is-minimized {
+    inset: 8px 8px auto !important; width: calc(100vw - 16px); height: auto; min-height: 0;
+  }
+  .brand-ip-workspace .bi-topbar {
+    flex: 0 0 auto; height: auto; min-height: 60px; gap: 6px; padding: 8px 12px;
+  }
+  .brand-ip-workspace .bi-topbar-center,
+  .brand-ip-workspace .bi-drag-handle,
+  .brand-ip-workspace .bi-brand-mark,
+  .brand-ip-workspace .bi-beta,
+  .brand-ip-workspace .bi-brand-lockup > div > span { display: none; }
+  .brand-ip-workspace .bi-brand-lockup { min-width: 0; gap: 0; }
+  .brand-ip-workspace .bi-brand-lockup strong { font-size: 14px; white-space: nowrap; }
+  .brand-ip-workspace .bi-top-actions { flex: 0 0 auto; gap: 4px; }
+  .brand-ip-workspace .bi-icon-button { flex: 0 0 auto; width: 44px; height: 44px; }
+  .brand-ip-workspace button { min-width: 44px; min-height: 44px; }
+  .brand-ip-workspace .bi-field input,
+  .brand-ip-workspace .bi-field textarea,
+  .brand-ip-workspace .bi-field select { min-height: 44px; }
+  .brand-ip-workspace .bi-product { padding: 16px 14px 28px !important; }
+  .brand-ip-workspace .bi-product-header { flex-direction: column; align-items: stretch; gap: 12px; }
+  .brand-ip-workspace .bi-header-actions { flex: 0 0 auto; flex-wrap: wrap; }
+  .brand-ip-workspace .bi-stage-nav {
+    display: flex; height: auto; gap: 6px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none;
+  }
+  .brand-ip-workspace .bi-stage-nav::-webkit-scrollbar { display: none; }
+  .brand-ip-workspace .bi-stage-nav button { flex: 0 0 auto; gap: 6px; padding: 0 12px; white-space: nowrap; }
+  .brand-ip-workspace .bi-content-grid { grid-template-columns: minmax(0, 1fr); }
+  .brand-ip-workspace .bi-path-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .brand-ip-workspace .bi-path-grid button { min-height: 44px; }
+  .brand-ip-workspace .bi-smart-toggle { min-height: 44px; }
+  .brand-ip-workspace .bi-drawer-actions button { min-height: 44px; }
+  .brand-ip-workspace .bi-setting-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .brand-ip-workspace .bi-content-grid > *,
+  .brand-ip-workspace .bi-setting-grid > * { min-width: 0; }
+}
+
 /* Bottom toolbar drawer: docked grouped tool launcher */
 #canvas-bottom-toolbar-drawer {
   transform-origin: bottom center;
@@ -1801,4 +1800,96 @@ input[type="range"]::-moz-range-thumb {
     animation: none !important;
     transition-duration: 0ms !important;
   }
+}
+
+/* Shared notification targets remain scoped; desktop density and dark tokens stay intact. */
+.wujie-notification-host[data-sonner-toaster][data-sonner-theme="light"] {
+  --error-text: #b91c1c;
+}
+
+/* Leave the mobile canvas navigation visible while recovery is in progress. */
+@media (max-width: 600px) {
+  .wujie-notification-host [data-sonner-toast][data-type="loading"].wujie-media-recovery-toast {
+    inset-inline-start: 72px;
+    width: calc(100% - 72px);
+  }
+}
+
+@media (pointer: coarse) {
+  .wujie-notification-host [data-sonner-toast][data-styled="true"]:has([data-close-button]) {
+    min-height: 64px;
+    padding-inline-end: 64px;
+  }
+
+  .wujie-notification-host [data-sonner-toast][data-styled="true"] [data-close-button] {
+    width: 44px;
+    height: 44px;
+    top: 8px;
+    inset-inline-start: auto;
+    inset-inline-end: 8px;
+    transform: none;
+  }
+}
+
+/* Touch lifecycle actions live outside the zoomed document surface. */
+.node-editor-root .workflow-touch-node-action {
+  display: none;
+}
+@media (any-pointer: coarse) {
+  .node-editor-root .workflow-touch-node-action,
+  .node-editor-root .workflow-node-property-close {
+    display: inline-flex;
+  }
+  .node-editor-root .workflow-node-properties-header {
+    min-height: 48px;
+  }
+}
+@media (pointer: coarse) {
+  .node-editor-root .node-card .collapse-toggle,
+  .node-editor-root .node-card .workflow-inline-node-close {
+    display: none;
+  }
+}
+
+/* Keep primary controls outside the compact auxiliary rail. Fine-pointer layout stays flat. */
+[data-canvas-toolbar-primary] > button,
+[data-canvas-toolbar-auxiliary] > button {
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+}
+[data-canvas-toolbar-fixed-zoom] { display: none; }
+@media not all and (hover: hover) and (pointer: fine) {
+  [data-toolbar="bottom-toolbar"][data-canvas-dock-compact="true"] {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+  [data-toolbar="bottom-toolbar"][data-canvas-dock-compact="true"] > [data-canvas-toolbar-primary] {
+    display: flex;
+    flex: 0 1 auto;
+    max-width: 100%;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  [data-toolbar="bottom-toolbar"][data-canvas-dock-compact="true"] [data-canvas-toolbar-fixed-zoom] {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 2.5rem;
+    min-height: 2.75rem;
+  }
+  [data-toolbar="bottom-toolbar"][data-canvas-dock-compact="true"] > [data-canvas-toolbar-auxiliary] {
+    display: flex;
+    flex: 1 1 5.5rem;
+    min-width: 2.75rem;
+    align-items: center;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x;
+    scrollbar-width: none;
+  }
+  [data-toolbar="bottom-toolbar"][data-canvas-dock-compact="true"] > [data-canvas-toolbar-auxiliary]::-webkit-scrollbar { display: none; }
+  [data-toolbar="bottom-toolbar"][data-canvas-dock-compact="true"] > [data-canvas-toolbar-auxiliary] > * { flex-shrink: 0; }
+  [data-toolbar="bottom-toolbar"][data-canvas-dock-compact="true"] [data-canvas-toolbar-flow-zoom] { display: none; }
 }

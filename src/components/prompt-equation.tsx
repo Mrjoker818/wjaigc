@@ -192,7 +192,8 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
                     </div>
                     <button
                         onClick={onClose}
-                        className="p-1.5 rounded-lg transition-colors hover:opacity-80"
+                        aria-label="关闭提示词方程式"
+                        className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg transition-colors hover:opacity-80"
                         style={{ color: textSecondary }}
                     >
                         <X className="w-4 h-4" />
@@ -200,7 +201,7 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
                 </div>
 
                 {/* ── 方程式输入区 ── */}
-                <div className="flex-1 overflow-y-auto px-5 py-3 space-y-1.5 custom-scrollbar" style={{ maxHeight: 'calc(90vh - 200px)' }}>
+                <div className="flex-1 min-h-0 overflow-y-auto px-5 py-3 space-y-1.5 custom-scrollbar [@media(max-height:430px)]:[--formula-body-limit:calc(90dvh-120px)]" style={{ maxHeight: 'var(--formula-body-limit, calc(90vh - 200px))' }}>
                     {EQUATION_FIELDS.map((f) => {
                         const isCollapsed = collapsedFields[f.key];
                         const hasValue = !!(fields[f.key] || '').trim();
@@ -214,8 +215,11 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
                                 }}
                             >
                                 {/* 字段标题行 */}
-                                <div
-                                    className="flex items-center gap-2 px-3.5 py-2 cursor-pointer select-none"
+                                <button
+                                    type="button"
+                                    aria-label={f.label}
+                                    aria-expanded={!isCollapsed}
+                                    className="flex w-full min-h-11 items-center gap-2 px-3.5 py-2 text-left cursor-pointer select-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px]"
                                     onClick={() => toggleCollapse(f.key)}
                                 >
                                     <span className="text-sm">{f.icon}</span>
@@ -227,16 +231,17 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
                                     <span className="flex-shrink-0" style={{ color: textSecondary }}>
                                         {isCollapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
                                     </span>
-                                </div>
+                                </button>
                                 {/* 输入区 */}
                                 {!isCollapsed && (
                                     <div className="px-3.5 pb-2.5">
                                         <input
                                             type="text"
+                                            aria-label={f.label}
                                             value={fields[f.key] || ''}
                                             onChange={(e) => updateField(f.key, e.target.value)}
                                             placeholder={f.placeholder}
-                                            className="w-full px-3 py-2 rounded-lg text-sm transition-all focus:outline-none focus:ring-1"
+                                            className="w-full min-h-11 px-3 py-2 rounded-lg text-sm transition-all focus:outline-none focus:ring-1"
                                             style={{
                                                 background: inputBg,
                                                 color: textPrimary,
@@ -255,7 +260,7 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
                     <div className="pt-1.5 pb-1">
                         <button
                             onClick={handleSynthesize}
-                            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 active:scale-[0.98]"
+                            className="w-full flex min-h-11 items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 active:scale-[0.98]"
                             style={{
                                 background: mc ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)' : 'linear-gradient(135deg, #d4af37 0%, #b8942e 100%)',
                                 color: mc ? '#fff' : '#111',
@@ -350,6 +355,7 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
                             {/* 可编辑的结果文本框 */}
                             <textarea
                                 ref={resultRef}
+                                aria-label="合成结果"
                                 value={useOptimized && optimizedText ? optimizedText : resultText}
                                 onChange={(e) => {
                                     if (useOptimized && optimizedText) {
@@ -360,13 +366,13 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
                                 }}
                                 placeholder="点击「合成提示词」将上方内容整合到这里，或直接输入..."
                                 rows={4}
-                                className="w-full px-3 py-2.5 rounded-lg text-sm leading-relaxed resize-y focus:outline-none focus:ring-1 custom-scrollbar"
+                                className="w-full px-3 py-2.5 rounded-lg text-sm leading-relaxed resize-y focus:outline-none focus:ring-1 custom-scrollbar [@media(max-height:300px)]:[--formula-result-min:48px] [@media(max-height:300px)]:[--formula-result-max:calc(90dvh-156px)]"
                                 style={{
                                     background: inputBg,
                                     color: textPrimary,
                                     border: `1px solid ${inputBorder}`,
-                                    minHeight: 80,
-                                    maxHeight: 200,
+                                    minHeight: 'var(--formula-result-min, 80px)',
+                                    maxHeight: 'var(--formula-result-max, 200px)',
                                 }}
                                 onFocus={(e) => { e.currentTarget.style.borderColor = accentColor; e.currentTarget.style.boxShadow = `0 0 0 2px ${accentColor}25`; }}
                                 onBlur={(e) => { e.currentTarget.style.borderColor = inputBorder; e.currentTarget.style.boxShadow = 'none'; }}
@@ -379,7 +385,7 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
                 <div className="flex items-center gap-2 px-5 py-3" style={{ borderTop: `1px solid ${panelBorder}` }}>
                     <button
                         onClick={handleReset}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all hover:opacity-80"
+                        className="flex min-h-11 min-w-11 items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all hover:opacity-80"
                         style={{ color: textSecondary, border: `1px solid ${inputBorder}` }}
                     >
                         <RotateCcw className="w-3.5 h-3.5" />
@@ -389,7 +395,7 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
                     <button
                         onClick={handleOptimize}
                         disabled={isOptimizing || (!resultText.trim() && !synthesize(fields).trim())}
-                        className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 active:scale-[0.97]"
+                        className="flex min-h-11 min-w-11 items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 active:scale-[0.97]"
                         style={{
                             background: mc ? 'rgba(0,0,0,0.06)' : 'rgba(212,175,55,0.1)',
                             color: mc ? '#3b82f6' : '#d4af37',
@@ -402,7 +408,7 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
                     <button
                         onClick={handleSend}
                         disabled={!resultText.trim() && !synthesize(fields).trim() && !(useOptimized && optimizedText.trim())}
-                        className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 active:scale-[0.97]"
+                        className="flex min-h-11 min-w-11 items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 active:scale-[0.97]"
                         style={{
                             background: mc ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)' : 'linear-gradient(135deg, #d4af37 0%, #b8942e 100%)',
                             color: mc ? '#fff' : '#111',

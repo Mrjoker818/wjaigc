@@ -357,6 +357,13 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
   const [prompt, setPrompt] = useState('');
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
+  const [translationError, setTranslationError] = useState<string | null>(null);
+  const translationDraftRef = useRef({ prompt, generation: 0 });
+  useLayoutEffect(() => {
+    if (translationDraftRef.current.prompt === prompt) return;
+    translationDraftRef.current = { prompt, generation: translationDraftRef.current.generation + 1 };
+    setTranslationError(null);
+  }, [prompt]);
   const [model, setModel] = useState('');
   const [aspectRatio, setAspectRatio] = useState('16:9');
   const [duration, setDuration] = useState(5);
@@ -510,12 +517,17 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
 
   // === 高级功能状态 ===
   const [cameraControl, setCameraControl] = useState<CameraControlParams | null>(null);
-  const [motionBrush, setMotionBrush] = useState<MotionBrushParams | null>(null);
+  const [motionBrushState, setMotionBrushState] = useState<{ imageUrl: string; params: MotionBrushParams } | null>(null);
+  const motionBrush = motionBrushState?.imageUrl === firstFrameUrl ? motionBrushState.params : null;
+  useEffect(() => {
+    setMotionBrushState(previous => previous?.imageUrl === firstFrameUrl ? previous : null);
+  }, [firstFrameUrl]);
   const [showCameraPanel, setShowCameraPanel] = useState(false);
   const [showCharacterPanel, setShowCharacterPanel] = useState(false);
   const [showMotionBrush, setShowMotionBrush] = useState(false);
   const [negativePrompt, setNegativePrompt] = useState('');
   const [seed, setSeed] = useState<number | undefined>(undefined);
+  const videoControlsId = React.useId();
   const [motionStrength, setMotionStrength] = useState(50);
   const [batchCount, setBatchCount] = useState<1 | 2 | 4>(1); // 批量生成数量
 
@@ -772,7 +784,7 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
 
   const handleMotionBrushExport = useCallback((result: MotionBrushResult) => {
     if (!result || result.trajectories.length === 0) {
-      setMotionBrush(null);
+      setMotionBrushState(null);
       return;
     }
     // Convert MotionBrushResult to MotionBrushParams format
@@ -786,8 +798,8 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
         speed: traj.speed,
       })),
     };
-    setMotionBrush(motionBrushParams);
-  }, []);
+    setMotionBrushState({ imageUrl: firstFrameUrl, params: motionBrushParams });
+  }, [firstFrameUrl]);
 
   // 提示词增强 - 调用 optimize-prompt API
   const handleEnhancePrompt = useCallback(async () => {
@@ -1029,12 +1041,19 @@ Rules:
     // 重拍前清理诊断标记，允许重拍失败后再次自动诊断
     autoDiagnoseFiredRef.current.delete(shotId);
     setDiagnoseOpen(null);
-    const shot = shotPlans.find(s => s.id === shotId);
+    const plansAtStart = shotPlansRef.current;
+    const shot = plansAtStart.find(s => s.id === shotId);
     if (!shot || !model) return;
+    // 串行下一轮在 React effect 前继续；终态须同步写入现有 ref，UI 仍用函数式更新。
+    const updateTerminalShot = (update: (current: VideoShotPlan) => VideoShotPlan): void => {
+      const apply = (plans: VideoShotPlan[]): VideoShotPlan[] => plans.map(s => s.id === shotId ? update(s) : s);
+      shotPlansRef.current = apply(shotPlansRef.current);
+      setShotPlans(apply);
+    };
     setCurrentGeneratingShotId(shotId);
     setShotPlans(prev => prev.map(s => s.id === shotId ? { ...s, status: 'generating' as const, error: undefined } : s));
     try {
-      const shotIdx = shotPlans.findIndex(s => s.id === shotId);
+      const shotIdx = plansAtStart.findIndex(s => s.id === shotId);
       // 场景图优先作为首帧（AI 制片流水线预先为该镜头生成的氛围图），仅当用户没手动设置首帧时生效
       let sceneFrameUrl: string | undefined;
       const matchedScene = productionScenes.find(s => {
@@ -1055,7 +1074,7 @@ Rules:
       // 查找上一个已完成镜头：优先使用服务端 ffmpeg 抽取的尾帧，其次用缩略图
       let firstFrameForThis: string | undefined = firstFrameUrl || sceneFrameUrl || undefined;
       if (shotIdx > 0 && tailFrameRelay && !firstFrameUrl && !sceneFrameUrl) {
-        const prev = shotPlans[shotIdx - 1];
+        const prev = plansAtStart[shotIdx - 1];
         if (prev?.videoUrl) {
           // 调用后端抽帧 API（ffmpeg 抽最后一帧，比前端 video 元素更稳定）
           try {
@@ -1105,7 +1124,7 @@ Rules:
         ? { type: normalizeCameraType(shot.cameraMove), intensity: motionStrength }
         : (cameraControl || undefined);
       // 连续性提示：用上一镜头结果构造续接 prompt，帮助模型衔接动作与场景
-      const prevShot = shotIdx > 0 ? shotPlans[shotIdx - 1] : undefined;
+      const prevShot = shotIdx > 0 ? plansAtStart[shotIdx - 1] : undefined;
       const shotPrompt = prevShot && prevShot.status === 'completed' && prevShot.videoUrl
         ? buildContinuationPrompt(prevShot, shot.directedPrompt || shot.prompt)
         : (shot.directedPrompt || shot.prompt);
@@ -1126,7 +1145,7 @@ Rules:
           quality,
           generateAudio: !!shot.audioCues || generateAudio,
           firstFrameUrl: firstFrameForThis,
-          lastFrameUrl: shotIdx === shotPlans.length - 1 ? (lastFrameUrl || undefined) : undefined,
+          lastFrameUrl: shotIdx === plansAtStart.length - 1 ? (lastFrameUrl || undefined) : undefined,
           resolution,
           cameraControl: camControl as CameraControlParams | undefined,
           motionBrush: motionBrush || undefined,
@@ -1158,19 +1177,19 @@ Rules:
       // 等待父组件通知该任务真正完成（视频URL/缩略图就绪）
       try {
         const { videoUrl, thumbnailUrl } = await waitPromise;
-        setShotPlans(prev => prev.map(s => s.id === shotId ? {
+        updateTerminalShot(s => ({
           ...s,
           status: 'completed' as const,
           videoUrl,
           thumbnailUrl,
           progress: 100,
           error: undefined,
-        } : s));
+        }));
       } catch (waitErr: unknown) {
-        setShotPlans(prev => prev.map(s => s.id === shotId ? { ...s, status: 'failed' as const, error: getErrorMessage(waitErr, '生成失败') } : s));
+        updateTerminalShot(s => ({ ...s, status: 'failed' as const, error: getErrorMessage(waitErr, '生成失败') }));
       }
     } catch (err: unknown) {
-      setShotPlans(prev => prev.map(s => s.id === shotId ? { ...s, status: 'failed' as const, error: getErrorMessage(err, '生成失败') } : s));
+      updateTerminalShot(s => ({ ...s, status: 'failed' as const, error: getErrorMessage(err, '生成失败') }));
     } finally {
       setCurrentGeneratingShotId(null);
     }
@@ -1564,8 +1583,7 @@ Rules:
   // 故事视频合成 - 调用 /api/video/tools concat-videos
   const handleComposeStoryVideo = useCallback(async () => {
     const completedShots = shotPlansRef.current
-      .filter((shot) => shot.status === 'completed' && Boolean(shot.videoUrl))
-      .sort((a, b) => a.index - b.index);
+      .filter((shot) => shot.status === 'completed' && Boolean(shot.videoUrl));
 
     if (completedShots.length < 2) {
       onError?.('请先完成至少两个镜头，再合成故事视频');
@@ -1606,6 +1624,8 @@ Rules:
   // 中英翻译 - 调用 optimize-prompt API 的 translate 模式
   const handleTranslatePrompt = useCallback(async () => {
     if (!prompt.trim() || isTranslating) return;
+    const draftGeneration = translationDraftRef.current.generation;
+    setTranslationError(null);
     setIsTranslating(true);
     try {
       const res = await fetch('/api/optimize-prompt', {
@@ -1625,12 +1645,18 @@ Rules:
         }),
       });
       if (!res.ok) throw new Error('翻译失败');
-      const data = await res.json();
-      if (data.optimized) {
-        setPrompt(data.optimized);
+      const data = await res.json() as { optimized?: unknown; success?: unknown } | null;
+      if (!data || data.success === false || typeof data.optimized !== 'string' || !data.optimized.trim()) {
+        throw new Error('翻译失败');
       }
+      if (translationDraftRef.current.generation !== draftGeneration) return;
+      const optimizedPrompt: string = data.optimized;
+      setPrompt((currentPrompt: string): string => currentPrompt === prompt ? optimizedPrompt : currentPrompt);
     } catch (err) {
       console.error('提示词翻译失败:', err);
+      if (translationDraftRef.current.generation === draftGeneration) {
+        setTranslationError('提示词翻译失败，草稿已保留，请重试。');
+      }
     } finally {
       setIsTranslating(false);
     }
@@ -1638,6 +1664,7 @@ Rules:
 
 
   const handleGenerate = useCallback(async () => {
+    const plannedShots = shotPlansRef.current;
     if (!prompt.trim() && mode === 'text2video') {
       onError?.('请输入视频描述');
       return;
@@ -1654,7 +1681,7 @@ Rules:
       onError?.('请提供源视频URL');
       return;
     }
-    if (mode === 'multi-shot' && multiShotScenes.every(s => !s.prompt.trim())) {
+    if (mode === 'multi-shot' && (plannedShots.length > 0 ? plannedShots : multiShotScenes).every(s => !s.prompt.trim())) {
       onError?.('请至少输入一个镜头的描述');
       return;
     }
@@ -1689,8 +1716,8 @@ Rules:
 
     // 多镜头叙事模式：使用结构化 ShotPlans（优先）或旧的 multiShotScenes 兼容
     const finalPrompt = mode === 'multi-shot'
-      ? (shotPlans.length > 0
-        ? shotPlans.map((s, i) => `[镜头${i + 1}｜${s.shotSize}｜${s.cameraMove}] ${s.prompt}`).join('\n')
+      ? (plannedShots.length > 0
+        ? plannedShots.map((s, i) => `[镜头${i + 1}｜${s.shotSize}｜${s.cameraMove}] ${s.prompt}`).join('\n')
         : multiShotScenes.filter(s => s.prompt.trim()).map((s, i) => `[镜头${i + 1}] ${s.prompt}`).join('\n'))
       : prompt.trim();
 
@@ -1726,7 +1753,7 @@ Rules:
         negativePrompt: negativePrompt.trim() || undefined,
         // 多镜头参数
         multiShotScenes: mode === 'multi-shot'
-          ? (shotPlans.length > 0 ? shotPlans : multiShotScenes.filter(s => s.prompt.trim()))
+          ? (plannedShots.length > 0 ? plannedShots : multiShotScenes.filter(s => s.prompt.trim()))
           : undefined,
         chainContinuity: mode === 'multi-shot' ? chainContinuity : undefined,
         useGlobalReferences: mode === 'multi-shot' && useGlobalReferences ? true : undefined,
@@ -1782,7 +1809,7 @@ Rules:
     || !currentDescriptor
     || availableDurations.length === 0;
   const isPrimaryDisabled = modelCapabilityUnavailable || (mode === 'multi-shot'
-    ? (isGeneratingAllShots || (shotPlans.length === 0 && multiShotScenes.every(s => !s.prompt.trim())))
+    ? (isGeneratingAllShots || (shotPlans.length > 0 ? shotPlans : multiShotScenes).every(s => !s.prompt.trim()))
     : (mode === 'video-extend' ? (!videoUrl || isExtending) : isGenerating || !prompt.trim() || !model));
 
   const primaryLabel = mode === 'multi-shot'
@@ -1948,6 +1975,23 @@ Rules:
         </div>
         )}
 
+        {translationError && !panelMinimized && (
+          <div
+            role="alert"
+            aria-atomic="true"
+            data-video-translation-error
+            className="mx-3 mt-2 flex shrink-0 items-start gap-2 rounded-lg border px-3 py-2 text-sm leading-5"
+            style={{
+              background: isMonochrome ? '#fef2f2' : 'rgba(239,68,68,0.12)',
+              borderColor: isMonochrome ? '#fecaca' : 'rgba(248,113,113,0.4)',
+              color: isMonochrome ? '#b91c1c' : '#fca5a5',
+            }}
+          >
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <span className="min-w-0">{translationError}</span>
+          </div>
+        )}
+
         {panelMinimized ? null : (
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
         {/* 非浮动模式简易头部 */}
@@ -2006,7 +2050,7 @@ Rules:
                 </label>
                 <button
                   onClick={() => setUseDirector(!useDirector)}
-                  className="px-2 py-0.5 rounded text-[10px] font-semibold cursor-pointer transition-all"
+                  className="max-md:min-h-11 max-md:min-w-11 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11 px-2 py-0.5 rounded text-[10px] font-semibold cursor-pointer transition-all"
                   style={{
                     background: useDirector ? `linear-gradient(135deg, ${accentColor}, ${isGold ? '#8b7225' : '#1d4ed8'})` : isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.05)',
                     color: useDirector ? '#0a0a0a' : subTextColor,
@@ -2032,7 +2076,7 @@ Rules:
                     <button
                       key={s.v}
                       onClick={() => { setDirectorStyle(s.v); if (!useDirector) setUseDirector(true); }}
-                      className="flex flex-col items-center gap-0.5 px-1 py-1.5 rounded-md text-[10px] font-medium transition-all cursor-pointer"
+                      className="max-md:min-h-11! max-md:min-w-11 [@media(any-pointer:coarse)]:min-h-11! [@media(any-pointer:coarse)]:min-w-11 flex flex-col items-center gap-0.5 px-1 py-1.5 rounded-md text-[10px] font-medium transition-all cursor-pointer"
                       style={{
                         background: active ? accentColor : isMonochrome ? '#f9fafb' : 'rgba(255,255,255,0.03)',
                         color: active ? (isGold ? '#0a0a0a' : '#fff') : subTextColor,
@@ -2135,7 +2179,7 @@ Rules:
                 onChange={e => setPrompt(e.target.value)}
                 placeholder={mode === 'video-extend' ? '描述希望延长的内容方向，如：继续向前推进、保持人物动作...' : useDirector ? '输入创意/剧本/想法，导演会自动补充运镜/光线/表演/氛围...' : '描述你想生成的视频画面，如：一位女性在海边漫步，夕阳西下，金色的阳光洒在海面上...'}
                 rows={4}
-                className="w-full px-3.5 py-2.5 rounded-lg text-[13px] resize-none focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 transition-colors leading-relaxed mt-2"
+                className="w-full px-3.5 py-2.5 rounded-lg text-base md:text-[13px] resize-none focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 transition-colors leading-relaxed mt-2"
                 style={{
                   background: inputBg,
                   color: textColor,
@@ -2150,7 +2194,7 @@ Rules:
                 <button
                   onClick={handleDirectorEnhance}
                   disabled={!prompt.trim() || isDirectorEnhancing}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="flex min-h-11 md:min-h-0 items-center gap-1.5 px-3 py-1.5 rounded-md text-xs md:text-[11px] font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   style={{
                     background: isDirectorEnhancing ? `${accentColor}40` : `linear-gradient(135deg, ${accentColor}, ${isGold ? '#8b7225' : '#1d4ed8'})`,
                     color: '#fff',
@@ -2171,7 +2215,7 @@ Rules:
                 <button
                   onClick={handleTranslatePrompt}
                   disabled={!prompt.trim() || isTranslating}
-                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-all disabled:opacity-40 cursor-pointer"
+                  className="flex min-h-11 md:min-h-0 items-center gap-1 px-2.5 py-1.5 rounded-md text-xs md:text-[11px] font-medium transition-all disabled:opacity-40 cursor-pointer"
                   style={{ background: isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.05)', color: subTextColor, border: `1px solid ${borderColor}` }}
                 >
                   {isTranslating ? <span className="inline-block w-2.5 h-2.5 border-[1.5px] border-current border-t-transparent rounded-full animate-spin" /> : <Languages className="w-3 h-3" />}
@@ -2181,7 +2225,7 @@ Rules:
                   onClick={() => {
                     setNegativePrompt(negativePrompt || '模糊，低质量，变形，畸形，水印，文字，过曝，暗部死黑');
                   }}
-                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-all cursor-pointer"
+                  className="flex min-h-11 md:min-h-0 items-center gap-1 px-2.5 py-1.5 rounded-md text-xs md:text-[11px] font-medium transition-all cursor-pointer"
                   style={{ background: isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.05)', color: subTextColor, border: `1px solid ${borderColor}` }}
                 >
                   <SlidersHorizontal className="w-3 h-3" />反向提示词
@@ -2190,7 +2234,7 @@ Rules:
                   <button
                     onClick={handlePlanShots}
                     disabled={!prompt.trim() || isPlanningShots}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="flex min-h-11 md:min-h-0 items-center gap-1.5 px-3 py-1.5 rounded-md text-xs md:text-[11px] font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                     style={{
                       background: isPlanningShots ? 'rgba(255,255,255,0.08)' : isMonochrome ? '#1f2937' : 'rgba(212,175,55,0.15)',
                       color: isPlanningShots ? subTextColor : accentColor,
@@ -2241,7 +2285,7 @@ Rules:
                       <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-gradient-to-t from-black/70 to-transparent">
                         <span className="text-white text-[10px]">首帧已设置</span>
                       </div>
-                      <button onClick={() => setFirstFrame('')} className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/60 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 cursor-pointer">×</button>
+                      <button onClick={() => setFirstFrame('')} aria-label="移除首帧图片" className="absolute top-1.5 right-1.5 w-11 h-11 [@media(hover:hover)_and_(pointer:fine)]:w-6 [@media(hover:hover)_and_(pointer:fine)]:h-6 rounded-full bg-black/60 text-white flex items-center justify-center opacity-100 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover:opacity-100 focus-visible:opacity-100 cursor-pointer"><X className="h-3.5 w-3.5" aria-hidden="true" /></button>
                     </div>
                   ) : (
                     <button
@@ -2282,7 +2326,7 @@ Rules:
                             <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-gradient-to-t from-black/70 to-transparent">
                               <span className="text-white text-[10px]">尾帧已设置</span>
                             </div>
-                            <button onClick={() => setLastFrame('')} className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/60 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 cursor-pointer">×</button>
+                            <button onClick={() => setLastFrame('')} aria-label="移除尾帧图片" className="absolute top-1.5 right-1.5 w-11 h-11 [@media(hover:hover)_and_(pointer:fine)]:w-6 [@media(hover:hover)_and_(pointer:fine)]:h-6 rounded-full bg-black/60 text-white flex items-center justify-center opacity-100 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover:opacity-100 focus-visible:opacity-100 cursor-pointer"><X className="h-3.5 w-3.5" aria-hidden="true" /></button>
                           </div>
                         ) : (
                           <button
@@ -2305,7 +2349,7 @@ Rules:
                       <span className="text-[11px] font-semibold flex items-center gap-1" style={{ color: subTextColor }}>
                         <Images className="w-3.5 h-3.5" />风格/场景参考图
                       </span>
-                      <button onClick={() => handleImageUpload('ref')} className="text-[10px] px-2 py-0.5 rounded transition-colors cursor-pointer" style={{ color: accentColor, background: isGold ? 'rgba(212,175,55,0.1)' : 'rgba(59,130,246,0.1)' }}>+ 添加</button>
+                      <button onClick={() => handleImageUpload('ref')} className="text-[10px] px-2 py-0.5 rounded transition-colors cursor-pointer max-md:min-h-11 max-md:min-w-11 max-md:text-sm" style={{ color: accentColor, background: isGold ? 'rgba(212,175,55,0.1)' : 'rgba(59,130,246,0.1)' }}>+ 添加</button>
                     </div>
                     {referenceImages.length > 0 ? (
                       <div className="space-y-1.5 mb-2">
@@ -2313,9 +2357,9 @@ Rules:
                           <div key={ref.id} className="flex items-center gap-2 rounded-lg p-1.5 group" style={{ background: inputBg }}>
                             <img src={ref.url} alt="ref" className="w-10 h-10 rounded object-cover" />
                             <select
-                              value={ref.type}
+                              value={ref.type} aria-label="参考图类型"
                               onChange={e => updateRefType(ref.id, e.target.value as ReferenceType)}
-                              className="flex-1 text-[11px] px-2 py-1 rounded cursor-pointer"
+                              className="min-w-0 flex-1 text-[11px] px-2 py-1 rounded cursor-pointer max-md:min-h-11 max-md:text-base"
                               style={{ background: isMonochrome ? '#fff' : '#1a1a1a', color: textColor, border: `1px solid ${borderColor}` }}
                             >
                               <option value="style">🎨 风格参考</option>
@@ -2325,7 +2369,7 @@ Rules:
                               <option value="lighting">💡 光线参考</option>
                               <option value="character-back">👤 角色背面</option>
                             </select>
-                            <button onClick={() => removeTypedReference(ref.id)} className="opacity-0 group-hover:opacity-100 text-red-400 w-6 h-6 rounded flex items-center justify-center cursor-pointer">×</button>
+                            <button onClick={() => removeTypedReference(ref.id)} aria-label="移除参考图" className="opacity-100 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-red-400 w-11 h-11 [@media(hover:hover)_and_(pointer:fine)]:w-6 [@media(hover:hover)_and_(pointer:fine)]:h-6 shrink-0 rounded flex items-center justify-center cursor-pointer">×</button>
                           </div>
                         ))}
                       </div>
@@ -2346,7 +2390,7 @@ Rules:
                     <div className="relative group flex items-center gap-2 p-2.5 rounded-md" style={{ background: inputBg, border: `1px solid ${borderColor}` }}>
                       <Video className="w-5 h-5 shrink-0" style={{ color: accentColor }} />
                       <span className="text-xs truncate flex-1" style={{ color: subTextColor }}>{videoUrl.length > 60 ? videoUrl.substring(0, 60) + '...' : videoUrl}</span>
-                      <button onClick={() => setVideoUrl('')} className="opacity-0 group-hover:opacity-100 w-6 h-6 rounded-full flex items-center justify-center text-red-400 cursor-pointer">×</button>
+                      <button onClick={() => setVideoUrl('')} aria-label="移除源视频" className="opacity-100 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover:opacity-100 focus-visible:opacity-100 w-11 h-11 [@media(hover:hover)_and_(pointer:fine)]:w-6 [@media(hover:hover)_and_(pointer:fine)]:h-6 shrink-0 rounded-full flex items-center justify-center text-red-400 cursor-pointer">×</button>
                     </div>
                   ) : (
                     <>
@@ -2517,6 +2561,7 @@ Rules:
                     return (
                       <button
                         key={cam.type}
+                        aria-pressed={active}
                         onClick={() => setCameraControl(active ? null : { type: cam.type as CameraControlParams['type'], intensity: 50 })}
                         className="flex flex-col items-center gap-0.5 px-1 py-1.5 rounded-md text-[10px] font-medium transition-all cursor-pointer"
                         style={{
@@ -2533,19 +2578,20 @@ Rules:
                 </div>
                 {cameraControl && cameraControl.type !== 'static' && (
                   <div className="mt-3 space-y-1">
-                    <label className="text-[10px] flex justify-between" style={{ color: subTextColor }}>
+                    <label htmlFor={`${videoControlsId}-motion-strength`} className="text-[10px] flex justify-between" style={{ color: subTextColor }}>
                       <span>运动强度</span><span>{motionStrength}%</span>
                     </label>
                     <input
+                      id={`${videoControlsId}-motion-strength`}
                       type="range" min={10} max={100} value={motionStrength}
                       onChange={e => setMotionStrength(Number(e.target.value))}
-                      className="w-full h-1 rounded-lg appearance-none cursor-pointer"
-                      style={{ background: `linear-gradient(to right, ${accentColor} ${motionStrength}%, ${isMonochrome ? '#ddd' : '#333'} ${motionStrength}%)` }}
+                      className="w-full h-1 max-md:h-11! rounded-lg appearance-none cursor-pointer [&::-webkit-slider-runnable-track]:h-1 [&::-webkit-slider-runnable-track]:rounded [&::-webkit-slider-runnable-track]:[background:var(--motion-strength-track)] [&::-moz-range-track]:h-1 [&::-moz-range-track]:rounded [&::-moz-range-track]:[background:var(--motion-strength-track)]"
+                      style={{ '--motion-strength-track': `linear-gradient(to right, ${accentColor} ${motionStrength}%, ${isMonochrome ? '#ddd' : '#333'} ${motionStrength}%)`, background: 'transparent', accentColor } as React.CSSProperties}
                     />
                   </div>
                 )}
                 {cameraControl && (
-                  <button onClick={() => { setCameraControl(null); }} className="text-[10px] mt-2 cursor-pointer" style={{ color: subTextColor }}>清除摄像机控制</button>
+                  <button onClick={() => { setCameraControl(null); }} className="text-[10px] mt-2 cursor-pointer max-md:min-h-[44px] max-md:min-w-[44px] max-md:px-2" style={{ color: subTextColor }}>清除摄像机控制</button>
                 )}
               </CollapsibleSection>
             )}
@@ -2567,10 +2613,14 @@ Rules:
                 <p className="text-[10px] mb-2" style={{ color: subTextColor }}>上传角色正面/侧面照，AI将保持角色外观一致</p>
                 <div className="flex flex-wrap gap-2">
                   {typedReferences.filter(r => r.type === 'character-front' || r.type === 'character-side').map(ref => (
-                    <div key={ref.id} className="relative w-16 h-16 rounded-md overflow-hidden group">
-                      <img src={ref.url} alt={ref.type} className="w-full h-full object-cover" />
-                      <span className="absolute bottom-0 left-0 right-0 text-[8px] text-center py-0.5 bg-black/60 text-white truncate">{REFERENCE_TYPE_CONFIG[ref.type]?.label}</span>
-                      <button onClick={() => removeTypedReference(ref.id)} className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 cursor-pointer">×</button>
+                    <div key={ref.id} className="relative w-16 shrink-0 space-y-1 md:h-16 md:space-y-0 md:rounded-md md:overflow-hidden group">
+                      <div className="relative w-16 h-16 rounded-md overflow-hidden">
+                        <img src={ref.url} alt={ref.type} className="w-full h-full object-cover" />
+                        <span className="absolute bottom-0 left-0 right-0 text-xs md:text-[8px] text-center py-0.5 bg-black/60 text-white truncate">{REFERENCE_TYPE_CONFIG[ref.type]?.label}</span>
+                      </div>
+                      <button onClick={() => removeTypedReference(ref.id)} aria-label={`移除${REFERENCE_TYPE_CONFIG[ref.type]?.label}图片`} className="w-full h-11 rounded-md bg-black/60 text-white text-sm flex items-center justify-center cursor-pointer md:absolute md:top-0.5 md:right-0.5 md:w-4 md:h-4 md:rounded-full md:text-[10px] md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100">
+                        <span className="md:hidden">移除</span><span className="hidden md:inline" aria-hidden="true">×</span>
+                      </button>
                     </div>
                   ))}
                   {(['character-front', 'character-side'] as const).map(charType => {
@@ -2616,6 +2666,8 @@ Rules:
                 iconColor={motionBrush ? accentColor : subTextColor}
                 badge={motionBrush ? `${motionBrush.trajectories.length}轨迹` : undefined}
                 defaultOpen={false}
+                open={showMotionBrush}
+                onOpenChange={setShowMotionBrush}
                 isMonochrome={isMonochrome}
                 accentColor={accentColor}
                 inputBg={inputBg}
@@ -2630,13 +2682,17 @@ Rules:
                 <MotionBrushCanvas
                   ref={motionBrushRef}
                   imageUrl={firstFrameUrl}
+                  accentColor={accentColor}
+                  borderColor={borderColor}
+                  inputBg={inputBg}
+                  textColor={textColor}
                   onExport={handleMotionBrushExport}
                   onClose={() => setShowMotionBrush(false)}
                 />
                 <div className="mt-2 text-[10px] space-y-0.5" style={{ color: subTextColor }}>
-                  <div>• 左键涂抹：标记运动区域</div>
-                  <div>• 右键绘制：定义运动方向箭头</div>
-                  <div>• 滚轮：调整画笔大小</div>
+                  <div>• 涂抹模式：标记运动区域</div>
+                  <div>• 轨迹模式：拖动绘制运动方向</div>
+                  <div>• 支持触控与鼠标；滑块调整画笔大小</div>
                 </div>
               </CollapsibleSection>
             )}
@@ -2655,11 +2711,11 @@ Rules:
                 subTextColor={subTextColor}
                 textColor={textColor}
               >
-                <div className="flex items-center gap-2 mb-3">
+                <div className="flex flex-wrap items-center gap-2 mb-3">
                   <button
                     onClick={handlePlanShots}
                     disabled={isPlanningShots || !prompt.trim()}
-                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[10px] font-semibold transition-all cursor-pointer disabled:opacity-40"
+                    className="flex min-h-11 shrink-0 md:min-h-0 items-center gap-1 px-2.5 py-1.5 rounded-md text-xs md:text-[10px] font-semibold transition-all cursor-pointer disabled:opacity-40"
                     style={{ background: 'linear-gradient(135deg,#a855f7,#7c3aed)', color: '#fff' }}
                   >
                     {isPlanningShots ? <span className="inline-block w-2.5 h-2.5 border-[1.5px] border-white border-t-transparent rounded-full animate-spin" /> : <Clapperboard className="w-3 h-3" />}
@@ -2667,10 +2723,10 @@ Rules:
                   </button>
                   <button
                     onClick={() => { setShotPlans([]); setMultiShotScenes([{ id: Date.now().toString(), prompt: '', duration: duration as number }]); }}
-                    className="px-2 py-1.5 rounded-md text-[10px] font-medium transition-colors cursor-pointer"
+                    className="min-h-11 min-w-11 md:min-h-0 md:min-w-0 px-2 py-1.5 rounded-md text-xs md:text-[10px] font-medium transition-colors cursor-pointer"
                     style={{ background: inputBg, color: subTextColor, border: `1px solid ${borderColor}` }}
                   >清空</button>
-                  <div className="ml-auto flex items-center gap-3">
+                  <div className="flex w-full flex-wrap items-center gap-2 md:w-auto md:ml-auto md:gap-3 [&_button]:min-h-11 [&_button]:px-2 [&_button]:text-xs md:[&_button]:min-h-0 md:[&_button]:px-0 md:[&_button]:text-[10px] [&_button>span]:whitespace-nowrap">
                     <ToggleBtn active={tailFrameRelay} onClick={() => setTailFrameRelay(!tailFrameRelay)} accent={accentColor} sub={subTextColor} mono={isMonochrome}>尾帧接力</ToggleBtn>
                     <ToggleBtn active={chainContinuity} onClick={() => setChainContinuity(!chainContinuity)} accent={accentColor} sub={subTextColor} mono={isMonochrome}>链式连贯</ToggleBtn>
                     <ToggleBtn active={useGlobalReferences} onClick={() => setUseGlobalReferences(!useGlobalReferences)} accent={accentColor} sub={subTextColor} mono={isMonochrome}>全局参考图</ToggleBtn>
@@ -2818,7 +2874,7 @@ Rules:
                 )}
 
                 {shotPlans.length > 0 ? (
-                  <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                  <div className="space-y-3 md:space-y-2 md:max-h-80 md:overflow-y-auto pr-1">
                     {shotPlans.map((shot, idx) => {
                       const isShotGenerating = currentGeneratingShotId === shot.id;
                       const shotRefs = shot.references || [];
@@ -2833,7 +2889,7 @@ Rules:
                           }}
                         >
                           {/* 顶部行：序号+标题+时长+状态 */}
-                          <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <div className="flex flex-col items-stretch md:flex-row md:items-center justify-between gap-2 mb-1.5">
                             <div className="flex items-center gap-1.5 min-w-0">
                               <span
                                 className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0"
@@ -2847,7 +2903,7 @@ Rules:
                               >
                                 {isShotGenerating ? <Loader2 className="w-3 h-3 animate-spin" /> : idx + 1}
                               </span>
-                              <span className="text-[11px] font-semibold truncate" style={{ color: textColor }}>
+                              <span className="text-sm md:text-[11px] font-semibold truncate" style={{ color: textColor }}>
                                 {shot.title || `镜头 ${idx + 1}`}
                               </span>
                               {shot.purpose && (
@@ -2856,7 +2912,7 @@ Rules:
                                 </span>
                               )}
                             </div>
-                            <div className="flex items-center gap-1 shrink-0">
+                            <div className="flex items-center justify-end gap-1 shrink-0">
                               <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold" style={{ background: `${accentColor}20`, color: accentColor }}>
                                 {shot.duration}s
                               </span>
@@ -2869,7 +2925,8 @@ Rules:
                                   setShotPlans(copy);
                                 }}
                                 disabled={idx === 0 || isShotGenerating || isGeneratingAllShots}
-                                className="cursor-pointer hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
+                                aria-label={`上移${shot.title || `镜头 ${idx + 1}`}`}
+                                className="min-h-11 min-w-11 md:min-h-0 md:min-w-0 flex items-center justify-center cursor-pointer hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
                                 style={{ color: subTextColor }}
                                 title="上移"
                               >
@@ -2883,7 +2940,8 @@ Rules:
                                   setShotPlans(copy);
                                 }}
                                 disabled={idx === shotPlans.length - 1 || isShotGenerating || isGeneratingAllShots}
-                                className="cursor-pointer hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
+                                aria-label={`下移${shot.title || `镜头 ${idx + 1}`}`}
+                                className="min-h-11 min-w-11 md:min-h-0 md:min-w-0 flex items-center justify-center cursor-pointer hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
                                 style={{ color: subTextColor }}
                                 title="下移"
                               >
@@ -2892,7 +2950,8 @@ Rules:
                               <button
                                 onClick={() => setShotPlans(shotPlans.filter((_, i) => i !== idx))}
                                 disabled={isShotGenerating || isGeneratingAllShots}
-                                className="cursor-pointer hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed"
+                                aria-label={`删除${shot.title || `镜头 ${idx + 1}`}`}
+                                className="min-h-11 min-w-11 md:min-h-0 md:min-w-0 flex items-center justify-center cursor-pointer hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed"
                                 style={{ color: subTextColor }}
                                 title="删除"
                               >
@@ -2939,7 +2998,8 @@ Rules:
                               setShotPlans(copy);
                             }}
                             rows={2}
-                            className="w-full px-2 py-1.5 rounded text-[11px] resize-none focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 leading-relaxed"
+                            aria-label={`${shot.title || `镜头 ${idx + 1}`}描述`}
+                            className="w-full px-2 py-1.5 rounded text-base md:text-[11px] resize-none focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 leading-relaxed"
                             style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}` }}
                           />
 
@@ -3010,7 +3070,7 @@ Rules:
                             <button
                               onClick={() => handleGenerateSingleShot(shot.id)}
                               disabled={isShotGenerating || isGeneratingAllShots}
-                              className="text-[10px] px-2 py-1 rounded transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                              className="min-h-11 min-w-11 md:min-h-0 md:min-w-0 text-xs md:text-[10px] px-2 py-1 rounded transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1"
                               style={{ background: `${accentColor}25`, color: accentColor }}
                             >
                               {isShotGenerating ? <><Loader2 className="w-3 h-3 animate-spin" />生成中</> : <><Play className="w-3 h-3" />{shot.status === 'completed' ? '重拍' : shot.status === 'failed' ? '重试' : '生成'}</>}
@@ -3055,7 +3115,7 @@ Rules:
                           <div className="flex items-center justify-between mb-1">
                             <span className="text-[10px] font-semibold" style={{ color: '#a855f7' }}>镜头 {idx + 1}</span>
                             {multiShotScenes.length > 1 && (
-                              <button onClick={() => setMultiShotScenes(multiShotScenes.filter(s => s.id !== scene.id))} className="cursor-pointer" style={{ color: subTextColor }}>
+                              <button onClick={() => setMultiShotScenes(multiShotScenes.filter(s => s.id !== scene.id))} aria-label={`删除镜头 ${idx + 1}`} className="min-h-11 min-w-11 md:min-h-0 md:min-w-0 flex items-center justify-center cursor-pointer" style={{ color: subTextColor }}>
                                 <X className="w-3 h-3" />
                               </button>
                             )}
@@ -3069,7 +3129,8 @@ Rules:
                             }}
                             placeholder={idx === 0 ? '描述开场画面...' : '描述下一镜头...'}
                             rows={2}
-                            className="w-full px-2 py-1.5 rounded text-[11px] resize-none focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                            aria-label={`镜头 ${idx + 1}描述`}
+                            className="w-full px-2 py-1.5 rounded text-base md:text-[11px] resize-none focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
                             style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}` }}
                           />
                         </div>
@@ -3085,7 +3146,7 @@ Rules:
                     <button
                       onClick={handleGenerateAllShots}
                       disabled={isGeneratingAllShots || isGenerating}
-                      className="w-full mt-2 py-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="w-full min-h-11 md:min-h-0 mt-2 py-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       style={{ background: accentColor, color: '#0a0a0a' }}
                     >
                       {isGeneratingAllShots ? (<><Loader2 className="w-3.5 h-3.5 animate-spin" />连续生成中（尾帧→首帧串联）...</>) : (<><Film className="w-3.5 h-3.5" />生成全部镜头（自动串联尾帧→首帧）</>)}
@@ -3093,7 +3154,7 @@ Rules:
                     <button
                       onClick={handleComposeStoryVideo}
                       disabled={isComposingStory || isGeneratingAllShots || shotPlans.some((shot) => shot.status !== 'completed' || !shot.videoUrl)}
-                      className="w-full mt-1.5 py-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="w-full min-h-11 md:min-h-0 mt-1.5 py-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       style={{ background: `${accentColor}22`, color: accentColor, border: `1px solid ${accentColor}66` }}
                     >
                       {isComposingStory ? (<><Loader2 className="w-3.5 h-3.5 animate-spin" />合成故事视频中...</>) : (<><Clapperboard className="w-3.5 h-3.5" />合成故事视频</>)}
@@ -3144,7 +3205,7 @@ Rules:
                 {shotPlans.length === 0 && (
                   <button
                     onClick={() => setMultiShotScenes([...multiShotScenes, { id: Date.now().toString(), prompt: '', duration: duration as number }])}
-                    className="w-full mt-2 py-1.5 rounded-md border-2 border-dashed text-[11px] flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                    className="w-full min-h-11 md:min-h-0 mt-2 py-1.5 rounded-md border-2 border-dashed text-xs md:text-[11px] md:leading-normal flex items-center justify-center gap-1 cursor-pointer transition-colors"
                     style={{ borderColor: borderColor, color: subTextColor }}
                   >
                     <Plus className="w-3 h-3" />添加镜头
@@ -3174,7 +3235,8 @@ Rules:
                       <button
                         key={r}
                         onClick={() => setResolution(r)}
-                        className="px-2.5 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer"
+                        aria-pressed={resolution === r}
+                        className="px-2.5 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer max-md:min-h-[44px] max-md:min-w-[44px] max-md:text-sm"
                         style={{
                           background: resolution === r ? accentColor : inputBg,
                           color: resolution === r ? (isGold ? '#0a0a0a' : '#fff') : subTextColor,
@@ -3185,27 +3247,29 @@ Rules:
                   </div>
                 </div>
                 <div>
-                  <label className={labelClass}>反向提示词（可选）</label>
+                  <label htmlFor={`${videoControlsId}-negative-prompt`} className={labelClass}>反向提示词（可选）</label>
                   <textarea
+                    id={`${videoControlsId}-negative-prompt`}
                     value={negativePrompt}
                     onChange={e => setNegativePrompt(e.target.value)}
                     placeholder="模糊、变形、低质量、水印..."
                     rows={2}
-                    className="w-full rounded-md px-2.5 py-1.5 text-[11px] resize-none focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                    className="w-full rounded-md px-2.5 py-1.5 text-[11px] resize-none focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 max-md:text-base max-md:min-h-[44px]"
                     style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}` }}
                   />
                 </div>
                 <div className="flex items-center gap-2">
-                  <label className="text-[11px] shrink-0 font-medium" style={{ color: subTextColor }}>随机种子</label>
+                  <label htmlFor={`${videoControlsId}-seed`} className="text-[11px] shrink-0 font-medium" style={{ color: subTextColor }}>随机种子</label>
                   <input
+                    id={`${videoControlsId}-seed`}
                     type="number"
                     value={seed ?? ''}
                     onChange={e => { const v = e.target.value; setSeed(v ? parseInt(v, 10) : undefined); }}
                     placeholder="随机"
-                    className="flex-1 rounded-md px-2.5 py-1.5 text-[11px] focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                    className="flex-1 rounded-md px-2.5 py-1.5 text-[11px] focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 max-md:min-w-0 max-md:w-0 max-md:min-h-[44px] max-md:text-base"
                     style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}` }}
                   />
-                  <button onClick={() => setSeed(Math.floor(Math.random() * 2147483647))} className="px-2.5 py-1.5 rounded-md text-sm cursor-pointer" style={{ background: inputBg, color: subTextColor, border: `1px solid ${borderColor}` }}>🎲</button>
+                  <button onClick={() => setSeed(Math.floor(Math.random() * 2147483647))} aria-label="生成随机种子" className="px-2.5 py-1.5 rounded-md text-sm cursor-pointer max-md:shrink-0 max-md:min-h-[44px] max-md:min-w-[44px]" style={{ background: inputBg, color: subTextColor, border: `1px solid ${borderColor}` }}>随机</button>
                 </div>
               </div>
             </CollapsibleSection>
@@ -3220,9 +3284,9 @@ Rules:
                   <ChevronDown className={`w-3.5 h-3.5 ml-auto transition-transform ${showHistory ? 'rotate-180' : ''}`} />
                 </button>
                 {showHistory && (
-                  <div className="mt-2 grid grid-cols-4 gap-1.5">
+                  <div className="mt-2 grid grid-cols-2 min-[640px]:grid-cols-4 gap-1.5">
                     {videoHistory.slice(0, 8).map(entry => (
-                      <button key={entry.id} onClick={() => reuseHistoryEntry(entry)} className="aspect-video rounded overflow-hidden relative group cursor-pointer" style={{ border: `1px solid ${borderColor}` }}>
+                      <button key={entry.id} onClick={() => reuseHistoryEntry(entry)} className="aspect-video min-h-11 [@media(hover:hover)_and_(pointer:fine)]:min-h-0 rounded overflow-hidden relative group cursor-pointer" style={{ border: `1px solid ${borderColor}` }}>
                         {entry.thumbnailUrl ? (
                           <img src={entry.thumbnailUrl} alt="" className="w-full h-full object-cover" />
                         ) : (
@@ -3267,12 +3331,14 @@ Rules:
 });
 
 // 可折叠区块（内联组件，保持简洁）
-function CollapsibleSection({ title, icon, iconColor, badge, defaultOpen = false, isMonochrome, accentColor, inputBg, borderColor, subTextColor, textColor, children }: {
+function CollapsibleSection({ title, icon, iconColor, badge, defaultOpen = false, open: controlledOpen, onOpenChange, isMonochrome, accentColor, inputBg, borderColor, subTextColor, textColor, children }: {
   title: string;
   icon?: ReactNode;
   iconColor?: string;
   badge?: string;
   defaultOpen?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   isMonochrome: boolean;
   accentColor: string;
   inputBg: string;
@@ -3281,12 +3347,14 @@ function CollapsibleSection({ title, icon, iconColor, badge, defaultOpen = false
   textColor: string;
   children: ReactNode;
 }) {
-  const [open, setOpen] = React.useState(defaultOpen);
+  const [localOpen, setOpen] = React.useState(defaultOpen);
+  const open = controlledOpen ?? localOpen;
   return (
     <div className="rounded-lg overflow-hidden" style={{ border: `1px solid ${borderColor}`, background: isMonochrome ? '#fafafa' : 'rgba(255,255,255,0.02)' }}>
       <button
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-2 px-3.5 py-2.5 text-left transition-colors cursor-pointer hover:opacity-90"
+        onClick={() => { const next = !open; if (controlledOpen === undefined) setOpen(next); onOpenChange?.(next); }}
+        aria-expanded={open}
+        className="w-full flex max-md:min-h-[44px]! items-center gap-2 px-3.5 py-2.5 text-left transition-colors cursor-pointer hover:opacity-90"
         style={{ background: open ? (isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.04)') : 'transparent' }}
       >
         {icon && <span className="shrink-0" style={{ color: iconColor || subTextColor }}>{icon}</span>}

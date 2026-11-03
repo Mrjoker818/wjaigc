@@ -26,30 +26,44 @@ interface MotionBrushCanvasProps {
   accentColor?: string;
   borderColor?: string;
   inputBg?: string;
+  textColor?: string;
   onExport?: (result: MotionBrushResult) => void;
   onClose?: () => void;
 }
 
 const MotionBrushCanvas = forwardRef<MotionBrushCanvasHandle, MotionBrushCanvasProps>(
-  ({ imageUrl, accentColor = '#d4af37', borderColor = 'rgba(212,175,55,0.3)', inputBg = '#2a2a2a', onExport, onClose }, ref) => {
+  ({ imageUrl, accentColor = '#d4af37', borderColor = 'rgba(212,175,55,0.3)', inputBg = '#2a2a2a', textColor = '#a1a1aa', onExport, onClose }, ref) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const overlayRef = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [isDrawing, setIsDrawing] = useState(false);
     const [tool, setTool] = useState<'brush' | 'eraser' | 'trajectory'>('brush');
     const [brushSize, setBrushSize] = useState(20);
-    const [imageLoaded, setImageLoaded] = useState(false);
+    const [loadedImageUrl, setLoadedImageUrl] = useState<string | null>(null);
+    const imageLoaded = loadedImageUrl === imageUrl;
+    const [imageError, setImageError] = useState<string | null>(null);
     const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
     const [trajectories, setTrajectories] = useState<MotionTrajectory[]>([]);
     const [trajStart, setTrajStart] = useState<{ x: number; y: number } | null>(null);
     const [trajEnd, setTrajEnd] = useState<{ x: number; y: number } | null>(null);
     const maskHistoryRef = useRef<ImageData[]>([]);
+    const activePointerRef = useRef<number | null>(null);
 
     // 加载图片并初始化画布
     useEffect(() => {
+      let current = true;
+      setLoadedImageUrl(null);
+      setImageError(null);
+      setIsDrawing(false);
+      activePointerRef.current = null;
+      setTrajectories([]);
+      setTrajStart(null);
+      setTrajEnd(null);
+      maskHistoryRef.current = [];
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => {
+        if (!current) return;
         const canvas = canvasRef.current;
         const overlay = overlayRef.current;
         if (!canvas || !overlay) return;
@@ -73,10 +87,20 @@ const MotionBrushCanvas = forwardRef<MotionBrushCanvasHandle, MotionBrushCanvasP
         const ctx = canvas.getContext('2d');
         if (ctx) {
           ctx.drawImage(img, 0, 0, w, h);
-          setImageLoaded(true);
+          setLoadedImageUrl(imageUrl);
+        } else {
+          setImageError('画布初始化失败，请重新打开运动笔刷。');
         }
       };
+      img.onerror = () => {
+        if (current) setImageError('图片加载失败，请更换首帧后重试。');
+      };
       img.src = imageUrl;
+      return () => {
+        current = false;
+        img.onload = null;
+        img.onerror = null;
+      };
     }, [imageUrl]);
 
     // 保存蒙版状态（用于撤销）
@@ -93,18 +117,18 @@ const MotionBrushCanvas = forwardRef<MotionBrushCanvasHandle, MotionBrushCanvasP
     }, []);
 
     // 获取归一化坐标 (0-1)
-    const getNormalizedPos = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const getNormalizedPos = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
       const overlay = overlayRef.current;
       if (!overlay) return { x: 0, y: 0 };
       const rect = overlay.getBoundingClientRect();
       return {
-        x: (e.clientX - rect.left) / rect.width,
-        y: (e.clientY - rect.top) / rect.height,
+        x: Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)),
+        y: Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)),
       };
     }, []);
 
     // 获取画布像素坐标
-    const getCanvasPos = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const getCanvasPos = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
       const overlay = overlayRef.current;
       if (!overlay) return { x: 0, y: 0 };
       const rect = overlay.getBoundingClientRect();
@@ -130,8 +154,12 @@ const MotionBrushCanvas = forwardRef<MotionBrushCanvasHandle, MotionBrushCanvasP
       ctx.fill();
     }, [brushSize]);
 
-    // 鼠标事件处理
-    const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    // Pointer capture keeps mouse, pen and touch gestures in the same tool.
+    const handlePointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+      if (!imageLoaded || !e.isPrimary || e.button !== 0 || activePointerRef.current !== null) return;
+      e.preventDefault();
+      activePointerRef.current = e.pointerId;
+      e.currentTarget.setPointerCapture(e.pointerId);
       if (tool === 'trajectory') {
         const pos = getNormalizedPos(e);
         setTrajStart(pos);
@@ -143,9 +171,10 @@ const MotionBrushCanvas = forwardRef<MotionBrushCanvasHandle, MotionBrushCanvasP
       saveMaskState();
       const pos = getCanvasPos(e);
       drawMask(pos.x, pos.y, tool === 'eraser');
-    }, [tool, drawMask, getCanvasPos, getNormalizedPos, saveMaskState]);
+    }, [tool, drawMask, getCanvasPos, getNormalizedPos, saveMaskState, imageLoaded]);
 
-    const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const handlePointerMove = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+      if (activePointerRef.current !== e.pointerId) return;
       if (tool === 'trajectory' && trajStart) {
         const pos = getNormalizedPos(e);
         setTrajEnd(pos);
@@ -157,7 +186,10 @@ const MotionBrushCanvas = forwardRef<MotionBrushCanvasHandle, MotionBrushCanvasP
       drawMask(pos.x, pos.y, tool === 'eraser');
     }, [isDrawing, tool, drawMask, getCanvasPos, getNormalizedPos, trajStart]);
 
-    const handleMouseUp = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const handlePointerUp = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+      if (activePointerRef.current !== e.pointerId) return;
+      activePointerRef.current = null;
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
       if (tool === 'trajectory' && trajStart) {
         const pos = getNormalizedPos(e);
         const dx = pos.x - trajStart.x;
@@ -178,6 +210,22 @@ const MotionBrushCanvas = forwardRef<MotionBrushCanvasHandle, MotionBrushCanvasP
 
       setIsDrawing(false);
     }, [tool, trajStart, getNormalizedPos]);
+
+    const cancelStroke = useCallback(() => {
+      const id = activePointerRef.current;
+      activePointerRef.current = null;
+      if (id !== null && overlayRef.current?.hasPointerCapture(id)) overlayRef.current.releasePointerCapture(id);
+      setIsDrawing(false);
+      setTrajStart(null);
+      setTrajEnd(null);
+    }, []);
+    const cancelPointerStroke = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+      if (activePointerRef.current === e.pointerId) cancelStroke();
+    }, [cancelStroke]);
+    useEffect(() => {
+      window.addEventListener('blur', cancelStroke);
+      return () => { window.removeEventListener('blur', cancelStroke); activePointerRef.current = null; };
+    }, [cancelStroke]);
 
     // 撤销
     const handleUndo = useCallback(() => {
@@ -202,6 +250,7 @@ const MotionBrushCanvas = forwardRef<MotionBrushCanvasHandle, MotionBrushCanvasP
 
     // 导出
     const exportResult = useCallback((): MotionBrushResult | null => {
+      if (!imageLoaded) return null;
       const overlay = overlayRef.current;
       if (!overlay) return null;
 
@@ -237,7 +286,7 @@ const MotionBrushCanvas = forwardRef<MotionBrushCanvasHandle, MotionBrushCanvasP
       const maskDataUrl = hasMask ? maskCanvas.toDataURL('image/png') : '';
 
       return { maskDataUrl, trajectories };
-    }, [trajectories]);
+    }, [trajectories, imageLoaded]);
 
     useImperativeHandle(ref, () => ({
       export: exportResult,
@@ -262,24 +311,20 @@ const MotionBrushCanvas = forwardRef<MotionBrushCanvasHandle, MotionBrushCanvasP
       // 这里我们用一个临时canvas来绘制箭头
     }, [trajectories, trajStart, trajEnd]);
 
-    if (!imageLoaded) {
-      return (
-        <div className="flex items-center justify-center p-8 text-gray-500 text-sm">
-          加载中...
-        </div>
-      );
-    }
-
     return (
-      <div className="space-y-2">
+      <>
+      {imageError && <p role="alert" className="p-4 text-sm text-red-500">{imageError}</p>}
+      {!imageLoaded && !imageError && <p role="status" className="p-8 text-sm text-gray-500">加载中...</p>}
+      <div className={imageLoaded ? 'space-y-2 max-md:[&_button]:min-h-[44px]! max-md:[&_button]:min-w-[44px]!' : 'hidden'}>
         {/* 工具栏 */}
-        <div className="flex items-center gap-2 px-2 py-1.5 rounded-md" style={{ background: inputBg }}>
+        <div className="flex flex-wrap items-center gap-2 px-2 py-1.5 rounded-md" style={{ background: inputBg }}>
           <button
             onClick={() => setTool('brush')}
+            aria-pressed={tool === 'brush'}
             className="flex items-center gap-1 px-2 py-1 rounded text-xs transition-all cursor-pointer"
             style={{
-              background: tool === 'brush' ? 'rgba(212,175,55,0.2)' : 'transparent',
-              color: tool === 'brush' ? accentColor : '#888',
+              background: tool === 'brush' ? `${accentColor}20` : 'transparent',
+              color: tool === 'brush' ? accentColor : textColor,
             }}
           >
             <Brush className="w-3.5 h-3.5" />
@@ -287,10 +332,11 @@ const MotionBrushCanvas = forwardRef<MotionBrushCanvasHandle, MotionBrushCanvasP
           </button>
           <button
             onClick={() => setTool('eraser')}
+            aria-pressed={tool === 'eraser'}
             className="flex items-center gap-1 px-2 py-1 rounded text-xs transition-all cursor-pointer"
             style={{
-              background: tool === 'eraser' ? 'rgba(212,175,55,0.2)' : 'transparent',
-              color: tool === 'eraser' ? accentColor : '#888',
+              background: tool === 'eraser' ? `${accentColor}20` : 'transparent',
+              color: tool === 'eraser' ? accentColor : textColor,
             }}
           >
             <Eraser className="w-3.5 h-3.5" />
@@ -298,10 +344,11 @@ const MotionBrushCanvas = forwardRef<MotionBrushCanvasHandle, MotionBrushCanvasP
           </button>
           <button
             onClick={() => setTool('trajectory')}
+            aria-pressed={tool === 'trajectory'}
             className="flex items-center gap-1 px-2 py-1 rounded text-xs transition-all cursor-pointer"
             style={{
-              background: tool === 'trajectory' ? 'rgba(212,175,55,0.2)' : 'transparent',
-              color: tool === 'trajectory' ? accentColor : '#888',
+              background: tool === 'trajectory' ? `${accentColor}20` : 'transparent',
+              color: tool === 'trajectory' ? accentColor : textColor,
             }}
           >
             <ArrowRight className="w-3.5 h-3.5" />
@@ -316,12 +363,13 @@ const MotionBrushCanvas = forwardRef<MotionBrushCanvasHandle, MotionBrushCanvasP
               <span className="text-[10px] text-gray-500">大小:</span>
               <input
                 type="range"
+                aria-label="画笔大小"
                 min="5"
                 max="50"
                 value={brushSize}
                 onChange={(e) => setBrushSize(Number(e.target.value))}
-                className="w-16 h-1 rounded appearance-none cursor-pointer"
-                style={{ background: `linear-gradient(to right, ${accentColor} ${brushSize * 2}%, #333 ${brushSize * 2}%)` }}
+                className="h-11 w-16 cursor-pointer appearance-none rounded [&::-webkit-slider-runnable-track]:h-1 [&::-webkit-slider-runnable-track]:rounded [&::-webkit-slider-runnable-track]:bg-gray-500/30 [&::-moz-range-track]:h-1 [&::-moz-range-track]:rounded [&::-moz-range-track]:bg-gray-500/30"
+                style={{ accentColor, background: 'transparent', height: 44 }}
               />
               <span className="text-[10px] text-gray-500 w-4">{brushSize}</span>
             </div>
@@ -356,6 +404,7 @@ const MotionBrushCanvas = forwardRef<MotionBrushCanvasHandle, MotionBrushCanvasP
           </button>
           <button
             onClick={onClose}
+            aria-label="关闭运动笔刷"
             className="p-1 rounded text-gray-500 hover:text-gray-300 cursor-pointer transition-colors"
           >
             <X className="w-3.5 h-3.5" />
@@ -365,8 +414,8 @@ const MotionBrushCanvas = forwardRef<MotionBrushCanvasHandle, MotionBrushCanvasP
         {/* 画布区域 */}
         <div
           ref={containerRef}
-          className="relative rounded-md overflow-hidden"
-          style={{ border: `1px solid ${borderColor}` }}
+          className="relative mx-auto rounded-md overflow-hidden"
+          style={{ border: `1px solid ${borderColor}`, maxWidth: imageSize.height ? 300 * imageSize.width / imageSize.height : undefined }}
         >
           <canvas
             ref={canvasRef}
@@ -376,15 +425,16 @@ const MotionBrushCanvas = forwardRef<MotionBrushCanvasHandle, MotionBrushCanvasP
           <canvas
             ref={overlayRef}
             className="absolute top-0 left-0 w-full h-full"
-            style={{ cursor: tool === 'trajectory' ? 'crosshair' : 'none', maxHeight: '300px' }}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
+            style={{ cursor: tool === 'trajectory' ? 'crosshair' : 'none', maxHeight: '300px', touchAction: 'none' }}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={cancelPointerStroke}
+            onLostPointerCapture={cancelPointerStroke}
             onWheel={(e) => {
               e.preventDefault();
               setBrushSize(prev => Math.max(5, Math.min(100, prev - Math.sign(e.deltaY) * 3)));
             }}
-            onMouseLeave={() => { setIsDrawing(false); setTrajStart(null); setTrajEnd(null); }}
           />
 
           {/* 轨迹预览SVG */}
@@ -444,6 +494,7 @@ const MotionBrushCanvas = forwardRef<MotionBrushCanvasHandle, MotionBrushCanvasP
           </span>
         </div>
       </div>
+      </>
     );
   }
 );

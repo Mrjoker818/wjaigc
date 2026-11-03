@@ -38,7 +38,7 @@ export interface CanvasZoomClusterProps {
   onOpenEngineDialog: () => void;
 }
 
-const buttonClassName = 'p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0';
+const buttonClassName = 'p-2 rounded-full transition-colors duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transition-none relative group whitespace-nowrap shrink-0 [&>svg]:transition-transform [&>svg]:duration-200 [&>svg]:ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-safe:hover:[&>svg]:scale-110 motion-safe:active:[&>svg]:scale-95 motion-reduce:[&>svg]:scale-100 motion-reduce:[&>svg]:transition-none';
 const tooltipClassName = 'absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white';
 
 export function CanvasZoomCluster({
@@ -84,7 +84,7 @@ export function CanvasZoomCluster({
         <span className={tooltipClassName}>缩小</span>
       </button>
 
-      <span className={`text-xs font-mono w-10 text-center select-none shrink-0 ${isMonochrome ? 'text-gray-500' : 'text-gold'}`}>
+      <span data-canvas-toolbar-flow-zoom className={`text-xs font-mono w-10 text-center select-none shrink-0 ${isMonochrome ? 'text-gray-500' : 'text-gold'}`}>
         {Math.round(zoom * 100)}%
       </span>
 
@@ -105,7 +105,7 @@ export function CanvasZoomCluster({
           type="button"
           onClick={onToggleMinimap}
           aria-pressed={minimapOpen}
-          className={`${buttonClassName} ${minimapOpen ? activeToggleClassName : inactiveToggleClassName}`}
+          className={`${buttonClassName} min-h-11 min-w-11 ${minimapOpen ? activeToggleClassName : inactiveToggleClassName}`}
           title={minimapOpen ? '关闭小地图' : '打开小地图'}
         >
           <MapIcon className="h-4 w-4" />
@@ -116,7 +116,7 @@ export function CanvasZoomCluster({
       <button
         type="button"
         onClick={onOpenCommandPalette}
-        className={`${buttonClassName} ${idleClassName}`}
+        className={`${buttonClassName} ${idleClassName} pointer-coarse:min-h-11 pointer-coarse:min-w-11`}
         title="命令面板 (Ctrl+K / Cmd+K)"
       >
         <Command className="h-4 w-4" />
