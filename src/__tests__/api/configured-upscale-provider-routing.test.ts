@@ -6,7 +6,7 @@ const routeSource = readFileSync(resolve(process.cwd(), 'src/app/api/image-edit/
 
 describe('configured upscale provider routing', () => {
   it('treats any configured upscaler selection as an explicit AI-only choice', () => {
-    expect(routeSource).toContain("const requestedUpscaleModel = body.upscaleModel?.trim() || null");
+    expect(routeSource).toContain("let requestedUpscaleModel = body.upscaleModel?.trim() || null");
     expect(routeSource).toContain('Boolean(requestedUpscaleModel)');
   });
 

@@ -14,6 +14,8 @@ vi.mock('@/lib/server-auth', () => ({
   getSessionUser: mocks.getSessionUser,
 }));
 
+vi.mock('server-only', () => ({}));
+
 vi.mock('coze-coding-dev-sdk', () => ({
   SearchClient: class {},
   Config: class {},

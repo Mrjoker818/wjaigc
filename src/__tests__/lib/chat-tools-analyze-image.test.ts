@@ -1,4 +1,8 @@
+import fs from 'fs';
+import path from 'path';
+import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { getServerDataRoot } from '@/lib/server-data-root';
 
 const mocks = vi.hoisted(() => ({
   findProviderForModel: vi.fn(),
@@ -16,6 +20,7 @@ import { executeToolCall } from '@/lib/chat-tools';
 
 describe('Agent analyze_image tool', () => {
   const originalFetch = globalThis.fetch;
+  let imagePath = '';
 
   beforeEach(() => {
     mocks.findProviderForModel.mockReset();
@@ -29,6 +34,7 @@ describe('Agent analyze_image tool', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     globalThis.fetch = originalFetch;
+    if (imagePath) fs.rmSync(imagePath, { force: true });
   });
 
   it('does not duplicate /v1 when the selected provider base URL already includes it', async () => {
@@ -39,6 +45,13 @@ describe('Agent analyze_image tool', () => {
       headers: { 'Content-Type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
+    const image = await sharp({
+      create: { width: 2, height: 2, channels: 3, background: { r: 255, g: 0, b: 0 } },
+    }).png().toBuffer();
+    const uploadDir = path.join(getServerDataRoot(), 'uploads');
+    fs.mkdirSync(uploadDir, { recursive: true });
+    imagePath = path.join(uploadDir, 'source.png');
+    fs.writeFileSync(imagePath, image);
 
     const result = await executeToolCall('analyze_image', {
       image_url: '/api/serve-upload/uploads/source.png',
@@ -54,5 +67,7 @@ describe('Agent analyze_image tool', () => {
       'https://provider.example/v1/chat/completions',
       expect.objectContaining({ method: 'POST' }),
     );
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(request.messages[0].content[1].image_url.url).toMatch(/^data:image\/png;base64,/);
   });
 });

@@ -1,5 +1,5 @@
 /**
- * 项目导出 API - 完全公开访问，无需管理员权限
+ * 项目导出 API - 仅管理员可打包源码
  *
  * 两种打包模式：
  *  1) 工作目录模式（默认）：打包磁盘上当前 checkout 的文件（用系统 tar 流式打包）
@@ -16,6 +16,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { spawn } from 'child_process'
+import { requireAdminUser } from '@/lib/server-auth'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 180
@@ -61,7 +62,50 @@ function streamResponse(proc: ReturnType<typeof spawn>, filename: string) {
   )
 }
 
+function createTarGz(scope: string, branch = ''): NextResponse | Promise<NextResponse> {
+  const projectRoot = process.env.COZE_WORKSPACE_PATH || process.cwd()
+  const date = new Date().toISOString().slice(0, 10)
+
+  if (branch) {
+    const verify = spawn('git', ['rev-parse', '--verify', '--quiet', branch], { cwd: projectRoot, stdio: ['ignore', 'pipe', 'pipe'] })
+    const verifyErr: Buffer[] = []
+    verify.stderr?.on('data', (c: Buffer) => verifyErr.push(c))
+    return new Promise<number>((resolve) => verify.on('close', resolve)).then(async (verifyCode) => {
+      if (verifyCode !== 0) {
+        const branches = spawn('git', ['branch', '--all'], { cwd: projectRoot, stdio: ['ignore', 'pipe', 'ignore'] })
+        let branchList = ''
+        branches.stdout?.on('data', (c: Buffer) => (branchList += c.toString()))
+        await new Promise<void>((resolve) => branches.on('close', () => resolve()))
+        return NextResponse.json({
+          error: `分支或引用 "${branch}" 不存在`,
+          availableBranches: branchList.split('\n').map(s => s.trim().replace(/^[*]\s*/, '')).filter(Boolean)
+        }, { status: 404 })
+      }
+
+      const paths = scope === 'minimal' ? ['src', 'scripts'] : []
+      const gitArgs = ['archive', '--format=tar.gz', `--prefix=wujie-${branch}/`, branch, ...paths]
+      const proc = spawn('git', gitArgs, { cwd: projectRoot, stdio: ['ignore', 'pipe', 'pipe'] })
+      const suffix = scope === 'minimal' ? 'src' : 'source'
+      return streamResponse(proc, `wujie-${branch}-${suffix}-${date}.tar.gz`)
+    })
+  }
+
+  const target = WORKDIR_SCOPES.find(s => s.scope === scope)
+  if (!target) {
+    return NextResponse.json({ error: `无效 scope，支持: ${WORKDIR_SCOPES.map(s => s.scope).join(', ')}` }, { status: 400 })
+  }
+
+  const tarArgs = ['-czf', '-', ...target.args]
+  const proc = spawn('tar', tarArgs, { cwd: projectRoot, stdio: ['ignore', 'pipe', 'inherit'] })
+  return streamResponse(proc, `wujie-workdir-${scope}-${date}.tar.gz`)
+}
+
 export async function GET(request: NextRequest) {
+  const admin = await requireAdminUser(request)
+  if (!admin) {
+    return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
+  }
+
   const { searchParams } = new URL(request.url)
   const scope = searchParams.get('scope') || 'source'
   const branch = searchParams.get('branch') || searchParams.get('ref') || ''
@@ -87,44 +131,8 @@ export async function GET(request: NextRequest) {
     })
   }
 
-  const projectRoot = process.env.COZE_WORKSPACE_PATH || process.cwd()
-  const date = new Date().toISOString().slice(0, 10)
-
-  // ============ 指定分支模式：git archive ============
-  if (branch) {
-    // 校验分支/ref 是否存在
-    const verify = spawn('git', ['rev-parse', '--verify', '--quiet', branch], { cwd: projectRoot, stdio: ['ignore', 'pipe', 'pipe'] })
-    const verifyErr: Buffer[] = []
-    verify.stderr?.on('data', (c: Buffer) => verifyErr.push(c))
-    const verifyCode = await new Promise<number>((resolve) => verify.on('close', resolve))
-    if (verifyCode !== 0) {
-      const branches = spawn('git', ['branch', '--all'], { cwd: projectRoot, stdio: ['ignore', 'pipe', 'ignore'] })
-      let branchList = ''
-      branches.stdout?.on('data', (c: Buffer) => (branchList += c.toString()))
-      await new Promise<void>((resolve) => branches.on('close', () => resolve()))
-      return NextResponse.json({
-        error: `分支或引用 "${branch}" 不存在`,
-        availableBranches: branchList.split('\n').map(s => s.trim().replace(/^[*]\s*/, '')).filter(Boolean)
-      }, { status: 404 })
-    }
-
-    // minimal 仅打包 src；其余打包该分支全部跟踪文件
-    const paths = scope === 'minimal' ? ['src', 'scripts'] : []
-    const gitArgs = ['archive', '--format=tar.gz', `--prefix=wujie-${branch}/`, branch, ...paths]
-    const proc = spawn('git', gitArgs, { cwd: projectRoot, stdio: ['ignore', 'pipe', 'pipe'] })
-    const suffix = scope === 'minimal' ? 'src' : 'source'
-    return streamResponse(proc, `wujie-${branch}-${suffix}-${date}.tar.gz`)
-  }
-
-  // ============ 工作目录模式：系统 tar ============
-  const target = WORKDIR_SCOPES.find(s => s.scope === scope)
-  if (!target) {
-    return NextResponse.json({ error: `无效 scope，支持: ${WORKDIR_SCOPES.map(s => s.scope).join(', ')}` }, { status: 400 })
-  }
-
-  const tarArgs = ['-czf', '-', ...target.args]
-  const proc = spawn('tar', tarArgs, { cwd: projectRoot, stdio: ['ignore', 'pipe', 'inherit'] })
-  return streamResponse(proc, `wujie-workdir-${scope}-${date}.tar.gz`)
+  if (branch) return createTarGz(scope, branch)
+  return createTarGz(scope)
 }
 
 function getCurrentBranch(): string {
@@ -138,11 +146,14 @@ function getCurrentBranch(): string {
 }
 
 export async function POST(request: NextRequest) {
+  const admin = await requireAdminUser(request)
+  if (!admin) {
+    return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
+  }
+
   const body = await request.json().catch(() => ({}))
   const scope = body.scope || 'source'
   const branch = body.branch || body.ref || ''
-  const redirectUrl = new URL('/api/export-project', request.nextUrl)
-  redirectUrl.searchParams.set('scope', scope)
-  if (branch) redirectUrl.searchParams.set('branch', branch)
-  return NextResponse.redirect(redirectUrl, 303)
+  if (branch) return createTarGz(scope, branch)
+  return createTarGz(scope)
 }

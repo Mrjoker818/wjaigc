@@ -74,7 +74,8 @@ describe('pear grok request body whitelist', () => {
       resolution: '2K',
     };
     const out = adjustRequestForProfile(raw, PROFILE_APIMART);
-    expect(out.body.resolution).toBe('2K');
+    expect(out.body.resolution).toBe('2k');
     expect(out.body.quality).toBe('medium');
+    expect(out.body.n).toBe(1);
   });
 });
