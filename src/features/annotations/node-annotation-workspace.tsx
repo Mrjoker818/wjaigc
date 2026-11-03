@@ -23,6 +23,8 @@ import { AnnotationOverlay } from './annotation-overlay';
 import type { EditIntentBundle } from './annotation-types';
 import {
   createInitialAnnotationControllerState,
+  selectAnnotation,
+  updateAnnotationInstruction,
   useAnnotationController,
 } from './use-annotation-controller';
 
@@ -408,14 +410,19 @@ export function NodeAnnotationWorkspace({
         executeLabel="创建修改节点"
         onToolChange={selectTool}
         onPromptChange={(prompt) => {
-          setState((current) => ({ ...current, prompt }));
+          setState((current) => {
+            if (!current.selectedAnnotationId) return { ...current, prompt };
+            return updateAnnotationInstruction(
+              current,
+              current.selectedAnnotationId,
+              prompt,
+              Date.now(),
+            );
+          });
         }}
         onModelChange={setModelId}
         onSelectAnnotation={(annotationId) => {
-          setState((current) => ({
-            ...current,
-            selectedAnnotationId: annotationId,
-          }));
+          setState((current) => selectAnnotation(current, annotationId));
         }}
         onRemoveAnnotation={remove}
         onUpdateInstruction={updateInstruction}

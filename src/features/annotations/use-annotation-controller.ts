@@ -348,6 +348,7 @@ function appendAnnotation(
     ...state,
     annotations: [...state.annotations, annotation],
     selectedAnnotationId: annotation.id,
+    prompt: annotation.instruction?.trim() || '',
     gesture: { kind: 'idle' },
     brushScreenWidths: brushScreenWidth === undefined
       ? state.brushScreenWidths
@@ -519,6 +520,7 @@ export function updateAnnotationInstruction(
   const nextInstruction = instruction.trim();
   return {
     ...state,
+    prompt: nextInstruction,
     annotations: state.annotations.map((annotation) =>
       annotation.id === annotationId
         ? {
@@ -527,6 +529,19 @@ export function updateAnnotationInstruction(
             updatedAt: now,
           }
         : annotation),
+  };
+}
+
+export function selectAnnotation(
+  state: AnnotationControllerState,
+  annotationId: string,
+): AnnotationControllerState {
+  const annotation = state.annotations.find((item) => item.id === annotationId);
+  if (!annotation) return state;
+  return {
+    ...state,
+    selectedAnnotationId: annotation.id,
+    prompt: annotation.instruction?.trim() || '',
   };
 }
 

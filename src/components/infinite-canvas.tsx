@@ -39,6 +39,8 @@ import {
 import { waitForAnnotationTaskResult } from '@/features/annotations/annotation-task-client';
 import {
   buildAnnotationSourceVersionId,
+  selectAnnotation,
+  updateAnnotationInstruction,
   type AnnotationGesture,
   useAnnotationController,
 } from '@/features/annotations/use-annotation-controller';
@@ -14032,17 +14034,23 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
               }}
               onPromptChange={(prompt) => {
                 setAnnotationExecutionError(null);
-                setAnnotationV2State((current) => ({ ...current, prompt }));
+                setAnnotationV2State((current) => {
+                  if (!current.selectedAnnotationId) return { ...current, prompt };
+                  return updateAnnotationInstruction(
+                    current,
+                    current.selectedAnnotationId,
+                    prompt,
+                    Date.now(),
+                  );
+                });
               }}
               onModelChange={(modelId) => {
                 setAnnotationExecutionError(null);
                 setAnnotationModelId(modelId);
               }}
               onSelectAnnotation={(annotationId) => {
-                setAnnotationV2State((current) => ({
-                  ...current,
-                  selectedAnnotationId: annotationId,
-                }));
+                setAnnotationV2State((current) =>
+                  selectAnnotation(current, annotationId));
               }}
               onRemoveAnnotation={(annotationId) => {
                 setAnnotationExecutionError(null);

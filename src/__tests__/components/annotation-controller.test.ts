@@ -11,6 +11,7 @@ import {
   createInitialAnnotationControllerState,
   moveTextAnnotation,
   removeAnnotation,
+  selectAnnotation,
   selectAnnotationTool,
   updateAnnotationGesture,
   updateAnnotationInstruction,
@@ -154,6 +155,27 @@ describe('annotation controller state machine', () => {
     state = commitAnnotationGesture(state, { x: 260, y: 180 }, 'ann-arrow', 1);
 
     expect(state.annotations[0].instruction).toBe('Move the subject to the right');
+    expect(state.prompt).toBe('Move the subject to the right');
+  });
+
+  it('keeps the toolbar prompt and selected annotation instruction synchronized', () => {
+    let state = selectAnnotationTool(createInitialAnnotationControllerState(), 'arrow');
+    state = { ...state, prompt: '改成金色门' };
+    state = beginAnnotationGesture(state, source, { x: 120, y: 120 });
+    state = commitAnnotationGesture(state, { x: 260, y: 180 }, 'ann-arrow', 1);
+    state = { ...state, prompt: '去做座椅' };
+    state = beginAnnotationGesture(state, source, { x: 180, y: 180 });
+    state = commitAnnotationGesture(state, { x: 300, y: 240 }, 'ann-arrow-2', 2);
+
+    state = selectAnnotation(state, 'ann-arrow');
+    expect(state.prompt).toBe('改成金色门');
+
+    state = updateAnnotationInstruction(state, 'ann-arrow', '改成蓝色门', 3);
+    expect(state.prompt).toBe('改成蓝色门');
+    expect(state.annotations.find((annotation) => annotation.id === 'ann-arrow')?.instruction)
+      .toBe('改成蓝色门');
+    expect(state.annotations.find((annotation) => annotation.id === 'ann-arrow-2')?.instruction)
+      .toBe('去做座椅');
   });
 
   it('commits a semantic annotation only after a resolved target is supplied', () => {
