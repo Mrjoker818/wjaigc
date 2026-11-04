@@ -599,8 +599,12 @@ async function readValidatedNodeInputs(
       const source = originalSource && effective(originalSource);
       const from = source?.ports.find(port => port.id === edge.fromPortId && port.direction === 'out');
       const to = target.ports.find(port => port.id === edge.toPortId && port.direction === 'in');
-      if (!source || !from || !to || source.id === target.id || !canConnectPorts(from.type, to.type)
-        || (edge.type !== 'any' && edge.type !== from.type)) {
+      // Loop control edges (out-loop/out-done, or a legacy body edge already selected by the
+      // executor) are untyped and may feed any existing input port.
+      const loopControl = ['loop-for', 'loop-each', 'loop-while'].includes(source?.type || '')
+        && (forcedControlEdges.has(edge.id) || ['out-loop', 'out-done'].includes(from?.id || ''));
+      if (!source || !to || source.id === target.id || (!loopControl && (!from || !canConnectPorts(from.type, to.type)
+        || (edge.type !== 'any' && edge.type !== from.type)))) {
         throw new Error(`工作流连线 ${edge.id} 失配：${edge.fromNodeId}/${edge.fromPortId} → ${edge.toNodeId}/${edge.toPortId}，请检查端口`);
       }
     }
