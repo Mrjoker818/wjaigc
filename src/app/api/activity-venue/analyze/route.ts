@@ -1,9 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { findProviderForModel, findProviderById } from '@/lib/server-api-config';
+import { getApiProviders } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getSessionUser } from '@/lib/server-auth';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
-import { normalizeModelForApi } from '@/lib/model-capabilities';
+import { selectActivityVenueModel } from '@/lib/activity-venue-model';
+import { z } from 'zod';
+
+const dimension = z.number().finite().positive();
+const regionCoordinates = z.object({
+  x: z.number().finite().min(0).max(1), y: z.number().finite().min(0).max(1),
+  w: z.number().finite().positive().max(1), h: z.number().finite().positive().max(1),
+}).passthrough().refine(position => position.x + position.w <= 1 && position.y + position.h <= 1);
+const venueAnalysisSchema = z.object({
+  spaceType: z.string().min(1),
+  estimatedDimensions: z.object({ length: dimension, width: dimension, height: dimension }).passthrough(),
+  lighting: z.string().min(1),
+  regions: z.array(z.object({
+    id: z.string().min(1), name: z.string().min(1), type: z.string().min(1),
+    position: z.union([z.string().refine(value => value.trim().length > 0), regionCoordinates]),
+    estimatedSize: z.union([z.string(), z.object({ length: dimension, width: dimension }).passthrough()]).optional(),
+    notes: z.string().optional(),
+  }).passthrough()),
+  structuralLimits: z.array(z.string()),
+  designNotes: z.string(),
+}).passthrough();
 
 /**
  * POST /api/activity-venue/analyze
@@ -20,18 +40,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '请提供场馆照片 URL' }, { status: 400 });
     }
 
-    // Find LLM (vision) provider
-    const provider = providerId
-      ? await findProviderById(providerId)
-      : await findProviderForModel(model || '', 'chat');
-    if (!provider) {
-      return NextResponse.json({ error: '未找到可用的LLM视觉模型，请在管理员后台配置' }, { status: 400 });
+    if ((providerId !== undefined && typeof providerId !== 'string') || (model !== undefined && typeof model !== 'string')) {
+      return NextResponse.json({ error: '供应商或模型参数无效' }, { status: 400 });
     }
+    const sessionUser = await getSessionUser(request);
+    if (!sessionUser) return NextResponse.json({ error: '请登录后分析场馆' }, { status: 401 });
+    const providers = await getApiProviders();
+    const selection = selectActivityVenueModel(providers, sessionUser, providerId, model);
+    if (!selection.ok) return NextResponse.json({ error: selection.error }, { status: selection.status });
+    const { provider, modelId: selectedModel } = selection;
 
-    const rawModel = provider.selectedModels?.[0] || model || 'gemini-2.5-flash';
-    const { apiModelName: selectedModel } = normalizeModelForApi(rawModel);
-
-    const sessionUser = await getSessionUser(request).catch(() => null);
     const taskId = `venue_analyze_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     registerTask(taskId, 'venue-analyze', `场馆分析`, sessionUser?.id);
 
@@ -97,32 +115,23 @@ export async function POST(request: NextRequest) {
         const apiResp = await response.json();
         const content = apiResp.choices?.[0]?.message?.content || '';
 
-        let analysis = null;
+        let parsed: unknown;
         try {
-          const jsonMatch = content.match(/\{[\s\S]*\}/);
-          if (jsonMatch) analysis = JSON.parse(jsonMatch[0]);
+          const jsonMatch = typeof content === 'string' ? content.match(/\{[\s\S]*\}/) : null;
+          if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
         } catch {
-          // fallback: return raw content
+          // Invalid provider content is handled below.
         }
-
-        if (!analysis) {
-          // Build minimal fallback
-          analysis = {
-            spaceType: 'other',
-            estimatedDimensions: { length: 10000, width: 8000, height: 4000 },
-            lighting: 'artificial',
-            regions: [
-              { id: 'r1', name: '主展区', type: 'main', position: '中央区域', estimatedSize: { length: 5000, width: 4000 }, notes: '' },
-            ],
-            structuralLimits: [],
-            designNotes: content.slice(0, 300),
-          };
+        const analysis = venueAnalysisSchema.safeParse(parsed);
+        if (!analysis.success) {
+          updateTaskProgress(taskId, { status: 'failed', error: '场馆分析结果格式无效，请查看任务状态' });
+          return;
         }
 
         updateTaskProgress(taskId, {
           status: 'completed',
           progress: 100,
-          result: { analysis, type: 'venue-analyze' },
+          result: { analysis: analysis.data, type: 'venue-analyze' },
         });
       } catch (err) {
         updateTaskProgress(taskId, {
@@ -133,9 +142,9 @@ export async function POST(request: NextRequest) {
     })();
 
     return NextResponse.json({ success: true, taskId, status: 'running' });
-  } catch (err) {
+  } catch {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : '服务器错误' },
+      { error: '场馆分析暂时不可用，请稍后查看任务状态' },
       { status: 500 },
     );
   }

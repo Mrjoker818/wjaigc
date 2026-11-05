@@ -55,6 +55,14 @@ interface CanvasShareManagePanelProps {
   projectName: string;
   createdShareAccess?: CanvasShareCreatedAccess;
   returnFocusRef?: RefObject<HTMLElement | null>;
+  returnFocusScope?: string;
+}
+
+interface FocusSession {
+  generation: number;
+  scope: string | undefined;
+  target: HTMLElement | null;
+  handingOff: boolean;
 }
 
 interface OperationState {
@@ -133,8 +141,20 @@ export function CanvasShareManagePanel({
   projectName,
   createdShareAccess,
   returnFocusRef,
+  returnFocusScope,
 }: CanvasShareManagePanelProps) {
   const scopeKey = operationScopeKey(open, projectId);
+  const focusScope = returnFocusScope;
+  const focusGenerationRef = useRef(0);
+  const committedFocusScopeRef = useRef(focusScope);
+  const focusSessionsRef = useRef(new WeakMap<EventTarget, FocusSession>());
+  const activeFocusSessionRef = useRef<FocusSession | null>(null);
+  useLayoutEffect(() => {
+    if (committedFocusScopeRef.current !== focusScope) {
+      committedFocusScopeRef.current = focusScope;
+      focusGenerationRef.current += 1;
+    }
+  }, [focusScope]);
   const [shares, setShares] = useState<CanvasShareOwnerRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -343,10 +363,29 @@ export function CanvasShareManagePanel({
         <DialogContent
           className="max-h-[calc(100dvh-1rem)] max-w-[calc(100%-1rem)] overflow-y-auto p-0 sm:max-w-2xl [&_[data-slot=dialog-close]]:flex [&_[data-slot=dialog-close]]:size-11 [&_[data-slot=dialog-close]]:items-center [&_[data-slot=dialog-close]]:justify-center"
           data-modal="true"
+          onOpenAutoFocus={event => {
+            const session: FocusSession = {
+              generation: ++focusGenerationRef.current,
+              scope: focusScope,
+              target: returnFocusRef?.current ?? null,
+              handingOff: false,
+            };
+            activeFocusSessionRef.current = session;
+            if (event.currentTarget) focusSessionsRef.current.set(event.currentTarget, session);
+          }}
           onCloseAutoFocus={event => {
-            if (!returnFocusRef?.current) return;
+            if (returnFocusScope === undefined) {
+              if (!returnFocusRef?.current) return;
+              event.preventDefault();
+              returnFocusRef.current.focus();
+              return;
+            }
             event.preventDefault();
-            returnFocusRef.current.focus();
+            const session = event.currentTarget ? focusSessionsRef.current.get(event.currentTarget) : undefined;
+            const target = session?.target;
+            if (session && session.generation === focusGenerationRef.current
+              && session.scope === returnFocusScope && target === returnFocusRef?.current
+              && target?.isConnected && target.getClientRects().length > 0) target.focus();
           }}
         >
           <DialogHeader className="border-b px-4 pb-4 pt-5 pr-12 sm:px-6 sm:pt-6">

@@ -377,6 +377,58 @@ describe('canvas share owner UI', () => {
     );
   });
 
+  it('preserves the edited title and options after a share preflight recheck', async () => {
+    apiMocks.preflightCanvasShare.mockResolvedValueOnce({
+      ...readyPreflight,
+      readiness: {
+        ready: false,
+        failures: [{ itemIndex: 0, code: 'CANVAS_SHARE_MEDIA_NOT_READY', message: 'pending' }],
+      },
+    });
+    renderCreateDialog();
+
+    await screen.findByText('媒体未就绪');
+    fireEvent.change(screen.getByLabelText('分享标题'), { target: { value: '客户自定义标题' } });
+    fireEvent.change(screen.getByLabelText('有效期'), { target: { value: '2026-12-24' } });
+    fireEvent.click(screen.getByRole('switch', { name: '允许访问者下载' }));
+    fireEvent.click(screen.getByRole('button', { name: '重新检查' }));
+
+    await screen.findByText('媒体已就绪');
+    expect(apiMocks.preflightCanvasShare).toHaveBeenCalledTimes(2);
+    expect(screen.getByLabelText('分享标题')).toHaveProperty('value', '客户自定义标题');
+    expect(screen.getByLabelText('有效期')).toHaveProperty('value', '2026-12-24');
+    expect(screen.getByRole('switch', { name: '允许访问者下载' }).getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByRole('button', { name: '创建分享' })).toHaveProperty('disabled', false);
+  });
+
+  it('requires a successful share preflight recheck after a project conflict', async () => {
+    apiMocks.createCanvasShare.mockRejectedValueOnce({ code: 'CANVAS_SHARE_PROJECT_CONFLICT' });
+    renderCreateDialog();
+
+    await screen.findByText('媒体已就绪');
+    fireEvent.click(screen.getByRole('button', { name: '创建分享' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('项目已更新，请重新检查后再创建');
+    expect(screen.getByRole('button', { name: '创建分享' })).toHaveProperty('disabled', true);
+    expect(apiMocks.createCanvasShare).toHaveBeenCalledTimes(1);
+
+    apiMocks.preflightCanvasShare.mockRejectedValueOnce(new Error('synthetic recheck failure'));
+    fireEvent.click(screen.getByRole('button', { name: '重新检查' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('操作未完成');
+    expect(screen.queryByText('媒体已就绪')).toBeNull();
+    expect(screen.getByRole('button', { name: '创建分享' })).toHaveProperty('disabled', true);
+    expect(apiMocks.createCanvasShare).toHaveBeenCalledTimes(1);
+
+    const pendingRecheck = deferred<typeof readyPreflight>();
+    apiMocks.preflightCanvasShare.mockReturnValueOnce(pendingRecheck.promise);
+    fireEvent.click(screen.getByRole('button', { name: '重新检查' }));
+    expect(screen.getByRole('button', { name: '创建分享' })).toHaveProperty('disabled', true);
+    await act(async () => pendingRecheck.resolve({ ...readyPreflight, projectRevision: 18 }));
+    expect(await screen.findByText('修订 18')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '创建分享' })).toHaveProperty('disabled', false);
+    expect(apiMocks.preflightCanvasShare).toHaveBeenCalledTimes(3);
+    expect(apiMocks.createCanvasShare).toHaveBeenCalledTimes(1);
+  });
+
   it('derives date defaults from the local calendar instead of UTC', async () => {
     vi.stubEnv('TZ', 'America/Los_Angeles');
     vi.setSystemTime(new Date('2026-01-01T01:00:00.000Z'));

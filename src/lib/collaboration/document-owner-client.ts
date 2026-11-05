@@ -7,7 +7,7 @@ export interface OwnerProjectSync {
 export interface OwnerProjectStatus {
   projectId: string; featureEnabled: boolean; enabled: boolean; currentRevision: number;
 }
-export async function readOwnerProjectStatus(projectId: string, signal?: AbortSignal): Promise<OwnerProjectStatus> {
+export async function readOwnerProjectStatus(projectId: string, signal?: AbortSignal, expectedActorId?: string): Promise<OwnerProjectStatus> {
   if (signal?.aborted) throw new OwnerDocumentRequestError('DOCUMENT_REQUEST_CANCELLED', 0, false);
   const controller = new AbortController();
   let cancel = (): void => {};
@@ -25,7 +25,8 @@ export async function readOwnerProjectStatus(projectId: string, signal?: AbortSi
   });
   const read = async (): Promise<OwnerProjectStatus> => {
     const data = await requestOwnerDocument(`/api/collaboration/document-enable?projectId=${encodeURIComponent(projectId)}`,
-      { signal: controller.signal });
+      { signal: controller.signal,
+        ...(expectedActorId !== undefined ? { headers: { 'x-wujie-expected-actor-id': expectedActorId } } : {}) });
     if (data.projectId !== projectId || typeof data.featureEnabled !== 'boolean' || typeof data.enabled !== 'boolean'
       || typeof data.currentRevision !== 'number' || !Number.isSafeInteger(data.currentRevision) || data.currentRevision < 0) {
       throw new OwnerDocumentRequestError('DOCUMENT_RESPONSE_INVALID', 200, false);

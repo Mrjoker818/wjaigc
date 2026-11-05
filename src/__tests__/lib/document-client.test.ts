@@ -54,6 +54,25 @@ describe('pending ACK confirmation barrier', () => {
     cleanups.push(() => { session.disconnect(); server.destroy(); });
     return { server, socket, session, store };
   }
+  it.each(['delete-then-throw','silent-no-delete','read-back-throws'] as const)('keeps the acknowledged edit in memory and rejects waiters when cleanup is %s', async mode => {
+    const f=fixture(); const originalRemove=f.store.remove.bind(f.store),originalLoad=f.store.load.bind(f.store); let removed=false;
+    const remove=vi.spyOn(f.store,'remove').mockImplementation(id=>{ if(mode!=='silent-no-delete')originalRemove(id); removed=true; if(mode==='delete-then-throw')throw Error('cleanup failed'); });
+    const load=vi.spyOn(f.store,'load').mockImplementation(()=>{if(mode==='read-back-throws' && removed)throw Error('read failed');return originalLoad();});
+    f.session.applyLocalChange({placementId:'p1',x:31});
+    const waiting=f.session.waitForPendingUpdates().then(()=> 'resolved',error=>String(error.message));
+    f.socket.receive(frame(0x12,8)); expect(await waiting).toBe('DOCUMENT_PENDING_CONFIRMATION_UNAVAILABLE');
+    expect(f.session.status).toBe('unavailable'); const removalCalls=remove.mock.calls.length; f.socket.receive(frame(0x12,9));
+    expect(f.session.status).toBe('unavailable'); expect(remove).toHaveBeenCalledTimes(removalCalls);
+    f.session.disconnect(); expect(f.session.exportRecoveryCopy().pendingFrames).toHaveLength(1);
+    remove.mockRestore(); load.mockRestore();
+  });
+  it('continues to acknowledge a no-store websocket session', async () => {
+    const server=createCanvasDocument(); applyCanvasImagePatch(server,placement('p1',10),'seed');
+    const socket=new FakeSocket(); const session=createCanvasDocumentSession(socket as unknown as WebSocket);
+    cleanups.push(()=>{session.disconnect();server.destroy()}); socket.receive(frame(0x11,1,Y.encodeStateAsUpdate(server)));
+    session.applyLocalChange({placementId:'p1',x:21}); const waiting=session.waitForPendingUpdates();
+    socket.receive(frame(0x12,2)); expect(await waiting).toBe(2); expect(session.status).toBe('saved');
+  });
   it('returns the current server sequence without making a frame when no updates await ACK', async () => {
     const f = fixture(); expect(await f.session.waitForPendingUpdates()).toBe(7);
     expect(f.socket.send).not.toHaveBeenCalled(); expect(f.store.load()).toHaveLength(0);

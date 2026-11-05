@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Upload, X, Plus, Cpu, GitMerge, GripHorizontal, Zap, FileText } from 'lucide-react';
 import { toast } from 'sonner';
@@ -57,12 +57,18 @@ export interface AltRefMarker {
 }
 
 interface GenerationPanelProps {
+    isVisible?: boolean;
     onGenerate: (params: GenerationParams) => void;
     onAnalyzeImage?: (imageData: string) => Promise<string>;
     onAddToCanvas?: (imageUrl: string) => void;
     onExtractPrompt?: (imageUrl: string) => Promise<string>;
     onUpdatePrompt?: (prompt: string) => string;
     externalPrompt?: string;
+    visionInsertion?: { id: number; text: string };
+    initialVisionDraft?: string;
+    visionScopeKey?: string;
+    onVisionDraftChange?: (draft: string) => void;
+    onVisionInsertionConsumed?: (id: number) => void;
     onExternalPromptConsumed?: () => void;
     onError?: (error: string) => void;
     themeStyle?: 'gold' | 'monochrome';
@@ -248,7 +254,13 @@ export function GenerationPanel(
         onAddToCanvas,
         onError,
         themeStyle = 'gold',
+        isVisible = true,
         externalPrompt,
+        visionInsertion,
+        initialVisionDraft,
+        visionScopeKey,
+        onVisionDraftChange,
+        onVisionInsertionConsumed,
         onExternalPromptConsumed,
         ctrlRefSelections = [],
         altRefMarkers = [],
@@ -265,9 +277,34 @@ export function GenerationPanel(
         selectedImageUrl,
     }: GenerationPanelProps
 ) {
-    const [prompt, setPrompt] = useState("");
+    const [scopedPrompt, setScopedPrompt] = useState<{ scope: string | undefined; text: string; insertionId?: number }>({ scope: visionScopeKey, text: initialVisionDraft ?? "" });
+    if (scopedPrompt.scope !== visionScopeKey) {
+        setScopedPrompt({ scope: visionScopeKey, text: initialVisionDraft ?? "" });
+    }
+    const prompt = scopedPrompt.scope === visionScopeKey ? scopedPrompt.text : (initialVisionDraft ?? "");
+    const setPrompt: React.Dispatch<React.SetStateAction<string>> = value => {
+        setScopedPrompt(previous => {
+            const text = previous.scope === visionScopeKey ? previous.text : (initialVisionDraft ?? "");
+            return { scope: visionScopeKey, text: typeof value === 'function' ? value(text) : value, ...(previous.scope === visionScopeKey ? { insertionId: previous.insertionId } : {}) };
+        });
+    };
+    const pendingVisionCommit = useRef<{ id: number; scope: string | undefined } | null>(null);
+    useLayoutEffect(() => {
+        const pending = pendingVisionCommit.current;
+        if (pending && pending.scope !== visionScopeKey) {
+            appliedVisionIds.current.delete(pending.id);
+            pendingVisionCommit.current = null;
+        }
+        onVisionDraftChange?.(prompt);
+        if (pendingVisionCommit.current && pendingVisionCommit.current.scope === visionScopeKey && scopedPrompt.scope === visionScopeKey && scopedPrompt.insertionId === pendingVisionCommit.current.id) {
+            const id = pendingVisionCommit.current.id;
+            pendingVisionCommit.current = null;
+            onVisionInsertionConsumed?.(id);
+        }
+    }, [visionScopeKey, prompt, scopedPrompt.scope, scopedPrompt.insertionId, onVisionDraftChange, onVisionInsertionConsumed]);
     const [selectedTags, setSelectedTags] = useState<string[]>([]);
     const [externalPromptApplied, setExternalPromptApplied] = useState(false);
+    const appliedVisionIds = useRef(new Set<number>());
     const [externalRefImgApplied, setExternalRefImgApplied] = useState(false);
     const [fusionPrompt, setFusionPrompt] = useState("");
 
@@ -293,6 +330,16 @@ export function GenerationPanel(
             setExternalPromptApplied(false);
         }
     }, [externalPrompt, externalPromptApplied, onExternalPromptConsumed]);
+
+    useEffect(() => {
+        if (!visionInsertion || appliedVisionIds.current.has(visionInsertion.id)) return;
+        appliedVisionIds.current.add(visionInsertion.id);
+        pendingVisionCommit.current = { id: visionInsertion.id, scope: visionScopeKey };
+        setScopedPrompt(previous => {
+            const text = previous.scope === visionScopeKey ? previous.text : (initialVisionDraft ?? "");
+            return { scope: visionScopeKey, text: text ? text + '\n' + visionInsertion.text : visionInsertion.text, insertionId: visionInsertion.id };
+        });
+    }, [visionInsertion, visionScopeKey]);
 
     // Sync external reference image from canvas right-click "发送参考图"
     useEffect(() => {
@@ -625,11 +672,12 @@ export function GenerationPanel(
     handleGenerateRef.current = handleGenerate;
     useEffect(() => {
         const handleTriggerGenerate = () => {
+            if (!isVisible) return;
             handleGenerateRef.current();
         };
         document.addEventListener('trigger-generate', handleTriggerGenerate);
         return () => document.removeEventListener('trigger-generate', handleTriggerGenerate);
-    }, []);
+    }, [isVisible]);
 
     // 初始化万能API管理器
     useEffect(() => {
@@ -761,6 +809,7 @@ export function GenerationPanel(
     const removeReferenceImage = (index: number) => {
         setReferenceImages(prev => prev.filter((_, i) => i !== index));
         setReferenceDescriptions(prev => prev.filter((_, i) => i !== index));
+        setReferenceStrengths(prev => prev.filter((_, i) => i !== index));
         setReferenceSelectedCategories(prev => {
             const next: Record<number, Set<string>> = {};
             // 重新映射索引：删除index后，后面的元素索引前移
@@ -1276,7 +1325,7 @@ export function GenerationPanel(
                                     ))}
                                 </div>
                                 {/* Floating thumbnail - portal to body to avoid overflow clipping */}
-                                {hoveredTemplateId && (() => {
+                                {isVisible && hoveredTemplateId && (() => {
                                     const tpl = filteredTemplates.find(t => t.id === hoveredTemplateId);
                                     if (!tpl?.thumbnail || !thumbnailRect) return null;
                                     return createPortal(
@@ -1432,7 +1481,8 @@ export function GenerationPanel(
                                     {img ? (
                                         <div className="flex items-center gap-2 p-1.5">
                                             {/* 缩略图 + 序号锚点 */}
-                                            <div className="relative w-12 h-12 flex-shrink-0 rounded overflow-hidden group">
+                                            <div className="relative w-12 flex-shrink-0 group">
+                                                <div className="w-12 h-12 rounded overflow-hidden">
                                                 <img src={img} className="w-full h-full object-cover" alt="" />
                                                 {/* 序号锚点标签 #1, #2, #3... */}
                                                 <span className={`absolute top-0 left-0 text-[10px] font-bold px-1 py-0 rounded-br leading-tight ${
@@ -1440,11 +1490,13 @@ export function GenerationPanel(
                                                 }`}>
                                                     #{i + 1}
                                                 </span>
+                                                </div>
                                                 <button
                                                     onClick={() => removeReferenceImage(i)}
-                                                    className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500/90 rounded-full text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                                                    aria-label={`移除第${i + 1}张参考图`}
+                                                    className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500/90 rounded-full text-white flex items-center justify-center opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity z-10 [@media(hover:none)]:static [@media(hover:none)]:h-11 [@media(hover:none)]:w-12 [@media(hover:none)]:rounded-md [@media(hover:none)]:opacity-100 [@media(any-pointer:coarse)]:static [@media(any-pointer:coarse)]:h-11 [@media(any-pointer:coarse)]:w-12 [@media(any-pointer:coarse)]:rounded-md [@media(any-pointer:coarse)]:opacity-100"
                                                 >
-                                                    <X className="h-2 w-2" />
+                                                    <X className="h-2 w-2 [@media(hover:none)]:h-4 [@media(hover:none)]:w-4 [@media(any-pointer:coarse)]:h-4 [@media(any-pointer:coarse)]:w-4" />
                                                 </button>
                                             </div>
                                             {/* 参考类型 + 强度 */}
@@ -1714,6 +1766,7 @@ export function GenerationPanel(
             </div>
             {/* 第三方模型调用弹窗 */}
             <ThirdPartyModelDialog
+                interactive={isVisible}
                 isOpen={showThirdPartyDialog}
                 onClose={() => setShowThirdPartyDialog(false)}
                 themeStyle={themeStyle}

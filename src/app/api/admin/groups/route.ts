@@ -10,13 +10,17 @@ async function requireAdmin(request: NextRequest): Promise<User | null> {
   return requireAdminUser(request);
 }
 
+function unknownOutcome(): NextResponse {
+  return NextResponse.json({ success: false, outcome: 'unknown', error: 'Group operation outcome unknown' }, { status: 503 });
+}
+
 export async function GET(request: NextRequest) {
   try {
     const admin = await requireAdmin(request);
     if (!admin) {
       return NextResponse.json({ success: false, error: 'Admin access required' }, { status: 403 });
     }
-    const groups = await dbReadGroups();
+    const groups = await dbReadGroups({ strict: true });
     return NextResponse.json({ success: true, groups });
   } catch (error) {
     console.error('[admin/groups] GET error:', error);
@@ -55,13 +59,14 @@ export async function POST(request: NextRequest) {
         created_at: now,
         updated_at: now,
       };
-      await dbWriteGroup(group);
-      await dbAddAuditLog({
+      if (!await dbWriteGroup(group)) return unknownOutcome();
+      const auditId = await dbAddAuditLog({
         user_id: admin.id, user_name: admin.name,
         action: 'group_create', target_type: 'group', target_id: id,
         detail: `创建分组 ${body.name}`,
         ip_address: null, created_at: now,
       });
+      if (!auditId) return unknownOutcome();
       return NextResponse.json({ success: true, group });
     }
 
@@ -70,7 +75,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: false, error: 'Missing group id' }, { status: 400 });
       }
       const now = Date.now();
-      const groups = await dbReadGroups();
+      const groups = await dbReadGroups({ strict: true });
       const existing = groups.find(g => g.id === body.id);
       if (!existing) {
         return NextResponse.json({ success: false, error: 'Group not found' }, { status: 404 });
@@ -84,13 +89,14 @@ export async function POST(request: NextRequest) {
         created_at: existing.created_at,
         updated_at: now,
       };
-      await dbWriteGroup(updated);
-      await dbAddAuditLog({
+      if (!await dbWriteGroup(updated)) return unknownOutcome();
+      const auditId = await dbAddAuditLog({
         user_id: admin.id, user_name: admin.name,
         action: 'group_update', target_type: 'group', target_id: body.id,
         detail: `更新分组 ${updated.name}`,
         ip_address: null, created_at: now,
       });
+      if (!auditId) return unknownOutcome();
       return NextResponse.json({ success: true, group: updated });
     }
 
@@ -98,13 +104,14 @@ export async function POST(request: NextRequest) {
       if (!body.id) {
         return NextResponse.json({ success: false, error: 'Missing group id' }, { status: 400 });
       }
-      await dbDeleteGroup(body.id);
-      await dbAddAuditLog({
+      if (!await dbDeleteGroup(body.id)) return unknownOutcome();
+      const auditId = await dbAddAuditLog({
         user_id: admin.id, user_name: admin.name,
         action: 'group_delete', target_type: 'group', target_id: body.id,
         detail: `删除分组 ${body.id}`,
         ip_address: null, created_at: Date.now(),
       });
+      if (!auditId) return unknownOutcome();
       return NextResponse.json({ success: true });
     }
 

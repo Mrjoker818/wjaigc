@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Bookmark, Plus, Trash2, Star, Save, ChevronDown, Loader2 } from 'lucide-react';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -52,7 +53,9 @@ export function BrandAssetManager({ currentSettings, onApply, userId, isMonochro
   const [showDropdown, setShowDropdown] = useState(false);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [saveName, setSaveName] = useState('');
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
+  const outsideDismissRef = useRef(false);
 
   // Theme
   const bg = isMonochrome ? 'bg-white' : 'bg-[#1a1a1a]';
@@ -60,6 +63,8 @@ export function BrandAssetManager({ currentSettings, onApply, userId, isMonochro
   const text = isMonochrome ? 'text-gray-900' : 'text-gray-100';
   const textSub = isMonochrome ? 'text-gray-500' : 'text-gray-400';
   const accent = isMonochrome ? '#2563eb' : '#d4af37';
+  // Popper rewrites inline animation; this local utility keeps touch targets unscaled.
+  const popupClassName = 'animate-none! max-w-[calc(100vw-16px)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto rounded-xl p-0 shadow-2xl [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:max-w-full [&_input]:min-h-11 [&_input]:max-w-full [&_input]:text-base lg:[&_input]:text-sm';
 
   // ─── Load assets on mount ───
   useEffect(() => {
@@ -76,16 +81,20 @@ export function BrandAssetManager({ currentSettings, onApply, userId, isMonochro
       .finally(() => setIsLoading(false));
   }, [userId]);
 
-  // ─── Close dropdown on outside click ───
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setShowDropdown(false);
-      }
+  // Capture sees outside presses before canvas/panel bubble isolation can intercept them.
+  useEffect((): (() => void) | undefined => {
+    if (!showDropdown && !showSaveDialog) return;
+    const closeOnOutsidePress = (event: PointerEvent): void => {
+      const target = event.target;
+      if (!(target instanceof Node) || containerRef.current?.contains(target) || popupRef.current?.contains(target)) return;
+      outsideDismissRef.current = true;
+      setShowDropdown(false);
+      setShowSaveDialog(false);
+      setSaveName('');
     };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
+    document.addEventListener('pointerdown', closeOnOutsidePress, true);
+    return (): void => document.removeEventListener('pointerdown', closeOnOutsidePress, true);
+  }, [showDropdown, showSaveDialog]);
 
   // ─── Save current settings as new brand asset ───
   const handleSave = useCallback(async () => {
@@ -161,10 +170,17 @@ export function BrandAssetManager({ currentSettings, onApply, userId, isMonochro
   }, [userId]);
 
   return (
-    <div className="relative" ref={dropdownRef}>
+    <div ref={containerRef} className="relative">
+      <Popover open={showDropdown || showSaveDialog} onOpenChange={(open: boolean): void => {
+        if (open) outsideDismissRef.current = false;
+        setShowDropdown(open);
+        setShowSaveDialog(false);
+        if (!open) setSaveName('');
+      }}>
       {/* Trigger button */}
+      <PopoverTrigger asChild>
       <button
-        onClick={() => setShowDropdown(v => !v)}
+        type="button"
         className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${isMonochrome ? 'text-gray-600 hover:bg-gray-100 border border-gray-200' : 'text-gray-300 hover:bg-[#2a2a2a] border border-white/[0.08]'}`}
       >
         <Bookmark size={12} />
@@ -176,10 +192,26 @@ export function BrandAssetManager({ currentSettings, onApply, userId, isMonochro
         )}
         <ChevronDown size={10} className={`transition-transform ${showDropdown ? 'rotate-180' : ''}`} />
       </button>
+      </PopoverTrigger>
+
+      <PopoverContent
+        ref={popupRef}
+        onCloseAutoFocus={(event: Event): void => {
+          if (outsideDismissRef.current) event.preventDefault();
+          outsideDismissRef.current = false;
+        }}
+        align="end"
+        collisionPadding={8}
+        aria-label={showSaveDialog ? '保存品牌方案' : '已保存的品牌方案'}
+        className={`${popupClassName} ${bg} border ${border}`}
+        onPointerDown={(event: React.PointerEvent<HTMLDivElement>): void => event.stopPropagation()}
+        onMouseDown={(event: React.MouseEvent<HTMLDivElement>): void => event.stopPropagation()}
+        onWheel={(event: React.WheelEvent<HTMLDivElement>): void => event.stopPropagation()}
+      >
 
       {/* Dropdown panel */}
       {showDropdown && (
-        <div className={`absolute top-full left-0 mt-1 w-72 rounded-xl shadow-2xl overflow-hidden z-50 ${bg} border ${border}`}>
+        <>
           {/* Header */}
           <div className={`flex items-center justify-between px-3 py-2 border-b ${border}`}>
             <span className={`text-xs font-semibold ${text}`}>已保存的品牌方案</span>
@@ -243,7 +275,7 @@ export function BrandAssetManager({ currentSettings, onApply, userId, isMonochro
                   {/* Delete */}
                   <button
                     onClick={(e) => handleDelete(asset.id, e)}
-                    className={`shrink-0 opacity-0 group-hover:opacity-100 p-1 rounded transition-all cursor-pointer ${isMonochrome ? 'text-gray-400 hover:text-red-500' : 'text-gray-500 hover:text-red-400'}`}
+                    className={`shrink-0 opacity-100 p-1 rounded transition-all cursor-pointer ${isMonochrome ? 'text-gray-400 hover:text-red-500' : 'text-gray-500 hover:text-red-400'}`}
                     title="删除方案"
                   >
                     <Trash2 size={11} />
@@ -252,12 +284,12 @@ export function BrandAssetManager({ currentSettings, onApply, userId, isMonochro
               ))
             )}
           </div>
-        </div>
+        </>
       )}
 
       {/* Save dialog */}
       {showSaveDialog && (
-        <div className={`absolute top-full left-0 mt-1 w-72 rounded-xl shadow-2xl overflow-hidden z-50 ${bg} border ${border}`}>
+        <>
           <div className={`px-3 py-2 border-b ${border}`}>
             <span className={`text-xs font-semibold ${text}`}>保存品牌方案</span>
           </div>
@@ -276,7 +308,7 @@ export function BrandAssetManager({ currentSettings, onApply, userId, isMonochro
               <button
                 onClick={handleSave}
                 disabled={!saveName.trim() || isSaving}
-                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-black cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${isMonochrome ? 'text-white' : 'text-black'} cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
                 style={{ background: accent }}
               >
                 {isSaving ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
@@ -290,8 +322,10 @@ export function BrandAssetManager({ currentSettings, onApply, userId, isMonochro
               </button>
             </div>
           </div>
-        </div>
+        </>
       )}
+      </PopoverContent>
+      </Popover>
     </div>
   );
 }

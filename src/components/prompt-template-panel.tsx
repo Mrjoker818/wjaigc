@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useId } from 'react';
 import { X, Plus, Edit2, Trash2, Search, Tag, FileText, Save, ChevronDown, Image as ImageIcon, Upload } from 'lucide-react';
 import { 
   PromptTemplate, 
@@ -26,6 +26,10 @@ export default function PromptTemplatePanel({
   isAdmin = false,
   onUseTemplate 
 }: PromptTemplatePanelProps) {
+  const templateNameId = useId();
+  const templateContentId = useId();
+  const templateCategoryId = useId();
+  const templateTagsId = useId();
   const [templates, setTemplates] = useState<PromptTemplate[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('');
@@ -189,7 +193,7 @@ export default function PromptTemplatePanel({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center">
+    <div className="fixed inset-0 z-[200] flex items-center justify-center" data-modal="prompt-templates">
       {/* Backdrop */}
       <div 
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
@@ -197,15 +201,15 @@ export default function PromptTemplatePanel({
       />
       
       {/* Panel */}
-      <div className={`relative w-full max-w-2xl max-h-[80vh] rounded-2xl shadow-2xl flex flex-col ${
+      <div className={`relative min-h-0 w-full max-w-2xl max-h-[80vh] rounded-2xl shadow-2xl flex flex-col max-md:h-[calc(100dvh-1rem)] max-md:max-h-[calc(100dvh-1rem)] max-md:max-w-[calc(100vw-1rem)] max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11 max-md:[&_button]:shrink-0 max-md:[&_button]:whitespace-nowrap max-md:[&_input:not([type=checkbox])]:min-h-11 max-md:[&_input:not([type=checkbox])]:text-base max-md:[&_textarea]:text-base max-md:[&_select]:min-h-11 max-md:[&_select]:text-base [@media(pointer:coarse)]:[&_button]:min-h-11 [@media(pointer:coarse)]:[&_button]:min-w-11 [@media(pointer:coarse)]:[&_button]:shrink-0 [@media(pointer:coarse)]:[&_button]:whitespace-nowrap [@media(pointer:coarse)]:[&_input:not([type=checkbox])]:min-h-11 [@media(pointer:coarse)]:[&_input:not([type=checkbox])]:text-base [@media(pointer:coarse)]:[&_select]:min-h-11 [@media(pointer:coarse)]:[&_select]:text-base [@media(pointer:coarse)]:[&_textarea]:text-base ${
         mc ? 'bg-white border border-gray-200' : 'bg-[#1a1a1a] border border-white/[0.12]'
       }`}>
         {/* Header */}
-        <div className={`flex items-center justify-between px-6 py-4 border-b ${
+        <div className={`flex shrink-0 items-center justify-between gap-2 px-6 py-4 border-b max-md:px-3 max-md:py-2 ${
           mc ? 'border-gray-200' : 'border-white/[0.08]'
         }`}>
-          <div className="flex items-center gap-3">
-            <FileText className={`w-5 h-5 ${mc ? 'text-gray-700' : 'text-gold'}`} />
+          <div className="flex min-w-0 flex-wrap items-center gap-3 max-md:gap-2">
+            <FileText className={`w-5 h-5 max-md:hidden ${mc ? 'text-gray-700' : 'text-gold'}`} />
             <h2 className={`text-lg font-semibold ${mc ? 'text-gray-900' : 'text-foreground'}`}>
               提示词模板
             </h2>
@@ -216,6 +220,7 @@ export default function PromptTemplatePanel({
             </span>
           </div>
           <button
+            aria-label="关闭提示词模板"
             onClick={onClose}
             className={`p-2 rounded-lg transition-colors ${
               mc ? 'hover:bg-gray-100 text-gray-500' : 'hover:bg-white/[0.06] text-gold-muted'
@@ -226,11 +231,11 @@ export default function PromptTemplatePanel({
         </div>
 
         {/* Toolbar */}
-        <div className={`flex items-center gap-3 px-6 py-3 border-b ${
+        <div className={`flex shrink-0 items-center gap-3 px-6 py-3 border-b max-md:grid max-md:grid-cols-2 max-md:gap-2 max-md:px-3 max-md:py-2 ${
           mc ? 'border-gray-200' : 'border-white/[0.08]'
         }`}>
           {/* Search */}
-          <div className={`flex-1 flex items-center gap-2 px-3 py-2 rounded-lg ${
+          <div className={`min-w-0 flex-1 flex items-center gap-2 px-3 py-2 rounded-lg max-md:col-span-2 max-md:py-0 ${
             mc ? 'bg-gray-50' : 'bg-white/[0.04]'
           }`}>
             <Search className={`w-4 h-4 ${mc ? 'text-gray-400' : 'text-gold-muted/50'}`} />
@@ -239,7 +244,8 @@ export default function PromptTemplatePanel({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="搜索模板..."
-              className={`flex-1 bg-transparent text-sm outline-none ${
+              aria-label="搜索模板"
+              className={`min-w-0 flex-1 bg-transparent text-sm outline-none ${
                 mc ? 'text-gray-900 placeholder:text-gray-400' : 'text-text-bright placeholder:text-gold-muted/50'
               }`}
             />
@@ -248,9 +254,10 @@ export default function PromptTemplatePanel({
           {/* Category Filter */}
           <div className="relative">
             <select
+              aria-label="模板分类"
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value)}
-              className={`appearance-none pl-3 pr-8 py-2 rounded-lg text-sm cursor-pointer ${
+              className={`max-md:w-full max-md:min-w-0 appearance-none pl-3 pr-8 py-2 rounded-lg text-sm cursor-pointer ${
                 mc 
                   ? 'bg-gray-50 text-gray-700 border border-gray-200' 
                   : 'bg-white/[0.04] text-gold-muted border border-white/[0.08]'
@@ -281,10 +288,10 @@ export default function PromptTemplatePanel({
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto">
           {/* Add/Edit Form */}
           {showAddForm && (
-            <div className={`mx-6 my-4 p-4 rounded-xl ${
+            <div className={`mx-6 my-4 p-4 rounded-xl max-md:mx-3 max-md:p-3 ${
               mc ? 'bg-gray-50 border border-gray-200' : 'bg-white/[0.03] border border-white/[0.08]'
             }`}>
               <h3 className={`text-sm font-medium mb-3 ${mc ? 'text-gray-700' : 'text-gold'}`}>
@@ -294,10 +301,11 @@ export default function PromptTemplatePanel({
               <div className="space-y-3">
                 {/* Name */}
                 <div>
-                  <label className={`text-xs mb-1 block ${mc ? 'text-gray-500' : 'text-gold-muted'}`}>
+                  <label htmlFor={templateNameId} className={`text-xs mb-1 block ${mc ? 'text-gray-500' : 'text-gold-muted'}`}>
                     模板名称 *
                   </label>
                   <input
+                    id={templateNameId}
                     type="text"
                     value={formName}
                     onChange={(e) => setFormName(e.target.value)}
@@ -312,10 +320,11 @@ export default function PromptTemplatePanel({
 
                 {/* Content */}
                 <div>
-                  <label className={`text-xs mb-1 block ${mc ? 'text-gray-500' : 'text-gold-muted'}`}>
+                  <label htmlFor={templateContentId} className={`text-xs mb-1 block ${mc ? 'text-gray-500' : 'text-gold-muted'}`}>
                     模板内容 * <span className="opacity-60">（使用 {'{subject}'} 作为占位符）</span>
                   </label>
                   <textarea
+                    id={templateContentId}
                     value={formContent}
                     onChange={(e) => setFormContent(e.target.value)}
                     placeholder="A highly detailed image of {subject}, professional photography..."
@@ -329,12 +338,13 @@ export default function PromptTemplatePanel({
                 </div>
 
                 {/* Category & Tags */}
-                <div className="flex gap-3">
+                <div className="flex gap-3 max-md:flex-col [&>div]:min-w-0">
                   <div className="flex-1">
-                    <label className={`text-xs mb-1 block ${mc ? 'text-gray-500' : 'text-gold-muted'}`}>
+                    <label htmlFor={templateCategoryId} className={`text-xs mb-1 block ${mc ? 'text-gray-500' : 'text-gold-muted'}`}>
                       分类
                     </label>
                     <input
+                      id={templateCategoryId}
                       type="text"
                       value={formCategory}
                       onChange={(e) => setFormCategory(e.target.value)}
@@ -347,10 +357,11 @@ export default function PromptTemplatePanel({
                     />
                   </div>
                   <div className="flex-1">
-                    <label className={`text-xs mb-1 block ${mc ? 'text-gray-500' : 'text-gold-muted'}`}>
+                    <label htmlFor={templateTagsId} className={`text-xs mb-1 block ${mc ? 'text-gray-500' : 'text-gold-muted'}`}>
                       标签 <span className="opacity-60">（逗号分隔）</span>
                     </label>
                     <input
+                      id={templateTagsId}
                       type="text"
                       value={formTags}
                       onChange={(e) => setFormTags(e.target.value)}
@@ -420,7 +431,7 @@ export default function PromptTemplatePanel({
 
                 {/* Admin: Global toggle */}
                 {isAdmin && (
-                  <label className={`flex items-center gap-2 text-sm cursor-pointer ${
+                  <label className={`flex items-center gap-2 text-sm cursor-pointer max-md:min-h-11 ${
                     mc ? 'text-gray-700' : 'text-gold-muted'
                   }`}>
                     <input
@@ -461,7 +472,7 @@ export default function PromptTemplatePanel({
           )}
 
           {/* Template List */}
-          <div className="px-6 py-4 space-y-2">
+          <div className="px-6 py-4 space-y-2 max-md:px-3">
             {filteredTemplates.length === 0 ? (
               <div className={`text-center py-12 ${mc ? 'text-gray-400' : 'text-gold-muted/50'}`}>
                 <FileText className="w-12 h-12 mx-auto mb-3 opacity-50" />
@@ -496,7 +507,7 @@ export default function PromptTemplatePanel({
 
                     {/* Content */}
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
+                      <div className="flex items-center gap-2 mb-1 max-md:flex-wrap">
                         <h4 className={`text-sm font-medium truncate ${mc ? 'text-gray-900' : 'text-foreground'}`}>
                           {template.name}
                         </h4>
@@ -517,12 +528,12 @@ export default function PromptTemplatePanel({
                         {template.content}
                       </p>
                       {template.tags.length > 0 && (
-                        <div className="flex items-center gap-1 mt-2">
+                        <div className="flex items-center gap-1 mt-2 max-md:flex-wrap">
                           <Tag className={`w-3 h-3 ${mc ? 'text-gray-400' : 'text-gold-muted/50'}`} />
                           {template.tags.map(tag => (
                             <span
                               key={tag}
-                              className={`text-[10px] px-1.5 py-0.5 rounded ${
+                              className={`min-w-0 max-w-full [overflow-wrap:anywhere] text-[10px] px-1.5 py-0.5 rounded ${
                                 mc ? 'bg-gray-100 text-gray-600' : 'bg-white/[0.04] text-gold-muted/70'
                               }`}
                             >
@@ -534,7 +545,7 @@ export default function PromptTemplatePanel({
                     </div>
                   </div>
                   {/* Actions */}
-                  <div className="flex items-center justify-end gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="flex items-center justify-end gap-1 mt-2 opacity-0 group-hover:opacity-100 focus-within:opacity-100 max-md:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
                     <button
                       onClick={() => handleUseTemplate(template)}
                       className={`p-1.5 rounded-lg transition-colors ${
@@ -570,7 +581,7 @@ export default function PromptTemplatePanel({
         </div>
 
         {/* Footer */}
-        <div className={`px-6 py-3 border-t text-xs ${
+        <div className={`shrink-0 px-6 py-3 border-t text-xs max-md:px-3 max-md:py-2 ${
           mc ? 'border-gray-200 text-gray-400' : 'border-white/[0.08] text-gold-muted/50'
         }`}>
           提示：在提示词输入框中输入 <kbd className={`px-1.5 py-0.5 rounded ${

@@ -577,7 +577,7 @@ export function BrandSettingsForm({
                   <span className={`text-xs font-mono ${isMonochrome ? 'text-gray-500' : 'text-gray-400'}`}>{c}</span>
                   <button
                     onClick={() => onRemoveBrandColor(c)}
-                    className={`opacity-0 group-hover:opacity-100 text-xs ${textMuted} hover:text-red-400 transition-opacity cursor-pointer`}
+                    className={`opacity-100 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 text-xs ${textMuted} hover:text-red-400 transition-opacity cursor-pointer`}
                   >
                     ✕
                   </button>
@@ -633,7 +633,7 @@ export function BrandSettingsForm({
         {refImage ? (
           <div className={`relative rounded-lg overflow-hidden border ${border} group`}>
             <img src={refImage} alt="参考图" className="w-full h-28 object-cover" />
-            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+            <div className="absolute inset-0 bg-black/40 opacity-100 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity flex items-center justify-center gap-2">
               <button
                 onClick={() => fileInputRef.current?.click()}
                 className={`px-2.5 py-1 rounded-md text-xs font-medium ${accent} ${isMonochrome ? 'text-white' : 'text-black'} cursor-pointer`}
@@ -667,7 +667,7 @@ export function BrandSettingsForm({
         {productImage ? (
           <div className="relative group">
             <img src={productImage} alt="产品图" className="w-full h-28 object-contain rounded-lg border border-white/[0.08]" />
-            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center gap-2">
+            <div className="absolute inset-0 bg-black/50 opacity-100 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity rounded-lg flex items-center justify-center gap-2">
               <button
                 onClick={() => productFileInputRef.current?.click()}
                 className={`px-2.5 py-1 rounded-md text-xs font-medium ${accent} ${accentHover} ${isMonochrome ? 'text-white' : 'text-black'} transition-colors cursor-pointer`}

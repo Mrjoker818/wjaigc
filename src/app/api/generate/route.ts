@@ -71,6 +71,7 @@ import {
   type TaskModelDescriptor,
 } from '@/lib/task-core/model-capability-contract';
 import { trustedGatewayContext } from '@/lib/media-gateway/internal-client';
+import { submitRestoredGenerationRetry } from '@/lib/task-core/restored-generation-retry';
 
 class OrdinaryReferenceTooLargeError extends Error {}
 
@@ -174,6 +175,18 @@ export async function POST(request: NextRequest) {
         error: '当前请求不能使用内部执行标记', retryable: false }, { status: 400 });
     }
     const projectAccess = await authorizeGenerationProject({ actorUserId: authResult.userId, projectId: body.projectId });
+    if (Object.prototype.hasOwnProperty.call(body, 'retryTaskId')) {
+      try {
+        return NextResponse.json(await submitRestoredGenerationRetry({ body, user: authResult.user,
+          access: projectAccess, origin: request.nextUrl.origin, schedule: execute => after(execute) }));
+      } catch (error) {
+        const failure = error && typeof error === 'object' ? error as { status?: unknown; code?: unknown } : {};
+        const status = typeof failure.status === 'number' && [400, 402, 403, 404, 409, 503].includes(failure.status) ? failure.status : 503;
+        return NextResponse.json({ success: false, code: typeof failure.code === 'string' ? failure.code : 'GENERATION_RETRY_UNAVAILABLE',
+          error: status === 402 ? '积分不足，请充值后重试原任务' : status === 503 ? '重试结果待确认，请再次点击原任务重试，不要重新提交表单' : error instanceof Error ? error.message : '原任务暂不能重试',
+          retryable: status === 503 }, { status });
+      }
+    }
     const {
       prompt,
       aspectRatio = '1:1',

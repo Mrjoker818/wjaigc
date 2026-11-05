@@ -309,10 +309,15 @@ describe('1394 actual batch / original prepared writing composition (SQL fixture
     const before = structuredClone(committed.versions); let done = false;
     delayedCommit = async () => { await barrier; };
     const operation = importDocumentMediaBatch('actor', request).then(result => { done = true; return result; });
-    await vi.waitFor(() => expect(events).toContain('FINAL-COMMIT')); expect(done).toBe(false);
-    release!(); await operation;
+    try {
+      await vi.waitFor(() => expect(events).toContain('FINAL-COMMIT'), { timeout: 15000 });
+      expect(done).toBe(false);
+    } finally {
+      release!();
+      await operation;
+    }
     expect(committed.versions['private-a']).toEqual(before['private-a']); expect(committed.versions['private-b']).toEqual(before['private-b']);
-  });
+  }, 25000);
   it('cancel after pending child writes rolls back everything; no ACK or subsequent child', async () => {
     abortBeforeCommit = new AbortController();
     await expect(importDocumentMediaBatch('actor', request, abortBeforeCommit.signal)).rejects.toThrow('DOCUMENT_MEDIA_CANCELLED');

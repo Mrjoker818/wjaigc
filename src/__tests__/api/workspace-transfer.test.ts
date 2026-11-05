@@ -19,6 +19,7 @@ vi.mock('@/lib/asset-core/service', async (importOriginal) => {
 
 import { POST } from '@/app/api/assets/transfer/route';
 import { AssetServiceError } from '@/lib/asset-core/service';
+import { expectedActorHeaders } from '@/lib/expected-actor-header';
 
 const baseBody = {
   sourceVersion: 'version-a',
@@ -95,6 +96,36 @@ describe('POST /api/assets/transfer', () => {
 
     expect(response.status).toBe(401);
     expect(mocks.sendVersionToWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('rejects a changed account before parsing or transferring an asset', async () => {
+    mocks.getSessionUser.mockResolvedValue({ id: 'account-b', role: 'user' });
+    const request = new NextRequest('http://localhost/api/assets/transfer', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-wujie-expected-actor-id': 'account-a' },
+      body: '{invalid-json',
+    });
+    const response = await POST(request);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: 'ACTOR_SCOPE_CHANGED' });
+    expect(mocks.sendVersionToWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('accepts a matching expected account and retains the session identity', async () => {
+    const request = new NextRequest('http://localhost/api/assets/transfer', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-wujie-expected-actor-id': 'owner-1' },
+      body: JSON.stringify(baseBody),
+    });
+    const response = await POST(request);
+    expect(response.status).toBe(200);
+    expect(mocks.sendVersionToWorkspace).toHaveBeenCalledWith(expect.objectContaining({ actorUserId: 'owner-1' }));
+  });
+
+  it('accepts an encoded non-ASCII account ID for single-asset transfer', async () => {
+    mocks.getSessionUser.mockResolvedValue({ id: '用户甲', role: 'user' });
+    const req = transferRequest(baseBody);
+    for (const [name, value] of Object.entries(expectedActorHeaders('用户甲'))) req.headers.set(name, value);
+    expect((await POST(req)).status).toBe(200);
+    expect(mocks.sendVersionToWorkspace).toHaveBeenCalledWith(expect.objectContaining({ actorUserId: '用户甲' }));
   });
 
   it('accepts only the brief fields and never accepts an owner or client digest', async () => {

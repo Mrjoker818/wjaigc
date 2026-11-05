@@ -29,6 +29,7 @@ import { PsdCanvas } from './PsdCanvas';
 import { LayerPanel } from './LayerPanel';
 import { LayerInspector } from './LayerInspector';
 import { ExportToolbar } from './ExportToolbar';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 interface PsdLayerEditorProps {
   imageUrl: string;
@@ -43,6 +44,7 @@ interface PsdLayerEditorProps {
 }
 
 type EditorStage = 'choosing' | 'loading' | 'cancelling' | 'editing' | 'exporting' | 'done' | 'error';
+type MobileEditorPane = 'canvas' | 'layers' | 'properties';
 type LayerErrorAction = 'layering' | 'cancelling' | 'terminal';
 type LayerDocumentStatus = 'temporary' | 'loading' | 'creating' | 'saved' | 'dirty' | 'saving' | 'error' | 'conflict';
 
@@ -131,7 +133,7 @@ const LAYER_MODES: Array<{ value: LayerEngineMode; label: string }> = [
 
 export function LayerModeControl({ value, disabled, onChange }: LayerModeControlProps) {
   return (
-    <div className="inline-flex h-8 items-center rounded-lg bg-neutral-950 p-0.5" role="group" aria-label="图片分层引擎">
+    <div className="inline-flex min-h-11 items-center rounded-lg bg-neutral-950 p-0.5 md:min-h-8" role="group" aria-label="图片分层引擎">
       {LAYER_MODES.map((item) => (
         <button
           key={item.value}
@@ -140,7 +142,7 @@ export function LayerModeControl({ value, disabled, onChange }: LayerModeControl
           aria-pressed={value === item.value}
           disabled={disabled}
           onClick={() => onChange(item.value)}
-          className={`h-7 min-w-14 rounded-md px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 disabled:cursor-not-allowed disabled:opacity-50 ${
+          className={`h-11 min-w-14 rounded-md px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 disabled:cursor-not-allowed disabled:opacity-50 md:[@media(hover:hover)_and_(pointer:fine)]:h-7 ${
             value === item.value
               ? 'bg-amber-500 text-neutral-950'
               : 'text-neutral-300 hover:bg-neutral-800 hover:text-white'
@@ -189,6 +191,8 @@ export default function PsdLayerEditor({
   const [qualityWarnings, setQualityWarnings] = useState<string[]>([]);
   const [showLayerPanel, setShowLayerPanel] = useState(true);
   const [showInspector, setShowInspector] = useState(true);
+  const [mobilePane, setMobilePane] = useState<MobileEditorPane>('canvas');
+  const isMobileViewport = useIsMobile();
   const [documentStatus, setDocumentStatus] = useState<LayerDocumentStatus>(source ? 'loading' : 'temporary');
   const [documentError, setDocumentError] = useState('');
   const [conflictDocument, setConflictDocument] = useState<LayerDocumentRecord | null>(null);
@@ -952,9 +956,13 @@ export default function PsdLayerEditor({
   }, []);
 
   const selectedLayer = layers.find(layer => layer.id === selectedLayerId) || null;
-
-  const panelWidth = 'min(85vw, 1200px)';
-  const panelHeight = 'min(85vh, 800px)';
+  const activeMobilePane = (
+    (mobilePane === 'layers' && !showLayerPanel)
+    || (mobilePane === 'properties' && !showInspector)
+  ) ? 'canvas' : mobilePane;
+  const mobileCanvasCovered = isMobileViewport
+    && (stage === 'editing' || stage === 'exporting')
+    && activeMobilePane !== 'canvas';
 
   return (
     <div
@@ -967,23 +975,24 @@ export default function PsdLayerEditor({
 
       {/* Floating panel */}
       <div
-        className="absolute flex flex-col rounded-xl overflow-hidden shadow-2xl border border-neutral-700"
+        role="dialog"
+        aria-modal="true"
+        aria-label="PSD 分层编辑器"
+        className="absolute left-2 top-2 flex h-[calc(100dvh-16px)] w-[calc(100vw-16px)] flex-col overflow-hidden rounded-xl border border-neutral-700 shadow-2xl md:left-[var(--psd-panel-x)] md:top-[var(--psd-panel-y)] md:h-[min(85vh,800px)] md:w-[min(85vw,1200px)]"
         style={{
-          left: panelPos.x,
-          top: panelPos.y,
-          width: panelWidth,
-          height: panelHeight,
+          '--psd-panel-x': `${panelPos.x}px`,
+          '--psd-panel-y': `${panelPos.y}px`,
           background: '#2a2a2a',
-        }}
+        } as React.CSSProperties}
       >
         {/* Title bar - draggable */}
         <div
-          className="flex items-center justify-between px-4 py-2.5 bg-neutral-800 border-b border-neutral-700 cursor-move select-none shrink-0"
+          className="flex shrink-0 cursor-move select-none flex-wrap items-center justify-between gap-2 border-b border-neutral-700 bg-neutral-800 px-3 py-2 md:flex-nowrap md:px-4 md:py-2.5"
           onMouseDown={handleTitleMouseDown}
         >
-          <div className="flex items-center gap-3">
-            <Layers3 className="h-4 w-4 text-amber-400" aria-hidden="true" />
-            <h2 className="text-sm font-medium text-white/90">PSD 分层编辑器</h2>
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 md:gap-3">
+            <Layers3 className="h-4 w-4 shrink-0 text-amber-400" aria-hidden="true" />
+            <h2 className="whitespace-nowrap text-sm font-medium text-white/90">PSD 分层编辑器</h2>
             {(stage === 'editing' || stage === 'exporting' || stage === 'done') && (
               <span className="rounded-md bg-white/10 px-2 py-0.5 text-xs text-white/60">
                 <span data-testid="layer-count">
@@ -993,7 +1002,7 @@ export default function PsdLayerEditor({
             )}
             <span
               data-testid="layer-document-status"
-              className={`rounded-md px-2 py-0.5 text-xs ${
+              className={`whitespace-nowrap rounded-md px-2 py-0.5 text-xs ${
                 documentStatus === 'conflict' || documentStatus === 'error'
                   ? 'bg-red-500/15 text-red-300'
                   : documentStatus === 'saved'
@@ -1010,18 +1019,20 @@ export default function PsdLayerEditor({
               </span>
             )}
           </div>
-          <LayerModeControl
-            value={layerEngine}
-            disabled={stage !== 'choosing' && stage !== 'error'}
-            onChange={setLayerEngine}
-          />
-          <div className="flex items-center gap-1">
+          <div className={`${stage === 'choosing' || stage === 'error' ? 'order-last basis-full' : 'hidden'} md:order-none md:block md:basis-auto`}>
+            <LayerModeControl
+              value={layerEngine}
+              disabled={stage !== 'choosing' && stage !== 'error'}
+              onChange={setLayerEngine}
+            />
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
             {(stage === 'editing' || stage === 'exporting') && (
               <>
                 <button
                   type="button"
                   onClick={() => setShowLayerPanel(!showLayerPanel)}
-                  className={`rounded-md p-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${showLayerPanel ? 'bg-amber-500/20 text-amber-400' : 'text-white/50 hover:bg-white/10 hover:text-white'}`}
+                  className={`hidden h-11 w-11 shrink-0 items-center justify-center rounded-md p-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 md:inline-flex md:[@media(hover:hover)_and_(pointer:fine)]:h-7 md:[@media(hover:hover)_and_(pointer:fine)]:w-7 ${showLayerPanel ? 'bg-amber-500/20 text-amber-400' : 'text-white/50 hover:bg-white/10 hover:text-white'}`}
                   title="图层面板"
                   aria-label="图层面板"
                 >
@@ -1030,19 +1041,19 @@ export default function PsdLayerEditor({
                 <button
                   type="button"
                   onClick={() => setShowInspector(!showInspector)}
-                  className={`rounded-md p-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${showInspector ? 'bg-amber-500/20 text-amber-400' : 'text-white/50 hover:bg-white/10 hover:text-white'}`}
+                  className={`hidden h-11 w-11 shrink-0 items-center justify-center rounded-md p-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 md:inline-flex md:[@media(hover:hover)_and_(pointer:fine)]:h-7 md:[@media(hover:hover)_and_(pointer:fine)]:w-7 ${showInspector ? 'bg-amber-500/20 text-amber-400' : 'text-white/50 hover:bg-white/10 hover:text-white'}`}
                   title="属性面板"
                   aria-label="属性面板"
                 >
                   <SlidersHorizontal className="h-4 w-4" />
                 </button>
-                <div className="mx-1 h-4 w-px bg-white/10" />
+                <div className="mx-1 hidden h-4 w-px bg-white/10 md:block" />
               </>
             )}
             <button
               type="button"
               onClick={handleClose}
-              className="rounded-md p-1.5 text-white/50 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-md p-1.5 text-white/50 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 md:[@media(hover:hover)_and_(pointer:fine)]:h-7 md:[@media(hover:hover)_and_(pointer:fine)]:w-7"
               title="关闭 (Esc)"
               aria-label="关闭"
             >
@@ -1051,6 +1062,31 @@ export default function PsdLayerEditor({
           </div>
         </div>
 
+        {(stage === 'editing' || stage === 'exporting') && (
+          <div role="group" aria-label="PSD 编辑视图" className="grid shrink-0 grid-cols-3 gap-1 border-b border-neutral-700 bg-neutral-900 p-1 md:hidden">
+            {([
+              { id: 'canvas', label: '画布' },
+              { id: 'layers', label: '图层' },
+              { id: 'properties', label: '属性' },
+            ] as const).map(pane => (
+              <button
+                key={pane.id}
+                type="button"
+                aria-pressed={activeMobilePane === pane.id}
+                aria-controls={`psd-mobile-pane-${pane.id}`}
+                onClick={() => {
+                  if (pane.id === 'layers') setShowLayerPanel(true);
+                  if (pane.id === 'properties') setShowInspector(true);
+                  setMobilePane(pane.id);
+                }}
+                className={`min-h-11 min-w-11 whitespace-nowrap rounded-md px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${activeMobilePane === pane.id ? 'bg-amber-500 text-neutral-950' : 'text-neutral-300 hover:bg-neutral-800'}`}
+              >
+                {pane.label}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Progress bar */}
         {(stage === 'loading' || stage === 'cancelling' || stage === 'exporting') && (
           <div className="h-0.5 bg-neutral-800 shrink-0">
@@ -1058,20 +1094,18 @@ export default function PsdLayerEditor({
           </div>
         )}
 
-        {/* Main content area - three-column layout */}
-        <div className="flex-1 flex min-h-0 relative">
           {documentStatus === 'error' && documentError && (
             <div
               data-testid="layer-document-save-error"
-              className="absolute inset-x-0 top-0 z-30 flex items-center justify-center gap-3 border-b border-red-500/30 bg-neutral-950/95 px-4 py-3 text-xs text-red-200 shadow-lg"
+              className="relative z-30 flex shrink-0 flex-col gap-2 border-b border-red-500/30 bg-neutral-950/95 px-3 py-2 text-xs text-red-200 shadow-lg md:flex-row md:items-center md:justify-center md:gap-3 md:px-4 md:py-3"
               role="alert"
             >
-              <span>{documentError}</span>
+              <span className="min-w-0 break-words">{documentError}</span>
               {dirtyRef.current && (
                 <button
                   type="button"
                   onClick={() => { void flushLayerDocument(); }}
-                  className="h-8 rounded-md bg-red-400 px-3 font-medium text-neutral-950 hover:bg-red-300"
+                  className="min-h-11 min-w-11 shrink-0 whitespace-nowrap rounded-md bg-red-400 px-3 py-2 font-medium text-neutral-950 hover:bg-red-300 md:[@media(hover:hover)_and_(pointer:fine)]:min-h-8 md:[@media(hover:hover)_and_(pointer:fine)]:py-0"
                 >
                   重试保存
                 </button>
@@ -1081,23 +1115,23 @@ export default function PsdLayerEditor({
           {documentStatus === 'conflict' && (
             <div
               data-testid="layer-document-conflict"
-              className="absolute inset-x-0 top-0 z-30 flex items-center justify-center gap-3 border-b border-red-500/30 bg-neutral-950/95 px-4 py-3 text-xs text-red-200 shadow-lg"
+              className="relative z-30 flex shrink-0 flex-col gap-2 border-b border-red-500/30 bg-neutral-950/95 px-3 py-2 text-xs text-red-200 shadow-lg min-[480px]:flex-row min-[480px]:items-center md:flex-row md:items-center md:justify-center md:gap-3 md:px-4 md:py-3"
               role="alert"
             >
-              <span>{documentError || '该图层文档已在其他窗口更新。'}</span>
+              <span className="min-w-0 break-words">{documentError || '该图层文档已在其他窗口更新。'}</span>
               {conflictDocument ? (
                 <>
                   <button
                     type="button"
                     onClick={applyServerDocument}
-                    className="h-8 rounded-md bg-red-400 px-3 font-medium text-neutral-950 hover:bg-red-300"
+                    className="min-h-11 min-w-11 shrink-0 whitespace-nowrap rounded-md bg-red-400 px-3 py-2 font-medium text-neutral-950 hover:bg-red-300 md:[@media(hover:hover)_and_(pointer:fine)]:min-h-8 md:[@media(hover:hover)_and_(pointer:fine)]:py-0"
                   >
                     使用服务器版本
                   </button>
                   <button
                     type="button"
                     onClick={keepLocalDocument}
-                    className="h-8 rounded-md bg-neutral-700 px-3 text-white hover:bg-neutral-600"
+                    className="min-h-11 min-w-11 shrink-0 whitespace-nowrap rounded-md bg-neutral-700 px-3 py-2 text-white hover:bg-neutral-600 md:[@media(hover:hover)_and_(pointer:fine)]:min-h-8 md:[@media(hover:hover)_and_(pointer:fine)]:py-0"
                   >
                     保留当前修改并重试
                   </button>
@@ -1106,16 +1140,24 @@ export default function PsdLayerEditor({
                 <button
                   type="button"
                   onClick={() => { void reloadConflictDocument(); }}
-                  className="h-8 rounded-md bg-red-400 px-3 font-medium text-neutral-950 hover:bg-red-300"
+                  className="min-h-11 min-w-11 shrink-0 whitespace-nowrap rounded-md bg-red-400 px-3 py-2 font-medium text-neutral-950 hover:bg-red-300 md:[@media(hover:hover)_and_(pointer:fine)]:min-h-8 md:[@media(hover:hover)_and_(pointer:fine)]:py-0"
                 >
                   重新加载服务器版本
                 </button>
               )}
             </div>
           )}
+        {/* Main content area - three-column layout */}
+        <div className="flex-1 flex min-h-0 relative">
           {/* Left sidebar: Layer panel */}
           {showLayerPanel && (stage === 'editing' || stage === 'exporting') && (
-            <div className="w-56 shrink-0 flex flex-col bg-neutral-900/95 border-r border-neutral-700 overflow-hidden">
+            <div
+              id="psd-mobile-pane-layers"
+              role="region"
+              aria-label="图层列表"
+              aria-hidden={isMobileViewport && activeMobilePane !== 'layers'}
+              className={`absolute inset-0 z-20 w-full shrink-0 flex-col overflow-hidden border-r border-neutral-700 bg-neutral-900 md:static md:z-auto md:w-56 md:bg-neutral-900/95 ${activeMobilePane === 'layers' ? 'flex' : 'hidden md:flex'}`}
+            >
               <div className="flex items-center justify-between px-3 py-2 border-b border-neutral-700 shrink-0">
                 <span className="text-xs font-medium text-white/80">图层</span>
                 <span className="text-xs text-white/40">{layers.length} 层</span>
@@ -1135,7 +1177,13 @@ export default function PsdLayerEditor({
           )}
 
           {/* Center: Canvas area with checkerboard background */}
-          <div className="flex-1 relative overflow-hidden"
+          <div
+            id="psd-mobile-pane-canvas"
+            role="region"
+            aria-label="图层画布"
+            aria-hidden={mobileCanvasCovered}
+            inert={mobileCanvasCovered}
+            className="relative min-w-0 flex-1 overflow-hidden"
             style={{
               background: `
                 repeating-conic-gradient(#3a3a3a 0% 25%, #2e2e2e 0% 50%) 0 0 / 20px 20px
@@ -1143,8 +1191,8 @@ export default function PsdLayerEditor({
             }}
           >
             {stage === 'choosing' && (
-              <div className="flex h-full w-full items-center justify-center bg-neutral-900">
-                <div className="flex w-full max-w-sm flex-col items-center gap-5 px-6 text-center">
+              <div className="flex h-full w-full flex-col overflow-y-auto bg-neutral-900">
+                <div className="m-auto flex w-full max-w-sm shrink-0 flex-col items-center gap-3 px-6 py-4 text-center md:gap-5 md:py-0">
                   <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-neutral-800 text-amber-400">
                     <Layers3 className="h-6 w-6" aria-hidden="true" />
                   </div>
@@ -1156,7 +1204,7 @@ export default function PsdLayerEditor({
                     type="button"
                     data-testid="layer-start"
                     onClick={() => void startLayering()}
-                    className="inline-flex h-10 items-center gap-2 rounded-lg bg-amber-500 px-5 text-sm font-semibold text-neutral-950 transition-colors hover:bg-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-900"
+                    className="inline-flex h-11 items-center gap-2 rounded-lg bg-amber-500 px-5 text-sm font-semibold text-neutral-950 transition-colors hover:bg-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-900 md:[@media(hover:hover)_and_(pointer:fine)]:h-10"
                   >
                     <Play className="h-4 w-4" aria-hidden="true" />
                     开始分层
@@ -1180,7 +1228,7 @@ export default function PsdLayerEditor({
                       type="button"
                       data-testid="layer-cancel"
                       onClick={() => void handleCancelLayering()}
-                      className="mt-5 inline-flex h-9 items-center gap-2 rounded-lg bg-neutral-700 px-4 text-sm text-neutral-100 transition-colors hover:bg-neutral-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+                      className="mt-5 inline-flex h-11 [@media(hover:hover)_and_(pointer:fine)]:h-9 items-center gap-2 rounded-lg bg-neutral-700 px-4 text-sm text-neutral-100 transition-colors hover:bg-neutral-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
                     >
                       <Ban className="h-4 w-4" aria-hidden="true" />
                       取消
@@ -1191,8 +1239,8 @@ export default function PsdLayerEditor({
             )}
 
             {stage === 'error' && (
-              <div data-testid="layer-error" className="w-full h-full flex items-center justify-center">
-                <div className="max-w-sm rounded-xl bg-neutral-800 p-6 text-center">
+              <div data-testid="layer-error" className="flex h-full min-h-0 w-full overflow-y-auto p-3">
+                <div className="m-auto w-full max-w-sm shrink-0 rounded-xl bg-neutral-800 p-6 text-center">
                   <p className="mb-5 text-sm text-red-300">{errorMessage}</p>
                   <div className="flex justify-center gap-3">
                     {errorAction !== 'terminal' && (
@@ -1200,13 +1248,13 @@ export default function PsdLayerEditor({
                         type="button"
                         data-testid="layer-retry"
                         onClick={retryLayerAction}
-                        className="inline-flex h-9 items-center gap-2 rounded-lg bg-amber-500 px-4 text-sm font-semibold text-neutral-950 hover:bg-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+                        className="inline-flex h-11 items-center gap-2 rounded-lg bg-amber-500 px-4 text-sm font-semibold text-neutral-950 hover:bg-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 md:[@media(hover:hover)_and_(pointer:fine)]:h-9"
                       >
                         <RotateCcw className="h-4 w-4" aria-hidden="true" />
                         重试
                       </button>
                     )}
-                    <button type="button" onClick={handleClose} className="h-9 rounded-lg bg-neutral-700 px-4 text-sm text-white hover:bg-neutral-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400">
+                    <button type="button" onClick={handleClose} className="h-11 rounded-lg bg-neutral-700 px-4 text-sm text-white hover:bg-neutral-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 md:[@media(hover:hover)_and_(pointer:fine)]:h-9">
                       关闭
                     </button>
                   </div>
@@ -1224,10 +1272,10 @@ export default function PsdLayerEditor({
                   </div>
                   <p className="text-green-400 text-sm mb-4">PSD 文件已下载</p>
                   <div className="flex gap-3 justify-center">
-                    <button onClick={() => setStage('editing')} className="px-4 py-2 bg-neutral-700 text-white rounded text-sm hover:bg-neutral-600 transition-colors">
+                    <button onClick={() => setStage('editing')} className="min-h-11 min-w-11 px-4 py-2 bg-neutral-700 text-white rounded text-sm hover:bg-neutral-600 transition-colors md:[@media(hover:hover)_and_(pointer:fine)]:min-h-0">
                       继续编辑
                     </button>
-                    <button onClick={handleClose} className="px-4 py-2 bg-neutral-700 text-white rounded text-sm hover:bg-neutral-600 transition-colors">
+                    <button onClick={handleClose} className="min-h-11 min-w-11 px-4 py-2 bg-neutral-700 text-white rounded text-sm hover:bg-neutral-600 transition-colors md:[@media(hover:hover)_and_(pointer:fine)]:min-h-0">
                       关闭
                     </button>
                   </div>
@@ -1255,7 +1303,7 @@ export default function PsdLayerEditor({
 
             {/* Fallback export toolbar when inspector is hidden */}
             {!showInspector && (stage === 'editing' || stage === 'exporting') && (
-              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10">
+              <div className="absolute bottom-3 left-1/2 z-10 hidden -translate-x-1/2 md:block">
                 <div className="bg-neutral-800/90 rounded-lg border border-neutral-700 px-3 py-2 shadow-xl">
                   <ExportToolbar
                     mode={exportMode}
@@ -1272,16 +1320,22 @@ export default function PsdLayerEditor({
 
           {/* Right sidebar: Properties panel */}
           {showInspector && (stage === 'editing' || stage === 'exporting') && (
-            <div className="w-60 shrink-0 flex flex-col bg-neutral-900/95 border-l border-neutral-700 overflow-hidden">
+            <div
+              id="psd-mobile-pane-properties"
+              role="region"
+              aria-label="图层属性"
+              aria-hidden={isMobileViewport && activeMobilePane !== 'properties'}
+              className={`absolute inset-0 z-20 w-full shrink-0 flex-col overflow-y-auto border-l border-neutral-700 bg-neutral-900 md:static md:z-auto md:w-60 md:[@media(hover:hover)_and_(pointer:fine)]:overflow-hidden md:bg-neutral-900/95 ${activeMobilePane === 'properties' ? 'flex' : 'hidden md:flex'}`}
+            >
               <div className="flex items-center justify-between px-3 py-2 border-b border-neutral-700 shrink-0">
                 <span className="text-xs font-medium text-white/80">属性</span>
-                <button onClick={() => setShowInspector(false)} className="text-white/40 hover:text-white/70 transition-colors">
+                <button type="button" aria-label="关闭属性面板" onClick={() => setShowInspector(false)} className="inline-flex h-11 w-11 items-center justify-center text-white/40 transition-colors hover:text-white/70 md:[@media(hover:hover)_and_(pointer:fine)]:h-3 md:[@media(hover:hover)_and_(pointer:fine)]:w-3">
                   <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
                     <path d="M1 1L13 13M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
                   </svg>
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto min-h-0">
+              <div className="shrink-0 md:[@media(hover:hover)_and_(pointer:fine)]:min-h-0 md:[@media(hover:hover)_and_(pointer:fine)]:flex-1 md:[@media(hover:hover)_and_(pointer:fine)]:overflow-y-auto">
                 {selectedLayer ? (
                   <LayerInspector layer={selectedLayer} />
                 ) : (

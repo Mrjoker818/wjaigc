@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  actualTransferCallback, canvasTransferContractFixture, contractReference, contractSecondReference,
+  actualTransferCallback, canvasTransferContractFixture, contractReference, contractSecondReference, withContractOperation,
   type BatchTransfer,
 } from '../helpers/canvas-chat-transfer-contract-fixture';
 import {
@@ -23,7 +23,10 @@ describe('canvas to embedded chat asset transfer', () => {
     // Breaks: clearing deletion/revision before admission or consuming an old actor/project result.
     const restored = canvasTransferContractFixture({ trashed: true });
     await restored.single(contractReference, { runId: 'run-a', restoreDeletedPlacement: true });
-    expect(restored.requests.map(request => request.url)).toEqual(['/api/assets/transfer', '/api/assets/asset-a/restore']);
+    expect(restored.requests.map(request => request.url)).toEqual(['/api/assets/actor-v2/transfer', '/api/assets/actor-v2/asset-a/restore']);
+    expect(restored.requests.map(request => request.actorHeader)).toEqual(['actor-a', 'actor-a']);
+    expect(restored.requests[0].body).toMatchObject({expectedActorId:'actor-a',targetProject:'project-a',sourceVersion:'version-a'});
+    expect(restored.requests[1].body).toMatchObject({expectedActorId:'actor-a',projectId:'project-a',placementId:'placement-a',expectedPlacementRevision:'5'});
     expect(restored.images.current[1]).toMatchObject({ id: 'canvas-skill:run-a:version-a', assetVersionId: 'version-a', placementId: 'placement-a' });
     expect(restored.revision.current).toBe(6);
     expect([...restored.deleted.current]).toEqual([]);
@@ -32,8 +35,9 @@ describe('canvas to embedded chat asset transfer', () => {
     for (const mutation of ['project', 'actor', 'revision', 'deletion'] as const) {
       const f = canvasTransferContractFixture({ trashed: true, pause: 'decode' });
       const operation = f.single(contractReference, { runId: 'run-a', restoreDeletedPlacement: true });
-      const outcome = operation.then(() => undefined, error => error);
-      await f.entered;
+      await withContractOperation(operation, f.release, async observed => {
+      const outcome = observed.settled.then(result => result.status === 'fulfilled' ? undefined : result.reason);
+      await observed.waitForEntry(f.entered);
       expect(f.revision.current).toBe(4);
       if (mutation === 'project') { f.project.current = { id: 'project-b' }; f.historyProject.current = 'project-b'; f.epoch.current++; }
       if (mutation === 'actor') f.actor.current = { id: 'actor-b' };
@@ -46,6 +50,7 @@ describe('canvas to embedded chat asset transfer', () => {
       expect(f.revision.current).toBe(revision);
       expect([...f.deleted.current]).toEqual(['canvas-skill:run-a:version-a']);
       expect(f.cleared).toEqual([]); expect(f.writes).toEqual([]); expect(f.successes).toEqual([]);
+      }, { expectedRejection: true, forceRelease: f.forceRelease });
     }
   });
   it('returns the canonical chat attachment reference after transfer', async () => {
@@ -86,11 +91,11 @@ describe('canvas to embedded chat asset transfer', () => {
     expect(workspaceSource).toContain("fetch('/api/assets/transfer'");
     expect(workspaceSource).toContain("entityType: 'chat-attachment'");
     expect(workspaceSource).toContain('sourceVersion: image.assetVersionId');
-    expect(workspaceSource).toContain('setChatInitialImage(transferredImage)');
+    expect(workspaceSource).toContain('setChatInitialImage({ image: transferredImage, scope: scope.epoch })');
     expect(workspaceSource).toContain('prepareCanvasAssetForChat');
     expect(workspaceSource).toContain('onResolveCanvasImageForChat={resolveCanvasImageForChat}');
-    expect(chatSource).toContain('void addCanvasImageToChat(chatInitialImage, false)');
-    expect(chatSource).toContain('void addCanvasImageToChat(selectedCanvasImage, false)');
+    expect(chatSource).toContain('void addCanvasImageToChat(chatInitialImage, false, chatInitialImageResolved)');
+    expect(chatSource).toContain('void addCanvasImageToChat(selectedCanvasImage, false, false, isCurrent)');
     expect(chatSource).toContain('void addCanvasImageToChat(sourceImage, true)');
     expect(chatSource).toContain('void addCanvasImageToChat(img, true)');
   });
@@ -123,8 +128,9 @@ describe('canvas to embedded chat asset transfer', () => {
       providerDisplayName: (): string => 'provider-a', toast: { error: (error: string): void => { f.errors.push(error); } },
     }, 'chat');
     await consume('/result.png', { generatedImageRefs: [contractReference], generateModelName: 'model-a' });
-    expect(f.requests.map(request => request.url)).toEqual(['/api/assets/transfer']);
-    expect(f.requests[0].body).toMatchObject({ sourceVersion: 'version-a', targetProject: 'project-a', targetWorkspace: 'canvas:project-a', entityType: 'canvas-image' });
+    expect(f.requests.map(request => request.url)).toEqual(['/api/assets/actor-v2/transfer']);
+    expect(f.requests[0].actorHeader).toBe('actor-a');
+    expect(f.requests[0].body).toMatchObject({ expectedActorId: 'actor-a', sourceVersion: 'version-a', targetProject: 'project-a', targetWorkspace: 'canvas:project-a', entityType: 'canvas-image' });
     expect(f.images.current.map(image => image.url)).toEqual(['/original.png', '/result.png']);
     expect(f.images.current[1]).toMatchObject({ assetId: 'asset-a', assetVersionId: 'version-a', placementId: 'placement-a', modelName: 'model-a', apiProvider: 'provider-a' });
     expect(f.writes).toHaveLength(1); expect(f.saves).toHaveLength(1); expect(f.successes).toHaveLength(1); expect(f.errors).toEqual([]);
@@ -194,21 +200,36 @@ describe('canvas to embedded chat asset transfer', () => {
     }, 'chat');
     let finished = false;
     const operation = consume([contractReference, contractSecondReference]).then(() => { finished = true; });
-    await f.entered; await Promise.resolve();
+    await withContractOperation(operation, f.release, async observed => {
+    await observed.waitForEntry(f.entered); await Promise.resolve();
     const completedBeforeFlush = finished;
     expect(f.successes).toEqual([]);
     expect(f.records).toEqual([]);
-    f.release(); await operation;
+    f.release(); await observed.unwrap();
     expect(completedBeforeFlush).toBe(false);
-    expect(f.requests.map(request => request.url)).toEqual(['/api/assets/batch-transfer']);
-    expect(f.requests[0].body).toEqual({ restoreDeletedPlacements: false, transfers: [
+    expect(f.requests.map(request => request.url)).toEqual(['/api/assets/actor-v2/batch-transfer']);
+    expect(f.requests[0].actorHeader).toBe('actor-a');
+    expect(f.requests[0].body).toEqual({ expectedActorId: 'actor-a', restoreDeletedPlacements: false, transfers: [
       { sourceVersion: 'version-a', targetProject: 'project-a', targetWorkspace: 'canvas:project-a', entityType: 'canvas-image', entityId: 'canvas-skill:run-a:version-a', idempotencyKey: 'canvas-skill:run-a:version-a', metadata: { source: 'canvas-skill', runId: 'run-a', sourceVersionIds: ['source-v'] } },
       { sourceVersion: 'version-b', targetProject: 'project-a', targetWorkspace: 'canvas:project-a', entityType: 'canvas-image', entityId: 'canvas-skill:run-a:version-b', idempotencyKey: 'canvas-skill:run-a:version-b', metadata: { source: 'canvas-skill', runId: 'run-a', sourceVersionIds: ['source-v'] } },
     ] });
     expect(f.writes.map(images => images.map(image => image.id))).toEqual([['original', 'canvas-skill:run-a:version-a', 'canvas-skill:run-a:version-b']]);
     expect(f.saves).toHaveLength(1); expect(f.successes).toHaveLength(1); expect(f.errors).toEqual([]);
+    }, { forceRelease: f.forceRelease });
     context.current = { ...context.current, projectId: 'project-b' };
     await expect(consume([contractReference, contractSecondReference])).rejects.toThrow('导出运行上下文已变化');
     expect(f.requests).toHaveLength(1); expect(f.writes).toHaveLength(1);
   });
+  it('rejects unknown routes and mismatched actor, method, and project before accepting a transfer', async () => {
+    const f = canvasTransferContractFixture();
+    const body = { expectedActorId:'actor-a', targetProject:'project-a', targetWorkspace:'canvas:project-a', sourceVersion:'version-a' };
+    const send = (url:string, value:unknown, actor:string, method='POST'):Promise<Response> => fetch(url,{method,headers:{'content-type':'application/json','x-wujie-expected-actor-id':actor},body:JSON.stringify(value)});
+    await expect(send('/api/assets/actor-v2/transfer',body,'actor-b')).rejects.toThrow('Rejected actor');
+    await expect(send('/api/assets/actor-v2/transfer',{...body,expectedActorId:'actor-b'},'actor-a')).rejects.toThrow('Rejected actor');
+    await expect(send('/api/assets/actor-v2/transfer',{...body,targetProject:'project-b'},'actor-a')).rejects.toThrow('Rejected single transfer scope');
+    await expect(send('/api/assets/actor-v2/unknown',body,'actor-a')).rejects.toThrow('Unexpected HTTP');
+    await expect(send('/api/assets/actor-v2/transfer',body,'actor-a','PUT')).rejects.toThrow('Rejected actor or method');
+    expect(f.writes).toEqual([]);expect(f.saves).toEqual([]);
+  });
+
 });

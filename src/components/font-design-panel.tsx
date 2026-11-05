@@ -192,6 +192,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   const [isDraggingState, setIsDraggingState] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
   const panelRef = useRef<HTMLDivElement>(null);
+  const touchDragRef = useRef<{ id: number; element: HTMLDivElement; x: number; y: number } | null>(null);
 
   const constrainPosition = useCallback((x: number, y: number): { x: number; y: number } => {
     const current = readViewport();
@@ -237,6 +238,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
 
   // ─── Drag handlers ───
   const handlePanelDragStart = (e: React.MouseEvent): void => {
+    if (touchDragRef.current) return;
     if (e.button !== 0 || (e.target as HTMLElement).closest('button, input, textarea, select')) return;
     e.preventDefault();
     e.stopPropagation();
@@ -244,11 +246,13 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     setIsDraggingState(true);
     dragStart.current = { x: e.clientX - position.x, y: e.clientY - position.y };
     const onMouseMove = (ev: MouseEvent): void => {
+      if (touchDragRef.current) return;
       if (!isDragging.current) return;
       ev.stopPropagation();
       setPosition(constrainPosition(ev.clientX - dragStart.current.x, ev.clientY - dragStart.current.y));
     };
     const onMouseUp = (ev: MouseEvent): void => {
+      if (touchDragRef.current) return;
       ev.stopPropagation();
       isDragging.current = false;
       setIsDraggingState(false);
@@ -258,6 +262,22 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
   };
+
+  const finishTouchDrag = useCallback((): void => {
+    const owner = touchDragRef.current;
+    if (!owner) return;
+    touchDragRef.current = null;
+    setIsDraggingState(false);
+    if (owner.element.hasPointerCapture(owner.id)) owner.element.releasePointerCapture(owner.id);
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener('blur', finishTouchDrag);
+    return () => {
+      window.removeEventListener('blur', finishTouchDrag);
+      finishTouchDrag();
+    };
+  }, [finishTouchDrag]);
 
   const stopPropagation = useCallback((e: React.MouseEvent | React.PointerEvent) => {
     e.stopPropagation();
@@ -814,7 +834,10 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
     <div
       ref={panelRef}
       data-floating-panel
-      className="fixed z-[150] min-w-0"
+      data-modal="font-design"
+      role="dialog"
+      aria-label="字境大师 Pro"
+      className="fixed z-[150] min-w-0 max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11 max-md:[&_button]:shrink-0 max-md:[&_input]:min-h-11 max-md:[&_textarea]:min-h-11"
       style={{
         left: position.x,
         top: position.y,
@@ -839,8 +862,28 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
       {/* ─── Header (draggable) ─── */}
       <div
         className="flex items-center gap-2 px-3 md:px-5 py-3 cursor-move select-none shrink-0"
-        style={{ borderBottom: isMinimized ? 'none' : `1px solid ${borderColor}`, background: isMonochrome ? '#f9fafb' : 'linear-gradient(180deg, #161616, #0f0f0f)' }}
+        style={{ touchAction: 'none', borderBottom: isMinimized ? 'none' : `1px solid ${borderColor}`, background: isMonochrome ? '#f9fafb' : 'linear-gradient(180deg, #161616, #0f0f0f)' }}
         onMouseDown={handlePanelDragStart}
+        onPointerDown={(event) => {
+          if (event.pointerType === 'mouse' || !event.isPrimary || isDragging.current || touchDragRef.current
+            || (event.target as HTMLElement).closest('button, input, textarea, select')) return;
+          event.preventDefault();
+          event.stopPropagation();
+          touchDragRef.current = { id: event.pointerId, element: event.currentTarget, x: event.clientX - position.x, y: event.clientY - position.y };
+          event.currentTarget.setPointerCapture(event.pointerId);
+          setIsDraggingState(true);
+        }}
+        onPointerMove={(event) => {
+          const owner = touchDragRef.current;
+          if (!owner || owner.id !== event.pointerId) return;
+          event.preventDefault();
+          event.stopPropagation();
+          setPosition(constrainPosition(event.clientX - owner.x, event.clientY - owner.y));
+        }}
+        onPointerUp={(event) => { if (touchDragRef.current?.id === event.pointerId) finishTouchDrag(); }}
+        onPointerCancel={(event) => { if (touchDragRef.current?.id === event.pointerId) finishTouchDrag(); }}
+        onLostPointerCapture={(event) => { if (touchDragRef.current?.id === event.pointerId) finishTouchDrag(); }}
+        onTouchStart={(event) => event.stopPropagation()}
       >
         <GripVertical size={16} className="shrink-0" style={{ color: mutedColor }} />
         <div
@@ -1048,9 +1091,10 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                       <input
                         type="text"
                         value={text}
+                        aria-label="设计文字"
                         onChange={(e) => setText(e.target.value)}
                         placeholder="请输入中文标题、活动主题、封面标题或文字Logo名称"
-                        style={inputStyle}
+                        style={{ ...inputStyle, paddingRight: 104 }}
                         maxLength={20}
                         onFocus={e => { e.currentTarget.style.borderColor = accentColor; }}
                         onBlur={e => { e.currentTarget.style.borderColor = borderColorLight; }}
@@ -1077,6 +1121,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                     <button
                       key={s.id}
                       onClick={() => setScene(s.name)}
+                      aria-pressed={scene === s.name}
                       style={chipStyle(scene === s.name)}
                       onMouseEnter={e => { if (scene !== s.name) e.currentTarget.style.borderColor = accentColor; }}
                       onMouseLeave={e => { if (scene !== s.name) e.currentTarget.style.borderColor = borderColorLight; }}
@@ -1099,6 +1144,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                     <button
                       key={cat.id}
                       onClick={() => { setPrimaryStyleCategory(cat.id); setSecondaryStyle(cat.subStyles[0]?.name || ''); }}
+                      aria-pressed={primaryStyleCategory === cat.id}
                       style={{
                         padding: '4px 10px',
                         borderRadius: 20,
@@ -1123,6 +1169,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                       <button
                         key={sub.id}
                         onClick={() => setSecondaryStyle(sub.name)}
+                        aria-pressed={secondaryStyle === sub.name}
                         style={subChipStyle(secondaryStyle === sub.name)}
                         onMouseEnter={e => { if (secondaryStyle !== sub.name) e.currentTarget.style.borderColor = accentColor; }}
                         onMouseLeave={e => { if (secondaryStyle !== sub.name) e.currentTarget.style.borderColor = borderColorLight; }}
@@ -1143,6 +1190,8 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                 <div className="relative">
                   <button
                     onClick={() => setShowModelDropdown(!showModelDropdown)}
+                    aria-label={`生图模型：${selectedImageModel?.name || selectedModel || '选择模型'}${selectedImageModel?.providerName ? ` · ${selectedImageModel.providerName}` : ''}`}
+                    aria-expanded={showModelDropdown}
                     className="w-full flex items-center justify-between"
                     style={inputStyle}
                   >
@@ -1164,6 +1213,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                         <button
                           key={`${m.providerId}::${m.id}`}
                           onClick={() => { setSelectedModel(m.id); setSelectedProviderId(m.providerId); setShowModelDropdown(false); }}
+                          aria-pressed={selectedModel === m.id && selectedProviderId === m.providerId}
                           className="w-full px-3 py-2.5 text-left text-xs flex items-center gap-2 transition-colors"
                           style={{
                             borderLeft: selectedModel === m.id && selectedProviderId === m.providerId ? `2px solid ${accentColor}` : '2px solid transparent',
@@ -1188,6 +1238,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
               <div>
                 <button
                   onClick={() => setShowAdvanced(!showAdvanced)}
+                  aria-expanded={showAdvanced}
                   className="flex items-center gap-1.5 text-xs font-medium w-full"
                   style={{ color: subTextColor }}
                 >
@@ -1203,11 +1254,11 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                       <p className="text-[11px] mb-1.5" style={{ color: `${subTextColor}aa` }}>画面比例</p>
                       <div className="flex gap-1.5 flex-wrap">
                         {(findModelConfig(MODEL_ASPECT_RATIOS, selectedModel) || DEFAULT_ASPECT_RATIOS).map((r: string) => (
-                          <button key={r} onClick={() => setRatio(r)} style={chipStyle(ratio === r)}>
+                          <button key={r} onClick={() => setRatio(r)} aria-pressed={ratio === r} style={chipStyle(ratio === r)}>
                             {r}
                           </button>
                         ))}
-                        <button onClick={() => setRatio('logo')} style={chipStyle(ratio === 'logo')}>
+                        <button onClick={() => setRatio('logo')} aria-pressed={ratio === 'logo'} style={chipStyle(ratio === 'logo')}>
                           ◇ 透明Logo
                         </button>
                       </div>
@@ -1220,6 +1271,8 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                           <button
                             key={c.id}
                             onClick={() => setColor(c.id)}
+                            aria-pressed={color === c.id}
+                            aria-label={`字体颜色：${c.id}`}
                             className="transition-all"
                             style={{
                               width: 28, height: 28, borderRadius: 6, cursor: 'pointer',
@@ -1238,7 +1291,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                       <p className="text-[11px] mb-1.5" style={{ color: `${subTextColor}aa` }}>背景类型</p>
                       <div className="flex gap-1.5 flex-wrap">
                         {BACKGROUND_OPTIONS.map((bg) => (
-                          <button key={bg} onClick={() => setBackground(bg)} style={chipStyle(background === bg)}>
+                          <button key={bg} onClick={() => setBackground(bg)} aria-pressed={background === bg} style={chipStyle(background === bg)}>
                             {bg}
                           </button>
                         ))}
@@ -1249,7 +1302,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                       <p className="text-[11px] mb-1.5" style={{ color: `${subTextColor}aa` }}>笔画处理（多选）</p>
                       <div className="flex flex-wrap gap-1">
                         {strokeOptionList.map((s) => (
-                          <button key={s.id} onClick={() => toggleStroke(s.name)} style={subChipStyle(strokeOptions.includes(s.name))}>
+                          <button key={s.id} onClick={() => toggleStroke(s.name)} aria-pressed={strokeOptions.includes(s.name)} style={subChipStyle(strokeOptions.includes(s.name))}>
                             {s.name}
                           </button>
                         ))}
@@ -1260,7 +1313,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                       <p className="text-[11px] mb-1.5" style={{ color: `${subTextColor}aa` }}>图形融合（多选）</p>
                       <div className="flex flex-wrap gap-1">
                         {graphicOptionList.map((g) => (
-                          <button key={g.id} onClick={() => toggleGraphic(g.name)} style={subChipStyle(graphicElements.includes(g.name))}>
+                          <button key={g.id} onClick={() => toggleGraphic(g.name)} aria-pressed={graphicElements.includes(g.name)} style={subChipStyle(graphicElements.includes(g.name))}>
                             {g.name}
                           </button>
                         ))}
@@ -1271,7 +1324,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                       <p className="text-[11px] mb-1.5" style={{ color: `${subTextColor}aa` }}>字体质感</p>
                       <div className="flex flex-wrap gap-1">
                         {materialList.map((m) => (
-                          <button key={m.id} onClick={() => setMaterial(m.name)} style={chipStyle(material === m.name)}>
+                          <button key={m.id} onClick={() => setMaterial(m.name)} aria-pressed={material === m.name} style={chipStyle(material === m.name)}>
                             {m.name}
                           </button>
                         ))}
@@ -1285,16 +1338,18 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                       </div>
                       <button
                         onClick={() => setJimengEnhanced(!jimengEnhanced)}
-                        className="relative transition-all"
-                        style={{
-                          width: 40, height: 22, borderRadius: 11, cursor: 'pointer',
-                          background: jimengEnhanced ? accentColor : borderColorLight,
-                        }}
+                        role="switch"
+                        aria-label="即梦增强模式"
+                        aria-checked={jimengEnhanced}
+                        className="relative flex h-11 w-11 shrink-0 items-center justify-center md:h-[22px] md:w-10"
+                        style={{ cursor: 'pointer' }}
                       >
+                        <span className="relative block h-[22px] w-10 rounded-full transition-colors" style={{ background: jimengEnhanced ? accentColor : borderColorLight }}>
                         <span
                           className="absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white transition-transform"
                           style={{ left: 2, transform: jimengEnhanced ? 'translateX(18px)' : 'translateX(0)' }}
                         />
+                        </span>
                       </button>
                     </div>
                   </div>
@@ -1359,6 +1414,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
+                  aria-pressed={activeTab === tab}
                   className="min-h-[44px] py-2.5 text-[13px] font-medium transition-colors relative"
                   style={{
                     color: activeTab === tab ? accentColor : subTextColor,
@@ -1592,15 +1648,15 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                               >
                                 <img src={img.url} alt={`${planTitle} 变体${vIdx + 1}`} className="w-full object-cover" style={getAspectRatioStyle(ratio)} crossOrigin="anonymous" />
                                 <div
-                                  className="absolute inset-0 flex items-center justify-center gap-2 transition-opacity opacity-0 group-hover:opacity-100"
+                                  className="absolute inset-0 flex items-center justify-center gap-2 transition-opacity opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:static [@media(hover:none)]:flex-wrap [@media(hover:none)]:opacity-100 [@media(any-pointer:coarse)]:static [@media(any-pointer:coarse)]:flex-wrap [@media(any-pointer:coarse)]:opacity-100"
                                   style={{ background: 'rgba(0,0,0,0.7)' }}
                                 >
-                                  <button onClick={() => handleAddToCanvas(img.url)} className="px-3 py-1.5 rounded-lg text-xs font-medium" style={{ background: accentColor, color: isMonochrome ? '#ffffff' : '#0a0a0a' }}>
+                                  <button onClick={() => handleAddToCanvas(img.url)} className="min-h-11 px-3 py-1.5 rounded-lg text-xs font-medium" style={{ background: accentColor, color: isMonochrome ? '#ffffff' : '#0a0a0a' }}>
                                     <Plus size={12} className="inline mr-1" />加入画布
                                   </button>
                                   <button
                                     onClick={() => { const a = document.createElement('a'); a.href = img.url; a.download = `font-design-${planIdx + 1}-${vIdx + 1}.png`; a.click(); }}
-                                    className="px-3 py-1.5 rounded-lg text-xs text-white"
+                                    className="min-h-11 px-3 py-1.5 rounded-lg text-xs text-white"
                                     style={{ border: '1px solid rgba(255,255,255,0.3)' }}
                                   >
                                     <Download size={12} className="inline mr-1" />下载
@@ -1649,15 +1705,16 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                   </div>
 
                   {/* Search + View mode toggle */}
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md" style={{ background: isMonochrome ? '#f3f4f6' : '#1c1c1c', border: `1px solid ${borderColor}` }}>
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <div className="flex min-w-0 flex-1 basis-40 items-center gap-1.5 px-2.5 py-1.5 rounded-md" style={{ background: isMonochrome ? '#f3f4f6' : '#1c1c1c', border: `1px solid ${borderColor}` }}>
                       <Search size={12} style={{ color: subTextColor }} />
                       <input
                         type="text"
                         value={gallerySearch}
                         onChange={e => { setGallerySearch(e.target.value); setGalleryPage(1); loadGalleryData(galleryFilter, 1, e.target.value); }}
                         placeholder="搜索关键词..."
-                        className="flex-1 bg-transparent text-xs outline-none"
+                        aria-label="搜索字体灵感"
+                        className="min-w-0 flex-1 bg-transparent text-xs outline-none"
                         style={{ color: textColor }}
                       />
                     </div>
@@ -1666,6 +1723,8 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                         <button
                           key={mode}
                           onClick={() => setGalleryViewMode(mode)}
+                          aria-pressed={galleryViewMode === mode}
+                          aria-label={mode === 'list' ? '列表模式' : mode === 'thumbnail' ? '缩略图模式' : '大图模式'}
                           className="p-1.5 transition-colors"
                           style={{
                             background: galleryViewMode === mode ? accentColor : (isMonochrome ? '#f3f4f6' : '#1c1c1c'),
@@ -1683,6 +1742,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                   <div className="flex flex-wrap gap-1.5">
                     <button
                       onClick={() => { setGalleryFilter('all'); setGalleryPage(1); loadGalleryData('all', 1, gallerySearch); }}
+                      aria-pressed={galleryFilter === 'all'}
                       className="px-2.5 py-1 rounded-full text-[10px] font-medium transition-colors"
                       style={{
                         background: galleryFilter === 'all' ? accentColor : (isMonochrome ? '#f3f4f6' : '#1c1c1c'),
@@ -1694,6 +1754,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                       <button
                         key={cat.id}
                         onClick={() => { setGalleryFilter(cat.id); setGalleryPage(1); loadGalleryData(cat.id, 1, gallerySearch); }}
+                        aria-pressed={galleryFilter === cat.id}
                         className="px-2.5 py-1 rounded-full text-[10px] font-medium transition-colors"
                         style={{
                           background: galleryFilter === cat.id ? accentColor : (isMonochrome ? '#f3f4f6' : '#1c1c1c'),
@@ -1745,7 +1806,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                           </div>
                           <button
                             onClick={() => handleUseInspiration(item)}
-                            className="shrink-0 px-2 py-1 rounded text-[10px] font-medium opacity-0 group-hover:opacity-100 transition-opacity"
+                            className="shrink-0 px-2 py-1 rounded text-[10px] font-medium opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
                             style={{ background: accentColor, color: isMonochrome ? '#fff' : '#000', cursor: 'pointer' }}
                           >
                             制作同款
@@ -1770,7 +1831,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                               loading="lazy"
                               onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
                             />
-                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/50 transition-all duration-200 flex items-center justify-center opacity-0 group-hover:opacity-100">
+                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/50 transition-all duration-200 flex items-center justify-center opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100">
                               <button
                                 onClick={() => handleUseInspiration(item)}
                                 className="px-2.5 py-1.5 rounded-md text-[10px] font-medium"
@@ -1815,7 +1876,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                             </div>
                             <button
                               onClick={() => handleUseInspiration(item)}
-                              className="absolute top-2 right-2 px-2.5 py-1.5 rounded-md text-[10px] font-medium opacity-0 group-hover:opacity-100 transition-opacity"
+                              className="absolute top-2 right-2 px-2.5 py-1.5 rounded-md text-[10px] font-medium opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
                               style={{ background: accentColor, color: isMonochrome ? '#fff' : '#000', cursor: 'pointer' }}
                             >
                               一键制作同款
@@ -1878,7 +1939,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                   {history.map((item) => (
                     <div
                       key={item.id}
-                      className="flex items-center gap-3 group p-3 rounded-lg transition-all"
+                      className="flex items-center gap-3 group p-3 rounded-lg transition-all max-sm:flex-wrap"
                       style={{ border: `1px solid ${borderColor}`, background: cardBgColor, cursor: 'default' }}
                       onMouseEnter={e => { e.currentTarget.style.borderColor = borderColorLight; e.currentTarget.style.background = isMonochrome ? '#f0f0f0' : '#1c1c1c'; }}
                       onMouseLeave={e => { e.currentTarget.style.borderColor = borderColor; e.currentTarget.style.background = cardBgColor; }}
@@ -1887,11 +1948,11 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                         <ImageIcon className="h-4 w-4 opacity-30" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="text-xs font-medium truncate" style={{ color: textColor }}>{item.text}</div>
+                        <div className="text-xs font-medium truncate max-sm:whitespace-normal max-sm:break-all" style={{ color: textColor }}>{item.text}</div>
                         <div className="text-[10px]" style={{ color: subTextColor }}>{item.scene} · {item.style}</div>
                         <div className="text-[10px]" style={{ color: subTextColor }}>{item.createdAt}</div>
                       </div>
-                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex gap-1 opacity-100 transition-opacity max-sm:basis-full max-sm:shrink-0 max-sm:justify-end focus-within:!opacity-100 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:none)]:[&>button]:min-h-11 [@media(hover:none)]:[&>button]:min-w-11 [@media(any-pointer:coarse)]:!opacity-100 [@media(any-pointer:coarse)]:[&>button]:min-h-11 [@media(any-pointer:coarse)]:[&>button]:min-w-11">
                         <button
                           onClick={() => { setText(item.text); setScene(item.scene); }}
                           className="p-1.5 rounded"

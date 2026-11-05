@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+import { beforeEach as beforeBrowserApis, afterEach as afterBrowserApis } from 'vitest';
+import { cleanup as cleanupBrowserApiReact } from '@testing-library/react';
+import { installJsdomMediaQueries, runJsdomFixtureCleanup } from '../helpers/jsdom-browser-apis';
 import { fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InfiniteCanvas, type CanvasImage } from '@/components/infinite-canvas';
@@ -353,4 +356,16 @@ describe('document canvas remove-background quote entry', () => {
     expect(requests[0].body).not.toHaveProperty('assetSelectedEntityIds');
     expect(requests[0].key).toBeNull();
   });
+});
+
+// Fixture APIs only; original assertions, timeouts and business inputs stay unchanged.
+let restoreBrowserApis: (() => void) | undefined;
+beforeBrowserApis((): void => {
+  restoreBrowserApis = installJsdomMediaQueries(window, { colorScheme: 'light', reducedMotion: false });
+});
+afterBrowserApis((): void => {
+  runJsdomFixtureCleanup([
+    cleanupBrowserApiReact,
+    (): void => { const restore = restoreBrowserApis; restoreBrowserApis = undefined; restore?.(); },
+  ]);
 });

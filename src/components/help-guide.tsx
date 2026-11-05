@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Move, Sparkles, MessageSquare, Keyboard, Lightbulb,
   BookOpen, X, Info, Wand2, ImagePlus, GitMerge,
@@ -814,32 +814,93 @@ interface HelpGuideProps {
 
 export function HelpGuide({ isOpen, onClose, initialSection = 'canvas', themeStyle }: HelpGuideProps) {
   const [activeSection, setActiveSection] = useState<SectionId>(initialSection);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = dialogRef.current;
+    closeRef.current?.focus();
+    return () => {
+      const active = document.activeElement;
+      if (opener?.isConnected && (active === document.body || dialog?.contains(active))) opener.focus();
+    };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
   const groups = ['使用说明', '更新内容'] as const;
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black"
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-2"
+      onMouseDown={(event) => event.stopPropagation()}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="w-[680px] max-h-[80vh] bg-[var(--color-surface)] rounded-xl border border-[var(--color-outline-variant)] shadow-2xl flex flex-col overflow-hidden"
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="使用说明"
+        onKeyDown={(event) => {
+          if (event.key === 'Tab' && !event.defaultPrevented && !event.altKey && !event.ctrlKey && !event.metaKey
+            && event.target instanceof Element && event.target.closest('[role="dialog"]') === event.currentTarget) {
+            const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
+              'button, select, input, textarea, a[href], [tabindex]',
+            )).filter(item => item.tabIndex >= 0 && !item.matches(':disabled')
+              && !item.closest('[hidden], [inert]') && item.getClientRects().length > 0
+              && getComputedStyle(item).visibility === 'visible');
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (event.shiftKey && document.activeElement === first && last) {
+              event.preventDefault();
+              last.focus();
+            } else if (!event.shiftKey && document.activeElement === last && first) {
+              event.preventDefault();
+              first.focus();
+            }
+          }
+          if (event.key === 'Escape' && !event.defaultPrevented) {
+            event.preventDefault();
+            event.stopPropagation();
+            onClose();
+          }
+        }}
+        style={{
+          '--color-surface': themeStyle === 'monochrome' ? '#ffffff' : '#1a1a1a',
+          '--color-surface-container': themeStyle === 'monochrome' ? '#f3f4f6' : '#252529',
+          '--color-on-surface': themeStyle === 'monochrome' ? '#111827' : '#f5f5f5',
+          '--color-on-surface-variant': themeStyle === 'monochrome' ? '#4b5563' : '#c2c2c8',
+          '--color-outline-variant': themeStyle === 'monochrome' ? '#d1d5db' : '#444444',
+          '--color-primary': themeStyle === 'monochrome' ? '#2563eb' : '#d4af37',
+        } as React.CSSProperties}
+        className="flex h-[min(80dvh,720px)] max-h-[calc(100dvh-16px)] w-[min(680px,calc(100vw-16px))] min-w-0 flex-col overflow-hidden rounded-xl border border-[var(--color-outline-variant)] bg-[var(--color-surface)] shadow-2xl"
         data-modal>
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--color-outline-variant)]">
-          <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center justify-between gap-2 px-4 py-2 border-b border-[var(--color-outline-variant)]">
+          <div className="flex min-w-0 items-center gap-2">
             <Info size={16} className="text-[var(--color-primary)]" />
             <span className="text-sm font-semibold text-[var(--color-on-surface)]">使用说明</span>
             <span className="text-[10px] text-[var(--color-on-surface-variant)] ml-1">{APP_VERSION_LABEL}</span>
           </div>
-          <button onClick={onClose} className="p-1 rounded-md hover:bg-[var(--color-surface-container)] transition-colors">
+          <button ref={closeRef} type="button" aria-label="关闭使用说明" onClick={onClose} className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md hover:bg-[var(--color-surface-container)] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-primary)]">
             <X size={16} className="text-[var(--color-on-surface-variant)]" />
           </button>
         </div>
 
         {/* Body */}
-        <div className="flex flex-1 min-h-0">
+        <div className="flex flex-1 min-h-0 flex-col md:flex-row">
+          <div className="shrink-0 border-b border-[var(--color-outline-variant)] p-2 md:hidden">
+            <label htmlFor="help-guide-section" className="sr-only">选择指南章节</label>
+            <select id="help-guide-section" value={activeSection}
+              onChange={(event) => setActiveSection(event.target.value as SectionId)}
+              className="h-11 w-full min-w-0 rounded-md border border-[var(--color-outline-variant)] bg-[var(--color-surface-container)] px-3 text-base text-[var(--color-on-surface)] focus-visible:outline-2 focus-visible:outline-[var(--color-primary)]">
+              {groups.map(group => (
+                <optgroup key={group} label={group}>
+                  {SECTIONS.filter(section => section.group === group).map(section => (
+                    <option key={section.id} value={section.id}>{section.label}</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </div>
           {/* Sidebar */}
-          <div className="w-[180px] border-r border-[var(--color-outline-variant)] overflow-y-auto py-2 shrink-0">
+          <nav aria-label="指南章节" className="hidden w-[180px] border-r border-[var(--color-outline-variant)] overflow-y-auto overscroll-contain py-2 shrink-0 md:block">
             {groups.map(group => (
               <div key={group}>
                 <div className="px-3 py-1.5 text-[10px] font-bold text-[var(--color-on-surface-variant)] uppercase tracking-wider">
@@ -847,9 +908,11 @@ export function HelpGuide({ isOpen, onClose, initialSection = 'canvas', themeSty
                 </div>
                 {SECTIONS.filter(s => s.group === group).map(section => (
                   <button
+                    type="button"
                     key={section.id}
                     onClick={() => setActiveSection(section.id)}
-                    className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors ${
+                    aria-current={activeSection === section.id ? 'page' : undefined}
+                    className={`min-h-11 w-full flex items-center gap-2 px-3 py-2 text-left text-xs transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--color-primary)] ${
                       activeSection === section.id
                         ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)] font-medium'
                         : 'text-[var(--color-on-surface-variant)] hover:bg-[var(--color-surface-container)]'
@@ -862,10 +925,11 @@ export function HelpGuide({ isOpen, onClose, initialSection = 'canvas', themeSty
                 ))}
               </div>
             ))}
-          </div>
+          </nav>
 
           {/* Content */}
-          <div className="flex-1 overflow-y-auto px-5 py-4">
+          <div role="region" aria-label="使用说明内容" tabIndex={0}
+            className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 [overflow-wrap:anywhere] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--color-primary)]">
             {SECTION_CONTENT[activeSection]}
           </div>
         </div>

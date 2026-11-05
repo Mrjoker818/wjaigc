@@ -361,11 +361,11 @@ export default function HumanRepairPanel({ isMonochrome = false, onClose, onAddI
               resetSourceState(event.target.value);
             }}
             placeholder="粘贴图片 URL 开始检测…"
-            className={"flex-1 rounded-md border px-3 py-2 text-sm " + inputClass}
+            className={"min-h-11 min-w-0 flex-1 rounded-md border px-3 py-2 text-sm " + inputClass}
           />
           <button
             onClick={() => void analyze()} disabled={isBusy || !imageUrl}
-            className="flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm whitespace-nowrap disabled:opacity-40"
+            className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-md border px-3 py-2 text-sm whitespace-nowrap disabled:opacity-40"
           >
             {isBusy ? <Loader2 size={14} className="animate-spin" /> : <Scan size={14} />}
             检测人物

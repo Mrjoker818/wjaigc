@@ -1,3 +1,4 @@
+import { observeWorkspaceBindings } from '../helpers/workspace-annotation-bindings';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
@@ -282,9 +283,30 @@ describe('InfiniteCanvas annotation gesture integration', () => {
   });
 
   it('reserves the visible right-panel width for the annotation composer', () => {
-    expect(canvasSource).toContain(
-      'rightInset={isPanelCollapsed ? 20 : 480}',
-    );
+    const controller = observeWorkspaceBindings({
+      workspace: canvasWorkspaceSource, canvas: canvasSource,
+    }, 1440);
+    const expected = [
+      { collapsed: false, inset: 480, left: 'calc((100% - 480px) / 2)', width: 'min(960px, calc(100% - 480px - 32px))' },
+      { collapsed: true, inset: 44, left: 'calc((100% - 44px) / 2)', width: 'min(960px, calc(100% - 44px - 32px))' },
+      { collapsed: false, inset: 480, left: 'calc((100% - 480px) / 2)', width: 'min(960px, calc(100% - 480px - 32px))' },
+    ];
+    for (const [index, target] of expected.entries()) {
+      const state = controller.read();
+      expect(state.collapsed).toBe(target.collapsed);
+      expect(state.canvasCollapsed).toBe(target.collapsed);
+      expect(state.rightInset).toBe(target.inset);
+      const tree = AnnotationComposer({
+        annotations: [], selectedAnnotationId: null, tool: 'region', prompt: '', modelId: '',
+        rightInset: state.rightInset,
+        onToolChange: vi.fn(), onPromptChange: vi.fn(), onModelChange: vi.fn(),
+        onSelectAnnotation: vi.fn(), onRemoveAnnotation: vi.fn(), onUpdateInstruction: vi.fn(),
+        onExecute: vi.fn(), onCancel: vi.fn(), onClose: vi.fn(),
+      });
+      const composer = findElement(tree, element => element.props['data-testid'] === 'annotation-composer');
+      expect(composer?.props.style).toMatchObject({ left: target.left, width: target.width, transform: 'translateX(-50%)' });
+      if (index < expected.length - 1) controller.clickToggle();
+    }
   });
 
   it('does not cancel a captured annotation gesture on pointer leave', () => {

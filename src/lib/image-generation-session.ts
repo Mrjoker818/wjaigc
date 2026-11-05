@@ -58,6 +58,8 @@ export interface ImageGenerationSlot {
 }
 
 interface SubmitResponse {
+  error?: ImageGenerationTaskUpdate['error'];
+  progress?: unknown;
   outputGroup?: unknown;
   result?: unknown;
   status?: unknown;
@@ -71,6 +73,7 @@ type PollHandle = ReturnType<typeof setTimeout> | number;
 
 export interface ImageGenerationSessionDependencies {
   submit(request: ImageGenerationRequest & { submitOnly: true }): Promise<SubmitResponse>;
+  retryRestoredTask?(taskId: string, projectId: string): Promise<SubmitResponse>;
   subscribeTaskEvents(listener: (update: ImageGenerationTaskUpdate) => void): () => void;
   isTaskEventsConnected(): boolean;
   cancelTask(taskId: string): Promise<{ success?: boolean; message?: string }>;
@@ -137,10 +140,12 @@ export function createImageGenerationSession(
 ): ImageGenerationSession {
   let disposed = false;
   let sequence = 0;
+  let restoreSequence = 0;
   let slots: ImageGenerationSlot[] = [];
   const listeners = new Set<(value: ImageGenerationSlot[]) => void>();
   const taskToSlot = new Map<string, string>();
   const requestBySlot = new Map<string, ImageGenerationRequest>();
+  const pendingRestoredRetries = new Map<string, ImageGenerationSlot>();
   const pollHandles = new Map<string, PollHandle>();
   const projectionPendingTaskIds = new Set<string>();
   const groups = new Map<string, { marker: OrdinaryGenerationOutputGroup; slotIds: string[]; projectId: string; cancelled: boolean }>();
@@ -168,6 +173,7 @@ export function createImageGenerationSession(
   };
 
   const applyUpdate = (update: ImageGenerationTaskUpdate): void => {
+    if (disposed) return;
     const group = groups.get(update.taskId);
     if (group) {
       if (group.cancelled || (update.projectId && update.projectId !== group.projectId)) return;
@@ -341,6 +347,65 @@ export function createImageGenerationSession(
     }
   };
 
+  const retryRestoredSlot = async (slot: ImageGenerationSlot): Promise<ImageGenerationSlot | null> => {
+    if (!slot.taskId || !dependencies.retryRestoredTask || slot.error?.retryable === false
+      || pendingRestoredRetries.has(slot.id)) return null;
+    pendingRestoredRetries.set(slot.id, slot);
+    const isCurrent = (): boolean => !disposed
+      && pendingRestoredRetries.get(slot.id) === slot
+      && slots.find(value => value.id === slot.id) === slot;
+    try {
+      const response = await dependencies.retryRestoredTask(slot.taskId, slot.projectId);
+      if (!isCurrent()) return null;
+      const submitted = normalizeGenerationSubmitSlots(response);
+      const child = submitted[0];
+      if (submitted.length !== 1 || child.slotIndex !== 0 || child.taskId === slot.taskId) {
+        throw new Error(normalizeError(response.error, '服务器未返回新的重试任务，请再次重试原任务').message);
+      }
+      // Sibling outputs can receive the same deterministic retry child; retain its existing owner.
+      const owner = slots.find(value => value.id !== slot.id && value.taskId === child.taskId);
+      if (owner) throw new Error(`该原任务的重试已在槽位 ${owner.id} 中，请查看该槽位的进度或结果`);
+      const group = groups.get(slot.taskId);
+      if (group) {
+        group.slotIds = group.slotIds.map(id => id === slot.id ? '' : id);
+        if (group.slotIds.every(id => !id)) groups.delete(slot.taskId);
+      }
+      clearPoll(slot.taskId);
+      taskToSlot.delete(slot.taskId);
+      projectionPendingTaskIds.delete(slot.taskId);
+      const retrySlot: ImageGenerationSlot = {
+        id: slot.id, projectId: slot.projectId, status: 'submitting', progress: 0,
+      };
+      // Bind as active first so the canonical reply can project even an already-terminal child.
+      bindSubmission([retrySlot], {
+        ...response,
+        status: 'processing',
+        slots: [{ ...child, status: 'processing' }],
+      });
+      applyUpdate({
+        taskId: child.taskId,
+        projectId: slot.projectId,
+        status: typeof response.status === 'string' ? response.status : child.status,
+        progress: typeof response.progress === 'number' ? response.progress : undefined,
+        result: response.result ?? child.result,
+        error: normalizeError(
+          (response.error ?? child.error) as ImageGenerationTaskUpdate['error'],
+          '生成任务失败',
+        ),
+      });
+      return cloneSlot(slots.find(value => value.id === slot.id)!);
+    } catch (cause) {
+      if (!isCurrent()) return null;
+      const message = cause instanceof Error && cause.message.trim() ? cause.message : '原任务暂不能重试，请稍后重试';
+      const originalMessage = slot.error?.message || '生成任务失败';
+      const next = { ...slot, error: { ...slot.error, message: `${originalMessage}\n重试未提交：${message}` } };
+      replaceSlot(slot.id, next);
+      return cloneSlot(next);
+    } finally {
+      if (pendingRestoredRetries.get(slot.id) === slot) pendingRestoredRetries.delete(slot.id);
+    }
+  };
+
   const unsubscribeEvents = dependencies.subscribeTaskEvents(applyUpdate);
 
   return {
@@ -360,7 +425,12 @@ export function createImageGenerationSession(
     },
 
     async restore(projectId) {
-      const restored = (await dependencies.restoreTasks(projectId)).filter(task => task.projectId === projectId);
+      if (disposed) return snapshot();
+      const restoreVersion = ++restoreSequence;
+      pendingRestoredRetries.clear();
+      const restoredTasks = await dependencies.restoreTasks(projectId);
+      if (disposed || restoreVersion !== restoreSequence) return snapshot();
+      const restored = restoredTasks.filter(task => task.projectId === projectId);
       for (const taskId of pollHandles.keys()) clearPoll(taskId);
       groups.clear(); taskToSlot.clear(); requestBySlot.clear(); projectionPendingTaskIds.clear();
       const groupUpdates: RestoredImageGenerationTask[] = [];
@@ -438,8 +508,9 @@ export function createImageGenerationSession(
     async retry(slotId) {
       const slot = slots.find(value => value.id === slotId);
       const request = requestBySlot.get(slotId);
-      if (!slot || !request || (slot.status !== 'failed' && slot.status !== 'timeout')) return null;
+      if (disposed || !slot || (slot.status !== 'failed' && slot.status !== 'timeout')) return null;
       if (slot.outputGroup && slot.error?.retryable === false) return null;
+      if (!request) return retryRestoredSlot(slot);
       if (slot.taskId) {
         const group = groups.get(slot.taskId);
         if (group) group.slotIds = group.slotIds.map(id => id === slotId ? '' : id);
@@ -460,6 +531,7 @@ export function createImageGenerationSession(
     dispose() {
       if (disposed) return;
       disposed = true;
+      pendingRestoredRetries.clear();
       unsubscribeEvents();
       for (const taskId of pollHandles.keys()) clearPoll(taskId);
       projectionPendingTaskIds.clear();

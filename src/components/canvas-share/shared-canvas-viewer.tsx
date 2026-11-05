@@ -357,8 +357,12 @@ export function SharedCanvasViewer({
 
   const releasePointer = useCallback((event: ReactPointerEvent<HTMLDivElement>): void => {
     const id = pointerId(event);
+    // A normal release may dispatch lostpointercapture after this pointer is removed.
+    if (!activePointersRef.current.has(id)) return;
+    const isPointerUp = event.type === 'pointerup';
+    if (!isPointerUp) completedTouchTapRef.current = null;
     const tapCandidate = touchTapCandidateRef.current;
-    if (event.pointerType === 'touch' && tapCandidate?.pointerId === id) {
+    if (isPointerUp && event.pointerType === 'touch' && tapCandidate?.pointerId === id) {
       const now = performance.now();
       const previousTap = completedTouchTapRef.current;
       const localPoint = clientPointToViewportLocal(event.currentTarget, event.clientX, event.clientY);
@@ -381,7 +385,9 @@ export function SharedCanvasViewer({
     activePointersRef.current.delete(id);
     gestureRef.current = gestureState([...activePointersRef.current.values()]);
     setIsPanning(activePointersRef.current.size > 0);
-    event.currentTarget.releasePointerCapture?.(id);
+    if (event.type !== 'lostpointercapture') {
+      event.currentTarget.releasePointerCapture?.(id);
+    }
   }, [zoomAt]);
 
   const handleWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>): void => {
@@ -478,6 +484,7 @@ export function SharedCanvasViewer({
         onPointerMove={handlePointerMove}
         onPointerUp={releasePointer}
         onPointerCancel={releasePointer}
+        onLostPointerCapture={releasePointer}
         onWheel={handleWheel}
         onDoubleClick={event => {
           if (shouldIgnoreCanvasGesture(event.target)) return;

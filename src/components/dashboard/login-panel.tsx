@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useId } from 'react';
 import { User } from '@/lib/user-types';
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
@@ -30,6 +30,7 @@ type LoginMode = 'canvas' | 'chat';
 type ViewState = 'select-mode' | 'login-form' | 'register-form';
 
 export function LoginPanel({ onLogin }: LoginPanelProps) {
+  const formId = useId();
   const userManager = useMemo(() => {
     try { return UserManagerCore.getInstance(); }
     catch (error) {
@@ -179,12 +180,12 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex min-h-screen" style={{ background: '#0A0A0F' }}>
-      <div className="w-full min-h-screen flex flex-col lg:flex-row">
+    <div className="fixed inset-0 z-[100] h-dvh min-h-0 [.theme-monochrome_&]:[--primary:#1d4ed8] [.theme-monochrome_&]:[--muted-foreground:#475569] overflow-y-auto overscroll-contain [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:focus-visible:ring-2 [&_button]:focus-visible:ring-primary [&_input]:min-h-11 [&_input]:text-base" style={{ background: 'var(--background)' }}>
+      <div className="w-full flex flex-col lg:flex-row" style={{ minHeight: '100%' }}>
 
         {/* 左侧品牌展示区 */}
         <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden flex-col justify-between p-12 xl:p-16"
-             style={{ background: 'linear-gradient(135deg, #0E0E16 0%, #151520 40%, #1A1A28 70%, #0E0E16 100%)' }}>
+             style={{ background: 'var(--background)' }}>
 
           {/* 渐变光效背景装饰 */}
           <div className="absolute top-0 left-0 w-full h-full pointer-events-none" aria-hidden="true">
@@ -278,12 +279,12 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
 
           {/* 版本号 */}
           <div className="relative z-10">
-            <p className="text-xs text-muted-foreground/50 font-mono">{APP_VERSION_LABEL}</p>
+            <p className="text-xs text-muted-foreground font-mono">{APP_VERSION_LABEL}</p>
           </div>
         </div>
 
         {/* 右侧登录区 */}
-        <div className="flex-1 flex items-center justify-center p-6 sm:p-8 lg:p-12" style={{ backgroundColor: '#0F1117' }}>
+        <div className="min-w-0 flex-1 flex items-center justify-center p-6 sm:p-8 lg:p-12" style={{ backgroundColor: 'var(--background)' }}>
           <div className="w-full max-w-sm">
 
             {/* 移动端品牌标识 */}
@@ -345,12 +346,12 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
                 </div>
 
                 {registrationEnabled ? (
-                  <p className="mt-8 text-xs text-muted-foreground/50 text-center">
+                  <p className="mt-8 text-xs text-muted-foreground text-center">
                     还没有账号？
                     <button type="button" onClick={goToRegister} className="text-primary hover:underline ml-1 focus:outline-none">立即注册</button>
                   </p>
                 ) : (
-                  <p className="mt-8 text-xs text-muted-foreground/50 text-center">请联系管理员创建新账户并授权对应功能。</p>
+                  <p className="mt-8 text-xs text-muted-foreground text-center">请联系管理员创建新账户并授权对应功能。</p>
                 )}
               </>
             ) : viewState === 'register-form' ? (
@@ -371,48 +372,51 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
                 <form onSubmit={(e) => { e.preventDefault(); void submitRegister(); }} autoComplete="off">
                   {/* 用户名 */}
                   <div className="mb-4">
-                    <Label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                    <Label htmlFor={`${formId}-register-name`} className="block text-xs font-medium text-muted-foreground mb-1.5">
                       用户名 <span className="text-primary">*</span>
                     </Label>
                     <div className="relative">
                       <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                        <UserIcon className="w-4 h-4 text-muted-foreground/60" />
+                        <UserIcon className="w-4 h-4 text-muted-foreground" />
                       </div>
                       <input
+                        id={`${formId}-register-name`}
                         type="text"
                         value={regName}
                         onChange={(e) => setRegName(e.target.value)}
                         placeholder="3-32位，字母/数字/下划线"
                         disabled={registering}
                         maxLength={32}
-                        className="w-full bg-muted border-none rounded-md pl-10 pr-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors disabled:opacity-50"
+                        className="w-full bg-muted border-none rounded-md pl-10 pr-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors disabled:opacity-50"
                       />
                     </div>
                   </div>
 
                   {/* 密码 */}
                   <div className="mb-4">
-                    <Label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                    <Label htmlFor={`${formId}-register-password`} className="block text-xs font-medium text-muted-foreground mb-1.5">
                       密码 <span className="text-primary">*</span>
                     </Label>
                     <div className="relative">
                       <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                        <Settings className="w-4 h-4 text-muted-foreground/60" />
+                        <Settings className="w-4 h-4 text-muted-foreground" />
                       </div>
                       <input
+                        id={`${formId}-register-password`}
                         type={showRegPassword ? 'text' : 'password'}
                         value={regPassword}
                         onChange={(e) => setRegPassword(e.target.value)}
                         placeholder="至少 6 位"
                         disabled={registering}
-                        className="w-full bg-muted border-none rounded-md pl-10 pr-10 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors disabled:opacity-50"
+                        className="w-full bg-muted border-none rounded-md pl-10 pr-14 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors disabled:opacity-50"
                       />
                       <button
                         type="button"
                         onClick={() => setShowRegPassword((v) => !v)}
                         aria-label={showRegPassword ? '隐藏密码' : '显示密码'}
+                        aria-pressed={showRegPassword}
                         disabled={registering}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+                        className="absolute right-1 top-1/2 -translate-y-1/2 flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground hover:text-foreground transition-colors"
                       >
                         {showRegPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
@@ -421,27 +425,29 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
 
                   {/* 确认密码 */}
                   <div className="mb-4">
-                    <Label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                    <Label htmlFor={`${formId}-register-confirm`} className="block text-xs font-medium text-muted-foreground mb-1.5">
                       确认密码 <span className="text-primary">*</span>
                     </Label>
                     <div className="relative">
                       <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                        <Settings className="w-4 h-4 text-muted-foreground/60" />
+                        <Settings className="w-4 h-4 text-muted-foreground" />
                       </div>
                       <input
+                        id={`${formId}-register-confirm`}
                         type={showRegConfirm ? 'text' : 'password'}
                         value={regConfirmPassword}
                         onChange={(e) => setRegConfirmPassword(e.target.value)}
                         placeholder="再次输入密码"
                         disabled={registering}
-                        className="w-full bg-muted border-none rounded-md pl-10 pr-10 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors disabled:opacity-50"
+                        className="w-full bg-muted border-none rounded-md pl-10 pr-14 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors disabled:opacity-50"
                       />
                       <button
                         type="button"
                         onClick={() => setShowRegConfirm((v) => !v)}
                         aria-label={showRegConfirm ? '隐藏密码' : '显示密码'}
+                        aria-pressed={showRegConfirm}
                         disabled={registering}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+                        className="absolute right-1 top-1/2 -translate-y-1/2 flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground hover:text-foreground transition-colors"
                       >
                         {showRegConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
@@ -450,16 +456,17 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
 
                   {/* 邮箱（可选） */}
                   <div className="mb-5">
-                    <Label className="block text-xs font-medium text-muted-foreground mb-1.5">
-                      邮箱 <span className="text-muted-foreground/40 font-normal">（可选）</span>
+                    <Label htmlFor={`${formId}-register-email`} className="block text-xs font-medium text-muted-foreground mb-1.5">
+                      邮箱 <span className="text-muted-foreground font-normal">（可选）</span>
                     </Label>
                     <input
+                      id={`${formId}-register-email`}
                       type="email"
                       value={regEmail}
                       onChange={(e) => setRegEmail(e.target.value)}
                       placeholder="example@domain.com"
                       disabled={registering}
-                      className="w-full bg-muted border-none rounded-md px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors disabled:opacity-50"
+                      className="w-full bg-muted border-none rounded-md px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors disabled:opacity-50"
                     />
                   </div>
 
@@ -482,12 +489,12 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
                 </form>
 
                 {registerError && (
-                  <div className="mt-4 px-4 py-3 rounded-md text-sm font-medium" style={{ backgroundColor: '#3D1518' }}>
+                  <div role="alert" className="mt-4 px-4 py-3 rounded-md text-sm font-medium" style={{ backgroundColor: '#3D1518' }}>
                     <span className="text-destructive">{registerError}</span>
                   </div>
                 )}
 
-                <p className="mt-6 text-xs text-muted-foreground/50 text-center">
+                <p className="mt-6 text-xs text-muted-foreground text-center">
                   已有账号？
                   <button type="button" onClick={goToLogin} className="text-primary hover:underline ml-1 focus:outline-none">立即登录</button>
                 </p>
@@ -526,38 +533,40 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
                 <form onSubmit={(e) => { e.preventDefault(); void handleLogin(); }} autoComplete="off">
                   {/* 用户名输入框 */}
                   <div className="mb-5">
-                    <Label className="block text-xs font-medium text-muted-foreground mb-1.5">用户名</Label>
+                    <Label htmlFor={`${formId}-login-name`} className="block text-xs font-medium text-muted-foreground mb-1.5">用户名</Label>
                     <div className="relative">
                       <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                        <UserIcon className="w-4 h-4 text-muted-foreground/60" />
+                        <UserIcon className="w-4 h-4 text-muted-foreground" />
                       </div>
                       <input
+                        id={`${formId}-login-name`}
                         type="text"
                         value={loginName}
                         onChange={(e) => setLoginName(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter') void handleLogin(); }}
                         placeholder="请输入用户名"
                         disabled={loggingIn}
-                        className="w-full bg-muted border-none rounded-md pl-10 pr-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors disabled:opacity-50"
+                        className="w-full bg-muted border-none rounded-md pl-10 pr-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors disabled:opacity-50"
                       />
                     </div>
                   </div>
 
                   {/* 密码输入框 */}
                   <div className="mb-6">
-                    <Label className="block text-xs font-medium text-muted-foreground mb-1.5">密码</Label>
+                    <Label htmlFor={`${formId}-login-password`} className="block text-xs font-medium text-muted-foreground mb-1.5">密码</Label>
                     <div className="relative">
                       <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                        <Settings className="w-4 h-4 text-muted-foreground/60" />
+                        <Settings className="w-4 h-4 text-muted-foreground" />
                       </div>
                       <input
+                        id={`${formId}-login-password`}
                         type={showLoginPassword ? 'text' : 'password'}
                         value={loginPassword}
                         onChange={(e) => setLoginPassword(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter') void handleLogin(); }}
                         placeholder="请输入密码"
                         disabled={loggingIn}
-                        className="w-full bg-muted border-none rounded-md pl-10 pr-10 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors disabled:opacity-50"
+                        className="w-full bg-muted border-none rounded-md pl-10 pr-14 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 transition-colors disabled:opacity-50"
                       />
                       <button
                         type="button"
@@ -566,7 +575,7 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
                         aria-pressed={showLoginPassword}
                         title={showLoginPassword ? '隐藏密码' : '显示密码'}
                         disabled={loggingIn}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+                        className="absolute right-1 top-1/2 -translate-y-1/2 flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground hover:text-foreground transition-colors"
                       >
                         {showLoginPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
@@ -593,12 +602,12 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
 
                 {/* 错误提示 */}
                 {loginError && (
-                  <div className="mt-4 px-4 py-3 rounded-md text-sm font-medium" style={{ backgroundColor: '#3D1518' }}>
+                  <div role="alert" className="mt-4 px-4 py-3 rounded-md text-sm font-medium" style={{ backgroundColor: '#3D1518' }}>
                     <span className="text-destructive">{loginError}</span>
                   </div>
                 )}
 
-                <p className="mt-6 text-xs text-muted-foreground/50 text-center">
+                <p className="mt-6 text-xs text-muted-foreground text-center">
                   {registrationEnabled ? (
                     <>还没有账号？<button type="button" onClick={goToRegister} className="text-primary hover:underline ml-1 focus:outline-none">立即注册</button></>
                   ) : '请联系管理员创建新账户并授权对应功能。'}

@@ -13,7 +13,7 @@
  */
 import { webcrypto } from 'node:crypto';
 import type { ComponentProps } from 'react';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import NodeEditor from '@/components/node-editor';
 import { WorkflowSketchImageControls, type WorkflowSketchImageControlsProps } from '@/components/workflow-sketch-image-controls';
@@ -264,7 +264,15 @@ function props(harness: Harness, insert: SketchInsert): WorkflowSketchImageContr
 function mount(harness: Harness, insert = harness.insert()): ReturnType<typeof render> {
   vi.stubGlobal('fetch', harness.fetcher); return render(<WorkflowSketchImageControls {...props(harness, insert)} />);
 }
-function addButton(): HTMLButtonElement { return screen.getByRole('button', { name: '添加生成图到画布' }) as HTMLButtonElement; }
+function imageResultControls(): ReturnType<typeof within> {
+  // Scope semantic queries to the live result controls, not every editor toolbar.
+  // Resolve each time: rerender/remount must not reuse a stale element.
+  const note = screen.getByText('生成图按当前项目授权读取，添加后保留原始草图。');
+  const region = note.parentElement;
+  if (!region || !region.isConnected) throw new Error('Live result controls missing');
+  return within(region);
+}
+function addButton(): HTMLButtonElement { return imageResultControls().getByRole('button', { name: '添加生成图到画布' }) as HTMLButtonElement; }
 async function addAndSettle(): Promise<void> {
   expect(addButton().disabled).toBe(false); fireEvent.click(addButton());
   await waitFor((): void => { expect(addButton().disabled).toBe(false); expect(screen.queryByText('正在核对当前授权…')).toBeNull(); });
@@ -466,7 +474,7 @@ async function mountEditor(h: Harness, wf: Workflow): Promise<ReturnType<typeof 
   await act(async (): Promise<void> => {});
   const card = await screen.findByText('重入回归草图生图');
   fireEvent.mouseDown(card, { button: 0 }); fireEvent.click(card);
-  await screen.findByRole('button', { name: '添加生成图到画布' });
+  await waitFor(() => imageResultControls().getByRole('button', { name: '添加生成图到画布' }));
   await act(async (): Promise<void> => {}); return view;
 }
 

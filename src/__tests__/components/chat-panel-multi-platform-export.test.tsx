@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
 
+import { afterEach as afterMediaApis, beforeEach as beforeMediaApis } from 'vitest';
+import { installJsdomMediaQueries, runJsdomFixtureCleanup } from '../helpers/jsdom-browser-apis';
+
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -64,3 +67,7 @@ describe('canvas ChatPanel multi-platform export integration', () => {
     expect(drawer.className).not.toMatch(/(?:^|\s)min-w-\[/);
   });
 });
+
+let restoreMediaApis: (() => void) | undefined;
+beforeMediaApis((): void => { restoreMediaApis = installJsdomMediaQueries(window, { colorScheme: 'light', reducedMotion: false }); });
+afterMediaApis((): void => { runJsdomFixtureCleanup([cleanup, (): void => { const restore = restoreMediaApis; restoreMediaApis = undefined; restore?.(); }]); });

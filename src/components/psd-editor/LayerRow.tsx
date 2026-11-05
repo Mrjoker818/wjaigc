@@ -49,7 +49,7 @@ export function LayerRow({ layer, isSelected, onSelect, onToggleVisibility, onTo
       data-layer-selected={isSelected ? 'true' : 'false'}
       onClick={onSelect}
       onDoubleClick={handleDoubleClick}
-      className={`flex items-center gap-1.5 px-2 py-1.5 cursor-pointer transition-colors group ${
+      className={`flex items-center gap-1.5 px-2 py-1.5 cursor-pointer text-white transition-colors group ${
         isSelected ? 'bg-amber-500/15 border-l-2 border-amber-500' : 'hover:bg-neutral-800 border-l-2 border-transparent'
       } ${!layer.visible ? 'opacity-50' : ''}`}
     >
@@ -78,20 +78,26 @@ export function LayerRow({ layer, isSelected, onSelect, onToggleVisibility, onTo
       )}
 
       <button
+        type="button"
         data-layer-action="visibility"
         data-layer-visible={layer.visible ? 'true' : 'false'}
+        aria-label={`图层可见性：${layer.name}`}
+        aria-pressed={layer.visible}
         onClick={(e) => { e.stopPropagation(); onToggleVisibility(); }}
-        className="w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+        className="flex h-11 w-11 shrink-0 items-center justify-center text-xs opacity-100 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 md:[@media(hover:hover)_and_(pointer:fine)]:h-5 md:[@media(hover:hover)_and_(pointer:fine)]:w-5 md:[@media(hover:hover)_and_(pointer:fine)]:opacity-0 md:[@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 md:[@media(hover:hover)_and_(pointer:fine)]:focus-visible:opacity-100"
         title={layer.visible ? '隐藏' : '显示'}
       >
         {layer.visible ? '视' : '-'}
       </button>
 
       <button
+        type="button"
         data-layer-action="lock"
+        aria-label={`图层锁定：${layer.name}`}
+        aria-pressed={layer.locked === true}
         onClick={(e) => { e.stopPropagation(); onToggleLock(); }}
-        className={`w-5 h-5 flex items-center justify-center text-xs transition-opacity ${
-          layer.locked ? 'opacity-100 text-amber-400' : 'opacity-0 group-hover:opacity-100'
+        className={`flex h-11 w-11 shrink-0 items-center justify-center text-xs opacity-100 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 md:[@media(hover:hover)_and_(pointer:fine)]:h-5 md:[@media(hover:hover)_and_(pointer:fine)]:w-5 ${
+          layer.locked ? 'text-amber-400' : 'md:[@media(hover:hover)_and_(pointer:fine)]:opacity-0 md:[@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 md:[@media(hover:hover)_and_(pointer:fine)]:focus-visible:opacity-100'
         }`}
         title={layer.locked ? '解锁' : '锁定'}
       >

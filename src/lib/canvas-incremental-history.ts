@@ -33,6 +33,9 @@ export interface HistoryEntry {
   diff?: CanvasImageDiff;
 }
 
+// Per-operation identity is memory-only: symbol keys are not serialized.
+export const CANVAS_CROP_OPERATION: unique symbol = Symbol('canvas-crop-operation');
+
 export type CanvasImageLike = { id: string };
 
 export class IncrementalHistoryManager<T extends CanvasImageLike = CanvasImageLike> {
@@ -298,6 +301,22 @@ export class IncrementalHistoryManager<T extends CanvasImageLike = CanvasImageLi
     });
 
     return result;
+  }
+
+  /** Reconcile a completed crop with the existing creation entry, without adding a step. */
+  updateCropCreation(id: string, patch: Record<string, unknown>, onlyRedo: boolean, operation: object): boolean {
+    const stacks = onlyRedo ? [this.redoStack] : [this.undoStack, this.redoStack];
+    for (const stack of stacks) {
+      for (let i = stack.length - 1; i >= 0; i--) {
+        const added = stack[i].diff?.added.get(id);
+        const processing = added?.processing as { label?: string; [CANVAS_CROP_OPERATION]?: object } | undefined;
+        if (added?.isProcessingPlaceholder === true && processing?.label === '裁切中' && processing[CANVAS_CROP_OPERATION] === operation) {
+          stack[i].diff!.added.set(id, { ...added, ...patch });
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   canUndo(): boolean {

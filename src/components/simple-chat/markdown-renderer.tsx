@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState } from "react";
+import { isValidElement, memo, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -12,33 +12,66 @@ interface MarkdownRendererProps {
   isDark?: boolean;
 }
 
+function codePlainText(value: React.ReactNode): string {
+  if (typeof value === "string" || typeof value === "number") return String(value);
+  if (Array.isArray(value)) return value.map(codePlainText).join("");
+  if (isValidElement<{ children?: React.ReactNode }>(value)) return codePlainText(value.props.children);
+  return "";
+}
+
 function CodeBlock({ children, className }: { children?: React.ReactNode; className?: string }) {
   const [copied, setCopied] = useState(false);
-  const codeText = String(children).replace(/\n$/, "");
+  const [copying, setCopying] = useState(false);
+  const [copyError, setCopyError] = useState(false);
+  const copyingRef = useRef(false);
+  const mountedRef = useRef(false);
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; clearTimeout(resetTimer.current); };
+  }, []);
+  const codeText = codePlainText(children).replace(/\n$/, "");
 
-  const handleCopy = async () => {
+  const handleCopy = async (): Promise<void> => {
+    if (copyingRef.current) return;
+    copyingRef.current = true;
+    setCopying(true);
+    setCopyError(false);
+    setCopied(false);
+    clearTimeout(resetTimer.current);
     try {
       await navigator.clipboard.writeText(codeText);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch { /* ignore */ }
+      if (mountedRef.current) {
+        setCopied(true);
+        resetTimer.current = setTimeout(() => setCopied(false), 2000);
+      }
+    } catch {
+      if (mountedRef.current) setCopyError(true);
+    } finally {
+      copyingRef.current = false;
+      if (mountedRef.current) setCopying(false);
+    }
   };
 
   const lang = /language-(\w+)/.exec(className || "")?.[1];
 
   return (
-    <div className="group/code relative my-3 overflow-hidden rounded-lg border border-border bg-zinc-950">
+    <div className="group/code relative my-3 min-w-0 max-w-full overflow-hidden rounded-lg border border-border bg-zinc-950">
       <div className="flex items-center justify-between border-b border-white/10 bg-white/5 px-3 py-1.5">
         <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">{lang || "code"}</span>
         <button
+          type="button"
           onClick={handleCopy}
-          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-white/10 hover:text-zinc-200"
+          disabled={copying}
+          aria-busy={copying}
+          className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center gap-1 rounded px-2 text-xs text-zinc-300 hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:opacity-60"
         >
           {copied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
-          {copied ? "已复制" : "复制"}
+          {copying ? "复制中" : copied ? "已复制" : "复制"}
         </button>
       </div>
-      <pre className="overflow-x-auto p-3 text-[13px] leading-relaxed text-zinc-100">
+      {copyError && <p role="alert" className="px-3 py-2 text-xs text-red-300">复制失败</p>}
+      <pre className="[overflow-wrap:normal] overflow-x-auto p-3 text-[13px] leading-relaxed text-zinc-100">
         <code className={className}>{children}</code>
       </pre>
     </div>
@@ -47,7 +80,7 @@ function CodeBlock({ children, className }: { children?: React.ReactNode; classN
 
 export const MarkdownRenderer = memo(function MarkdownRenderer({ content, className = "", isDark: _isDark }: MarkdownRendererProps) {
   return (
-    <div className={`markdown-body text-sm leading-relaxed ${className}`}>
+    <div className={`markdown-body min-w-0 max-w-full [overflow-wrap:anywhere] text-sm leading-relaxed ${className}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}
@@ -65,12 +98,12 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content, classN
             );
           },
           table: ({ children }) => (
-            <div className="my-3 overflow-x-auto rounded-lg border border-border">
+            <div className="my-3 max-w-full overflow-x-auto rounded-lg border border-border">
               <table className="w-full border-collapse text-sm">{children}</table>
             </div>
           ),
           thead: ({ children }) => <thead className="bg-muted/60">{children}</thead>,
-          th: ({ children }) => <th className="border-b border-border px-3 py-2 text-left font-semibold">{children}</th>,
+          th: ({ children }) => <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left font-semibold">{children}</th>,
           td: ({ children }) => <td className="border-b border-border/50 px-3 py-2">{children}</td>,
           h1: ({ children }) => <h1 className="mb-3 mt-5 text-xl font-bold first:mt-0">{children}</h1>,
           h2: ({ children }) => <h2 className="mb-2.5 mt-4 text-lg font-bold first:mt-0">{children}</h2>,

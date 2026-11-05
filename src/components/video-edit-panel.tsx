@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useId } from 'react';
 import { Play, Pause, Volume2, VolumeX, RotateCcw, Download, Sparkles, X, Film, Clock, Wand2, Loader2 } from 'lucide-react';
 
 interface VideoEditPanelProps {
@@ -12,6 +12,8 @@ interface VideoEditPanelProps {
   thumbnailUrl?: string;
   /** 原始提示词 */
   originalPrompt?: string;
+  /** 打开时由入口指定的页签，省略时保留语言编辑默认行为 */
+  initialTab?: 'edit' | 'extend';
   /** 主题风格 */
   themeStyle?: 'gold' | 'monochrome';
   /** 关闭回调 */
@@ -44,6 +46,7 @@ export function VideoEditPanel({
   videoUrl,
   thumbnailUrl,
   originalPrompt = '',
+  initialTab = 'edit',
   themeStyle = 'gold',
   onClose,
   onEdit,
@@ -53,7 +56,7 @@ export function VideoEditPanel({
 }: VideoEditPanelProps) {
   const [editPrompt, setEditPrompt] = useState('');
   const [extendPrompt, setExtendPrompt] = useState('');
-  const [activeTab, setActiveTab] = useState<'edit' | 'extend'>('edit');
+  const [activeTab, setActiveTab] = useState<'edit' | 'extend'>(initialTab);
   const [extendDuration, setExtendDuration] = useState(5);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -61,6 +64,7 @@ export function VideoEditPanel({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const isDark = themeStyle === 'gold';
+  const fieldId = useId();
 
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
@@ -78,8 +82,10 @@ export function VideoEditPanel({
       setIsPlaying(false);
       setIsSubmitting(false);
       setSubmitError(null);
+    } else {
+      setActiveTab(initialTab);
     }
-  }, [isOpen]);
+  }, [isOpen, initialTab]);
 
   // 同步 video 元素真实状态（防止外部控制/快捷键导致状态不一致）
   useEffect(() => {
@@ -158,9 +164,10 @@ export function VideoEditPanel({
 
   return (
     <div className={`fixed inset-0 z-[250] flex items-center justify-center ${isDark ? 'bg-black/70' : 'bg-black/50'}`}
+      role="dialog" aria-modal="true" aria-label="视频编辑" data-modal="video-edit"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div
-        className={`relative w-[560px] max-h-[88vh] flex flex-col rounded-2xl shadow-2xl ${isDark ? 'bg-[#1a1a1a] border border-[#2a2a2a]' : 'bg-white border border-gray-200'}`}
+        className={`relative w-[min(560px,calc(100vw-1rem))] max-h-[calc(100dvh-1rem)] min-h-0 flex flex-col rounded-2xl shadow-2xl [&_button]:inline-flex [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:shrink-0 [&_button]:items-center [&_button]:justify-center [&_button]:whitespace-nowrap ${isDark ? 'bg-[#1a1a1a] border border-[#2a2a2a]' : 'bg-white border border-gray-200'}`}
       >
         {/* 头部 */}
         <div className={`flex items-center justify-between px-5 py-3 border-b flex-shrink-0 ${isDark ? 'border-[#2a2a2a]' : 'border-gray-200'}`}>
@@ -168,13 +175,13 @@ export function VideoEditPanel({
             <Film className={`w-5 h-5 ${isDark ? 'text-[#d4af37]' : 'text-blue-500'}`} />
             <h2 className={`text-base font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>视频编辑</h2>
           </div>
-          <button onClick={onClose} className={`p-1.5 rounded-lg transition-colors ${isDark ? 'text-gray-400 hover:text-white hover:bg-[#2a2a2a]' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'}`}>
+          <button onClick={onClose} aria-label="关闭视频编辑" className={`p-1.5 rounded-lg transition-colors ${isDark ? 'text-gray-400 hover:text-white hover:bg-[#2a2a2a]' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'}`}>
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* 可滚动内容区 */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden px-5 pt-4" style={{ scrollbarWidth: 'thin' }}>
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-5 pt-4" style={{ scrollbarWidth: 'thin' }}>
           {/* 视频预览 */}
           <div>
             <div className={`relative rounded-xl overflow-hidden ${isDark ? 'bg-[#0d0d0d]' : 'bg-gray-100'}`} style={{ aspectRatio: '16/9' }}>
@@ -183,20 +190,22 @@ export function VideoEditPanel({
                 src={videoUrl}
                 poster={thumbnailUrl}
                 className="w-full h-full object-contain"
+                playsInline
                 onPlay={() => setIsPlaying(true)}
                 onPause={() => setIsPlaying(false)}
                 onEnded={() => setIsPlaying(false)}
               />
               <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3 flex items-center gap-3">
-                <button onClick={togglePlay} className="text-white hover:text-[#d4af37] transition-colors">
+                <button onClick={togglePlay} aria-label={isPlaying ? '暂停' : '播放'} className="text-white hover:text-[#d4af37] transition-colors">
                   {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
                 </button>
-                <button onClick={toggleMute} className="text-white hover:text-[#d4af37] transition-colors">
+                <button onClick={toggleMute} aria-label={isMuted ? '取消静音' : '静音'} aria-pressed={isMuted} className="text-white hover:text-[#d4af37] transition-colors">
                   {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
                 </button>
                 <div className="flex-1" />
                 <button
                   onClick={() => { if (videoRef.current) videoRef.current.currentTime = 0; }}
+                  aria-label="回到开头"
                   className="text-white hover:text-[#d4af37] transition-colors"
                 >
                   <RotateCcw className="w-4 h-4" />
@@ -209,6 +218,7 @@ export function VideoEditPanel({
           <div className={`flex mt-4 rounded-lg overflow-hidden ${isDark ? 'bg-[#0d0d0d]' : 'bg-gray-100'}`}>
             <button
               onClick={() => setActiveTab('edit')}
+              aria-pressed={activeTab === 'edit'}
               className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-all ${
                 activeTab === 'edit'
                   ? isDark ? 'bg-[#2a2a2a] text-[#d4af37]' : 'bg-white text-blue-600 shadow-sm'
@@ -220,6 +230,7 @@ export function VideoEditPanel({
             </button>
             <button
               onClick={() => setActiveTab('extend')}
+              aria-pressed={activeTab === 'extend'}
               className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-all ${
                 activeTab === 'extend'
                   ? isDark ? 'bg-[#2a2a2a] text-[#d4af37]' : 'bg-white text-blue-600 shadow-sm'
@@ -235,8 +246,9 @@ export function VideoEditPanel({
           {activeTab === 'edit' && (
             <div className="pt-4 pb-5 space-y-3">
               <div>
-                <label className={`text-xs font-medium mb-1.5 block ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>编辑描述</label>
+                <label htmlFor={`${fieldId}-edit`} className={`text-xs font-medium mb-1.5 block ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>编辑描述</label>
                 <textarea
+                  id={`${fieldId}-edit`}
                   value={editPrompt}
                   onChange={(e) => setEditPrompt(e.target.value)}
                   placeholder="描述你想要对视频做的修改，例如：将背景改为海滩日落、添加飘落的雪花..."
@@ -272,8 +284,9 @@ export function VideoEditPanel({
           {activeTab === 'extend' && (
             <div className="pt-4 pb-5 space-y-3">
               <div>
-                <label className={`text-xs font-medium mb-1.5 block ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>延续描述（可选）</label>
+                <label htmlFor={`${fieldId}-extend`} className={`text-xs font-medium mb-1.5 block ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>延续描述（可选）</label>
                 <textarea
+                  id={`${fieldId}-extend`}
                   value={extendPrompt}
                   onChange={(e) => setExtendPrompt(e.target.value)}
                   placeholder="描述视频后续画面发展，留空则自动延续当前画面风格..."
@@ -288,6 +301,7 @@ export function VideoEditPanel({
                     <button
                       key={d}
                       onClick={() => setExtendDuration(d)}
+                      aria-pressed={extendDuration === d}
                       className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all ${
                         extendDuration === d
                           ? isDark ? 'bg-[#2a2a2a] text-[#d4af37] border border-[#d4af37]/30' : 'bg-blue-50 text-blue-600 border border-blue-200'

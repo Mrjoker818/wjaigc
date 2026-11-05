@@ -33,6 +33,7 @@ interface AnnotationComposerProps {
   sourceLabel?: string;
   executeLabel?: string;
   rightInset?: number;
+  layout?: 'floating' | 'workspace';
   isExecuting?: boolean;
   executionProgress?: number;
   executionStage?: string;
@@ -50,7 +51,7 @@ interface AnnotationComposerProps {
 }
 
 const TOOL_BUTTON_CLASS =
-  'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40';
+  'inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40 lg:h-8 lg:w-8';
 
 function annotationLabel(annotation: CanvasAnnotationV2, index: number): string {
   if (annotation.label?.trim()) return annotation.label.trim();
@@ -102,6 +103,7 @@ export function AnnotationComposer({
   sourceLabel = '当前图片',
   executeLabel = '执行修改',
   rightInset = 0,
+  layout = 'floating',
   isExecuting = false,
   executionProgress = 0,
   executionStage = '正在准备任务',
@@ -130,8 +132,8 @@ export function AnnotationComposer({
       data-testid="annotation-composer"
       data-floating-panel="annotation-composer"
       data-toolbar="annotation-tools"
-      className="absolute bottom-[76px] z-50 flex flex-col gap-2 rounded-lg border border-border bg-panel-bg p-2 shadow-float"
-      style={{
+      className={`z-50 flex flex-col gap-2 rounded-lg border border-border bg-panel-bg p-2 shadow-float ${layout === 'workspace' ? 'relative min-h-0 w-full shrink-0 h-[min(24rem,60dvh)] max-h-[60dvh] overflow-y-auto overscroll-contain lg:absolute lg:h-auto lg:bottom-[76px] lg:left-1/2 lg:w-[min(960px,calc(100%_-_32px))] lg:-translate-x-1/2' : 'absolute bottom-[76px] md:bottom-[max(76px,var(--canvas-bottom-toolbar-offset,76px))]'}`}
+      style={layout === 'workspace' ? undefined : {
         left: `calc((100% - ${rightInset}px) / 2)`,
         width: `min(960px, calc(100% - ${rightInset}px - 32px))`,
         transform: 'translateX(-50%)',
@@ -140,21 +142,21 @@ export function AnnotationComposer({
       onMouseDown={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <div className="flex min-h-7 items-center gap-2 overflow-hidden">
-        <div className="inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+      <div className="flex min-h-11 flex-wrap items-center gap-2 overflow-hidden lg:min-h-7 lg:flex-nowrap">
+        <div className="inline-flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground lg:text-xs">
           <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-secondary text-foreground">
             <Crosshair size={14} aria-hidden="true" />
           </span>
           <span className="max-w-28 truncate">{sourceLabel}</span>
         </div>
 
-        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className={`order-last min-w-0 basis-full items-center gap-1 overflow-x-auto [scrollbar-width:none] lg:order-none lg:basis-auto lg:flex-1 [&::-webkit-scrollbar]:hidden ${annotations.length > 0 ? 'flex' : 'hidden lg:flex'}`}>
           {annotations.map((annotation, index) => {
             const selected = annotation.id === selectedAnnotationId;
             return (
               <div
                 key={annotation.id}
-                className={`inline-flex h-7 shrink-0 items-center gap-1 rounded-md border px-2 text-xs ${
+                className={`inline-flex h-11 shrink-0 items-center gap-1 rounded-md border px-1 text-sm lg:h-7 lg:px-2 lg:text-xs ${
                   selected
                     ? 'border-primary bg-accent text-foreground'
                     : 'border-border bg-secondary text-muted-foreground'
@@ -162,7 +164,7 @@ export function AnnotationComposer({
               >
                 <button
                   type="button"
-                  className="max-w-28 truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  className="inline-flex min-h-11 min-w-11 max-w-28 items-center justify-center truncate px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary lg:min-h-0 lg:min-w-0 lg:px-0"
                   onClick={() => onSelectAnnotation(annotation.id)}
                   title="定位批注"
                 >
@@ -171,7 +173,7 @@ export function AnnotationComposer({
                 <button
                   type="button"
                   data-annotation-remove={annotation.id}
-                  className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-destructive/15 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-destructive/15 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary lg:h-5 lg:w-5"
                   onClick={() => onRemoveAnnotation(annotation.id)}
                   title="删除批注"
                   aria-label={`删除${annotationLabel(annotation, index)}`}
@@ -183,7 +185,7 @@ export function AnnotationComposer({
           })}
         </div>
 
-        <span className="shrink-0 text-[11px] text-muted-foreground">
+        <span className="ml-auto shrink-0 text-sm text-muted-foreground lg:ml-0 lg:text-[11px]">
           {annotations.length}/10 · 最多 10 个标记
         </span>
         <button
@@ -263,14 +265,14 @@ export function AnnotationComposer({
           rows={1}
           maxLength={2000}
           placeholder="描述需要修改的内容，可组合多个标记"
-          className="min-h-9 min-w-0 flex-[1_1_320px] resize-none rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="min-h-11 min-w-0 flex-[1_1_320px] resize-none rounded-md border border-input bg-background px-3 py-2 text-base text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary lg:min-h-9 lg:text-sm"
         />
 
         {models.length > 0 && (
           <select
             value={modelId}
             onChange={(event) => onModelChange(event.target.value)}
-            className="h-9 min-w-36 rounded-md border border-input bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            className="h-11 min-w-36 max-w-full rounded-md border border-input bg-background px-2 text-base text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary lg:h-9 lg:text-xs"
             aria-label="批注修改模型"
           >
             {models.map((model) => (
@@ -319,7 +321,7 @@ export function AnnotationComposer({
           <button
             type="button"
             data-testid="annotation-execute"
-            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex h-11 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40 lg:h-9"
             disabled={!canExecute}
             onClick={onExecute}
           >
@@ -349,7 +351,7 @@ export function AnnotationComposer({
           maxLength={500}
           placeholder="Edit text instruction"
           aria-label="Text annotation instruction"
-          className="h-8 w-full rounded-md border border-input bg-background px-3 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="h-11 w-full rounded-md border border-input bg-background px-3 text-base text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary lg:h-8 lg:text-xs"
         />
       )}
 

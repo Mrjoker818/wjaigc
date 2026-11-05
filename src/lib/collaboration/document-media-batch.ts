@@ -5,21 +5,21 @@ import { isDeepStrictEqual } from 'node:util';
 import type { PoolClient } from 'pg';
 import { getPool } from '@/lib/db-client';
 import { lockAssetGraphWriteGate } from '@/lib/asset-core/storage';
-import { assertDocumentEditor, assertDocumentProjectEnabled, DocumentAccessError } from './document-access';
-import { loadDocumentInTransaction, commitDocumentSkillRestorationInTransaction } from './document-store';
-import { readCanvasDocument } from './canvas-document';
-import { readTaskPublicationAccess } from './task-publication-access';
-import { prepareDocumentAssetsForImport, prepareDocumentAssetsForSkillBatch } from './document-asset-validation';
-import { executeDocumentAssetCommandInTransaction } from './document-asset-commands';
-import { parseDocumentAssetCommandRequest } from './canvas-asset-command';
-import { prepareSkillRestoration, type PreparedSkillRestoration } from './document-skill-restoration';
+import { assertDocumentEditor, assertDocumentProjectEnabled, DocumentAccessError } from '@/lib/collaboration/document-access';
+import { loadDocumentInTransaction, commitDocumentSkillRestorationInTransaction } from '@/lib/collaboration/document-store';
+import { readCanvasDocument } from '@/lib/collaboration/canvas-document';
+import { readTaskPublicationAccess } from '@/lib/collaboration/task-publication-access';
+import { prepareDocumentAssetsForImport, prepareDocumentAssetsForSkillBatch } from '@/lib/collaboration/document-asset-validation';
+import { executeDocumentAssetCommandInTransaction } from '@/lib/collaboration/document-asset-commands';
+import { parseDocumentAssetCommandRequest } from '@/lib/collaboration/canvas-asset-command';
+import { prepareSkillRestoration, type PreparedSkillRestoration } from '@/lib/collaboration/document-skill-restoration';
 import { resolveSkillRunAssets, prepareSkillDelivery, assertPreparedSkillDelivery, readSkillDeliveryIdentity } from '@/lib/skill-runtime/document-assets';
 import { acquireKey, prepareDocumentVersionForBatch, preparedDocumentMediaCommitIdentity,
   commitPreparedDocumentMediaInTransaction, cleanupPreparedDocumentMediaCommit, readDocumentMediaBatchChild,
-  type PreparedDocumentMediaCommit } from './document-media-import';
-import { DocumentMediaError, assertMediaActive, mediaDeadline, parseMediaAdoption, parseMediaVersionImport } from './document-media-request';
+  type PreparedDocumentMediaCommit } from '@/lib/collaboration/document-media-import';
+import { DocumentMediaError, assertMediaActive, mediaDeadline, parseMediaAdoption, parseMediaVersionImport } from '@/lib/collaboration/document-media-request';
 import { parseDocumentMediaBatchRequest, type DocumentMediaBatchRequest, type DocumentMediaBatchResult,
-  type DocumentMediaBatchItemResult } from './document-media-batch-request';
+  type DocumentMediaBatchItemResult } from '@/lib/collaboration/document-media-batch-request';
 
 function conflict(): never { throw new DocumentMediaError('DOCUMENT_MEDIA_CONFLICT'); }
 function digest(value: unknown): string { return createHash('sha256').update(JSON.stringify(value)).digest('hex'); }

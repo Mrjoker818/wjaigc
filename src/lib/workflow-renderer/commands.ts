@@ -97,6 +97,7 @@ export type WorkflowEditorTransition =
   | { kind: 'command'; command: WorkflowInteractionCommand }
   | { kind: 'user.update'; workflow: Workflow; transactionId: string }
   | { kind: 'system.update'; workflow: Workflow }
+  | { kind: 'insertion.settle'; nodeId: string; transactionId: string; before: WorkflowNode; after: WorkflowNode }
   | { kind: 'history.undo' }
   | { kind: 'history.redo' };
 
@@ -523,6 +524,43 @@ export function applyWorkflowCommand(
   );
 }
 
+// Only a node.add from one material insertion can be refined; ordinary history is untouched.
+function settleWorkflowInsertion(state: WorkflowEditorState, transition: Extract<WorkflowEditorTransition, { kind: 'insertion.settle' }>): WorkflowEditorState {
+  if (transition.before.id !== transition.nodeId || transition.after.id !== transition.nodeId) return state;
+  const index = state.history.entries.findIndex(entry => entry.transactionId === transition.transactionId);
+  if (index < 0) return state;
+  const entry = state.history.entries[index]!;
+  const addition = entry.redo.find(operation => operation.type === 'node.add' && operation.node.id === transition.nodeId);
+  if (!addition || addition.type !== 'node.add' || !entry.undo.some(operation => operation.type === 'node.remove' && operation.nodeId === transition.nodeId)) return state;
+  const live = state.workflow.nodes.find(node => node.id === transition.nodeId);
+  if (live && (index >= state.history.index || !valuesEqual(live, transition.before))) return state;
+  const operations: WorkflowPatchOperation[] = [];
+  const referenceFields = new Set(['imageUrl', 'source', 'sourceImageId', 'assetTransferPending', 'assetTransferError', 'assetTransferExpectedActorId', 'assetTransferExpectedProjectId', 'assetTransferExpectedSource', 'projectId', 'assetId', 'assetVersionId', 'placementId']);
+  let valid = true;
+  let expectedSourceRecorded = false;
+  collectValuePatch(transition.before, transition.after, [], (path, value, remove) => {
+    if (path.length >= 2 && path[0] === 'config' && path[1] === 'assetTransferExpectedSource') {
+      if (!expectedSourceRecorded) {
+        expectedSourceRecorded = true;
+        const source = transition.after.config.assetTransferExpectedSource;
+        operations.push(source === undefined
+          ? { type: 'node.set', nodeId: transition.nodeId, path: ['config', 'assetTransferExpectedSource'], remove: true }
+          : { type: 'node.set', nodeId: transition.nodeId, path: ['config', 'assetTransferExpectedSource'], value: cloneSnapshotValue(source) });
+      }
+      return;
+    }
+    const geometry = path.length === 1 && ['x', 'y', 'width', 'height'].includes(path[0]!);
+    const reference = path.length === 2 && path[0] === 'config' && referenceFields.has(path[1]!);
+    if ((!geometry && !reference) || (geometry && (remove || typeof value !== 'number' || !Number.isFinite(value)))) { valid = false; return; }
+    operations.push(remove ? { type: 'node.set', nodeId: transition.nodeId, path, remove: true } : { type: 'node.set', nodeId: transition.nodeId, path, value: cloneSnapshotValue(value) });
+  });
+  if (!valid || operations.length === 0) return state;
+  const snapshot = applyWorkflowPatch({ ...state.workflow, nodes: [addition.node], connections: [] }, operations).nodes[0]!;
+  const refined = { ...entry, redo: entry.redo.map(operation => operation === addition ? { ...addition, node: snapshot } : operation) };
+  const workflow = live ? applyWorkflowPatch(state.workflow, operations) : state.workflow;
+  return { ...state, workflow, history: { ...state.history, entries: state.history.entries.map((item, i) => i === index ? refined : item) },
+    broadcastRevision: state.broadcastRevision + (workflow === state.workflow ? 0 : 1) };
+}
 export function createWorkflowEditorState(workflow: Workflow): WorkflowEditorState {
   return { workflow: restoreLegacyEditMaskPorts(workflow), history: createWorkflowCommandHistory(), broadcastRevision: 0 };
 }
@@ -531,6 +569,7 @@ export function reduceWorkflowEditorState(
   state: WorkflowEditorState,
   transition: WorkflowEditorTransition,
 ): WorkflowEditorState {
+  if (transition.kind === 'insertion.settle') return settleWorkflowInsertion(state, transition);
   if (transition.kind === 'history.undo') {
     if (state.history.index <= 0) return state;
     const navigation = undoWorkflowCommandHistory(state.history, state.workflow);

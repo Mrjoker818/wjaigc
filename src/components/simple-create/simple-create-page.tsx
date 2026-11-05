@@ -1,7 +1,7 @@
 'use client';
 
 import { ArrowLeft, LoaderCircle } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { fetchSessionPayload } from '@/lib/auth-session';
 import { extractTaskAssetReferences } from '@/lib/asset-core/workspace-transfer';
@@ -48,7 +48,20 @@ interface SimpleCreatePageProps {
   initialProjectId: string;
 }
 
+interface SimpleCreatePageLifecycle {
+  context: SimpleCreatePageProps;
+  ready: boolean;
+  submitting: boolean;
+  uploadBusy: boolean;
+}
+
 export function SimpleCreatePage({ dependencies, initialProjectId }: SimpleCreatePageProps) {
+  const context = useMemo<SimpleCreatePageProps>(
+    () => ({ dependencies, initialProjectId }),
+    [dependencies, initialProjectId],
+  );
+  const lifecycle = useRef<SimpleCreatePageLifecycle | null>(null);
+  const [visibleContext, setVisibleContext] = useState<SimpleCreatePageProps | null>(null);
   const [models, setModels] = useState<SimpleCreateModel[]>([]);
   const [slots, setSlots] = useState<ImageGenerationSlot[]>([]);
   const [referenceImages, setReferenceImages] = useState<string[]>([]);
@@ -57,14 +70,25 @@ export function SimpleCreatePage({ dependencies, initialProjectId }: SimpleCreat
   const [uploadBusy, setUploadBusy] = useState(false);
   const [error, setError] = useState('');
 
-  useEffect(() => dependencies.session.subscribe(setSlots), [dependencies]);
-
   useEffect(() => {
-    let active = true;
+    const owner: SimpleCreatePageLifecycle = { context, ready: false, submitting: false, uploadBusy: false };
+    lifecycle.current = owner;
+    setVisibleContext(context);
+    setLoading(true);
+    setModels([]);
+    setSlots([]);
+    setReferenceImages([]);
+    setSubmitting(false);
+    setUploadBusy(false);
+    setError('');
+    const unsubscribe = dependencies.session.subscribe((currentSlots: ImageGenerationSlot[]): void => {
+      if (lifecycle.current !== owner || !owner.ready) return;
+      setSlots(currentSlots.filter((slot: ImageGenerationSlot): boolean => slot.projectId === initialProjectId));
+    });
     void (async () => {
       try {
         const sessionState = await dependencies.getSession();
-        if (!active) return;
+        if (lifecycle.current !== owner) return;
         if (!sessionState.authenticated) {
           dependencies.navigate(buildSimpleCreateLoginUrl(
             `/simple-create?${new URLSearchParams({ projectId: initialProjectId }).toString()}`,
@@ -75,28 +99,36 @@ export function SimpleCreatePage({ dependencies, initialProjectId }: SimpleCreat
           setError('请先选择一个项目');
           return;
         }
-        const [availableModels, restoredSlots] = await Promise.all([
+        const [availableModels] = await Promise.all([
           dependencies.loadModels(),
           dependencies.session.restore(initialProjectId),
         ]);
-        if (!active) return;
+        if (lifecycle.current !== owner) return;
+        const currentSlots = dependencies.session.snapshot();
         setModels(availableModels);
-        setSlots(restoredSlots);
+        setSlots(currentSlots.filter((slot: ImageGenerationSlot): boolean => slot.projectId === initialProjectId));
+        owner.ready = true;
         if (availableModels.length === 0) setError('当前账号没有可用的图像模型');
       } catch (cause) {
-        if (active) setError(cause instanceof Error ? cause.message : '快速生图页加载失败');
+        if (lifecycle.current === owner) setError(cause instanceof Error ? cause.message : '快速生图页加载失败');
       } finally {
-        if (active) setLoading(false);
+        if (lifecycle.current === owner) setLoading(false);
       }
     })();
-    return () => { active = false; };
-  }, [dependencies, initialProjectId]);
+    return () => {
+      if (lifecycle.current === owner) lifecycle.current = null;
+      unsubscribe();
+    };
+  }, [context, dependencies, initialProjectId]);
 
   const submit = async (value: SimpleCreateFormValue): Promise<void> => {
+    const owner = lifecycle.current;
+    if (!owner || owner.context !== context || !owner.ready || owner.submitting || owner.uploadBusy) return;
+    owner.submitting = true;
     setSubmitting(true);
     setError('');
     try {
-      setSlots(await dependencies.session.submit({
+      await dependencies.session.submit({
         projectId: initialProjectId,
         outputCount: value.outputCount,
         prompt: value.prompt,
@@ -107,37 +139,43 @@ export function SimpleCreatePage({ dependencies, initialProjectId }: SimpleCreat
         ...(value.quality ? { quality: value.quality } : {}),
         ...(value.resolution ? { resolution: value.resolution } : {}),
         referenceImages: value.referenceImages,
-      }));
+      });
+      if (lifecycle.current !== owner) return;
+      const currentSlots = dependencies.session.snapshot();
+      setSlots(currentSlots.filter((slot: ImageGenerationSlot): boolean => slot.projectId === initialProjectId));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '图像生成任务提交失败');
+      if (lifecycle.current === owner) setError(cause instanceof Error ? cause.message : '图像生成任务提交失败');
     } finally {
-      setSubmitting(false);
+      if (lifecycle.current === owner) {
+        owner.submitting = false;
+        setSubmitting(false);
+      }
     }
   };
 
-  if (loading) {
+  if (loading || visibleContext !== context) {
     return (
-      <main className="flex min-h-dvh items-center justify-center bg-[#0d1016] text-zinc-300">
+      <main style={{ height: '100dvh' }} className="flex h-dvh min-h-0 items-center justify-center bg-[#0d1016] text-zinc-300">
         <LoaderCircle className="h-5 w-5 animate-spin" aria-label="正在加载" />
       </main>
     );
   }
 
   return (
-    <main data-simple-create-page className="min-h-dvh bg-[#0d1016] text-white">
+    <main data-simple-create-page style={{ height: '100dvh' }} className="h-dvh min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain bg-[#0d1016] text-white">
       <div className="mx-auto w-full max-w-3xl px-4 pb-12 pt-[max(1rem,env(safe-area-inset-top))] sm:px-6">
         <header className="mb-7 flex items-center gap-3 border-b border-zinc-800 pb-4">
           <button
             type="button"
             aria-label="返回项目"
             onClick={() => dependencies.navigate('/?view=dashboard')}
-            className="flex h-10 w-10 items-center justify-center rounded-md border border-zinc-700 text-zinc-300 hover:border-amber-400 hover:text-white"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-zinc-700 text-zinc-300 hover:border-amber-400 hover:text-white"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
-          <div>
+          <div className="min-w-0">
             <h1 className="text-lg font-semibold">快速生图</h1>
-            <p className="text-xs text-zinc-500">项目 {initialProjectId || '未选择'}</p>
+            <p className="text-xs text-zinc-500 [overflow-wrap:anywhere]">项目 {initialProjectId || '未选择'}</p>
           </div>
         </header>
 
@@ -149,19 +187,30 @@ export function SimpleCreatePage({ dependencies, initialProjectId }: SimpleCreat
             submitting={submitting}
             uploadBusy={uploadBusy}
             referenceImages={referenceImages}
-            onUpload={async (file) => {
+            onUpload={async (file: File): Promise<void> => {
+              const owner = lifecycle.current;
+              if (!owner || owner.context !== context || !owner.ready || owner.uploadBusy) return;
+              owner.uploadBusy = true;
               setUploadBusy(true);
               setError('');
               try {
                 const reference = await dependencies.uploadReference(file);
+                if (lifecycle.current !== owner) return;
                 setReferenceImages(current => [...current, reference.url]);
               } catch (cause) {
-                setError(cause instanceof Error ? cause.message : '参考图上传失败');
+                if (lifecycle.current === owner) setError(cause instanceof Error ? cause.message : '参考图上传失败');
               } finally {
-                setUploadBusy(false);
+                if (lifecycle.current === owner) {
+                  owner.uploadBusy = false;
+                  setUploadBusy(false);
+                }
               }
             }}
-            onRemoveReference={index => setReferenceImages(current => current.filter((_, itemIndex) => itemIndex !== index))}
+            onRemoveReference={(index: number): void => {
+              const owner = lifecycle.current;
+              if (!owner || owner.context !== context || !owner.ready) return;
+              setReferenceImages(current => current.filter((_, itemIndex) => itemIndex !== index));
+            }}
             onSubmit={submit}
           />
         )}
@@ -169,10 +218,26 @@ export function SimpleCreatePage({ dependencies, initialProjectId }: SimpleCreat
         <div className="mt-8">
           <SimpleCreateResults
             slots={slots}
-            onCancel={slotId => { void dependencies.session.cancel(slotId); }}
-            onRetry={slotId => { void dependencies.session.retry(slotId); }}
-            onDownload={slot => { if (slot.url) dependencies.download(slot.url, `${slot.id}.png`); }}
-            onOpenCanvas={slot => {
+            onCancel={(slotId: string): void => {
+              const owner = lifecycle.current;
+              if (!owner || owner.context !== context || !owner.ready) return;
+              if (!slots.some((slot: ImageGenerationSlot): boolean => slot.id === slotId && slot.projectId === initialProjectId)) return;
+              void dependencies.session.cancel(slotId);
+            }}
+            onRetry={(slotId: string): void => {
+              const owner = lifecycle.current;
+              if (!owner || owner.context !== context || !owner.ready) return;
+              if (!slots.some((slot: ImageGenerationSlot): boolean => slot.id === slotId && slot.projectId === initialProjectId)) return;
+              void dependencies.session.retry(slotId);
+            }}
+            onDownload={(slot: ImageGenerationSlot): void => {
+              const owner = lifecycle.current;
+              if (!owner || owner.context !== context || !owner.ready || slot.projectId !== initialProjectId) return;
+              if (slot.url) dependencies.download(slot.url, `${slot.id}.png`);
+            }}
+            onOpenCanvas={(slot: ImageGenerationSlot): void => {
+              const owner = lifecycle.current;
+              if (!owner || owner.context !== context || !owner.ready || slot.projectId !== initialProjectId) return;
               if (!slot.url || !slot.assetVersionId || !slot.placementId) return;
               dependencies.navigate(buildSimpleCreateCanvasUrl(initialProjectId, {
                 url: slot.url,
@@ -213,6 +278,19 @@ function createBrowserDependencies(): SimpleCreateDependencies {
       if (!response.ok || data?.success !== true) {
         throw new Error(typeof data?.error === 'string' ? data.error : '图像生成任务提交失败');
       }
+      return data;
+    },
+    retryRestoredTask: async (taskId, projectId) => {
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ retryTaskId: taskId, projectId, submitOnly: true, outputCount: 1, n: 1 }),
+      });
+      const data = await response.json().catch(() => null) as Record<string, unknown> | null;
+      if (!response.ok || !data) {
+        throw new Error(typeof data?.error === 'string' ? data.error : '原任务重试提交失败，请稍后重试');
+      }
+      // A 200 success:false reply may identify a reused failed child that must remain retryable.
       return data;
     },
     subscribeTaskEvents: listener => taskEventsClient.onTaskEvent(event => listener({

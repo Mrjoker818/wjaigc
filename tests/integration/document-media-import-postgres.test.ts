@@ -5,7 +5,7 @@ import path from 'node:path';
 import { setTimeout as realDelay } from 'node:timers/promises';
 import sharp from 'sharp';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { withIsolatedPostgres, type QueryFn } from '../helpers/postgres-test-database';
+import { withIsolatedPostgres as runIsolatedPostgres, type IsolatedPostgresContext, type QueryFn } from '../helpers/postgres-test-database';
 import { adoptDocumentTaskResult, importDocumentUpload, importDocumentAssetVersion, publishDocumentTaskOutput } from '../../src/lib/collaboration/document-media-import';
 import { prepareCanvasTaskPublicationInTransaction, persistCanvasTaskPublicationInTransaction } from '../../src/lib/collaboration/task-publication';
 import { executeDocumentAssetCommand } from '../../src/lib/collaboration/document-asset-commands';
@@ -44,6 +44,31 @@ vi.mock('node:fs/promises', async (importOriginal): Promise<typeof import('node:
   ...await importOriginal<typeof import('node:fs/promises')>(),
 }));
 const mediaRoot = roots.root;
+const pendingMediaImportFixtures = new Set<Promise<unknown>>();
+const mediaImportFixtureFailures: unknown[] = [];
+let mediaImportFixtureClosures = 0;
+function withIsolatedPostgres<T>(
+  testName: string,
+  callback: (context: IsolatedPostgresContext) => Promise<T>,
+  options?: Parameters<typeof runIsolatedPostgres>[2],
+): Promise<T> {
+  const work = runIsolatedPostgres(testName, callback, options);
+  pendingMediaImportFixtures.add(work);
+  void work.then(
+    () => { pendingMediaImportFixtures.delete(work); },
+    (error: unknown) => {
+      mediaImportFixtureFailures.push(error);
+      pendingMediaImportFixtures.delete(work);
+    },
+  );
+  return work;
+}
+async function finishMediaImportFixtures(): Promise<void> {
+  await Promise.allSettled([...pendingMediaImportFixtures]);
+  if (mediaImportFixtureFailures.length > 0) {
+    throw new AggregateError([...mediaImportFixtureFailures], 'DOCUMENT_MEDIA_FIXTURE_PENDING: isolated fixture failure');
+  }
+}
 let image: Buffer;
 let video: Buffer;
 beforeAll(async (): Promise<void> => {
@@ -57,14 +82,31 @@ beforeAll(async (): Promise<void> => {
   await writeFile(path.join(mediaRoot, 'images', 'source.mp4'), video);
 });
 afterAll(async (): Promise<void> => {
+  if (pendingMediaImportFixtures.size > 0 || mediaImportFixtureFailures.length > 0 || mediaImportFixtureClosures > 0) {
+    throw new Error('DOCUMENT_MEDIA_FIXTURE_PENDING: preserve media until fixture cleanup is certain');
+  }
   const relative = path.relative(path.resolve(roots.base), path.resolve(mediaRoot));
   expect(relative.startsWith('document-media-import-') && !relative.includes(path.sep)).toBe(true);
   await rm(mediaRoot, { recursive: true, force: true });
   if (roots.previousRoot === undefined) delete process.env.WUJIE_DATA_DIR;
   else process.env.WUJIE_DATA_DIR = roots.previousRoot;
 });
-beforeEach(() => vi.stubEnv('WUJIE_YJS_ENABLED', 'true'));
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+beforeEach(() => {
+  if (pendingMediaImportFixtures.size > 0 || mediaImportFixtureFailures.length > 0 || mediaImportFixtureClosures > 0) {
+    throw new Error('DOCUMENT_MEDIA_FIXTURE_PENDING: previous fixture has not safely completed');
+  }
+  vi.stubEnv('WUJIE_YJS_ENABLED', 'true');
+});
+afterEach(async (): Promise<void> => {
+  mediaImportFixtureClosures++;
+  try {
+    await finishMediaImportFixtures();
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  } finally {
+    mediaImportFixtureClosures--;
+  }
+});
 
 async function seed(query: QueryFn, versionMigration: boolean = true): Promise<void> {
   for (const name of ['20260809_wj_core_users.sql', '20260810_wj_stable_s2_assets.sql',

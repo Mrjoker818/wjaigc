@@ -700,7 +700,7 @@ export async function dbDeleteUserData(userId: string, key?: string): Promise<bo
 
 // ─── System Settings ─────────────────────────────────────────────────────────
 
-export async function dbGetSystemSetting(key: string): Promise<unknown> {
+export async function dbGetSystemSetting(key: string, options?: { throwOnError?: boolean }): Promise<unknown> {
   try {
     const result = await execSql(
       'SELECT value FROM wujie_system_settings WHERE key = $1',
@@ -709,6 +709,7 @@ export async function dbGetSystemSetting(key: string): Promise<unknown> {
     return (result.rows as { value: unknown }[])[0]?.value || null;
   } catch (e) {
     console.error('[db-storage] dbGetSystemSetting error:', e);
+    if (options?.throwOnError) throw e;
     return null;
   }
 }
@@ -1061,7 +1062,7 @@ export interface DbUserGroup {
   updated_at: number;
 }
 
-export async function dbReadGroups(): Promise<DbUserGroup[]> {
+export async function dbReadGroups(options?: { strict?: boolean }): Promise<DbUserGroup[]> {
   try {
     const result = await execSql('SELECT * FROM wujie_user_groups ORDER BY created_at ASC');
     return (result.rows as unknown as Record<string, unknown>[]).map(row => ({
@@ -1075,6 +1076,7 @@ export async function dbReadGroups(): Promise<DbUserGroup[]> {
     }));
   } catch (e) {
     console.error('[db-storage] dbReadGroups error:', e);
+    if (options?.strict) throw new Error('Failed to load groups');
     return [];
   }
 }
@@ -1909,17 +1911,23 @@ interface DbCreditTransaction {
   created_at: number;
 }
 
-export async function dbGetCredits(userId: string): Promise<DbCredits | null> {
+interface CreditStorageErrorOptions {
+  /** Display reads must distinguish unavailable storage from absent/empty data. */
+  throwOnError?: boolean;
+}
+
+export async function dbGetCredits(userId: string, options: CreditStorageErrorOptions = {}): Promise<DbCredits | null> {
   try {
     const result = await execSql('SELECT * FROM wujie_credits WHERE user_id = $1', [userId]);
     return (result.rows as unknown as DbCredits[])[0] || null;
   } catch (e) {
     console.error('[db-storage] dbGetCredits error:', e);
+    if (options.throwOnError) throw e;
     return null;
   }
 }
 
-export async function dbInitCredits(userId: string, initialBalance = 0): Promise<DbCredits | null> {
+export async function dbInitCredits(userId: string, initialBalance = 0, options: CreditStorageErrorOptions = {}): Promise<DbCredits | null> {
   try {
     const id = `credits_${userId}_${Date.now()}`;
     const now = Date.now();
@@ -1933,6 +1941,7 @@ export async function dbInitCredits(userId: string, initialBalance = 0): Promise
     return (result.rows as unknown as DbCredits[])[0] || null;
   } catch (e) {
     console.error('[db-storage] dbInitCredits error:', e);
+    if (options.throwOnError) throw e;
     return null;
   }
 }
@@ -2043,7 +2052,7 @@ export async function dbRecordCreditTransaction(
 
 export async function dbGetCreditTransactions(
   userId: string,
-  options?: { type?: string; limit?: number; offset?: number }
+  options?: { type?: string; limit?: number; offset?: number } & CreditStorageErrorOptions
 ): Promise<DbCreditTransaction[]> {
   try {
     const limit = options?.limit || 50;
@@ -2063,16 +2072,18 @@ export async function dbGetCreditTransactions(
     return result.rows as unknown as DbCreditTransaction[];
   } catch (e) {
     console.error('[db-storage] dbGetCreditTransactions error:', e);
+    if (options?.throwOnError) throw e;
     return [];
   }
 }
 
-export async function dbGetAllCredits(): Promise<DbCredits[]> {
+export async function dbGetAllCredits(options: CreditStorageErrorOptions = {}): Promise<DbCredits[]> {
   try {
     const result = await execSql('SELECT c.*, u.name as user_name FROM wujie_credits c LEFT JOIN wujie_users u ON c.user_id = u.id ORDER BY c.updated_at DESC');
     return result.rows as unknown as DbCredits[];
   } catch (e) {
     console.error('[db-storage] dbGetAllCredits error:', e);
+    if (options.throwOnError) throw e;
     return [];
   }
 }
@@ -2173,6 +2184,7 @@ export async function dbGetAuditLogs(options?: {
   search?: string;
   limit?: number;
   offset?: number;
+  throwOnError?: boolean;
 }): Promise<{ logs: DbAuditLog[]; total: number }> {
   try {
     const conditions: string[] = [];
@@ -2233,11 +2245,12 @@ export async function dbGetAuditLogs(options?: {
     return { logs: result.rows as unknown as DbAuditLog[], total };
   } catch (e) {
     console.error('[db-storage] dbGetAuditLogs error:', e);
+    if (options?.throwOnError) throw new Error('日志存储读取失败');
     return { logs: [], total: 0 };
   }
 }
 
-export async function dbGetAuditStats(): Promise<{
+export async function dbGetAuditStats(options?: { throwOnError?: boolean }): Promise<{
   totalActions: number;
   todayActions: number;
   uniqueUsers: number;
@@ -2283,6 +2296,10 @@ export async function dbGetAuditStats(): Promise<{
       avgDurationMs: Math.round((avgDurRes.rows as { avg: number }[])[0]?.avg || 0),
     };
   } catch (e) {
+    if (options?.throwOnError) {
+      console.error('[db-storage] dbGetAuditStats error');
+      throw new Error('日志统计读取失败');
+    }
     console.error('[db-storage] dbGetAuditStats error:', e);
     return { totalActions: 0, todayActions: 0, uniqueUsers: 0, actionBreakdown: {}, levelBreakdown: {}, errorCount: 0, unresolvedErrorCount: 0, avgDurationMs: 0 };
   }
@@ -2340,7 +2357,7 @@ export async function dbCleanOldAuditLogs(olderThanDays: number): Promise<number
 
 // ─── Dashboard Stats ─────────────────────────────────────────────────────────
 
-export async function dbGetDashboardStats(periodDays = 7) {
+export async function dbGetDashboardStats(periodDays = 7, options: { throwOnError?: boolean } = {}) {
   try {
     const now = Date.now();
     const todayStart = now - (now % 86400000);
@@ -2351,7 +2368,9 @@ export async function dbGetDashboardStats(periodDays = 7) {
 
     const [usersRes, creditsRes, todayRes, weekRes, monthRes] = await Promise.all([
       execSql('SELECT COUNT(*) as count FROM wujie_users'),
-      execSql('SELECT COALESCE(SUM(total_recharged), 0) as recharged, COALESCE(SUM(total_used), 0) as consumed FROM wujie_credits'),
+      execSql(`SELECT COALESCE((SELECT SUM(amount) FROM wujie_credit_transactions
+                       WHERE type = 'recharge' AND amount > 0), 0) as recharged,
+                      COALESCE(SUM(total_used), 0) as consumed FROM wujie_credits`),
       execSql('SELECT COUNT(*) as count FROM wujie_users WHERE created_at >= $1', [todayStart]),
       execSql('SELECT COUNT(*) as count FROM wujie_users WHERE created_at >= $1', [weekStart]),
       execSql('SELECT COUNT(*) as count FROM wujie_users WHERE created_at >= $1', [monthStart]),
@@ -2477,6 +2496,7 @@ export async function dbGetDashboardStats(periodDays = 7) {
     };
   } catch (e) {
     console.error('[db-storage] dbGetDashboardStats error:', e);
+    if (options.throwOnError) throw new Error('仪表盘统计读取失败');
     return {
       totalUsers: 0, weekActive: 0, totalCredits: 0, totalApiCalls: 0,
       userTrend: [], creditTrend: [], modelRank: [], providerStatus: [], alerts: [], recentUsers: [],

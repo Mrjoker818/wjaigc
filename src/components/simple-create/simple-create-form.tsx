@@ -65,7 +65,7 @@ export function SimpleCreateForm({
   const maxReferences = selected?.supportsReferenceImages
     ? Math.max(1, selected.maxReferenceImages || 1)
     : 0;
-  const canSubmit = Boolean(selected && prompt.trim() && !submitting);
+  const canSubmit = Boolean(selected && prompt.trim() && !submitting && !uploadBusy);
 
   return (
     <form
@@ -95,7 +95,7 @@ export function SimpleCreateForm({
           aria-label="模型"
           value={selectedKey}
           onChange={event => setSelectedKey(event.target.value)}
-          className="min-h-11 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 text-sm text-white outline-none focus:border-amber-400"
+          className="min-h-11 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 text-base text-white outline-none md:text-sm focus:border-amber-400"
         >
           {models.map(model => (
             <option key={`${model.providerId}::${model.modelId}`} value={`${model.providerId}::${model.modelId}`}>
@@ -113,7 +113,7 @@ export function SimpleCreateForm({
           onChange={event => setPrompt(event.target.value)}
           rows={5}
           placeholder="描述你想生成的画面"
-          className="w-full resize-y rounded-md border border-zinc-700 bg-zinc-900 px-3 py-3 text-sm text-white outline-none placeholder:text-zinc-500 focus:border-amber-400"
+          className="w-full resize-y rounded-md border border-zinc-700 bg-zinc-900 px-3 py-3 text-base text-white outline-none md:text-sm placeholder:text-zinc-500 focus:border-amber-400"
         />
       </label>
 
@@ -153,14 +153,14 @@ export function SimpleCreateForm({
           {referenceImages.length > 0 && (
             <div className="flex flex-wrap gap-2" aria-label="已上传参考图">
               {referenceImages.map((url, index) => (
-                <div key={`${url}-${index}`} className="relative h-16 w-16 overflow-hidden rounded-md border border-zinc-700">
+                <div key={`${url}-${index}`} className="relative h-20 w-20 overflow-hidden rounded-md border border-zinc-700">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={url} alt="参考图已上传" className="h-full w-full object-cover" />
                   <button
                     type="button"
                     aria-label={`移除参考图 ${index + 1}`}
                     onClick={() => onRemoveReference(index)}
-                    className="absolute right-0 top-0 flex h-8 w-8 items-center justify-center bg-black/70 text-white"
+                    className="absolute right-0 top-0 flex h-11 w-11 items-center justify-center bg-black/70 text-white"
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -201,7 +201,7 @@ function SelectField({
         aria-label={label}
         value={value}
         onChange={event => onChange(event.target.value)}
-        className="min-h-11 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 text-sm text-white outline-none focus:border-amber-400"
+        className="min-h-11 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 text-base text-white outline-none md:text-sm focus:border-amber-400"
       >
         {values.map(item => <option key={item} value={item}>{item}</option>)}
       </select>

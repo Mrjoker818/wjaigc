@@ -9,8 +9,9 @@ import {
 } from "lucide-react"
 import { useTheme } from "next-themes"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
+import { cn } from "@/lib/utils"
 
-const Toaster = ({ ...props }: ToasterProps) => {
+const Toaster = ({ className, ...props }: ToasterProps): React.JSX.Element => {
   const { theme = "system" } = useTheme()
 
   return (
@@ -20,7 +21,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
       richColors
       closeButton
       theme={theme as ToasterProps["theme"]}
-      className="toaster group"
+      className={cn("toaster group wujie-notification-host", className)}
       icons={{
         success: <CircleCheckIcon className="size-4" />,
         info: <InfoIcon className="size-4" />,

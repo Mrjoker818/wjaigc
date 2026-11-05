@@ -16,12 +16,12 @@ export interface ProjectCollaborationDialogProps {
 
 interface Editor { userId: string; name: string; }
 interface ViewState {
-  key: string; status: OwnerProjectStatus | null; editors: Editor[];
+  key: string; status: OwnerProjectStatus | null; editors: Editor[]; editorsLoaded: boolean;
   busy: string; error: string; message: string; memberName: string; refreshFailed: boolean;
 }
 interface Operation { scope: OwnerClientScope; key: string; controller: AbortController; }
 function emptyState(key: string): ViewState {
-  return { key, status: null, editors: [], busy: '', error: '', message: '', memberName: '', refreshFailed: false };
+  return { key, status: null, editors: [], editorsLoaded: false, busy: '', error: '', message: '', memberName: '', refreshFailed: false };
 }
 function safeError(error: unknown): string {
   if (error instanceof OwnerDocumentRequestError) {
@@ -72,6 +72,7 @@ export function ProjectCollaborationDialog({ open, userId, projectId, projectNam
     if (current(op)) setState(previous => ({ ...previous, busy: '' }));
   }, [current]);
   const load = useCallback(async (op: Operation, id: string): Promise<OwnerProjectStatus | null> => {
+    setState(previous => ({ ...previous, editorsLoaded: false }));
     const status = await readOwnerProjectStatus(id, op.controller.signal);
     if (!current(op)) return null;
     setState(previous => ({ ...previous, status }));
@@ -82,7 +83,7 @@ export function ProjectCollaborationDialog({ open, userId, projectId, projectNam
         typeof editor === 'object' && editor !== null && 'userId' in editor && typeof editor.userId === 'string'
         && 'name' in editor && typeof editor.name === 'string'
       ))) throw new OwnerDocumentRequestError('DOCUMENT_RESPONSE_INVALID', 200, false);
-      setState(previous => ({ ...previous, editors: result.editors as Editor[] }));
+      setState(previous => ({ ...previous, editors: result.editors as Editor[], editorsLoaded: true }));
     }
     return status;
   }, [current]);
@@ -176,11 +177,11 @@ export function ProjectCollaborationDialog({ open, userId, projectId, projectNam
                 disabled={!!visible.busy} onChange={event => setState(previous => ({ ...previous, memberName: event.target.value }))} />
               <Button className="min-h-11" type="submit" disabled={!!visible.busy || !visible.memberName.trim()}>邀请编辑者</Button>
             </form>
-            <ul className="space-y-2" aria-label="项目编辑者">{visible.editors.map(editor => <li key={editor.userId} className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-md border p-2">
+            {visible.editorsLoaded && <><ul className="space-y-2" aria-label="项目编辑者">{visible.editors.map(editor => <li key={editor.userId} className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-md border p-2">
               <span className="min-w-0 break-all">{editor.name}</span><Button className="min-h-11" variant="outline" disabled={!!visible.busy}
                 aria-label={`撤销 ${editor.name} 的编辑权限`} onClick={() => void mutateMember(editor)}>撤销</Button>
             </li>)}</ul>
-            {visible.editors.length === 0 && <p className="text-sm text-muted-foreground">尚无编辑者</p>}
+            {visible.editors.length === 0 && <p className="text-sm text-muted-foreground">尚无编辑者</p>}</>}
           </>}
           <label className="space-y-2 text-sm">协作访问链接<Input readOnly className="min-h-11" value={link} /></label>
           <Button className="min-h-11" variant="outline" disabled={!!visible.busy} onClick={() => void copy()}>复制协作链接</Button>

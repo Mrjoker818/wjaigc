@@ -10,6 +10,7 @@ import { canvasEntityIdForTransferredReference, filterUniqueCanvasImageInsertion
 import { routeCanvasWorkspaceChange, type CanvasWorkspaceAuthority } from '@/lib/collaboration/canvas-document-image-bridge';
 import { isCanvasTaskProjectionChange } from '@/lib/canvas-kernel/commands';
 import { IncrementalHistoryManager } from '@/lib/canvas-incremental-history';
+import { expectedActorHeaders } from '@/lib/expected-actor-header';
 import { canvasSkillProjectionIdentity, transferCanvasSkillAsset, transferCanvasSkillAssets,
   createCanvasSkillProjectionCoordinator } from '@/lib/skill-runtime/canvas-client';
 
@@ -86,13 +87,13 @@ function fixture(mode: CanvasWorkspaceAuthority['authority'] = 'legacy', options
     isWritable: (): boolean => true } };
   const raw: CanvasImage[][] = [], saves: CanvasImage[][] = [], records: unknown[] = [], stable: unknown[] = [];
   const successes: string[] = [], infos: string[] = [], errors: string[] = [], connections: unknown[] = [];
-  const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
+  const requests: Array<{ url: string; body?: Record<string, unknown>; headers: Headers }> = [];
   const routes: Array<{ before: string[]; after: string[]; kind: string }> = [];
   const revisions = { current: 4 }, cleared: string[][] = [];
   const deletion = { current: new Map<string, number>() }, deleted = { current: new Set<string>() };
   const toast = { success: (s: string): void => { successes.push(s); }, info: (s: string): void => { infos.push(s); },
     error: (s: string): void => { errors.push(s); } };
-  const config: { reject: boolean; flushFailure: boolean; trashed: boolean; beforeAdmission?: () => void } = {
+  const config: { reject: boolean; flushFailure: boolean; trashed: boolean; serverActor?: string; restoreActor?: string; beforeAdmission?: () => void } = {
     reject: false, flushFailure: false, trashed: false,
   };
   const manager = {
@@ -109,7 +110,7 @@ function fixture(mode: CanvasWorkspaceAuthority['authority'] = 'legacy', options
     latestImagesRef: images, images: images.current, imageDeletionGenerationRef: deletion,
     recentlyDeletedIdsRef: deleted, UserManagerCore: { getInstance: () => manager }, toast,
     canvasEntityIdForTransferredReference, filterUniqueCanvasImageInsertions, isWorkspaceResultScopeCurrent,
-    canvasSkillProjectionIdentity, transferCanvasSkillAsset, transferCanvasSkillAssets,
+    canvasSkillProjectionIdentity, transferCanvasSkillAsset, transferCanvasSkillAssets, expectedActorHeaders,
     autoLayoutImages: actual('autoLayoutImages', {}), getCanvasImageDisplaySize: actual('getCanvasImageDisplaySize', {}),
     loadCanvasImageSize: actual('loadCanvasImageSize', {}),
     stabilizeCanvasImages: (v: unknown): void => { stable.push(v); },
@@ -160,7 +161,7 @@ function fixture(mode: CanvasWorkspaceAuthority['authority'] = 'legacy', options
   });
   vi.stubGlobal('fetch', async (url: string, init?: RequestInit): Promise<Response> => {
     const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
-    requests.push({ url, body });
+    requests.push({ url, body, headers: new Headers(init?.headers) });
     const isTransfer = url.startsWith('/api/assets/');
     await wait(isTransfer ? 'transfer' : 'save');
     if (url.startsWith('blob:')) {
@@ -170,9 +171,23 @@ function fixture(mode: CanvasWorkspaceAuthority['authority'] = 'legacy', options
     }
     let payload: unknown;
     if (url === '/api/save-image') payload = { success: true, url: '/saved.png' };
-    else if (url === '/api/assets/transfer') payload = { ...reference, projectRevision: 4,
-      ...(config.trashed ? { placementStatus: 'trashed', placementRevision: '4' } : {}) };
-    else if (url === '/api/assets/batch-transfer') {
+    else if (url === '/api/assets/actor-v2/transfer') {
+      if (!body?.expectedActorId || (config.serverActor && (body.expectedActorId !== config.serverActor || new Headers(init?.headers).get('x-wujie-expected-actor-id') !== config.serverActor))) {
+        return Response.json({ error: 'ACTOR_SCOPE_CHANGED' }, { status: 409 });
+      }
+      payload = { ...reference, projectRevision: 4,
+        ...(config.trashed ? { placementStatus: 'trashed', placementRevision: '4' } : {}) };
+    }
+    else if (url === '/api/assets/actor-v2/asset-a/restore') {
+      if (!body?.expectedActorId || (config.restoreActor && (body.expectedActorId !== config.restoreActor || new Headers(init?.headers).get('x-wujie-expected-actor-id') !== config.restoreActor))) {
+        return Response.json({ error: 'ACTOR_SCOPE_CHANGED' }, { status: 409 });
+      }
+      payload = { projectRevision: 4, placement: { id: 'placement-a', assetId: 'asset-a', assetVersionId: 'version-a', status: 'active' } };
+    }
+    else if (url === '/api/assets/actor-v2/batch-transfer') {
+      if (!body?.expectedActorId || (config.serverActor && (body.expectedActorId !== config.serverActor || new Headers(init?.headers).get('x-wujie-expected-actor-id') !== config.serverActor))) {
+        return Response.json({ error: 'ACTOR_SCOPE_CHANGED' }, { status: 409 });
+      }
       const transfers = body?.transfers as Array<{ sourceVersion: string; entityId: string }>;
       payload = { transfers: transfers.map((t, i) => ({ ...reference,
         assetId: i === 0 ? 'asset-a' : 'asset-b', assetVersionId: t.sourceVersion, entityId: t.entityId,
@@ -355,7 +370,7 @@ describe('actual embedded transfer parent to actual sink', () => {
       await f.entered; const untouched = f.mutate('roundtrip'); f.release();
       expect((await operation).error).toBeDefined(); expect(f.images.current).toBe(untouched);
       expect(f.raw).toEqual([]); expect(f.successes).toEqual([]);
-      if (checkRestore) expect(f.requests.map(request => request.url)).toEqual(['/api/assets/transfer']);
+      if (checkRestore) expect(f.requests.map(request => request.url)).toEqual(['/api/assets/actor-v2/transfer']);
     });
     it.each(['unknown', 'document'] as const)('refuses ' + kind + ' %s before owner-only transfer', async mode => {
       const f = fixture(mode);
@@ -384,25 +399,66 @@ describe('actual embedded transfer parent to actual sink', () => {
   }
   it('keeps the single Chat transfer target and exact reference identity', async () => {
     const f = fixture(); expect((await f.run(() => f.single(reference, { modelName: 'm', apiProvider: 'p' }))).error).toBeUndefined();
-    expect(f.requests.map(r => r.url)).toEqual(['/api/assets/transfer']);
+    expect(f.requests.map(r => r.url)).toEqual(['/api/assets/actor-v2/transfer']);
+    expect(f.requests[0].headers.get('x-wujie-expected-actor-id')).toBe('actor-a');
     expect(f.requests[0].body).toMatchObject({ sourceVersion: 'version-a', targetProject: 'project-a', targetWorkspace: 'canvas:project-a' });
     expect(f.images.current[1]).toMatchObject({ id: 'canvas-skill:run-a:version-a', assetId: 'asset-a',
       assetVersionId: 'version-a', placementId: 'placement-a', modelName: 'm', apiProvider: 'p',
       sourceTrace: reference.sourceTrace });
     expect(f.saves).toHaveLength(1); expect(f.successes).toHaveLength(1);
   });
+  it('binds a single Skill result transfer to the captured account', async () => {
+    const f = fixture();
+    expect((await f.run(() => f.single(reference, { runId: 'run-a' }))).error).toBeUndefined();
+    expect(f.requests[0].url).toBe('/api/assets/actor-v2/transfer');
+    expect(f.requests[0].headers.get('x-wujie-expected-actor-id')).toBe('actor-a');
+  });
+  it.each([false, true])('does not insert a single result for a different server account (Skill=%s)', async useSkill => {
+    const f = fixture();
+    f.config.serverActor = 'actor-b';
+    const result = await f.run(() => f.single(reference, useSkill ? { runId: 'run-a' } : {}));
+    expect(result.error).toBeDefined();
+    expect(f.requests[0].headers.get('x-wujie-expected-actor-id')).toBe('actor-a');
+    expect(f.images.current).toEqual([original]);
+    expect(f.saves).toHaveLength(0);
+    expect(f.successes).toHaveLength(0);
+  });
+  it('does not restore or insert when the server account changes after transfer', async () => {
+    const f = fixture();
+    f.config.trashed = true;
+    f.config.restoreActor = 'actor-b';
+    const result = await f.run(() => f.single(reference, { runId: 'run-a', restoreDeletedPlacement: true }));
+    expect(result.error).toBeDefined();
+    expect(f.requests.map(request => request.url)).toEqual(['/api/assets/actor-v2/transfer', '/api/assets/actor-v2/asset-a/restore']);
+    expect(f.requests[1].headers.get('x-wujie-expected-actor-id')).toBe('actor-a');
+    expect(f.images.current).toEqual([original]);
+    expect(f.saves).toHaveLength(0);
+    expect(f.successes).toHaveLength(0);
+  });
   it('preserves one atomic batch transfer request, run/source versions, restoration and identity', async () => {
     const f = fixture();
     const second = { ...reference, assetVersionId: 'version-b', assetId: 'asset-b', placementId: 'placement-b', url: '/second.png' };
     expect((await f.run(() => f.batch([reference, second], { runId: 'run-a', sourceVersionIds: ['source-v'],
       restoreDeletedPlacement: true }))).error).toBeUndefined();
-    expect(f.requests.map(r => r.url)).toEqual(['/api/assets/batch-transfer']);
+    expect(f.requests.map(r => r.url)).toEqual(['/api/assets/actor-v2/batch-transfer']);
+    expect(f.requests[0].headers.get('x-wujie-expected-actor-id')).toBe('actor-a');
     expect(f.requests[0].body).toMatchObject({ restoreDeletedPlacements: true, transfers: [
       { entityId: 'canvas-skill:run-a:version-a', metadata: { runId: 'run-a', sourceVersionIds: ['source-v'] } },
       { entityId: 'canvas-skill:run-a:version-b', metadata: { runId: 'run-a', sourceVersionIds: ['source-v'] } },
     ] });
     expect(f.images.current.map(i => i.id)).toEqual(['original-a', 'canvas-skill:run-a:version-a', 'canvas-skill:run-a:version-b']);
     expect(f.raw).toHaveLength(1); expect(f.saves).toHaveLength(1); expect(f.successes).toHaveLength(1);
+  });
+  it('does not insert a batch when the server session belongs to another account', async () => {
+    const f = fixture();
+    f.config.serverActor = 'actor-b';
+    const second = { ...reference, assetVersionId: 'version-b', assetId: 'asset-b', placementId: 'placement-b', url: '/second.png' };
+    const result = await f.run(() => f.batch([reference, second], { runId: 'run-a', sourceVersionIds: ['source-v'] }));
+    expect(result.error).toBeDefined();
+    expect(f.requests[0].headers.get('x-wujie-expected-actor-id')).toBe('actor-a');
+    expect(f.images.current).toEqual([original]);
+    expect(f.saves).toHaveLength(0);
+    expect(f.successes).toHaveLength(0);
   });
   it('lets the real Skill coordinator reject a late abort and retry instead of recording false completion', async () => {
     const f = fixture('legacy', { pause: 'transfer' }), coordinator = createCanvasSkillProjectionCoordinator();
@@ -536,7 +592,8 @@ it('does not settle the actual NodeEditor consumer when workspace insertion reje
   visit(node); if (!delivery || !settled || !catcher) throw new Error('Node delivery/catch boundary missing');
   const retries: unknown[] = [], canvasPersistence = { settled: false };
   const bindings = { onAddImages, insertion: { items: ['/local.png'] }, meta: {}, canvasPersistence,
-    controller: f.controller, pollCount: 1, poll: (): void => {}, timerId: undefined,
+    controller: f.controller, imageRetryEpochRef: { current: 0 }, pollEpoch: 0, activeImageRetry: undefined,
+    pollCount: 1, poll: (): void => {}, timerId: undefined,
     setTimeout: (op: unknown): number => { retries.push(op); return 1; },
     setExecStatus: (): void => {}, console: { error: (): void => {} } };
   const js = ts.transpileModule('const deliver = async () => { try {' + delivery.getText(node)

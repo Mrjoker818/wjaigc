@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { expectedActorHeaders } from '@/lib/expected-actor-header';
 
 const mocks = vi.hoisted(() => ({
   getRequestUser: vi.fn(),
@@ -38,6 +39,29 @@ describe('asset restore API', () => {
     );
     expect(response.status).toBe(401);
     expect(mocks.restorePlacement).not.toHaveBeenCalled();
+  });
+
+  it('rejects an expected account mismatch before restoring a placement', async () => {
+    mocks.getRequestUser.mockResolvedValue({ user: { id: 'owner-b', role: 'user' } });
+    const response = await restoreAsset(new NextRequest('http://localhost/api/assets/asset-a/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-wujie-expected-actor-id': 'owner-a' },
+      body: JSON.stringify({ projectId: 'project-a', placementId: 'placement-a' }),
+    }), { params: Promise.resolve({ assetId: 'asset-a' }) });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 'ACTOR_SCOPE_CHANGED' });
+    expect(mocks.restorePlacement).not.toHaveBeenCalled();
+  });
+
+  it('accepts an encoded non-ASCII account ID when restoring', async () => {
+    mocks.getRequestUser.mockResolvedValue({ user: { id: '用户甲', role: 'user' } });
+    mocks.restorePlacement.mockResolvedValue({ placement: { id: 'placement-a', status: 'active' } });
+    const response = await restoreAsset(new NextRequest('http://localhost/api/assets/asset-a/restore', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...expectedActorHeaders('用户甲') },
+      body: JSON.stringify({ projectId: 'project-a', placementId: 'placement-a' }),
+    }), { params: Promise.resolve({ assetId: 'asset-a' }) });
+    expect(response.status).toBe(200);
+    expect(mocks.restorePlacement).toHaveBeenCalledWith(expect.objectContaining({ actorUserId: '用户甲' }));
   });
 
   it('restores only the session owners placement inside the retention window', async () => {

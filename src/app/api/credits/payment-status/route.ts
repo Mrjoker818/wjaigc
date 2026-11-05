@@ -8,7 +8,7 @@ export async function GET(request: NextRequest) {
   if (authResult instanceof NextResponse) return authResult;
 
   try {
-    return NextResponse.json({ success: true, ...(await getPaymentStatus()) });
+    return NextResponse.json({ success: true, ...(await getPaymentStatus({ throwOnReadError: true })) });
   } catch {
     return NextResponse.json({
       success: false,
@@ -17,6 +17,6 @@ export async function GET(request: NextRequest) {
       qrUrls: { wechat: '', alipay: '' },
       payLinks: { wechat: '', alipay: '' },
       note: '',
-    });
+    }, { status: 503 });
   }
 }

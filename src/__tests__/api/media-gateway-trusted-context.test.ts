@@ -76,7 +76,8 @@ vi.mock('@/lib/task-registry', () => ({
   isTaskCancelled: vi.fn().mockReturnValue(false), getTaskInfo: vi.fn(),
 }));
 vi.mock('@/lib/s3-storage', () => ({ persistRemoteImage: vi.fn(async (url: string) => url) }));
-vi.mock('@/lib/cloud-task-storage', () => ({
+vi.mock('@/lib/cloud-task-storage', async (importOriginal) => ({
+  CloudTaskAdmissionError: (await importOriginal<typeof import('@/lib/cloud-task-storage')>()).CloudTaskAdmissionError,
   chargeCloudTaskCredits: vi.fn().mockResolvedValue({ charged: true, creditCost: 0 }),
   claimCloudTaskLease: vi.fn(), completeCloudTask: vi.fn(), getCloudTaskForUser: vi.fn(),
   getCloudTaskForUserByIdempotencyKey: vi.fn(), releaseCloudTaskLease: vi.fn(),
@@ -249,4 +250,17 @@ describe('trusted gateway source context', () => {
     });
     expect(mocks.recordImageTaskSubmitted).not.toHaveBeenCalled();
   });
+});
+
+
+it('keeps the real admission constructor and derived error contract under the partial storage mock', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/cloud-task-storage')>('@/lib/cloud-task-storage');
+  const mocked = await import('@/lib/cloud-task-storage');
+  const { SketchAdmissionError } = await import('@/lib/sketch-to-code/admission');
+  expect(mocked.CloudTaskAdmissionError).toBe(actual.CloudTaskAdmissionError);
+  const error = new SketchAdmissionError('SYNTHETIC_PROJECT_DENIED', 403);
+  expect(error).toBeInstanceOf(actual.CloudTaskAdmissionError);
+  expect(error).toBeInstanceOf(Error);
+  expect(error).toMatchObject({ name: 'SketchAdmissionError', code: 'SYNTHETIC_PROJECT_DENIED', status: 403, message: 'SYNTHETIC_PROJECT_DENIED' });
+  expect(new Error('ordinary')).not.toBeInstanceOf(actual.CloudTaskAdmissionError);
 });

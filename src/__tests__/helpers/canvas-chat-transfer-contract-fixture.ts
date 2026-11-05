@@ -8,6 +8,7 @@ import { canvasEntityIdForTransferredReference, filterUniqueCanvasImageInsertion
 import { routeCanvasWorkspaceChange } from '@/lib/collaboration/canvas-document-image-bridge';
 import { isCanvasTaskProjectionChange } from '@/lib/canvas-kernel/commands';
 import { IncrementalHistoryManager } from '@/lib/canvas-incremental-history';
+import { expectedActorHeaders, readExpectedActor } from '@/lib/expected-actor-header';
 import { canvasSkillProjectionIdentity, transferCanvasSkillAsset, transferCanvasSkillAssets } from '@/lib/skill-runtime/canvas-client';
 
 const sources = {
@@ -75,8 +76,8 @@ interface CanvasTransferContractFixture {
   images: { current: CanvasImage[] }; deleted: { current: Set<string> }; deletion: { current: Map<string, number> };
   revision: { current: number }; writes: CanvasImage[][]; saves: CanvasImage[][]; records: unknown[];
   cleared: string[][]; successes: string[]; errors: string[];
-  requests: Array<{ url: string; body: Record<string, unknown> | undefined }>;
-  entered: Promise<void>; release: () => void;
+  requests: Array<{ url: string; body: Record<string, unknown> | undefined; actorHeader: string | null }>;
+  entered: Promise<void>; release: () => void; forceRelease: () => void;
 }
 export function canvasTransferContractFixture(options: { pause?: 'decode' | 'flush'; trashed?: boolean } = {}): CanvasTransferContractFixture {
   const entered = contractDeferred<void>(), released = contractDeferred<void>();
@@ -91,7 +92,7 @@ export function canvasTransferContractFixture(options: { pause?: 'decode' | 'flu
   const deletion = { current: new Map<string, number>() }, revision = { current: 4 };
   const writes: CanvasImage[][] = [], saves: CanvasImage[][] = [], records: unknown[] = [], cleared: string[][] = [];
   const successes: string[] = [], errors: string[] = [];
-  const requests: Array<{ url: string; body: Record<string, unknown> | undefined }> = [];
+  const requests: Array<{ url: string; body: Record<string, unknown> | undefined; actorHeader: string | null }> = [];
   const manager = {
     getProjectSyncRevision: (): number => revision.current,
     advanceProjectSyncRevision: (value: number): void => { revision.current = value; },
@@ -107,7 +108,7 @@ export function canvasTransferContractFixture(options: { pause?: 'decode' | 'flu
     UserManagerCore: { getInstance: () => manager },
     toast: { success: (value: string): void => { successes.push(value); }, info: (): void => {}, error: (value: string): void => { errors.push(value); } },
     canvasEntityIdForTransferredReference, filterUniqueCanvasImageInsertions, canvasSkillProjectionIdentity,
-    transferCanvasSkillAsset, transferCanvasSkillAssets,
+    transferCanvasSkillAsset, transferCanvasSkillAssets, expectedActorHeaders,
     autoLayoutImages: actualTransferCallback('autoLayoutImages', {}),
     getCanvasImageDisplaySize: actualTransferCallback('getCanvasImageDisplaySize', {}),
     loadCanvasImageSize: async (): Promise<{ width: number; height: number }> => { await wait('decode'); return { width: 32, height: 24 }; },
@@ -132,17 +133,97 @@ export function canvasTransferContractFixture(options: { pause?: 'decode' | 'flu
   });
   vi.stubGlobal('fetch', async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = String(input);
-    requests.push({ url, body: init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined });
-    if (url === '/api/assets/transfer') return Response.json({ ...contractReference, projectRevision: 6,
-      ...(options.trashed ? { placementStatus: 'trashed', placementRevision: '5' } : {}) });
-    if (url === '/api/assets/asset-a/restore') return Response.json({ projectRevision: 6, placement: {
-      id: 'placement-a', assetId: 'asset-a', assetVersionId: 'version-a', status: 'active',
-    } });
-    if (url === '/api/assets/batch-transfer') return Response.json({ transfers: [
-      { ...contractReference, projectRevision: 6 }, { ...contractSecondReference, projectRevision: 6 },
-    ] });
+    const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
+    const headers = new Headers(init?.headers);
+    requests.push({ url, body, actorHeader: headers.get('x-wujie-expected-actor-id') });
+    const actorClaim = readExpectedActor(headers);
+    if (init?.method !== 'POST' || !body || actorClaim.status !== 'present'
+      || actorClaim.actorId !== actor.current.id || body.expectedActorId !== actor.current.id) {
+      throw new Error('Rejected actor or method in transfer contract: ' + url);
+    }
+    if (url === '/api/assets/actor-v2/transfer') {
+      if (body.targetProject !== project.current.id || body.sourceVersion !== 'version-a' || body.targetWorkspace !== 'canvas:' + project.current.id) throw new Error('Rejected single transfer scope');
+      return Response.json({ ...contractReference, projectRevision: 6,
+        ...(options.trashed ? { placementStatus: 'trashed', placementRevision: '5' } : {}) });
+    }
+    if (url === '/api/assets/actor-v2/asset-a/restore') {
+      if (body.projectId !== project.current.id || body.placementId !== 'placement-a' || body.expectedPlacementRevision !== '5') throw new Error('Rejected restore scope');
+      return Response.json({ projectRevision: 6, placement: { id: 'placement-a', assetId: 'asset-a', assetVersionId: 'version-a', status: 'active' } });
+    }
+    if (url === '/api/assets/actor-v2/batch-transfer') {
+      if (!Array.isArray(body.transfers) || body.transfers.length !== 2 || body.transfers.some((item: Record<string, unknown>, index: number) => item.targetProject !== project.current.id || item.targetWorkspace !== 'canvas:' + project.current.id || item.sourceVersion !== ['version-a', 'version-b'][index])) throw new Error('Rejected batch transfer scope');
+      return Response.json({ transfers: [ { ...contractReference, projectRevision: 6 }, { ...contractSecondReference, projectRevision: 6 } ] });
+    }
     throw new Error('Unexpected HTTP in transfer contract: ' + url);
   });
   return { single, batch, bindings, actor, project, historyProject, epoch, mounted, images, deleted, deletion, revision,
-    writes, saves, records, cleared, successes, errors, requests, entered: entered.promise, release: (): void => released.release() };
+    writes, saves, records, cleared, successes, errors, requests, entered: entered.promise,
+    release: (): void => released.release(), forceRelease: released.release };
+}
+
+export interface ObservedContractOperation<T> {
+  settled: Promise<PromiseSettledResult<T>>;
+  waitForEntry(entry: Promise<unknown>): Promise<void>;
+  unwrap(): Promise<T>;
+}
+export function observeContractOperation<T>(operation: Promise<T>): ObservedContractOperation<T> {
+  // Attach a rejection handler synchronously, before waiting on any other signal.
+  const settled: Promise<PromiseSettledResult<T>> = operation.then(
+    value => ({ status: 'fulfilled', value }),
+    reason => ({ status: 'rejected', reason }),
+  );
+  return {
+    settled,
+    async waitForEntry(entry: Promise<unknown>): Promise<void> {
+      const winner = await Promise.race([
+        entry.then(() => ({ kind: 'entered' as const })),
+        settled.then(result => ({ kind: 'settled' as const, result })),
+      ]);
+      if (winner.kind === 'settled') {
+        if (winner.result.status === 'rejected') throw winner.result.reason;
+        throw new Error('Contract operation finished before reaching the expected entry');
+      }
+    },
+    async unwrap(): Promise<T> {
+      const result = await settled;
+      if (result.status === 'rejected') throw result.reason;
+      return result.value;
+    },
+  };
+}
+// The former vi.waitFor used a 1,000ms deadline; no interval survives a lost race.
+export async function waitForContractEntry<T>(observed: ObservedContractOperation<T>, entry: Promise<unknown>, check: () => void): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => { try { check(); reject(new Error('Contract entry signal missing')); } catch (error) { reject(error); } }, 1_000);
+  });
+  try { await observed.waitForEntry(Promise.race([entry, deadline])); check(); }
+  finally { if (timer !== undefined) clearTimeout(timer); }
+}
+export async function withContractOperation<T, R>(
+  operation: Promise<T>, release: () => void,
+  action: (observed: ObservedContractOperation<T>) => Promise<R>,
+  options: { expectedRejection?: boolean; forceRelease: () => void },
+): Promise<R> {
+  const observed = observeContractOperation(operation);
+  let failed = false, releaseFailed = false, forceFailed = false, primary: unknown, value!: R;
+  let releaseFailure: unknown, forceFailure: unknown, outcome!: PromiseSettledResult<T>;
+  try {
+    try { value = await action(observed); } catch (error) { failed = true; primary = error; }
+  } finally {
+    try { release(); } catch (error) {
+      releaseFailed = true; releaseFailure = error;
+      try { options.forceRelease(); } catch (forceError) { forceFailed = true; forceFailure = forceError; }
+    }
+    if (forceFailed) {
+      const failures = [...(failed ? [primary] : []), releaseFailure, forceFailure];
+      throw new AggregateError(failures, 'Contract gate could not be released; operation not confirmed settled', { cause: failed ? primary : releaseFailure });
+    }
+    outcome = await observed.settled;
+  }
+  const errors = [...(failed ? [primary] : []), ...(releaseFailed ? [releaseFailure] : [])];
+  if (outcome.status === 'rejected' && !options.expectedRejection && (!failed || outcome.reason !== primary)) errors.push(outcome.reason);
+  if (errors.length > 1) throw new AggregateError(errors, 'Contract operation and cleanup failed', { cause: errors[0] });
+  if (errors.length === 1) throw errors[0];
+  return value;
 }

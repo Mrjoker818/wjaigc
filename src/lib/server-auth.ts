@@ -75,9 +75,11 @@ function parseJsonArray(val: unknown): string[] | undefined {
   return undefined;
 }
 
-const SYSTEM_DIR = getServerSystemDir();
-const USERS_PATH = path.join(SYSTEM_DIR, 'users.json');
-const AUTH_SECRET_PATH = path.join(SYSTEM_DIR, 'auth-secret');
+// Resolved on first use so an import does not freeze the data root before WUJIE_DATA_DIR is set.
+function authPaths(): { dir: string; users: string; secret: string } {
+  const dir = getServerSystemDir();
+  return { dir, users: path.join(dir, 'users.json'), secret: path.join(dir, 'auth-secret') };
+}
 
 export const WUJIE_SESSION_COOKIE = 'wujie_session';
 export const WUJIE_SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
@@ -232,7 +234,7 @@ function createInitialSecretRing(secret: string, now: number): AuthSecretRingV1 
 
 async function writeAuthFile(filePath: string, value: unknown): Promise<void> {
   try {
-    await mkdir(SYSTEM_DIR, { recursive: true });
+    await mkdir(authPaths().dir, { recursive: true });
     await writeAuthJsonFileAtomic(filePath, value);
   } catch (error) {
     throw error instanceof AuthServiceError ? error : persistenceUnavailable();
@@ -241,7 +243,7 @@ async function writeAuthFile(filePath: string, value: unknown): Promise<void> {
 
 async function readAuthSecretFileRaw(): Promise<string | null> {
   try {
-    return await readFile(AUTH_SECRET_PATH, 'utf8');
+    return await readFile(authPaths().secret, 'utf8');
   } catch (error) {
     if (isMissingFileError(error)) return null;
     throw persistenceUnavailable();
@@ -273,7 +275,7 @@ function parseFileSecretRing(raw: string, now: number): {
 }
 
 async function countFileLegacyCredentialUsers(): Promise<number> {
-  const file = await readAuthJsonFile<StoredUsersFile>(USERS_PATH);
+  const file = await readAuthJsonFile<StoredUsersFile>(authPaths().users);
   if (!file || !Array.isArray(file.users)) return 0;
   return file.users.filter(user => (
     user.credentialHash === undefined
@@ -294,7 +296,7 @@ function warnReplicaWriteOnce(code: string): void {
 
 async function writeSecretRingReplicaBestEffort(ring: AuthSecretRingV1): Promise<void> {
   try {
-    await writeAuthFile(AUTH_SECRET_PATH, ring);
+    await writeAuthFile(authPaths().secret, ring);
   } catch {
     warnReplicaWriteOnce('AUTH_SECRET_RING_FILE_REPLICA_DEFERRED');
   }
@@ -311,7 +313,7 @@ async function resolveFileSecretRing(
     }
     const initialSecret = configuredSecret ?? crypto.randomBytes(48).toString('base64url');
     const ring = createInitialSecretRing(initialSecret, now);
-    await writeAuthFile(AUTH_SECRET_PATH, ring);
+    await writeAuthFile(authPaths().secret, ring);
     return ring;
   }
 
@@ -334,7 +336,7 @@ async function resolveFileSecretRing(
     shouldWrite = true;
   }
   if (shouldWrite) {
-    await writeAuthFile(AUTH_SECRET_PATH, ring);
+    await writeAuthFile(authPaths().secret, ring);
   }
   return ring;
 }
@@ -649,7 +651,7 @@ function nextUpdatedAt(previous: number): number {
 }
 
 async function writeUsersFile(data: StoredUsersFile): Promise<void> {
-  await writeAuthFile(USERS_PATH, data);
+  await writeAuthFile(authPaths().users, data);
 }
 
 async function writeDatabaseUsers(users: StoredUser[]): Promise<void> {
@@ -663,7 +665,7 @@ async function writeDatabaseUsers(users: StoredUser[]): Promise<void> {
 
 async function readFileStore(): Promise<StoredUsersFile> {
   try {
-    const parsed = await readAuthJsonFile<StoredUsersFile>(USERS_PATH);
+    const parsed = await readAuthJsonFile<StoredUsersFile>(authPaths().users);
     if (parsed === null) {
       return { users: [], updatedAt: Date.now() };
     }
@@ -708,7 +710,7 @@ async function readSessionUser(userId: string, now: number): Promise<StoredUser 
   const mode = getAuthPersistenceMode();
   if (mode === 'FILE_ONLY') {
     try {
-      const parsed = await readAuthJsonFile<unknown>(USERS_PATH);
+      const parsed = await readAuthJsonFile<unknown>(authPaths().users);
       if (parsed === null) return null;
       if (typeof parsed !== 'object'
         || Array.isArray(parsed)
@@ -796,7 +798,7 @@ async function refreshUserFileReplicaBestEffort(): Promise<void> {
   if (getAuthPersistenceMode() !== 'DB_PLUS_FILE') return;
   try {
     await withDatabaseAuthReplicaLock(async client => {
-      await refreshAuthJsonFileAtomic(USERS_PATH, async () => {
+      await refreshAuthJsonFileAtomic(authPaths().users, async () => {
         const file = await readDatabaseStore(client);
         return { ...file, updatedAt: Date.now() };
       });

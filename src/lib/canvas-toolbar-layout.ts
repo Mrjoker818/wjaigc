@@ -101,14 +101,18 @@ export function getBottomToolbarDrawerPlacement({ viewport, trigger, drawer, occ
   const availableWidth = Math.max(0, availableRight - margin);
   const availableHeight = Math.max(0, viewport.height - margin * 2);
   const width = Math.min(drawer.width, Math.max(safeMinWidth, availableWidth));
-  const height = Math.min(drawer.height, availableHeight);
+  let height = Math.min(drawer.height, availableHeight);
   const triggerCenter = trigger.left + trigger.width / 2;
   const preferredLeft = triggerCenter - width / 2;
   const maxLeft = Math.max(margin, availableRight - width);
   const left = Math.round(clamp(preferredLeft, margin, maxLeft));
   const aboveTop = trigger.top - gap - height;
   const useAbove = aboveTop >= margin || trigger.top > viewport.height / 2;
-  const topCandidate = useAbove ? aboveTop : trigger.top + trigger.height + gap;
+  // The chosen side bounds the actual bottom/top anchored element, not only its reported top.
+  const sideHeight = useAbove ? trigger.top - gap - margin
+    : viewport.height - trigger.top - trigger.height - gap - margin;
+  height = Math.min(height, Math.max(0, sideHeight));
+  const topCandidate = useAbove ? trigger.top - gap - height : trigger.top + trigger.height + gap;
   return {
     left,
     top: Math.round(clamp(topCandidate, margin, viewport.height - margin - height)),

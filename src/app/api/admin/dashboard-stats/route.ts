@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
 
     const period = request.nextUrl.searchParams.get('period') || '7';
     const [stats, managedUsers] = await Promise.all([
-      dbGetDashboardStats(Number(period)),
+      dbGetDashboardStats(Number(period), { throwOnError: true }),
       listManagedUsers(),
     ]);
 
@@ -43,6 +43,7 @@ export async function GET(request: NextRequest) {
     }
 
     const payload = {
+      creditObservabilityVersion: 1,
       // User management is the authoritative user directory. The database
       // aggregate can lag behind it during user creation or cloud recovery.
       totalUsers: managedUsers.length,

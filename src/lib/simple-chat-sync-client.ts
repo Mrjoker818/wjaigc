@@ -18,6 +18,7 @@ const DEBOUNCE_MILLISECONDS = 800;
 const RETRY_BASE_MILLISECONDS = 250;
 const MAX_TRANSIENT_RETRIES = 3;
 const MAX_CONFLICT_REPLAYS = 2;
+const MAX_ENVELOPE_REWRITES = 4;
 const LIFECYCLE_TIMEOUT_MILLISECONDS = 5_000;
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 
@@ -594,10 +595,14 @@ export function createSimpleChatSyncCoordinator(
       if (signal.aborted) setState('failed', lifecycleTimeoutError());
       return;
     }
-    if (envelope === null || initialBatch === null || envelope.userId !== initialBatch.userId) {
-      if (envelope !== null && status !== 'failed') setState('synced');
+    if (initialBatch === null) {
+      if (envelope !== null && status !== 'failed') {
+        if (envelope.pendingOperations.length === 0) setState('synced');
+        else scheduleDebounce();
+      }
       return;
     }
+    if (envelope === null || envelope.userId !== initialBatch.userId) return;
     if (isOffline()) {
       setState('offline', {
         code: 'CHAT_SYNC_OFFLINE',
@@ -703,31 +708,44 @@ export function createSimpleChatSyncCoordinator(
           return;
         }
         if (envelope === null || envelope.userId !== batch.userId) return;
-        const mutationVersion = envelopeMutationVersion;
         const pendingEnvelope = cloneValue(envelope);
-        let acknowledged = acknowledgeEnvelope(envelope, batch, parsed.value.syncRevision, createId, now);
-        const persisted = await awaitFlushPersistence(enqueuePersistence(
-          acknowledged,
-          () => true,
-          () => !signal.aborted,
-          () => envelope?.userId === batch.userId ? envelope : pendingEnvelope,
-        ), signal);
-        if (!persisted) return;
-        if (envelope === null || envelope.userId !== batch.userId) return;
-        if (envelopeMutationVersion !== mutationVersion) {
-          acknowledged = acknowledgeEnvelope(envelope, batch, parsed.value.syncRevision, createId, now);
+        let rewrites = 0;
+        while (envelope !== null && envelope.userId === batch.userId) {
+          const mutationVersion = envelopeMutationVersion;
+          const acknowledged = acknowledgeEnvelope(envelope, batch, parsed.value.syncRevision, createId, now);
           if (!await awaitFlushPersistence(enqueuePersistence(
             acknowledged,
             () => true,
             () => !signal.aborted,
             () => envelope?.userId === batch.userId ? envelope : pendingEnvelope,
           ), signal)) return;
+          if (envelope === null || envelope.userId !== batch.userId) return;
+          if (envelopeMutationVersion !== mutationVersion) {
+            if (++rewrites >= MAX_ENVELOPE_REWRITES) {
+              envelope = acknowledgeEnvelope(envelope, batch, parsed.value.syncRevision, createId, now);
+              const handoffVersion = ++envelopeMutationVersion;
+              const handoff = cloneValue(envelope);
+              const persisted = await awaitFlushPersistence(enqueuePersistence(
+                handoff, () => true, () => !signal.aborted,
+                () => envelope?.userId === batch.userId ? envelope : handoff,
+              ), signal);
+              if (!persisted || envelope === null || envelope.userId !== batch.userId) return;
+              if (envelopeMutationVersion === handoffVersion && status !== 'failed') {
+                automaticSyncBlocked = false;
+                setState(envelope.pendingOperations.length === 0 ? 'synced' : 'syncing');
+              }
+              scheduleDebounce();
+              return;
+            }
+            continue;
+          }
+          envelope = acknowledged;
+          envelopeMutationVersion += 1;
+          automaticSyncBlocked = false;
+          setState(envelope.pendingOperations.length === 0 ? 'synced' : 'syncing');
+          if (envelope.pendingOperations.length > 0) scheduleDebounce();
+          return;
         }
-        envelope = acknowledged;
-        envelopeMutationVersion += 1;
-        automaticSyncBlocked = false;
-        setState(envelope.pendingOperations.length === 0 ? 'synced' : 'syncing');
-        if (envelope.pendingOperations.length > 0) scheduleDebounce();
         return;
       }
 
@@ -802,17 +820,39 @@ export function createSimpleChatSyncCoordinator(
     }
     if (envelope === null || envelope.userId !== userId) return false;
 
-    const mutationVersion = envelopeMutationVersion;
-    let candidate = rebaseEnvelope(envelope, remote.body, createId, now);
-    if (!await awaitFlushPersistence(enqueuePersistence(candidate), signal)) return false;
-    if (envelope === null || envelope.userId !== userId) return false;
-    if (envelopeMutationVersion !== mutationVersion) {
-      candidate = rebaseEnvelope(envelope, remote.body, createId, now);
-      if (!await awaitFlushPersistence(enqueuePersistence(candidate), signal)) return false;
+    const pendingEnvelope = cloneValue(envelope);
+    let rewrites = 0;
+    while (envelope !== null && envelope.userId === userId) {
+      const mutationVersion = envelopeMutationVersion;
+      const candidate = rebaseEnvelope(envelope, remote.body, createId, now);
+      if (!await awaitFlushPersistence(enqueuePersistence(
+        candidate, () => true, () => !signal.aborted,
+        () => envelope?.userId === userId ? envelope : pendingEnvelope,
+      ), signal)) return false;
+      if (envelope === null || envelope.userId !== userId) return false;
+      if (envelopeMutationVersion !== mutationVersion) {
+        if (++rewrites >= MAX_ENVELOPE_REWRITES) {
+          envelope = rebaseEnvelope(envelope, remote.body, createId, now);
+          const handoffVersion = ++envelopeMutationVersion;
+          const handoff = cloneValue(envelope);
+          const persisted = await awaitFlushPersistence(enqueuePersistence(
+            handoff, () => true, () => !signal.aborted,
+            () => envelope?.userId === userId ? envelope : handoff,
+          ), signal);
+          if (!persisted || envelope === null || envelope.userId !== userId) return false;
+          if (envelopeMutationVersion === handoffVersion && status !== 'failed') {
+            setState(envelope.pendingOperations.length === 0 ? 'synced' : 'syncing');
+          }
+          scheduleDebounce();
+          return false;
+        }
+        continue;
+      }
+      envelope = candidate;
+      envelopeMutationVersion += 1;
+      return true;
     }
-    envelope = candidate;
-    envelopeMutationVersion += 1;
-    return true;
+    return false;
   }
 
   async function readRemoteSnapshot(

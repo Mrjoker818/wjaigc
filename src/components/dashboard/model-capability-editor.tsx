@@ -118,7 +118,7 @@ function CapabilityCheckbox({
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <label className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-xs text-foreground">
+    <label className="inline-flex min-h-11 min-w-11 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-xs text-foreground">
       <input type="checkbox" checked={checked} onChange={event => onChange(event.target.checked)} />
       {label}
     </label>
@@ -212,7 +212,8 @@ export function ModelCapabilityEditor({ models, value, onChange }: ModelCapabili
             key={model.id}
             type="button"
             onClick={() => setSelectedModelId(model.id)}
-            className={`rounded-md border px-2.5 py-1.5 text-xs transition-colors ${
+            aria-pressed={selectedModel?.id === model.id}
+            className={`min-w-0 max-w-full whitespace-normal! [overflow-wrap:anywhere] rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors ${
               selectedModel?.id === model.id
                 ? 'border-primary bg-primary/10 text-primary'
                 : 'border-border bg-background text-muted-foreground hover:text-foreground'
@@ -255,7 +256,7 @@ export function ModelCapabilityEditor({ models, value, onChange }: ModelCapabili
             </div>
           </fieldset>
           <label className="block text-xs font-medium text-foreground">最大时长（秒）
-            <input type="number" min="1" value={selectedValue.maxDurationSeconds || ''} onChange={event => patchSelected({ maxDurationSeconds: numericValue(event.target.value, 1) })} className="mt-1 block h-8 w-full rounded-md border border-input bg-background px-2 text-sm" />
+            <input type="number" min="1" value={selectedValue.maxDurationSeconds || ''} onChange={event => patchSelected({ maxDurationSeconds: numericValue(event.target.value, 1) })} className="mt-1 block h-11 w-full rounded-md border border-input bg-background px-2 text-base md:text-sm" />
           </label>
           <fieldset className="space-y-1.5">
             <legend className="text-xs font-medium text-foreground">操作模式</legend>
@@ -269,9 +270,9 @@ export function ModelCapabilityEditor({ models, value, onChange }: ModelCapabili
           <fieldset className="space-y-1.5"><legend className="text-xs font-medium text-foreground">画面比例</legend><div className="flex flex-wrap gap-1.5">{ratioOptions.map(ratio => <CapabilityCheckbox key={ratio} label={ratio} checked={selectedValue.allowedRatios?.includes(ratio) || false} onChange={checked => toggleStrings('allowedRatios', ratio, checked)} />)}</div></fieldset>
           <fieldset className="space-y-1.5"><legend className="text-xs font-medium text-foreground">尺寸</legend><div className="flex flex-wrap gap-1.5">{sizeOptions.map(size => <CapabilityCheckbox key={size} label={size} checked={selectedValue.allowedSizes?.includes(size) || false} onChange={checked => toggleStrings('allowedSizes', size, checked)} />)}</div></fieldset>
           <fieldset className="space-y-1.5"><legend className="text-xs font-medium text-foreground">质量</legend><div className="flex flex-wrap gap-1.5">{qualityOptions.map(quality => <CapabilityCheckbox key={quality} label={quality} checked={selectedValue.qualityOptions?.includes(quality) || false} onChange={checked => toggleStrings('qualityOptions', quality, checked)} />)}</div></fieldset>
-          <label className="block text-xs font-medium text-foreground">最大生成数量<input aria-label="最大生成数量" type="number" min="1" max="4" value={selectedValue.maxOutputs || ''} onChange={event => patchSelected({ maxOutputs: numericValue(event.target.value, 1) })} className="mt-1 block h-8 w-full rounded-md border border-input bg-background px-2 text-sm" /></label>
+          <label className="block text-xs font-medium text-foreground">最大生成数量<input aria-label="最大生成数量" type="number" min="1" max="4" value={selectedValue.maxOutputs || ''} onChange={event => patchSelected({ maxOutputs: numericValue(event.target.value, 1) })} className="mt-1 block h-11 w-full rounded-md border border-input bg-background px-2 text-base md:text-sm" /></label>
           <div className="flex flex-wrap gap-3"><CapabilityCheckbox label="支持参考图" checked={selectedValue.supportsReferenceImages || false} onChange={checked => patchSelected({ supportsReferenceImages: checked })} /><CapabilityCheckbox label="支持蒙版" checked={selectedValue.supportsMask || false} onChange={checked => patchSelected({ supportsMask: checked })} /></div>
-          <label className="block text-xs font-medium text-foreground">最大参考图数量<input type="number" min="0" max="16" value={selectedValue.maxReferenceImages ?? ''} onChange={event => patchSelected({ maxReferenceImages: numericValue(event.target.value, 0) })} className="mt-1 block h-8 w-full rounded-md border border-input bg-background px-2 text-sm" /></label>
+          <label className="block text-xs font-medium text-foreground">最大参考图数量<input type="number" min="0" max="16" value={selectedValue.maxReferenceImages ?? ''} onChange={event => patchSelected({ maxReferenceImages: numericValue(event.target.value, 0) })} className="mt-1 block h-11 w-full rounded-md border border-input bg-background px-2 text-base md:text-sm" /></label>
           <fieldset className="space-y-1.5"><legend className="text-xs font-medium text-foreground">输出格式</legend><div className="flex flex-wrap gap-1.5">{outputOptions.map(format => <CapabilityCheckbox key={format} label={format} checked={selectedValue.outputKinds?.includes(format) || false} onChange={checked => toggleStrings('outputKinds', format, checked)} />)}</div></fieldset>
         </div>
       )}

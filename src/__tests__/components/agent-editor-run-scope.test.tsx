@@ -6,6 +6,7 @@ const hooks = vi.hoisted(() => ({
   dirty: false,
   slots: [] as Array<{ value?: unknown; deps?: readonly unknown[]; cleanup?: () => void }>,
   pendingEffects: [] as Array<() => void>,
+  pendingLayoutEffects: [] as Array<() => void>,
 }));
 const observedRunIds = vi.hoisted(() => vi.fn());
 const progressTimer = vi.hoisted(() => ({
@@ -52,6 +53,20 @@ vi.mock('react', async importOriginal => {
         || deps.some((value, dependencyIndex) => !Object.is(value, previous[dependencyIndex]));
       if (changed) hooks.slots[index] = { value: callback, deps: [...deps] };
       return hooks.slots[index].value;
+    },
+    useLayoutEffect(effect: () => void | (() => void), deps?: readonly unknown[]) {
+      const index = hooks.cursor++;
+      const previousSlot = hooks.slots[index];
+      const previous = previousSlot?.deps;
+      const changed = !deps || !previous || deps.length !== previous.length
+        || deps.some((value, dependencyIndex) => !Object.is(value, previous[dependencyIndex]));
+      if (!changed) return;
+      hooks.slots[index] = { deps: deps ? [...deps] : undefined };
+      hooks.pendingLayoutEffects.push(() => {
+        previousSlot?.cleanup?.();
+        const cleanup = effect();
+        if (typeof cleanup === 'function') hooks.slots[index].cleanup = cleanup;
+      });
     },
     useEffect(effect: () => void | (() => void), deps?: readonly unknown[]) {
       const index = hooks.cursor++;
@@ -136,6 +151,7 @@ function renderEditor(selectedEntityId: string, options: { drainEffects?: boolea
     hooks.cursor = 0;
     hooks.dirty = false;
     hooks.pendingEffects = [];
+    hooks.pendingLayoutEffects = [];
     isRendering = true;
     try {
       lastTree = AgentEditor({
@@ -150,6 +166,9 @@ function renderEditor(selectedEntityId: string, options: { drainEffects?: boolea
     } finally {
       isRendering = false;
     }
+    const layoutEffects = hooks.pendingLayoutEffects.splice(0);
+    layoutEffects.forEach(effect => effect());
+    if (hooks.dirty) continue;
     if (!drainEffects) return;
     const effects = hooks.pendingEffects.splice(0);
     effects.forEach(effect => effect());
@@ -170,6 +189,7 @@ function resetRenderHarness(): void {
   hooks.dirty = false;
   hooks.slots = [];
   hooks.pendingEffects = [];
+  hooks.pendingLayoutEffects = [];
 }
 
 function elementText(node: unknown, visited = new Set<object>()): string {
@@ -246,6 +266,7 @@ describe('AgentEditor selected-image run scope', () => {
     hooks.dirty = false;
     hooks.slots = [];
     hooks.pendingEffects = [];
+    hooks.pendingLayoutEffects = [];
     observedRunIds.mockReset();
     vi.stubGlobal('crypto', {
       randomUUID: () => webcrypto.randomUUID(),
@@ -265,6 +286,27 @@ describe('AgentEditor selected-image run scope', () => {
     hooks.slots.forEach(slot => slot.cleanup?.());
     vi.unstubAllGlobals();
     vi.useRealTimers();
+  });
+
+  it('runs layout effects after render with dependency and cleanup semantics', async () => {
+    const mockedLayoutEffect = (await import('react')).useLayoutEffect;
+    const events: string[] = [];
+    const renderLayout = (value: number) => {
+      hooks.cursor = 0;
+      mockedLayoutEffect(() => { events.push('setup-' + value); return () => { events.push('cleanup-' + value); }; }, [value]);
+    };
+    renderLayout(1);
+    expect(events).toEqual([]);
+    hooks.pendingLayoutEffects.splice(0).forEach(effect => effect());
+    expect(events).toEqual(['setup-1']);
+    renderLayout(1);
+    expect(hooks.pendingLayoutEffects).toHaveLength(0);
+    renderLayout(2);
+    expect(events).toEqual(['setup-1']);
+    hooks.pendingLayoutEffects.splice(0).forEach(effect => effect());
+    expect(events).toEqual(['setup-1', 'cleanup-1', 'setup-2']);
+    resetRenderHarness();
+    expect(events).toEqual(['setup-1', 'cleanup-1', 'setup-2', 'cleanup-2']);
   });
 
   it('exposes no previous run and never persists it when switching to an empty image scope', () => {

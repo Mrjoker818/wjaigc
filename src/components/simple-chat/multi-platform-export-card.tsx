@@ -19,7 +19,7 @@ interface MultiPlatformExportCardProps {
   onReturnToCanvas: (references: WorkspaceAssetReference[]) => void | Promise<void>;
 }
 
-const actionClass = 'inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50';
+const actionClass = 'inline-flex min-h-[44px] items-center justify-center gap-2 rounded-md border border-border px-3 text-xs font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50';
 
 function readResult(outputs: unknown): MultiPlatformExportResultV1 | undefined {
   try {
@@ -85,7 +85,7 @@ export function MultiPlatformExportCard({
         <AgentProgressTimeline
           projection={run.projection}
           stale={run.stale}
-          onCancel={() => { void run.cancel(); }}
+          onCancel={() => run.cancel()}
         />
       )}
 
@@ -105,7 +105,7 @@ export function MultiPlatformExportCard({
           {result.failures.length > 0 && (
             <ul className="space-y-1 text-xs text-destructive" aria-label="导出失败项">
               {result.failures.map((failure, index) => (
-                <li key={`${failure.sourceAssetVersionId}:${index}`}>
+                <li key={`${failure.sourceAssetVersionId}:${index}`} className="min-w-0 [overflow-wrap:anywhere]">
                   {failure.sourceAssetVersionId}：{failure.code}
                 </li>
               ))}

@@ -186,13 +186,12 @@ function CameraAutoFit() {
 /*  Auto Rotate Component                                              */
 /* ------------------------------------------------------------------ */
 function AutoRotateComponent({ enabled }: { enabled: boolean }) {
-  const angleRef = useRef(0);
   useFrame(({ camera }, delta) => {
     if (!enabled) return;
-    angleRef.current += delta * 0.5;
-    const radius = camera.position.length();
-    camera.position.x = Math.sin(angleRef.current) * radius * 0.7;
-    camera.position.z = Math.cos(angleRef.current) * radius * 0.7;
+    const radius = Math.hypot(camera.position.x, camera.position.z);
+    const angle = Math.atan2(camera.position.x, camera.position.z) + delta * 0.5;
+    camera.position.x = Math.sin(angle) * radius;
+    camera.position.z = Math.cos(angle) * radius;
     camera.lookAt(0, 0, 0);
   });
   return null;
@@ -201,12 +200,23 @@ function AutoRotateComponent({ enabled }: { enabled: boolean }) {
 /* ------------------------------------------------------------------ */
 /*  Preset Camera View Component                                       */
 /* ------------------------------------------------------------------ */
-function PresetCameraView({ preset }: { preset: string | null }) {
+function PresetCameraView({ preset, revision, orbitRef }: {
+  preset: string | null;
+  revision: number;
+  orbitRef: React.RefObject<React.ElementRef<typeof OrbitControls> | null>;
+}) {
   const { camera } = useThree();
   useEffect(() => {
     if (!preset) return;
     const distance = camera.position.length();
     const d = Math.max(distance, 3);
+    const controls = orbitRef.current;
+    const damping = controls?.enableDamping;
+    if (controls) {
+      controls.enableDamping = false;
+      controls.update();
+      controls.target.set(0, 0, 0);
+    }
     switch (preset) {
       case 'front':  camera.position.set(0, 0, d); break;
       case 'back':   camera.position.set(0, 0, -d); break;
@@ -217,7 +227,11 @@ function PresetCameraView({ preset }: { preset: string | null }) {
     }
     camera.lookAt(0, 0, 0);
     camera.updateProjectionMatrix();
-  }, [preset, camera]);
+    if (controls) {
+      controls.update();
+      controls.enableDamping = damping ?? true;
+    }
+  }, [preset, revision, camera, orbitRef]);
   return null;
 }
 
@@ -479,7 +493,11 @@ export default function ModelViewer3D({
   const [showGrid, setShowGrid] = useState(true);
   const [showSidebar, setShowSidebar] = useState(true);
   const [activeFormat, setActiveFormat] = useState<string>('');
-  const [cameraPreset, setCameraPreset] = useState<string | null>(null);
+  const [cameraPresetState, setCameraPresetState] = useState<{ value: string | null; revision: number }>({ value: null, revision: 0 });
+  const setCameraPreset = (value: string): void => {
+    setCameraPresetState(previous => ({ value, revision: previous.revision + 1 }));
+  };
+  const cameraPreset = cameraPresetState.value;
   const [showViewPanel, setShowViewPanel] = useState(false);
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
   const orbitRef = useRef<React.ElementRef<typeof OrbitControls> | null>(null);
@@ -530,7 +548,8 @@ export default function ModelViewer3D({
     setLoading(true);
     let cancelled = false;
     fetch(proxiedUrl, { method: 'HEAD' })
-      .then((res) => {
+      .then(async (res) => {
+        try {
         if (cancelled) return;
         if (res.ok) {
           const contentLength = res.headers.get('content-length');
@@ -547,6 +566,9 @@ export default function ModelViewer3D({
           setLoading(false);
         }
         // Other errors: let the Three.js loader attempt and show its own error
+        } finally {
+          await res.arrayBuffer();
+        }
       })
       .catch(() => { /* ignore — let useLoader attempt */ });
     return () => { cancelled = true; };
@@ -726,11 +748,14 @@ export default function ModelViewer3D({
         if (e.target === e.currentTarget) onClose();
       }}
       onWheel={(e) => { e.stopPropagation(); }}
-      onKeyDown={(e) => { e.stopPropagation(); }}
+      onKeyDown={(e) => { if (e.key !== 'Escape') e.stopPropagation(); }}
       onKeyUp={(e) => { e.stopPropagation(); }}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="3D模型预览"
         className="relative min-h-0 rounded-2xl border border-[#2a2a2a]/80 bg-gradient-to-b from-[#141414] to-[#0a0a0a] overflow-y-auto flex flex-col shadow-2xl shadow-black/50 lg:overflow-hidden [&_button]:inline-flex [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:shrink-0 [&_button]:items-center [&_button]:justify-center [&_button]:whitespace-nowrap"
         style={{ width: Math.min(1200, Math.max(0, viewerViewport.width - 16)), height: Math.min(800, Math.max(0, viewerViewport.height - 16)) }}
         onWheel={(e) => e.stopPropagation()}
@@ -782,6 +807,7 @@ export default function ModelViewer3D({
               onClick={() => setShowSidebar(!showSidebar)}
               className="p-1.5 rounded-md text-[#777] hover:text-white hover:bg-white/5 transition-all"
               title={showSidebar ? '隐藏侧栏' : '显示侧栏'}
+              aria-expanded={showSidebar}
             >
               <ChevronDown size={14} className={`transition-transform ${showSidebar ? 'rotate-0' : '-rotate-90'}`} />
             </button>
@@ -973,6 +999,7 @@ export default function ModelViewer3D({
                 <div className="flex gap-1">
                   <button
                     onClick={() => setViewMode('orbit')}
+                    aria-pressed={viewMode === 'orbit'}
                     className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-xs font-medium transition-all ${
                       viewMode === 'orbit'
                         ? 'bg-[#d4af37]/20 text-[#d4af37] border border-[#d4af37]/30'
@@ -983,6 +1010,7 @@ export default function ModelViewer3D({
                   </button>
                   <button
                     onClick={() => setViewMode('pan')}
+                    aria-pressed={viewMode === 'pan'}
                     className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-xs font-medium transition-all ${
                       viewMode === 'pan'
                         ? 'bg-[#d4af37]/20 text-[#d4af37] border border-[#d4af37]/30'
@@ -1060,7 +1088,7 @@ export default function ModelViewer3D({
                   <CheckerboardGrid visible={showGrid} />
                   <CameraAutoFit />
                   <AutoRotateComponent enabled={autoRotate} />
-                  <PresetCameraView preset={cameraPreset} />
+                  <PresetCameraView preset={cameraPreset} revision={cameraPresetState.revision} orbitRef={orbitRef} />
 
                   <OrbitControls
                     ref={orbitRef}
@@ -1074,6 +1102,10 @@ export default function ModelViewer3D({
                     maxDistance={50}
                     enablePan={true}
                     target={[0, 0, 0]}
+                    touches={{
+                      ONE: viewMode === 'pan' ? THREE.TOUCH.PAN : THREE.TOUCH.ROTATE,
+                      TWO: THREE.TOUCH.DOLLY_PAN,
+                    }}
                     mouseButtons={{
                       LEFT: viewMode === 'pan' ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE,
                       MIDDLE: THREE.MOUSE.DOLLY,
@@ -1098,9 +1130,9 @@ export default function ModelViewer3D({
             {!loading && !loadError && (
               <div className="absolute top-3 right-3 flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-black/60 backdrop-blur-sm border border-[#2a2a2a]/50 text-xs text-[#888]">
                 {viewMode === 'orbit' ? (
-                  <><RotateCcw size={10} className="text-[#d4af37]" /> 左键旋转 · 右键平移</>
+                  <><RotateCcw size={10} className="text-[#d4af37]" /> {viewerViewport.width < 1024 ? '单指旋转 · 双指缩放/平移' : '左键旋转 · 右键平移'}</>
                 ) : (
-                  <><Move size={10} className="text-[#d4af37]" /> 左键平移 · 右键旋转</>
+                  <><Move size={10} className="text-[#d4af37]" /> {viewerViewport.width < 1024 ? '单指平移 · 双指缩放/平移' : '左键平移 · 右键旋转'}</>
                 )}
               </div>
             )}
@@ -1117,6 +1149,7 @@ export default function ModelViewer3D({
                 materialMode === 'wireframe' ? 'bg-[#d4af37]/15 text-[#d4af37]' : 'text-[#666] hover:text-white'
               }`}
               title={materialMode === 'wireframe' ? '实体模式' : '线框模式'}
+              aria-pressed={materialMode === 'wireframe'}
             >
               {materialMode === 'wireframe' ? <Grid3x3 size={11} /> : <BoxSelect size={11} />}
               {materialMode === 'wireframe' ? '线框' : '实体'}
@@ -1132,6 +1165,7 @@ export default function ModelViewer3D({
                   lightPreset === preset ? 'bg-[#d4af37]/15 text-[#d4af37]' : 'text-[#666] hover:text-white'
                 }`}
                 title={preset === 'studio' ? '影棚光' : preset === 'soft' ? '柔和光' : '户外光'}
+                aria-pressed={lightPreset === preset}
               >
                 {preset === 'studio' ? <Aperture size={10} /> : preset === 'soft' ? <Lightbulb size={10} /> : <Sun size={10} />}
               </button>
@@ -1145,6 +1179,7 @@ export default function ModelViewer3D({
                 autoRotate ? 'bg-[#d4af37]/15 text-[#d4af37]' : 'text-[#666] hover:text-white'
               }`}
               title="自动旋转"
+              aria-pressed={autoRotate}
             >
               <RefreshCw size={11} /> 自动旋转
             </button>
@@ -1156,6 +1191,7 @@ export default function ModelViewer3D({
                 showGrid ? 'bg-[#d4af37]/15 text-[#d4af37]' : 'text-[#666] hover:text-white'
               }`}
               title="网格"
+              aria-pressed={showGrid}
             >
               <Grid3x3 size={11} /> 网格
             </button>
@@ -1168,6 +1204,7 @@ export default function ModelViewer3D({
                 onClick={() => setShowViewPanel(!showViewPanel)}
                 className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs text-[#666] hover:text-white transition-all"
                 title="预设视角"
+                aria-expanded={showViewPanel}
               >
                 <Eye size={11} /> 视角
                 <ChevronDown size={9} className={`transition-transform ${showViewPanel ? 'rotate-180' : ''}`} />
@@ -1207,11 +1244,11 @@ export default function ModelViewer3D({
             </button>
           </div>
           <div className="flex min-w-0 flex-wrap items-center gap-3 text-xs text-[#555]">
-            <span className="flex items-center gap-1"><RotateCcw size={9} /> 左键{viewMode === 'orbit' ? '旋转' : '平移'}</span>
+            <span className="flex items-center gap-1"><RotateCcw size={9} /> {viewerViewport.width < 1024 ? '单指' : '左键'}{viewMode === 'orbit' ? '旋转' : '平移'}</span>
             <span>·</span>
-            <span className="flex items-center gap-1"><ZoomIn size={9} /> 滚轮缩放</span>
+            <span className="flex items-center gap-1"><ZoomIn size={9} /> {viewerViewport.width < 1024 ? '双指缩放' : '滚轮缩放'}</span>
             <span>·</span>
-            <span>右键{viewMode === 'orbit' ? '平移' : '旋转'}</span>
+            <span>{viewerViewport.width < 1024 ? '双指平移' : `右键${viewMode === 'orbit' ? '平移' : '旋转'}`}</span>
           </div>
         </div>
       </div>

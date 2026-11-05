@@ -10,6 +10,7 @@ import { promisify } from 'util';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { isSafeVideoSource } from '@/lib/api-validator';
+import { isGeneratedAudioLocation, readGeneratedAudioFromUrl } from '@/lib/generated-audio-storage';
 
 const execFileAsync = promisify(execFile);
 
@@ -242,6 +243,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (action === 'add-audio') {
       assertAllowedVideoSource(videoUrl);
       assertAllowedVideoSource(audioUrl);
+      const generatedAudio = isGeneratedAudioLocation(audioUrl)
+        ? await readGeneratedAudioFromUrl(audioUrl, req.signal) : undefined;
+      if (generatedAudio === null) throw new Error('生成音频文件不存在');
       await ensureDir();
       await ensureFfmpeg();
 
@@ -252,7 +256,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const videoPath = path.join(workDir, 'input.mp4');
         const audioPath = path.join(workDir, 'input.mp3');
         await writeFile(videoPath, await downloadToBuffer(videoUrl));
-        await writeFile(audioPath, await downloadToBuffer(audioUrl));
+        await writeFile(audioPath, generatedAudio ? generatedAudio.buffer : await downloadToBuffer(audioUrl));
         await execFileAsync('ffmpeg', [
           '-i', videoPath, '-i', audioPath,
           '-filter:a', `volume=${Math.max(0, Math.min(Number(volume) || 1, 2))}`,

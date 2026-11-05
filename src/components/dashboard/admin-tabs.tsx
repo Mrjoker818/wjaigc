@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect } from 'react';
 import { getBillingModelCategory, type BillingModelCategory } from '@/lib/billing-model-category';
 import { AdminRechargeOrders } from './admin-recharge-orders';
 import {
@@ -71,11 +71,28 @@ interface AuditLogEntry {
 }
 
 interface AuditStats {
-  todayCount: number; weekCount: number; totalCount: number;
-  byAction?: Record<string, number>;
-  errorCount?: number;
-  warnCount?: number;
-  unresolvedCount?: number;
+  todayCount: number; totalCount: number; errorCount: number;
+  warnCount: number; unresolvedCount: number;
+}
+
+function parseAuditStats(value: unknown): AuditStats | null {
+  if (!value || typeof value !== 'object') return null;
+  const data = value as Record<string, unknown>;
+  if (!data.levelBreakdown || typeof data.levelBreakdown !== 'object' || Array.isArray(data.levelBreakdown)) return null;
+  const count = (input: unknown): number | null => {
+    if (typeof input === 'string' && !/^\d+$/.test(input)) return null;
+    if (typeof input !== 'string' && typeof input !== 'number') return null;
+    const result = Number(input);
+    return Number.isSafeInteger(result) && result >= 0 ? result : null;
+  };
+  const todayCount = count(data.todayActions);
+  const totalCount = count(data.totalActions);
+  const errorCount = count(data.errorCount);
+  const unresolvedCount = count(data.unresolvedErrorCount);
+  const levels = data.levelBreakdown as Record<string, unknown>;
+  const warnCount = count(Object.prototype.hasOwnProperty.call(levels, 'warn') ? levels.warn : 0);
+  if (todayCount === null || totalCount === null || errorCount === null || unresolvedCount === null || warnCount === null) return null;
+  return { todayCount, totalCount, errorCount, warnCount, unresolvedCount };
 }
 
 interface AuditLogView extends AuditLogEntry {
@@ -197,6 +214,27 @@ function formatNumber(n: number): string {
   return String(n);
 }
 
+function formatCreditFlow(value: number | undefined): string {
+  return typeof value === 'number' && Number.isFinite(value) ? formatNumber(value) : '—';
+}
+
+function verifiedCreditDistribution(data: { flows?: { consumed?: unknown; refunded?: unknown; recharged?: unknown; compensated?: unknown }; distribution?: unknown }): { label: string; value: number; color: string; pct: string }[] | null {
+  const flows = data.flows;
+  if (!flows || ![flows.consumed, flows.refunded, flows.recharged, flows.compensated].every(value => typeof value === 'number' && Number.isFinite(value) && value >= 0) || !Array.isArray(data.distribution) || data.distribution.length !== 4) return null;
+  const segments = data.distribution as Array<{ label?: unknown; value?: unknown; color?: unknown }>;
+  if (segments.some(item => !item || typeof item.label !== 'string' || typeof item.color !== 'string' || typeof item.value !== 'number' || !Number.isFinite(item.value) || item.value < 0)) return null;
+  const total = segments.reduce((sum, item) => sum + (item.value as number), 0);
+  if (!Number.isFinite(total) || Math.abs(total - (flows.consumed as number)) > 1e-6) return null;
+  const exact = segments.map(item => total > 0 ? (item.value as number) / total * 100 : 0);
+  const whole = exact.map(Math.floor);
+  let remainder = total > 0 ? 100 - whole.reduce((sum, value) => sum + value, 0) : 0;
+  for (const item of exact.map((value, index) => ({ index, fraction: value - whole[index] })).sort((a, b) => b.fraction - a.fraction || a.index - b.index)) {
+    if (remainder <= 0) break;
+    whole[item.index]++; remainder--;
+  }
+  return segments.map((item, index) => ({ label: item.label as string, value: item.value as number, color: item.color as string, pct: `${whole[index]}%` }));
+}
+
 function formatDate(iso: string | number | undefined): string {
   if (!iso) return '-';
   const d = new Date(typeof iso === 'number' ? iso : iso);
@@ -284,7 +322,7 @@ export default function AdminTabs(props: AdminTabsProps) {
   /* ── Overview state ── */
   const [overviewData, setOverviewData] = useState<{
     totalUsers: number; weekActive: number; totalCredits: number; totalApiCalls: number;
-    creditsRecharged: number; creditsConsumed: number; todayGenerations: number;
+    creditsRecharged: number; creditsConsumed: number; todayGenerations: number; creditObservabilityVersion?: number;
     userTrend: { date: string; count: number }[];
     creditTrend: { date: string; income: number; expense: number }[];
     modelRank: { name: string; calls: number; successRate: number | null }[];
@@ -294,6 +332,9 @@ export default function AdminTabs(props: AdminTabsProps) {
     recentUsers: { name: string; date: string; email: string }[];
   } | null>(null);
   const [overviewPeriod, setOverviewPeriod] = useState<'7' | '30'>('7');
+  const [overviewReadError, setOverviewReadError] = useState<'failed' | 'forbidden' | 'unverified' | null>(null);
+  const overviewReadRequest = useRef(0);
+  const overviewPermissionBarrier = useRef<number | null>(null);
 
   /* ── Users state ── */
   const [userSearch, setUserSearch] = useState('');
@@ -332,12 +373,17 @@ export default function AdminTabs(props: AdminTabsProps) {
 
   /* ── Credits state ── */
   const [creditsOverview, setCreditsOverview] = useState<{
-    totalBalance: number; totalRecharged: number; totalConsumed: number; totalUsers: number; avgPerUser: number;
-    flows: { consumed: number; refunded: number; recharged: number; compensated: number };
-    distribution: { label: string; value: number; color: string; pct: string }[];
-    topUsers: { userId?: string; name: string; consumed: number; totalConsumed: number; balance: number; totalRecharged: number; pct?: string }[];
+    totalBalance: number; totalRecharged: number | null; totalConsumed: number; totalUsers: number; avgPerUser: number;
+    flows?: { consumed: number; refunded: number; recharged: number; compensated: number };
+    distribution: { label: string; value: number; color: string; pct: string }[] | null;
+    topUsers: { userId?: string; name: string; consumed: number; totalConsumed: number; balance: number; totalRecharged: number | null; pct?: string }[];
     recentTransactions: { id: string; user: string; type: string; typeLabel: string; direction: 'credit' | 'debit'; amount: number; desc: string; time: string }[];
   } | null>(null);
+  const [creditsOverviewLoading, setCreditsOverviewLoading] = useState(false);
+  const [creditsUpdatedAt, setCreditsUpdatedAt] = useState<number | null>(null);
+  const [creditsOverviewError, setCreditsOverviewError] = useState<'failed' | 'forbidden' | null>(null);
+  const creditsOverviewRequest = useRef(0);
+  const creditsPermissionBarrier = useRef<number | null>(null);
   const [rechargeUserId, setRechargeUserId] = useState<string | null>(null);
   const [rechargeAmount, setRechargeAmount] = useState(100);
   const [showRechargeModal, setShowRechargeModal] = useState(false);
@@ -354,7 +400,19 @@ export default function AdminTabs(props: AdminTabsProps) {
   /* ── Audit state ── */
   const [auditLogs, setAuditLogs] = useState<AuditLogView[]>([]);
   const [auditStats, setAuditStats] = useState<AuditStats | null>(null);
+  const [auditStatsError, setAuditStatsError] = useState(false);
+  const [auditStatsLoading, setAuditStatsLoading] = useState(false);
   const [auditLoading, setAuditLoading] = useState(false);
+  const [auditLoadError, setAuditLoadError] = useState<'forbidden' | 'failed' | null>(null);
+  const [auditHasSnapshot, setAuditHasSnapshot] = useState(false);
+  const auditRequestId = useRef(0);
+  const auditLatestLog = useRef(0);
+  const auditLatestStats = useRef(0);
+  const auditScope = useRef(0);
+  const auditActive = useRef(false);
+  const auditPermissionBarrier = useRef<number | null>(null);
+  const auditLastLogSuccess = useRef(0);
+  const auditLastStatsSuccess = useRef(0);
   const [auditFilterAction, setAuditFilterAction] = useState('all');
   const [auditFilterLevel, setAuditFilterLevel] = useState('all');
   const [auditFilterUserId, setAuditFilterUserId] = useState('');
@@ -367,44 +425,202 @@ export default function AdminTabs(props: AdminTabsProps) {
   /* ── Settings state ── */
   const [systemSettings, setSystemSettings] = useState<Record<string, string>>({});
   const [settingsDirty, setSettingsDirty] = useState(false);
+  const [settingsSaved, setSettingsSaved] = useState(false);
+  const [settingsLoadError, setSettingsLoadError] = useState<'forbidden' | 'failed' | null>(null);
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [settingsVerified, setSettingsVerified] = useState(false);
+  const [confirmSettingsReset, setConfirmSettingsReset] = useState(false);
+  const settingsRequest = useRef(0);
+  const settingsAccessLost = useRef(false);
+  const settingsAccessEpoch = useRef(0);
+  const settingsEditSequence = useRef(0);
+  const settingsEdits = useRef<Record<string, { value: string; sequence: number }>>({});
+
+  const loseSettingsAccess = useCallback(() => {
+    settingsRequest.current++;
+    settingsAccessLost.current = true;
+    settingsAccessEpoch.current++;
+    settingsEdits.current = {};
+    setSystemSettings({});
+    setSettingsDirty(false);
+    setSettingsSaved(false);
+    setConfirmSettingsReset(false);
+    setSettingsVerified(false);
+    setSettingsLoading(false);
+    setSettingsLoadError('forbidden');
+  }, []);
+
+  const editSetting = (key: string, value: string) => {
+    settingsEdits.current[key] = { value, sequence: ++settingsEditSequence.current };
+    setSystemSettings(prev => ({ ...prev, [key]: value }));
+    setSettingsDirty(true);
+  };
 
   /* ── Data loading ── */
   const loadDashboardStats = useCallback(async (period: '7' | '30' = '7') => {
+    const requestId = ++overviewReadRequest.current;
     try {
       const res = await fetch(`/api/admin/dashboard-stats?period=${period}`);
-      if (res.ok) { const data = await res.json(); setOverviewData(data); }
-    } catch {}
+      if (res.status === 401 || res.status === 403) {
+        overviewPermissionBarrier.current = overviewReadRequest.current;
+        setOverviewData(null); setOverviewReadError('forbidden'); return;
+      }
+      if (!res.ok) throw new Error('运营总览读取失败');
+      const data = await res.json();
+      if (data.success !== true) throw new Error('运营总览读取失败');
+      if (requestId !== overviewReadRequest.current || (overviewPermissionBarrier.current !== null && requestId <= overviewPermissionBarrier.current)) return;
+      if (data.creditObservabilityVersion !== 1) {
+        if (overviewPermissionBarrier.current === null) setOverviewReadError('unverified');
+        return;
+      }
+      setOverviewData(data); overviewPermissionBarrier.current = null; setOverviewReadError(null);
+    } catch {
+      if (requestId === overviewReadRequest.current && overviewPermissionBarrier.current === null) setOverviewReadError('failed');
+    }
   }, []);
 
+  // A response from a previous visit or unmounted account cannot affect this view.
+  useLayoutEffect(() => {
+    if (activeTab !== 'audit') return;
+    auditActive.current = true;
+    setAuditStats(null);
+    setAuditStatsError(false);
+    setAuditStatsLoading(false);
+    return () => { auditActive.current = false; auditScope.current++; };
+  }, [activeTab]);
+
+  const denyAuditAccess = useCallback((requestId: number, resource: 'logs' | 'stats') => {
+    const lastSuccess = resource === 'logs' ? auditLastLogSuccess.current : auditLastStatsSuccess.current;
+    if (lastSuccess > requestId) return;
+    auditPermissionBarrier.current = auditRequestId.current;
+    setAuditLogs([]);
+    setAuditTotal(0);
+    setAuditStats(null);
+    setAuditStatsError(false);
+    setAuditStatsLoading(false);
+    setAuditLoading(false);
+    setAuditHasSnapshot(false);
+    setAuditExpandedId(null);
+    setAuditAiAnalysis({});
+    setAuditLoadError('forbidden');
+  }, []);
+
+  const loadAuditStats = useCallback(async () => {
+    if (!auditActive.current || auditPermissionBarrier.current !== null) return;
+    const requestId = ++auditRequestId.current;
+    auditLatestStats.current = requestId;
+    const scope = auditScope.current;
+    const isCurrentScope = () => auditActive.current && auditScope.current === scope;
+    setAuditStats(null);
+    setAuditStatsError(false);
+    setAuditStatsLoading(true);
+    try {
+      const res = await fetch('/api/admin/audit?stats=true');
+      if (!isCurrentScope()) return;
+      if (res.status === 401 || res.status === 403) {
+        denyAuditAccess(requestId, 'stats');
+        return;
+      }
+      if (requestId !== auditLatestStats.current || auditPermissionBarrier.current !== null) return;
+      if (!res.ok) throw new Error('AUDIT_STATS_READ_FAILED');
+      const body = await res.json();
+      if (!isCurrentScope() || requestId !== auditLatestStats.current || auditPermissionBarrier.current !== null) return;
+      const stats = body.success ? parseAuditStats(body.stats) : null;
+      if (!stats) throw new Error('AUDIT_STATS_INVALID');
+      auditLastStatsSuccess.current = Math.max(auditLastStatsSuccess.current, requestId);
+      setAuditStats(stats);
+    } catch {
+      if (isCurrentScope() && requestId === auditLatestStats.current && auditPermissionBarrier.current === null) {
+        setAuditStats(null);
+        setAuditStatsError(true);
+      }
+    } finally {
+      if (isCurrentScope() && requestId === auditLatestStats.current) setAuditStatsLoading(false);
+    }
+  }, [denyAuditAccess]);
+
   const loadAuditLogs = useCallback(async (page = 1, action = 'all', level = 'all', userId = '') => {
+    const requestId = ++auditRequestId.current;
+    auditLatestLog.current = requestId;
+    const scope = auditScope.current;
+    const isCurrentScope = () => auditActive.current && auditScope.current === scope;
     setAuditLoading(true);
     try {
       const params = new URLSearchParams({ page: String(page), limit: '20' });
       if (action !== 'all') params.set('action', action);
       if (level !== 'all') params.set('level', level);
       if (userId) params.set('userId', userId);
-      const res = await fetch(`/api/admin/op-log?${params}`);
-      if (res.ok) {
-        const data = await res.json();
-        setAuditLogs(data.logs || []);
-        setAuditTotal(data.total || 0);
-        setAuditStats(data.stats || { todayCount: 0, weekCount: 0, totalCount: 0, errorCount: 0, warnCount: 0, unresolvedCount: 0 });
+      const res = await fetch('/api/admin/op-log?' + params);
+      if (!isCurrentScope()) return;
+      if (res.status === 401 || res.status === 403) {
+        denyAuditAccess(requestId, 'logs');
+        return;
       }
-    } catch {} finally { setAuditLoading(false); }
-  }, []);
+      if (requestId !== auditLatestLog.current) return;
+      if (!res.ok) {
+        setAuditLoadError(auditPermissionBarrier.current === null ? 'failed' : 'forbidden');
+        return;
+      }
+      const data = await res.json();
+      if (!isCurrentScope() || requestId !== auditLatestLog.current) return;
+      if (auditPermissionBarrier.current !== null && requestId <= auditPermissionBarrier.current) return;
+      auditPermissionBarrier.current = null;
+      auditLastLogSuccess.current = Math.max(auditLastLogSuccess.current, requestId);
+      setAuditLogs(data.logs || []);
+      setAuditTotal(data.total || 0);
+      setAuditHasSnapshot(true);
+      setAuditLoadError(null);
+      void loadAuditStats();
+    } catch {
+      if (isCurrentScope() && requestId === auditLatestLog.current) {
+        setAuditLoadError(auditPermissionBarrier.current === null ? 'failed' : 'forbidden');
+      }
+    } finally {
+      if (isCurrentScope() && requestId === auditLatestLog.current) setAuditLoading(false);
+    }
+  }, [denyAuditAccess, loadAuditStats]);
 
   const loadCreditsOverview = useCallback(async () => {
+    const requestId = ++creditsOverviewRequest.current;
+    setCreditsOverviewLoading(true);
     try {
       const res = await fetch('/api/admin/credits/overview');
-      if (res.ok) {
-        const data = await res.json();
-        setCreditsOverview({
-          ...data,
-          flows: data.flows || { consumed: data.totalConsumed || 0, refunded: 0, recharged: data.totalRecharged || 0, compensated: 0 },
-          recentTransactions: (data.recentTransactions || []).map((transaction: CreditTransactionView) => normalizeCreditTransaction(transaction)),
-        });
+      if (res.status === 401 || res.status === 403) {
+        creditsPermissionBarrier.current = creditsOverviewRequest.current;
+        setCreditsOverview(null);
+        setCreditsUpdatedAt(null);
+        setCreditsOverviewLoading(false);
+        setCreditsOverviewError('forbidden');
+        return;
       }
-    } catch {}
+      if (!res.ok) throw new Error('积分统计读取失败');
+      const data = await res.json();
+      if (data.success !== true || data.storageUnavailable || !Array.isArray(data.distribution) || !Array.isArray(data.topUsers) || !Array.isArray(data.recentTransactions)) throw new Error('积分统计读取失败');
+      if (requestId !== creditsOverviewRequest.current || (creditsPermissionBarrier.current !== null && requestId <= creditsPermissionBarrier.current)) return;
+      const distribution = data.creditObservabilityVersion === 1 ? verifiedCreditDistribution(data) : null;
+      const trusted = distribution !== null;
+      const recharge = trusted && typeof data.flows.recharged === 'number' && data.flows.recharged === data.totalRecharged ? data.totalRecharged : null;
+      setCreditsOverview({
+        ...data,
+        distribution,
+        totalRecharged: recharge,
+        flows: trusted ? data.flows : undefined,
+        topUsers: data.topUsers.map((user: { totalRecharged: number }) => ({ ...user, totalRecharged: trusted ? user.totalRecharged : null })),
+        recentTransactions: data.recentTransactions.map((transaction: CreditTransactionView) => {
+          const normalized = normalizeCreditTransaction(transaction);
+          return !trusted && (!transaction.typeLabel || !transaction.direction)
+            ? { ...normalized, type: 'unknown', typeLabel: normalized.direction === 'credit' ? '收入（类型待确认）' : '支出（类型待确认）' }
+            : normalized;
+        }),
+      });
+      creditsPermissionBarrier.current = null;
+      setCreditsUpdatedAt(Date.now());
+      setCreditsOverviewError(null);
+    } catch {
+      if (requestId === creditsOverviewRequest.current && creditsPermissionBarrier.current === null) setCreditsOverviewError('failed');
+    } finally {
+      if (requestId === creditsOverviewRequest.current) setCreditsOverviewLoading(false);
+    }
   }, []);
 
   const loadModelCreditPricing = useCallback(async () => {
@@ -439,22 +655,42 @@ export default function AdminTabs(props: AdminTabsProps) {
     } catch { /* retain the current editable values */ }
   }, []);
 
-  const loadSystemSettings = useCallback(async () => {
+  const loadSystemSettings = useCallback(async (discardExisting = false) => {
+    const request = ++settingsRequest.current;
+    const atStart = settingsEditSequence.current;
+    setSettingsLoading(true);
     try {
       const res = await fetch('/api/admin/settings');
-      if (res.ok) {
-        const data = await res.json();
-        setSystemSettings(data.settings || {});
-        setSettingsDirty(false);
+      if (res.status === 401 || res.status === 403) {
+        if (request === settingsRequest.current) loseSettingsAccess();
+        return;
       }
-    } catch {}
-  }, []);
+      if (!res.ok) throw new Error('failed');
+      const data = await res.json();
+      if (!data.success || !data.settings || typeof data.settings !== 'object' || Array.isArray(data.settings)) throw new Error('failed');
+      if (request !== settingsRequest.current) return;
+      const edits = Object.fromEntries(Object.entries(settingsEdits.current).filter(([, edit]) => !discardExisting || edit.sequence > atStart));
+      settingsEdits.current = edits;
+      setSystemSettings({ ...data.settings, ...Object.fromEntries(Object.entries(edits).map(([key, edit]) => [key, edit.value])) });
+      setSettingsDirty(Object.keys(edits).length > 0);
+      settingsAccessLost.current = false;
+      setSettingsVerified(true);
+      setSettingsLoadError(null);
+    } catch {
+      if (request !== settingsRequest.current) return;
+      setSettingsVerified(false);
+      setSettingsLoadError(settingsAccessLost.current ? 'forbidden' : 'failed');
+    } finally {
+      if (request === settingsRequest.current) setSettingsLoading(false);
+    }
+  }, [loseSettingsAccess]);
 
   useEffect(() => {
     if (activeTab === 'overview') loadDashboardStats();
     if (activeTab === 'audit') loadAuditLogs();
     if (activeTab === 'credits') { loadCreditsOverview(); loadModelCreditPricing(); }
-    if (activeTab === 'settings') loadSystemSettings();
+    if (activeTab === 'settings') void loadSystemSettings();
+    return () => { settingsRequest.current++; };
   }, [activeTab, loadDashboardStats, loadAuditLogs, loadCreditsOverview, loadModelCreditPricing, loadSystemSettings]);
 
   const creditCategoryCounts = useMemo(() => {
@@ -492,17 +728,24 @@ export default function AdminTabs(props: AdminTabsProps) {
   /* ── Handlers ── */
   const handleRefresh = async () => { setLoading(true); await onRefreshAdmin(); setLoading(false); };
 
-  const [settingsSaved, setSettingsSaved] = useState(false);
-
   const handleSaveSettings = async () => {
+    if (!settingsVerified || settingsLoading || settingsLoadError) return;
+    const atStart = settingsEditSequence.current;
+    const accessEpoch = settingsAccessEpoch.current;
     try {
       const res = await fetch('/api/admin/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(systemSettings)
       });
+      if (accessEpoch !== settingsAccessEpoch.current) return;
+      if (res.status === 401 || res.status === 403) {
+        loseSettingsAccess();
+        return;
+      }
       if (res.ok) {
-        setSettingsDirty(false);
+        settingsEdits.current = Object.fromEntries(Object.entries(settingsEdits.current).filter(([, edit]) => edit.sequence > atStart));
+        setSettingsDirty(Object.keys(settingsEdits.current).length > 0);
         setSettingsSaved(true);
         setTimeout(() => setSettingsSaved(false), 2500);
       } else {
@@ -559,39 +802,40 @@ export default function AdminTabs(props: AdminTabsProps) {
     const maxVal = (arr: number[]) => Math.max(...arr, 1);
 
     return (
-      <div className="space-y-4 px-6 pt-6 pb-8">
+      <div className="space-y-4 px-4 pt-4 pb-8 sm:px-6 sm:pt-6 [&_.grid>*]:min-w-0 [@media(pointer:coarse)]:[&_button]:min-h-11 [@media(pointer:coarse)]:[&_button]:min-w-11 [&_button]:shrink-0 [&_button]:whitespace-nowrap">
         {/* 页面头部 */}
-        <div className="flex items-center justify-between mb-2">
+        <div className="mb-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-xl font-bold text-foreground">运营总览</h1>
             <p className="text-sm text-muted-foreground mt-0.5">平台运营数据与趋势分析</p>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => setOverviewPeriod('7')} className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${overviewPeriod === '7' ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted text-muted-foreground border-border hover:bg-muted/80'}`}>7天</button>
-            <button onClick={() => setOverviewPeriod('30')} className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${overviewPeriod === '30' ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted text-muted-foreground border-border hover:bg-muted/80'}`}>30天</button>
+            <button onClick={() => handleTogglePeriod('7')} aria-pressed={overviewPeriod === '7'} className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${overviewPeriod === '7' ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted text-muted-foreground border-border hover:bg-muted/80'}`}>7天</button>
+            <button onClick={() => handleTogglePeriod('30')} aria-pressed={overviewPeriod === '30'} className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${overviewPeriod === '30' ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted text-muted-foreground border-border hover:bg-muted/80'}`}>30天</button>
             <button onClick={() => loadDashboardStats(overviewPeriod)} className="px-3 py-1.5 text-xs rounded-md bg-muted text-muted-foreground border border-border hover:bg-muted/80 transition-colors flex items-center gap-1"><RefreshCw className="w-3 h-3" />刷新</button>
           </div>
         </div>
+        {overviewReadError && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground"><span>{overviewReadError === 'forbidden' ? '当前账号无权查看运营总览' : overviewReadError === 'unverified' ? (s ? '旧版服务无法确认最新数据，当前显示上次结果。' : '旧版服务无法确认运营总览数据，请待服务更新后重试。') : s ? '运营总览读取失败，当前显示上次结果。' : '运营总览暂时不可用'}</span><button type="button" onClick={handleRefresh} className="min-h-11 min-w-11 rounded-md border border-border px-3">重试</button></div>}
         {/* 1. 统计卡片 — 匹配原型: 总用户/总积分充值/总积分消耗/今日生成 */}
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard icon={Users} label="总用户" value={s ? formatNumber(s.totalUsers) : '-'} sub={s ? `周活 ${formatNumber(s.weekActive)}` : ''} colorClass="text-primary" iconBg="bg-primary/15" />
-          <StatCard icon={Wallet} label="总积分充值" value={s ? formatNumber(s.creditsRecharged ?? s.totalCredits) : '-'} sub="全平台累计" colorClass="text-yellow-500" iconBg="bg-yellow-500/15" />
+          <StatCard icon={Wallet} label="总积分充值" value={s?.creditObservabilityVersion === 1 ? formatCreditFlow(s.creditsRecharged) : '—'} sub="全平台累计" colorClass="text-yellow-500" iconBg="bg-yellow-500/15" />
           <StatCard icon={CreditCard} label="总积分消耗" value={s ? formatNumber(s.creditsConsumed ?? 0) : '-'} sub="全平台累计" colorClass="text-red-400" iconBg="bg-red-400/15" />
           <StatCard icon={Activity} label="今日生成" value={s ? formatNumber(s.todayGenerations ?? 0) : '-'} sub="图片+视频+3D" colorClass="text-green-500" iconBg="bg-green-500/15" />
         </div>
 
         {/* 2. 趋势图区 */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           {/* 用户活跃趋势 */}
           <div className="bg-card rounded-lg shadow-card p-5 border border-border/50">
-            <div className="flex items-center justify-between mb-4">
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 className="text-base font-semibold text-foreground">用户活跃趋势</h2>
                 <p className="text-xs text-muted-foreground mt-0.5">DAU / 新增</p>
               </div>
               <div className="flex items-center gap-1 bg-muted rounded-md p-0.5">
-                <button onClick={() => handleTogglePeriod('7')} className={`px-2.5 py-1 rounded text-xs font-medium transition-colors cursor-pointer ${overviewPeriod === '7' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>7天</button>
-                <button onClick={() => handleTogglePeriod('30')} className={`px-2.5 py-1 rounded text-xs font-medium transition-colors cursor-pointer ${overviewPeriod === '30' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>30天</button>
+                <button onClick={() => handleTogglePeriod('7')} aria-pressed={overviewPeriod === '7'} className={`px-2.5 py-1 rounded text-xs font-medium transition-colors cursor-pointer ${overviewPeriod === '7' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>7天</button>
+                <button onClick={() => handleTogglePeriod('30')} aria-pressed={overviewPeriod === '30'} className={`px-2.5 py-1 rounded text-xs font-medium transition-colors cursor-pointer ${overviewPeriod === '30' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>30天</button>
               </div>
             </div>
             <div className="flex items-center gap-4 mb-3">
@@ -622,30 +866,30 @@ export default function AdminTabs(props: AdminTabsProps) {
                   {trendDates.map((d, i) => {
                     const x = padL + (chartW / Math.max(trendDates.length - 1, 1)) * i;
                     const short = d.slice(5);
-                    return <text key={i} x={x} y={svgH - 8} fill="#a1a1aa" fontSize="9" textAnchor="middle">{short}</text>;
+                    return <text key={i} x={x} y={svgH - 8} fill="#a1a1aa" fontSize="14" className="max-sm:text-[20px]" textAnchor={i === 0 ? 'start' : i === trendDates.length - 1 ? 'end' : 'middle'}>{short}</text>;
                   })}
                 </svg>
               ) : (
-                <div className="h-[180px] flex items-center justify-center text-muted-foreground text-sm">暂无趋势数据</div>
+                <div className="h-[180px] flex items-center justify-center text-muted-foreground text-sm">{s ? '暂无趋势数据' : '数据待确认'}</div>
               )}
             </div>
           </div>
 
           {/* 积分收支趋势 */}
           <div className="bg-card rounded-lg shadow-card p-5 border border-border/50">
-            <div className="flex items-center justify-between mb-4">
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 className="text-base font-semibold text-foreground">积分收支趋势</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">充值 / 消耗对比</p>
+                <p className="text-xs text-muted-foreground mt-0.5">按流水正负统计，包含退款、补偿及调整</p>
               </div>
               <div className="flex items-center gap-1 bg-muted rounded-md p-0.5">
-                <button onClick={() => handleTogglePeriod('7')} className={`px-2.5 py-1 rounded text-xs font-medium transition-colors cursor-pointer ${overviewPeriod === '7' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>7天</button>
-                <button onClick={() => handleTogglePeriod('30')} className={`px-2.5 py-1 rounded text-xs font-medium transition-colors cursor-pointer ${overviewPeriod === '30' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>30天</button>
+                <button onClick={() => handleTogglePeriod('7')} aria-pressed={overviewPeriod === '7'} className={`px-2.5 py-1 rounded text-xs font-medium transition-colors cursor-pointer ${overviewPeriod === '7' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>7天</button>
+                <button onClick={() => handleTogglePeriod('30')} aria-pressed={overviewPeriod === '30'} className={`px-2.5 py-1 rounded text-xs font-medium transition-colors cursor-pointer ${overviewPeriod === '30' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>30天</button>
               </div>
             </div>
             <div className="flex items-center gap-4 mb-3">
-              <div className="flex items-center gap-1.5"><span className="w-3 h-3 bg-green-500/60 rounded-sm" /><span className="text-xs text-muted-foreground">充值</span></div>
-              <div className="flex items-center gap-1.5"><span className="w-3 h-3 bg-yellow-500/60 rounded-sm" /><span className="text-xs text-muted-foreground">消耗</span></div>
+              <div className="flex items-center gap-1.5"><span className="w-3 h-3 bg-green-500/60 rounded-sm" /><span className="text-xs text-muted-foreground">积分入账</span></div>
+              <div className="flex items-center gap-1.5"><span className="w-3 h-3 bg-yellow-500/60 rounded-sm" /><span className="text-xs text-muted-foreground">积分出账</span></div>
             </div>
             <div className="relative">
               {creditIncome.length > 0 || creditExpense.length > 0 ? (
@@ -673,21 +917,21 @@ export default function AdminTabs(props: AdminTabsProps) {
                   {(s?.creditTrend || []).map((t, i) => {
                     const n = Math.max(s?.creditTrend?.length || 1, 1);
                     const cx = padL + (chartW / n) * (i + 0.5);
-                    return <text key={i} x={cx} y={svgH - 8} fill="#a1a1aa" fontSize="9" textAnchor="middle">{t.date.slice(5)}</text>;
+                    return <text key={i} x={cx} y={svgH - 8} fill="#a1a1aa" fontSize="14" className="max-sm:text-[20px]" textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'}>{t.date.slice(5)}</text>;
                   })}
                 </svg>
               ) : (
-                <div className="h-[180px] flex items-center justify-center text-muted-foreground text-sm">暂无收支数据</div>
+                <div className="h-[180px] flex items-center justify-center text-muted-foreground text-sm">{s ? '暂无收支数据' : '数据待确认'}</div>
               )}
             </div>
           </div>
         </div>
 
         {/* 3. API调用量排行 + 提供商健康 */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           {/* 模型调用量排行 Top10 */}
           <div className="bg-card rounded-lg shadow-card p-5 border border-border/50">
-            <div className="flex items-center justify-between mb-4">
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 className="text-base font-semibold text-foreground">模型调用量排行</h2>
                 <p className="text-xs text-muted-foreground mt-0.5">Top 10 模型近{overviewPeriod}日调用统计</p>
@@ -706,7 +950,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                       <span className={`w-5 text-xs font-bold text-right ${i < 3 ? 'text-primary' : 'text-muted-foreground'}`}>{i + 1}</span>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between mb-1">
-                          <span className="text-sm font-medium text-foreground truncate">{m.name}</span>
+                          <span className="min-w-0 break-words text-sm font-medium text-foreground [overflow-wrap:anywhere]">{m.name}</span>
                           <div className="flex items-center gap-3">
                             <span className={`text-xs ${rateColor}`}>{m.successRate === null ? '—' : `${m.successRate}%`}</span>
                             <span className="text-xs font-mono text-muted-foreground">{m.calls.toLocaleString('zh-CN')}</span>
@@ -720,14 +964,14 @@ export default function AdminTabs(props: AdminTabsProps) {
                   );
                 })
               ) : (
-                <div className="py-8 text-center text-sm text-muted-foreground">暂无模型调用数据</div>
+                <div className="py-8 text-center text-sm text-muted-foreground">{s ? '暂无模型调用数据' : '数据待确认'}</div>
               )}
             </div>
           </div>
 
           {/* API 提供商状态 */}
           <div className="bg-card rounded-lg shadow-card p-5 border border-border/50">
-            <div className="flex items-center justify-between mb-4">
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 className="text-base font-semibold text-foreground">API 提供商状态</h2>
                 <p className="text-xs text-muted-foreground mt-0.5">近24h健康监控</p>
@@ -741,12 +985,12 @@ export default function AdminTabs(props: AdminTabsProps) {
                   const badgeBg = p.status === '正常' ? 'bg-green-500/15 text-green-500' : p.status === '告警' ? 'bg-yellow-500/15 text-yellow-500' : 'bg-destructive/15 text-destructive';
                   const rateColor = p.failRate === null ? 'text-muted-foreground' : p.failRate < 5 ? 'text-green-500' : p.failRate < 10 ? 'text-yellow-500' : 'text-destructive';
                   return (
-                    <div key={i} className="flex items-center gap-4 p-3 bg-muted/50 rounded-lg">
+                    <div key={i} className="flex min-w-0 flex-col gap-3 rounded-lg bg-muted/50 p-3 sm:flex-row sm:items-center sm:gap-4">
                       <div className="flex items-center gap-2.5 min-w-0 flex-1">
                         <span className={`w-2 h-2 rounded-full ${dotColor} shrink-0`} />
-                        <span className="text-sm font-medium text-foreground truncate">{p.name}</span>
+                        <span className="min-w-0 break-words text-sm font-medium text-foreground [overflow-wrap:anywhere]">{p.name}</span>
                       </div>
-                      <div className="flex items-center gap-6 text-xs">
+                      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs">
                         <div className="text-muted-foreground">24h <span className="text-foreground font-mono font-medium">{p.calls24h.toLocaleString('zh-CN')}</span></div>
                         <div className="text-muted-foreground">失败率 <span className={`${rateColor} font-mono font-medium`}>{p.failRate === null ? '—' : `${p.failRate}%`}</span></div>
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium ${badgeBg}`}>{p.status}</span>
@@ -755,7 +999,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                   );
                 })
               ) : (
-                <div className="py-8 text-center text-sm text-muted-foreground">暂无提供商数据</div>
+                <div className="py-8 text-center text-sm text-muted-foreground">{s ? '暂无提供商数据' : '数据待确认'}</div>
               )}
             </div>
           </div>
@@ -763,7 +1007,7 @@ export default function AdminTabs(props: AdminTabsProps) {
 
         {/* 4. 异常预警 */}
         <div className="bg-card rounded-lg shadow-card p-5 border border-border/50">
-          <div className="flex items-center justify-between mb-4">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-lg bg-destructive/15 flex items-center justify-center">
                 <AlertTriangle className="w-4 h-4 text-destructive" />
@@ -773,10 +1017,10 @@ export default function AdminTabs(props: AdminTabsProps) {
                 <p className="text-xs text-muted-foreground mt-0.5">需要关注的系统异常</p>
               </div>
             </div>
-            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-destructive/15 text-destructive">{(s?.alerts || []).length} 条预警</span>
+            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-destructive/15 text-destructive">{s ? `${(s.alerts || []).length} 条预警` : '预警待确认'}</span>
           </div>
           {(s?.alerts || []).length > 0 ? (
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
               {(s?.alerts || []).map((alert, ai) => {
                 const borderColor = alert.severity === 'error' ? 'border-destructive' : alert.severity === 'warning' ? 'border-yellow-500' : 'border-blue-500';
                 const iconColor = alert.severity === 'error' ? 'text-destructive' : alert.severity === 'warning' ? 'text-yellow-500' : 'text-blue-500';
@@ -787,7 +1031,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                     <div className="flex items-center gap-2 mb-2"><Icon className={`w-3.5 h-3.5 ${iconColor}`} /><span className={`text-xs font-semibold ${iconColor}`}>{label}</span></div>
                     <div className="space-y-1.5">
                       {(alert.items || []).map((item, ii) => (
-                        <div key={ii} className="flex items-center justify-between"><span className="text-xs text-foreground">{item.name}</span><span className={`text-xs font-mono ${item.value.includes('异常') || item.value.includes('高') ? 'text-yellow-500' : 'text-foreground'}`}>{item.value}</span></div>
+                        <div key={ii} className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1"><span className="min-w-0 break-words text-xs text-foreground [overflow-wrap:anywhere]">{item.name}</span><span className={`text-xs font-mono ${item.value.includes('异常') || item.value.includes('高') ? 'text-yellow-500' : 'text-foreground'}`}>{item.value}</span></div>
                       ))}
                     </div>
                   </div>
@@ -795,31 +1039,40 @@ export default function AdminTabs(props: AdminTabsProps) {
               })}
             </div>
           ) : (
-            <div className="py-8 text-center text-sm text-muted-foreground">暂无预警信息，系统运行正常</div>
+            <div className="py-8 text-center text-sm text-muted-foreground">{s ? '暂无预警信息，系统运行正常' : '数据待确认'}</div>
           )}
         </div>
 
         {/* 5. 最近注册 */}
         <div className="bg-card rounded-lg shadow-card p-5 border border-border/50">
-          <div className="flex items-center justify-between mb-4">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <h2 className="text-base font-semibold text-foreground">最近注册用户</h2>
             <button onClick={viewAllUsers} className="text-xs text-primary hover:underline inline-flex items-center gap-1 cursor-pointer">查看全部 <ChevronRight className="w-3 h-3" /></button>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-xs text-muted-foreground border-b border-border/50">
-                  <th className="text-left py-2.5 px-3 font-medium">用户名</th>
-                  <th className="text-left py-2.5 px-3 font-medium">邮箱</th>
-                  <th className="text-left py-2.5 px-3 font-medium">注册时间</th>
+          <div className="overflow-x-auto max-sm:overflow-visible">
+            <table role="table" aria-label="最近注册用户" className="w-full text-sm max-sm:block">
+              <thead role="rowgroup" className="max-sm:sr-only">
+                <tr role="row" className="text-xs text-muted-foreground border-b border-border/50">
+                  <th scope="col" className="text-left py-2.5 px-3 font-medium">用户名</th>
+                  <th scope="col" className="text-left py-2.5 px-3 font-medium">邮箱</th>
+                  <th scope="col" className="text-left py-2.5 px-3 font-medium">注册时间</th>
                 </tr>
               </thead>
-              <tbody>
-                {(s?.recentUsers || adminUsers.slice(0, 5).map(u => ({ name: u.name, date: getUserCreated(u), email: getUserEmail(u) }))).map((u, i) => (
-                  <tr key={i} className="border-b border-border/30 hover:bg-muted/30 transition-colors">
-                    <td className="py-2.5 px-3 text-foreground font-medium">{u.name}</td>
-                    <td className="py-2.5 px-3 text-muted-foreground">{u.email || '-'}</td>
-                    <td className="py-2.5 px-3 text-muted-foreground font-mono text-xs">{formatDate(u.date)}</td>
+              <tbody role="rowgroup" className="max-sm:block">
+                {(s?.recentUsers || []).map((u, i) => (
+                  <tr role="row" key={i} className="border-b border-border/30 hover:bg-muted/30 transition-colors max-sm:grid max-sm:gap-1 max-sm:py-3">
+                    <td role="cell" className="py-2.5 px-3 text-foreground font-medium max-sm:grid max-sm:grid-cols-[4.5rem_minmax(0,1fr)] max-sm:items-start max-sm:gap-3 max-sm:px-0 max-sm:py-1">
+                      <span aria-hidden="true" className="hidden text-sm font-normal text-muted-foreground max-sm:block">用户名</span>
+                      <span className="min-w-0 max-sm:[overflow-wrap:anywhere]">{u.name}</span>
+                    </td>
+                    <td role="cell" className="py-2.5 px-3 text-muted-foreground max-sm:grid max-sm:grid-cols-[4.5rem_minmax(0,1fr)] max-sm:items-start max-sm:gap-3 max-sm:px-0 max-sm:py-1">
+                      <span aria-hidden="true" className="hidden text-sm max-sm:block">邮箱</span>
+                      <span className="min-w-0 max-sm:[overflow-wrap:anywhere]">{u.email || '-'}</span>
+                    </td>
+                    <td role="cell" className="py-2.5 px-3 text-muted-foreground font-mono text-xs max-sm:grid max-sm:grid-cols-[4.5rem_minmax(0,1fr)] max-sm:items-start max-sm:gap-3 max-sm:px-0 max-sm:py-1 max-sm:text-sm">
+                      <span aria-hidden="true" className="hidden font-sans text-sm max-sm:block">注册时间</span>
+                      <span className="min-w-0 max-sm:whitespace-nowrap">{formatDate(u.date)}</span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -852,30 +1105,30 @@ export default function AdminTabs(props: AdminTabsProps) {
             <p className="text-sm text-muted-foreground mt-0.5">查看和管理平台所有用户</p>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={handleRefresh} className="h-9 px-4 rounded-lg bg-muted text-muted-foreground text-sm font-medium hover:text-foreground transition-colors flex items-center gap-2 cursor-pointer"><RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />刷新</button>
+            <button onClick={handleRefresh} className="h-11 min-w-11 px-4 rounded-lg bg-muted text-muted-foreground text-sm font-medium hover:text-foreground transition-colors flex items-center gap-2 cursor-pointer"><RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />刷新</button>
           </div>
         </div>
         {/* 操作栏：搜索 + 筛选 + 批量操作 + 添加 */}
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="flex min-w-0 w-full sm:w-auto items-center gap-3 flex-wrap">
-            <div className="relative w-full sm:w-auto">
+            <div className="relative min-w-0 max-w-full w-full sm:w-auto">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <input value={userSearch} onChange={e => setUserSearch(e.target.value)} placeholder="搜索用户名 / 邮箱" className="bg-background border border-border rounded-md pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 w-full sm:w-64 transition-colors" />
+              <input value={userSearch} onChange={e => setUserSearch(e.target.value)} placeholder="搜索用户名 / 邮箱" className="h-11 min-w-0 max-w-full bg-background border border-border rounded-md pl-9 pr-3 py-2 text-base text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 w-full sm:w-64 transition-colors" />
             </div>
-            <div className="relative inline-flex items-center">
-              <select value={userFilterRole} onChange={e => setUserFilterRole(e.target.value)} className="bg-background border border-border rounded-md pl-3 pr-8 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer appearance-none">
+            <div className="relative inline-flex min-w-0 max-w-full items-center">
+              <select value={userFilterRole} onChange={e => setUserFilterRole(e.target.value)} className="h-11 min-w-11 max-w-full bg-background border border-border rounded-md pl-3 pr-8 py-2 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer appearance-none">
                 <option value="all">全部角色</option><option value="admin">Admin</option><option value="user">User</option>
               </select>
               <ChevronDown className="w-3.5 h-3.5 text-muted-foreground absolute right-2.5 pointer-events-none" />
             </div>
-            <div className="relative inline-flex items-center">
-              <select value={userFilterStatus} onChange={e => setUserFilterStatus(e.target.value)} className="bg-background border border-border rounded-md pl-3 pr-8 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer appearance-none">
+            <div className="relative inline-flex min-w-0 max-w-full items-center">
+              <select value={userFilterStatus} onChange={e => setUserFilterStatus(e.target.value)} className="h-11 min-w-11 max-w-full bg-background border border-border rounded-md pl-3 pr-8 py-2 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer appearance-none">
                 <option value="all">全部状态</option><option value="active">活跃</option><option value="disabled">禁用</option>
               </select>
               <ChevronDown className="w-3.5 h-3.5 text-muted-foreground absolute right-2.5 pointer-events-none" />
             </div>
-            <div className="relative inline-flex items-center">
-              <select value={userFilterGroup} onChange={e => setUserFilterGroup(e.target.value)} className="bg-background border border-border rounded-md pl-3 pr-8 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer appearance-none">
+            <div className="relative inline-flex w-full min-w-0 max-w-full items-center sm:w-64">
+              <select value={userFilterGroup} onChange={e => setUserFilterGroup(e.target.value)} className="h-11 w-full min-w-0 max-w-full bg-background border border-border rounded-md pl-3 pr-8 py-2 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer appearance-none">
                 <option value="all">全部分组</option>
                 {props.adminGroups.filter(g => g.is_active).map(g => (
                   <option key={g.id} value={g.id}>{g.name}</option>
@@ -886,11 +1139,11 @@ export default function AdminTabs(props: AdminTabsProps) {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button onClick={() => handleBatchToggleUsers(true)} disabled={selectedUserIds.size === 0} className={`bg-muted text-muted-foreground px-3 py-2 rounded-md text-sm font-medium transition-all inline-flex items-center gap-1.5 ${selectedUserIds.size === 0 ? 'cursor-not-allowed opacity-50' : 'hover:text-foreground cursor-pointer'}`}><CheckCircle className="w-3.5 h-3.5" />批量启用</button>
-            <button onClick={() => handleBatchToggleUsers(false)} disabled={selectedUserIds.size === 0} className={`bg-muted text-muted-foreground px-3 py-2 rounded-md text-sm font-medium transition-all inline-flex items-center gap-1.5 ${selectedUserIds.size === 0 ? 'cursor-not-allowed opacity-50' : 'hover:text-foreground cursor-pointer'}`}><Ban className="w-3.5 h-3.5" />批量禁用</button>
-            <button onClick={() => void handleBatchDeleteUsers()} disabled={selectedUserIds.size === 0} className={`bg-muted text-muted-foreground px-3 py-2 rounded-md text-sm font-medium transition-all inline-flex items-center gap-1.5 ${selectedUserIds.size === 0 ? 'cursor-not-allowed opacity-50' : 'hover:text-destructive cursor-pointer'}`}><Trash2 className="w-3.5 h-3.5" />批量删除</button>
+            <button onClick={() => handleBatchToggleUsers(true)} disabled={selectedUserIds.size === 0} className={`min-h-11 min-w-11 bg-muted text-muted-foreground px-3 py-2 rounded-md text-sm font-medium transition-all inline-flex items-center gap-1.5 ${selectedUserIds.size === 0 ? 'cursor-not-allowed opacity-50' : 'hover:text-foreground cursor-pointer'}`}><CheckCircle className="w-3.5 h-3.5" />批量启用</button>
+            <button onClick={() => handleBatchToggleUsers(false)} disabled={selectedUserIds.size === 0} className={`min-h-11 min-w-11 bg-muted text-muted-foreground px-3 py-2 rounded-md text-sm font-medium transition-all inline-flex items-center gap-1.5 ${selectedUserIds.size === 0 ? 'cursor-not-allowed opacity-50' : 'hover:text-foreground cursor-pointer'}`}><Ban className="w-3.5 h-3.5" />批量禁用</button>
+            <button onClick={() => void handleBatchDeleteUsers()} disabled={selectedUserIds.size === 0} className={`min-h-11 min-w-11 bg-muted text-muted-foreground px-3 py-2 rounded-md text-sm font-medium transition-all inline-flex items-center gap-1.5 ${selectedUserIds.size === 0 ? 'cursor-not-allowed opacity-50' : 'hover:text-destructive cursor-pointer'}`}><Trash2 className="w-3.5 h-3.5" />批量删除</button>
             <div className="w-px h-6 bg-border/30 mx-1" />
-            <button onClick={openUserAddDrawer} className="bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium hover:opacity-90 active:scale-[0.98] transition-all inline-flex items-center gap-2"><UserPlus className="w-4 h-4" />添加用户</button>
+            <button onClick={openUserAddDrawer} className="min-h-11 min-w-11 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium hover:opacity-90 active:scale-[0.98] transition-all inline-flex items-center gap-2"><UserPlus className="w-4 h-4" />添加用户</button>
           </div>
         </div>
         {/* 选中提示 */}
@@ -898,7 +1151,7 @@ export default function AdminTabs(props: AdminTabsProps) {
           <div className="flex items-center gap-2 text-sm text-primary bg-primary/10 rounded-md px-3 py-2">
             <Info className="w-4 h-4" />
             <span>已选择 {selectedUserIds.size} 位用户</span>
-            <button onClick={() => setSelectedUserIds(new Set())} className="text-muted-foreground hover:text-foreground ml-auto text-xs">取消选择</button>
+            <button onClick={() => setSelectedUserIds(new Set())} className="text-muted-foreground hover:text-foreground ml-auto text-xs max-md:min-h-11 max-md:min-w-11">取消选择</button>
           </div>
         )}
 
@@ -906,9 +1159,9 @@ export default function AdminTabs(props: AdminTabsProps) {
         <div role="region" aria-label="用户列表，可横向滚动" tabIndex={0} className="max-w-full overflow-x-auto bg-card rounded-lg shadow-card border border-border/50">
           <div className="min-w-[1120px]">
           {/* 表头 */}
-          <div className="grid grid-cols-[40px_1fr_1.2fr_90px_80px_90px_90px_70px_100px_110px_100px] items-center px-4 py-3 bg-muted text-xs font-semibold text-muted-foreground uppercase tracking-wider border-b border-border/20">
+          <div className="grid grid-cols-[44px_minmax(0,1fr)_minmax(0,1.2fr)_90px_80px_90px_90px_70px_100px_110px_100px] items-center px-4 py-3 bg-muted text-xs font-semibold text-muted-foreground uppercase tracking-wider border-b border-border/20">
             <div className="flex items-center justify-center">
-              <input type="checkbox" checked={selectedUserIds.size > 0 && selectedUserIds.size === filteredUsers.length} onChange={() => { if (selectedUserIds.size === filteredUsers.length) setSelectedUserIds(new Set()); else setSelectedUserIds(new Set(filteredUsers.map(u => u.id))); }} className="w-4 h-4 rounded border-border accent-primary" />
+              <input type="checkbox" checked={selectedUserIds.size > 0 && selectedUserIds.size === filteredUsers.length} onChange={() => { if (selectedUserIds.size === filteredUsers.length) setSelectedUserIds(new Set()); else setSelectedUserIds(new Set(filteredUsers.map(u => u.id))); }} className="w-11 h-11 shrink-0 rounded border-border accent-primary" />
             </div>
             <span>用户名</span><span>邮箱</span><span>分组</span><span>角色</span><span>状态</span><span>积分余额</span><span>作品数</span><span>注册时间</span><span>最后登录</span><span className="text-right">操作</span>
           </div>
@@ -918,16 +1171,16 @@ export default function AdminTabs(props: AdminTabsProps) {
               const isActive = u.status === 'active';
               const isSelected = selectedUserIds.has(u.id);
               return (
-                <div key={u.id} className={`grid grid-cols-[40px_1fr_1.2fr_90px_80px_90px_90px_70px_100px_110px_100px] items-center px-4 py-3 hover:bg-muted/30 transition-colors ${isSelected ? 'bg-primary/5' : ''}`}>
+                <div key={u.id} className={`grid grid-cols-[44px_minmax(0,1fr)_minmax(0,1.2fr)_90px_80px_90px_90px_70px_100px_110px_100px] items-center px-4 py-3 hover:bg-muted/30 transition-colors ${isSelected ? 'bg-primary/5' : ''}`}>
                   <div className="flex items-center justify-center">
-                    <input type="checkbox" checked={isSelected} onChange={() => setSelectedUserIds(prev => { const n = new Set(prev); n.has(u.id) ? n.delete(u.id) : n.add(u.id); return n; })} className="w-4 h-4 rounded border-border accent-primary" />
+                    <input type="checkbox" checked={isSelected} onChange={() => setSelectedUserIds(prev => { const n = new Set(prev); n.has(u.id) ? n.delete(u.id) : n.add(u.id); return n; })} className="w-11 h-11 shrink-0 rounded border-border accent-primary" />
                   </div>
-                  <div className="flex items-center gap-2.5">
+                  <div className="flex min-w-0 items-center gap-2.5">
                     <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary shrink-0">{u.name.charAt(0).toUpperCase()}</div>
                     <span className="text-sm font-medium text-foreground truncate">{u.name}</span>
                   </div>
                   <span className="text-sm text-muted-foreground truncate">{getUserEmail(u) || '-'}</span>
-                  <span className="text-xs text-muted-foreground">{getGroupName(u.groupId) || '-'}</span>
+                  <span className="min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">{getGroupName(u.groupId) || '-'}</span>
                   <span className={`inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium w-fit ${u.role === 'admin' ? 'bg-primary/15 text-primary' : 'bg-blue-500/15 text-blue-500'}`}>{u.role === 'admin' ? 'admin' : 'user'}</span>
                   <span className="inline-flex items-center gap-1.5 text-sm">
                     <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isActive ? 'bg-green-500' : 'bg-muted-foreground'}`} />
@@ -937,11 +1190,11 @@ export default function AdminTabs(props: AdminTabsProps) {
                   <span className="text-sm text-muted-foreground">{getUserProjects(u) || '-'}</span>
                   <span className="text-xs text-muted-foreground">{formatDate(getUserCreated(u))}</span>
                   <span className="text-xs text-muted-foreground">{getUserLastLogin(u)}</span>
-                  <div className="flex items-center justify-end gap-1">
-                    <button onClick={() => setUserDetailId(u.id)} className="p-1.5 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground" title="详情"><Eye className="w-3.5 h-3.5" /></button>
-                    <button onClick={() => setUserDetailId(u.id)} className="p-1.5 rounded-md hover:bg-muted transition-colors text-primary" title="编辑"><Pencil className="w-3.5 h-3.5" /></button>
-                    <button onClick={() => props.onToggleUser(u)} className="p-1.5 rounded-md hover:bg-muted transition-colors text-yellow-500" title={isActive ? '禁用' : '启用'}><Ban className="w-3.5 h-3.5" /></button>
-                    <button onClick={() => props.onDeleteUser(u)} className="p-1.5 rounded-md hover:bg-muted transition-colors text-destructive" title="删除"><Trash2 className="w-3.5 h-3.5" /></button>
+                  <div className="grid grid-cols-2 justify-items-end gap-1">
+                    <button onClick={() => setUserDetailId(u.id)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground" title="详情"><Eye className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => setUserDetailId(u.id)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md hover:bg-muted transition-colors text-primary" title="编辑"><Pencil className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => props.onToggleUser(u)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md hover:bg-muted transition-colors text-yellow-500" title={isActive ? '禁用' : '启用'}><Ban className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => props.onDeleteUser(u)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md hover:bg-muted transition-colors text-destructive" title="删除"><Trash2 className="w-3.5 h-3.5" /></button>
                   </div>
                 </div>
               );
@@ -955,24 +1208,24 @@ export default function AdminTabs(props: AdminTabsProps) {
         {detailUser && (
           <div className="fixed inset-0 z-[200] flex">
             <div className="absolute inset-0 bg-black/50" onClick={() => setUserDetailId(null)} />
-            <div className="ml-auto w-[420px] h-full bg-card border-l border-border overflow-y-auto relative z-10">
-              <div className="sticky top-0 z-10 bg-card/95 backdrop-blur-sm border-b border-border/50 px-6 py-4 flex items-center justify-between">
-                <h3 className="text-base font-semibold text-foreground">用户详情</h3>
-                <button onClick={() => setUserDetailId(null)} aria-label="关闭用户详情" className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+            <div className="ml-auto w-full min-w-0 max-w-[420px] h-full min-h-0 max-h-full bg-card border-l border-border overflow-y-auto overscroll-contain relative z-10">
+              <div className="sticky top-0 z-10 bg-card/95 backdrop-blur-sm border-b border-border/50 px-4 sm:px-6 py-4 flex items-center justify-between gap-3">
+                <h3 className="min-w-0 text-base font-semibold text-foreground [overflow-wrap:anywhere]">用户详情</h3>
+                <button onClick={() => setUserDetailId(null)} aria-label="关闭用户详情" className="w-11 h-11 shrink-0 rounded-lg bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
               </div>
-              <div className="p-6 space-y-6">
+              <div className="min-w-0 p-4 sm:p-6 space-y-6">
                 {/* 基础信息 */}
-                <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 rounded-full bg-primary/15 flex items-center justify-center"><span className="text-xl font-bold text-primary">{detailUser.name.charAt(0).toUpperCase()}</span></div>
-                  <div>
-                    <div className="flex items-center gap-2"><span className="text-lg font-semibold text-foreground">{detailUser.name}</span><span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${detailUser.role === 'admin' ? 'bg-primary/15 text-primary' : 'bg-blue-500/15 text-blue-500'}`}>{detailUser.role === 'admin' ? '管理员' : '用户'}</span></div>
-                    <p className="text-xs text-muted-foreground mt-0.5">{detailUser.email || '未设置邮箱'}</p>
+                <div className="flex min-w-0 items-start gap-4">
+                  <div className="w-14 h-14 shrink-0 rounded-full bg-primary/15 flex items-center justify-center"><span className="text-xl font-bold text-primary">{detailUser.name.charAt(0).toUpperCase()}</span></div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 flex-wrap items-start gap-2"><span className="min-w-0 max-w-full text-lg font-semibold text-foreground [overflow-wrap:anywhere]">{detailUser.name}</span><span className={`inline-flex shrink-0 items-center whitespace-nowrap px-1.5 py-0.5 rounded text-[10px] font-medium ${detailUser.role === 'admin' ? 'bg-primary/15 text-primary' : 'bg-blue-500/15 text-blue-500'}`}>{detailUser.role === 'admin' ? '管理员' : '用户'}</span></div>
+                    <p className="min-w-0 max-w-full text-sm text-muted-foreground mt-0.5 [overflow-wrap:anywhere]">{detailUser.email || '未设置邮箱'}</p>
                   </div>
                 </div>
                 <div className="grid grid-cols-3 gap-3">
-                  <div className="bg-muted/50 rounded-lg p-3 text-center"><p className="text-lg font-bold text-foreground">{(detailUser.credits ?? 0).toLocaleString('zh-CN')}</p><p className="text-[10px] text-muted-foreground mt-0.5">积分余额</p></div>
-                  <div className="bg-muted/50 rounded-lg p-3 text-center"><p className="text-lg font-bold text-foreground">{detailUser.project_count ?? '-'}</p><p className="text-[10px] text-muted-foreground mt-0.5">作品数</p></div>
-                  <div className="bg-muted/50 rounded-lg p-3 text-center"><p className="text-xs font-bold text-foreground">{getUserCreated(detailUser)}</p><p className="text-[10px] text-muted-foreground mt-0.5">注册时间</p></div>
+                  <div className="min-w-0 bg-muted/50 rounded-lg p-3 text-center"><p className="text-lg font-bold text-foreground [overflow-wrap:anywhere]">{(detailUser.credits ?? 0).toLocaleString('zh-CN')}</p><p className="text-[10px] text-muted-foreground mt-0.5">积分余额</p></div>
+                  <div className="min-w-0 bg-muted/50 rounded-lg p-3 text-center"><p className="text-lg font-bold text-foreground [overflow-wrap:anywhere]">{detailUser.project_count ?? '-'}</p><p className="text-[10px] text-muted-foreground mt-0.5">作品数</p></div>
+                  <div className="min-w-0 bg-muted/50 rounded-lg p-3 text-center"><p className="text-xs font-bold text-foreground [overflow-wrap:anywhere]">{getUserCreated(detailUser)}</p><p className="text-[10px] text-muted-foreground mt-0.5">注册时间</p></div>
                 </div>
                 {/* 所属分组 */}
                 <div>
@@ -983,14 +1236,14 @@ export default function AdminTabs(props: AdminTabsProps) {
                       const gid = e.target.value;
                       if (props.onUpdateUserGroup) await props.onUpdateUserGroup(detailUser.id, gid);
                     }}
-                    className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    className="w-full min-w-0 max-w-full h-11 px-3 rounded-lg bg-background border border-border text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
                   >
                     <option value="">无分组</option>
                     {props.adminGroups.filter(g => g.is_active).map(g => (
                       <option key={g.id} value={g.id}>{g.name}</option>
                     ))}
                   </select>
-                  <p className="text-[10px] text-muted-foreground mt-1">分组的产品权限和积分配额会自动应用</p>
+                  <p className="text-xs text-muted-foreground mt-1 [overflow-wrap:anywhere]">分组的产品权限和积分配额会自动应用</p>
                 </div>
                 {/* 模型权限 */}
                 <div className="space-y-3">
@@ -1018,26 +1271,26 @@ export default function AdminTabs(props: AdminTabsProps) {
                       const isAll = section.current.length === 0 || allIds.every(id => section.current.includes(id));
                       const isNone = section.current.length > 0 && !allIds.some(id => section.current.includes(id));
                       return (
-                        <div key={section.key}>
-                          <div className="flex items-center justify-between mb-1.5">
-                            <h4 className="text-xs font-semibold text-foreground">{section.title}</h4>
-                            <div className="flex gap-2 text-[10px]">
+                        <div key={section.key} className="min-w-0">
+                          <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 mb-1.5">
+                            <h4 className="min-w-0 text-xs font-semibold text-foreground [overflow-wrap:anywhere]">{section.title}</h4>
+                            <div className="flex flex-wrap gap-2 text-sm">
                               <button
                                 onClick={() => section.onChange(allIds)}
-                                className={`${isAll && section.current.length > 0 ? 'text-primary' : 'text-muted-foreground hover:text-foreground'} transition-colors`}
+                                className={`${isAll && section.current.length > 0 ? 'text-primary' : 'text-muted-foreground hover:text-foreground'} inline-flex min-h-11 min-w-11 items-center justify-center px-2 transition-colors`}
                               >全选</button>
                               <button
                                 onClick={() => section.onChange([])}
-                                className={`${isNone ? 'text-primary' : 'text-muted-foreground hover:text-foreground'} transition-colors`}
+                                className={`${isNone ? 'text-primary' : 'text-muted-foreground hover:text-foreground'} inline-flex min-h-11 min-w-11 items-center justify-center px-2 transition-colors`}
                               >不限</button>
                             </div>
                           </div>
-                          <div className="max-h-[140px] overflow-y-auto bg-muted/20 rounded-lg p-2 grid grid-cols-2 gap-0.5">
+                          <div className="min-w-0 max-h-[140px] overflow-y-auto bg-muted/20 rounded-lg p-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
                             {section.models.map(m => {
                               const isCustom = section.current.length > 0;
                               const checked = !isCustom || section.current.includes(m.id);
                               return (
-                                <label key={m.id} className={`flex items-center gap-1.5 px-1.5 py-1 rounded cursor-pointer ${isCustom && !section.current.includes(m.id) ? 'opacity-30 hover:opacity-60' : 'hover:bg-muted/40'}`}>
+                                <label key={m.id} className={`flex min-w-0 min-h-11 items-center gap-2 px-1.5 py-1 rounded cursor-pointer ${isCustom && !section.current.includes(m.id) ? 'opacity-30 hover:opacity-60' : 'hover:bg-muted/40'}`}>
                                   <input
                                     type="checkbox" checked={checked}
                                     onChange={() => {
@@ -1045,9 +1298,9 @@ export default function AdminTabs(props: AdminTabsProps) {
                                       else if (section.current.includes(m.id)) section.onChange(section.current.filter(x => x !== m.id));
                                       else section.onChange([...section.current, m.id]);
                                     }}
-                                    className="w-3 h-3 rounded accent-primary shrink-0"
+                                    className="w-11 h-11 rounded accent-primary shrink-0"
                                   />
-                                  <span className="text-[11px] text-foreground truncate">{m.name}</span>
+                                  <span className="min-w-0 flex-1 text-sm text-foreground [overflow-wrap:anywhere]">{m.name}</span>
                                 </label>
                               );
                             })}
@@ -1083,10 +1336,10 @@ export default function AdminTabs(props: AdminTabsProps) {
                         } catch {}
                       };
                       return (
-                        <div key={key} className="flex items-center justify-between py-2 px-3 bg-muted/30 rounded-lg">
-                          <div><span className="text-sm text-foreground">{label}</span><p className="text-[10px] text-muted-foreground">{desc}</p></div>
-                          <button onClick={handleToggle} className={`w-10 h-5 rounded-full relative transition-colors ${has ? 'bg-primary' : 'bg-muted'}`}>
-                            <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${has ? 'left-5.5 translate-x-0' : 'left-0.5'}`} />
+                        <div key={key} className="flex min-w-0 items-center justify-between gap-3 py-2 px-3 bg-muted/30 rounded-lg">
+                          <div className="min-w-0 flex-1"><span className="text-sm text-foreground [overflow-wrap:anywhere]">{label}</span><p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">{desc}</p></div>
+                          <button onClick={handleToggle} className={`relative h-11 w-12 shrink-0 rounded-lg transition-colors before:absolute before:inset-x-0 before:top-1/2 before:h-6 before:-translate-y-1/2 before:rounded-full before:content-[''] ${has ? 'before:bg-primary' : 'before:bg-muted'}`}>
+                            <span className={`pointer-events-none absolute top-1/2 w-4 h-4 -translate-y-1/2 rounded-full bg-white shadow transition-transform ${has ? 'left-7' : 'left-1'}`} />
                           </button>
                         </div>
                       );
@@ -1102,14 +1355,14 @@ export default function AdminTabs(props: AdminTabsProps) {
                       { key: 'monthlyTokenLimit', label: '月Token上限', val: detailUser.monthlyTokenLimit ?? 0 },
                       { key: 'dailyImageLimit', label: '日生图上限', val: detailUser.dailyImageLimit ?? 0 },
                     ].map(({ key, label, val }) => (
-                      <div key={key} className="flex items-center justify-between py-2 px-3 bg-muted/30 rounded-lg">
-                        <span className="text-sm text-foreground">{label}</span>
-                        <div className="flex items-center gap-1">
+                      <div key={key} className="flex min-w-0 flex-wrap items-center justify-between gap-3 py-2 px-3 bg-muted/30 rounded-lg">
+                        <span className="min-w-0 text-sm text-foreground [overflow-wrap:anywhere]">{label}</span>
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
                           <input
                             type="number"
                             defaultValue={val || 0}
                             min={0}
-                            className="w-20 h-7 px-2 rounded bg-background border border-border text-xs text-foreground text-center focus:outline-none focus:ring-2 focus:ring-primary/30"
+                            className="w-20 min-w-11 max-w-full h-11 px-2 rounded bg-background border border-border text-base text-foreground text-center focus:outline-none focus:ring-2 focus:ring-primary/30"
                             placeholder="0=不限"
                             onBlur={async (e) => {
                               const v = Number(e.target.value) || 0;
@@ -1120,7 +1373,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                             }}
                             onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
                           />
-                          <span className="text-[10px] text-muted-foreground">0=不限</span>
+                          <span className="text-xs text-muted-foreground">0=不限</span>
                         </div>
                       </div>
                     ))}
@@ -1140,14 +1393,14 @@ export default function AdminTabs(props: AdminTabsProps) {
                         setResetPasswordError('');
                         setShowResetPasswordDialog(true);
                       }}
-                      className="w-full h-9 rounded-lg bg-muted text-foreground text-sm font-medium hover:bg-muted/80 transition-colors flex items-center justify-center gap-2"
+                      className="w-full min-w-11 h-11 rounded-lg bg-muted text-foreground text-sm font-medium hover:bg-muted/80 transition-colors flex items-center justify-center gap-2"
                     >
                       <Lock className="w-4 h-4" />重置密码
                     </button>
-                    <button onClick={() => props.onToggleUser(detailUser)} className={`w-full h-9 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 ${detailUser.status === 'active' ? 'bg-destructive/15 text-destructive' : 'bg-green-500/15 text-green-500'}`}>
+                    <button onClick={() => props.onToggleUser(detailUser)} className={`w-full min-w-11 h-11 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 ${detailUser.status === 'active' ? 'bg-destructive/15 text-destructive' : 'bg-green-500/15 text-green-500'}`}>
                       {detailUser.status === 'active' ? <><Ban className="w-4 h-4" />停用用户</> : <><Check className="w-4 h-4" />启用用户</>}
                     </button>
-                    <button onClick={() => props.onDeleteUser(detailUser)} className="w-full h-9 rounded-lg bg-destructive/15 text-destructive text-sm font-medium hover:bg-destructive/25 transition-colors flex items-center justify-center gap-2"><X className="w-4 h-4" />删除用户</button>
+                    <button onClick={() => props.onDeleteUser(detailUser)} className="w-full min-w-11 h-11 rounded-lg bg-destructive/15 text-destructive text-sm font-medium hover:bg-destructive/25 transition-colors flex items-center justify-center gap-2"><X className="w-4 h-4" />删除用户</button>
                   </div>
                 </div>
               </div>
@@ -1157,21 +1410,21 @@ export default function AdminTabs(props: AdminTabsProps) {
 
         {/* 重置密码弹窗 */}
         {showResetPasswordDialog && resetPasswordUserId && (
-          <div className="fixed inset-0 z-[210] flex items-center justify-center">
+          <div className="fixed inset-0 z-[210] flex items-center justify-center p-3">
             <div className="absolute inset-0 bg-black/50" onClick={() => { if (!resetPasswordLoading) setShowResetPasswordDialog(false); }} />
-            <div className="relative z-10 w-[400px] bg-card border border-border rounded-xl shadow-2xl p-6">
-              <div className="flex items-center justify-between mb-5">
-                <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
+            <div className="relative z-10 w-full min-w-0 max-w-[400px] max-h-[calc(100dvh-1.5rem)] overflow-y-auto overscroll-contain bg-card border border-border rounded-xl shadow-2xl p-4 sm:p-6">
+              <div className="flex items-center justify-between gap-3 mb-5">
+                <h3 className="min-w-0 text-base font-semibold text-foreground flex items-center gap-2">
                   <Lock className="w-4 h-4 text-primary" />重置用户密码
                 </h3>
                 <button
                   onClick={() => { if (!resetPasswordLoading) setShowResetPasswordDialog(false); }}
-                  className="w-7 h-7 rounded-md bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+                  className="w-11 h-11 shrink-0 rounded-md bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
               </div>
-              <p className="text-sm text-muted-foreground mb-4">
+              <p className="text-sm text-muted-foreground mb-4 [overflow-wrap:anywhere]">
                 正在为用户 <span className="font-medium text-foreground">{adminUsers.find(u => u.id === resetPasswordUserId)?.name || resetPasswordUserId}</span> 重置密码
               </p>
               <div className="space-y-3">
@@ -1185,7 +1438,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                       onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setResetPasswordValue(e.target.value); setResetPasswordError(''); }}
                       placeholder="至少6个字符"
                       disabled={resetPasswordLoading}
-                      className="w-full h-10 pl-3 pr-11 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
+                      className="w-full min-w-0 h-11 pl-3 pr-11 rounded-lg bg-background border border-border text-base text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
                     />
                     <button
                       type="button"
@@ -1193,7 +1446,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                       disabled={resetPasswordLoading}
                       aria-label={showResetPasswordValue ? '隐藏新密码' : '显示新密码'}
                       aria-pressed={showResetPasswordValue}
-                      className="absolute inset-y-0 right-0 flex w-10 cursor-pointer items-center justify-center rounded-r-lg text-muted-foreground transition-colors hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="absolute inset-y-0 right-0 flex w-11 cursor-pointer items-center justify-center rounded-r-lg text-muted-foreground transition-colors hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {showResetPasswordValue ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
@@ -1209,7 +1462,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                       onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setResetPasswordConfirm(e.target.value); setResetPasswordError(''); }}
                       placeholder="再次输入新密码"
                       disabled={resetPasswordLoading}
-                      className="w-full h-10 pl-3 pr-11 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
+                      className="w-full min-w-0 h-11 pl-3 pr-11 rounded-lg bg-background border border-border text-base text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
                     />
                     <button
                       type="button"
@@ -1217,7 +1470,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                       disabled={resetPasswordLoading}
                       aria-label={showResetPasswordConfirm ? '隐藏确认密码' : '显示确认密码'}
                       aria-pressed={showResetPasswordConfirm}
-                      className="absolute inset-y-0 right-0 flex w-10 cursor-pointer items-center justify-center rounded-r-lg text-muted-foreground transition-colors hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="absolute inset-y-0 right-0 flex w-11 cursor-pointer items-center justify-center rounded-r-lg text-muted-foreground transition-colors hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {showResetPasswordConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
@@ -1234,7 +1487,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                 <button
                   onClick={() => setShowResetPasswordDialog(false)}
                   disabled={resetPasswordLoading}
-                  className="flex-1 h-10 rounded-lg bg-muted text-muted-foreground text-sm font-medium hover:text-foreground transition-colors disabled:opacity-50"
+                  className="flex-1 min-w-11 h-11 rounded-lg bg-muted text-muted-foreground text-sm font-medium hover:text-foreground transition-colors disabled:opacity-50"
                 >
                   取消
                 </button>
@@ -1270,7 +1523,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                     }
                   }}
                   disabled={resetPasswordLoading}
-                  className="flex-1 h-10 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="flex-1 min-w-11 h-11 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {resetPasswordLoading ? (
                     <><RefreshCw className="w-4 h-4 animate-spin" />处理中...</>
@@ -1287,14 +1540,14 @@ export default function AdminTabs(props: AdminTabsProps) {
         {showUserAddDrawer && (
           <div className="fixed inset-0 z-[200] flex">
             <div className="absolute inset-0 bg-black/50" onClick={closeUserAddDrawer} />
-            <div className="ml-auto relative z-10 w-[380px] h-full bg-card border-l border-border overflow-y-auto">
-              <div className="px-6 py-4 border-b border-border/50 flex items-center justify-between">
-                <h3 className="text-base font-semibold text-foreground">新建用户</h3>
-                <button onClick={closeUserAddDrawer} aria-label="关闭添加用户面板" className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+            <div className="ml-auto relative z-10 w-full min-w-0 max-w-[380px] h-full min-h-0 max-h-full bg-card border-l border-border overflow-y-auto overscroll-contain">
+              <div className="sticky top-0 z-10 bg-card/95 backdrop-blur-sm px-4 sm:px-6 py-4 border-b border-border/50 flex items-center justify-between gap-3">
+                <h3 className="min-w-0 text-base font-semibold text-foreground [overflow-wrap:anywhere]">新建用户</h3>
+                <button onClick={closeUserAddDrawer} aria-label="关闭添加用户面板" className="w-11 h-11 shrink-0 rounded-lg bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
               </div>
               <form
                 autoComplete="off"
-                className="p-6 space-y-4"
+                className="min-w-0 p-4 sm:p-6 space-y-4"
                 onSubmit={async (event) => {
                   event.preventDefault();
                   if (!newUserName || !newUserPassword) return;
@@ -1302,18 +1555,18 @@ export default function AdminTabs(props: AdminTabsProps) {
                   closeUserAddDrawer();
                 }}
               >
-                <div><label htmlFor="new-user-name" className="text-sm font-medium text-foreground mb-1.5 block">用户名</label><input id="new-user-name" name="new-user-name" autoComplete="new-username" value={newUserName} onChange={e => setNewUserName(e.target.value)} placeholder="输入用户名" className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" /></div>
-                <div><label htmlFor="new-user-password" className="text-sm font-medium text-foreground mb-1.5 block">密码</label><input id="new-user-password" name="new-user-password" autoComplete="new-password" type="password" value={newUserPassword} onChange={e => setNewUserPassword(e.target.value)} placeholder="输入密码" className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" /></div>
-                <div><label htmlFor="new-user-email" className="text-sm font-medium text-foreground mb-1.5 block">邮箱 (可选)</label><input id="new-user-email" name="new-user-email" autoComplete="email" value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} placeholder="输入邮箱" className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" /></div>
-                <div><label className="text-sm font-medium text-foreground mb-1.5 block">分组 (可选)</label>
-                  <select value={newUserGroupId} onChange={e => setNewUserGroupId(e.target.value)} className="w-full h-10 px-3 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30">
+                <div className="min-w-0"><label htmlFor="new-user-name" className="text-sm font-medium text-foreground mb-1.5 block [overflow-wrap:anywhere]">用户名</label><input id="new-user-name" name="new-user-name" autoComplete="new-username" value={newUserName} onChange={e => setNewUserName(e.target.value)} placeholder="输入用户名" className="w-full min-w-0 max-w-full h-11 px-3 rounded-lg bg-background border border-border text-base text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" /></div>
+                <div className="min-w-0"><label htmlFor="new-user-password" className="text-sm font-medium text-foreground mb-1.5 block [overflow-wrap:anywhere]">密码</label><input id="new-user-password" name="new-user-password" autoComplete="new-password" type="password" value={newUserPassword} onChange={e => setNewUserPassword(e.target.value)} placeholder="输入密码" className="w-full min-w-0 max-w-full h-11 px-3 rounded-lg bg-background border border-border text-base text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" /></div>
+                <div className="min-w-0"><label htmlFor="new-user-email" className="text-sm font-medium text-foreground mb-1.5 block [overflow-wrap:anywhere]">邮箱 (可选)</label><input id="new-user-email" name="new-user-email" autoComplete="email" value={newUserEmail} onChange={e => setNewUserEmail(e.target.value)} placeholder="输入邮箱" className="w-full min-w-0 max-w-full h-11 px-3 rounded-lg bg-background border border-border text-base text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30" /></div>
+                <div className="min-w-0"><label className="text-sm font-medium text-foreground mb-1.5 block [overflow-wrap:anywhere]">分组 (可选)</label>
+                  <select value={newUserGroupId} onChange={e => setNewUserGroupId(e.target.value)} className="w-full min-w-0 max-w-full h-11 px-3 rounded-lg bg-background border border-border text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30">
                     <option value="">无分组</option>
                     {props.adminGroups.filter(g => g.is_active).map(g => (
                       <option key={g.id} value={g.id}>{g.name}</option>
                     ))}
                   </select>
                 </div>
-                <button type="submit" className="w-full h-10 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors">创建用户</button>
+                <button type="submit" className="w-full min-w-11 h-11 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors">创建用户</button>
               </form>
             </div>
           </div>
@@ -1334,37 +1587,40 @@ export default function AdminTabs(props: AdminTabsProps) {
       let users = co?.topUsers ? [...co.topUsers] : [];
       if (creditSearch) { const q = creditSearch.toLowerCase(); users = users.filter(u => u.name.toLowerCase().includes(q)); }
       if (creditSort === 'balance') users.sort((a, b) => b.balance - a.balance);
-      else if (creditSort === 'recharge') users.sort((a, b) => b.totalRecharged - a.totalRecharged);
+      else if (creditSort === 'recharge') users.sort((a, b) => (b.totalRecharged ?? 0) - (a.totalRecharged ?? 0));
       else if (creditSort === 'consume') users.sort((a, b) => b.consumed - a.consumed);
       else users.sort((a, b) => b.consumed - a.consumed); // default by consumed desc
       return users;
     })();
 
     return (
-      <div className="space-y-4 px-6 pt-6 pb-8">
+      <div className="min-w-0 space-y-4 px-4 pt-4 pb-8 sm:px-6 sm:pt-6 [overflow-wrap:anywhere]">
         {/* 页面标题 */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold text-foreground">积分管理</h1>
             <p className="text-sm text-muted-foreground mt-0.5">管理用户积分、消耗明细与套餐配置</p>
           </div>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <RefreshCw className="w-3.5 h-3.5" />
-            <span>数据更新于 {new Date().toLocaleDateString()}</span>
+            <span>{creditsUpdatedAt === null ? '更新时间待确认' : `数据更新于 ${new Date(creditsUpdatedAt).toLocaleString()}`}</span>
           </div>
         </div>
         {/* 统计卡片 */}
-        <div className="grid grid-cols-4 gap-4">
-          <StatCard icon={Users} label="总用户数" value={formatNumber(co?.totalUsers ?? adminUsers.length)} colorClass="text-blue-500" iconBg="bg-blue-500/15" />
-          <StatCard icon={Wallet} label="总充值积分" value={co ? formatNumber(co.totalRecharged) : '-'} colorClass="text-primary" iconBg="bg-primary/15" />
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4 max-sm:[&>div]:p-3 max-sm:[&>div>div]:flex-col max-sm:[&>div>div]:gap-2 max-sm:[&_.text-2xl]:text-lg">
+          <StatCard icon={Users} label="总用户数" value={co ? formatNumber(co.totalUsers) : '—'} colorClass="text-blue-500" iconBg="bg-blue-500/15" />
+          <StatCard icon={Wallet} label="总充值积分" value={formatCreditFlow(co?.totalRecharged ?? undefined)} colorClass="text-primary" iconBg="bg-primary/15" />
           <StatCard icon={TrendingUp} label="总消耗积分" value={co ? formatNumber(co.totalConsumed) : '-'} colorClass="text-destructive" iconBg="bg-destructive/15" />
           <StatCard icon={BarChart3} label="系统结余" value={co ? formatNumber(co.totalBalance) : '-'} sub="当前用户余额合计" colorClass="text-green-500" iconBg="bg-green-500/15" />
         </div>
 
+        {creditsOverviewLoading && co && !creditsOverviewError && <div role="status" className="text-sm text-muted-foreground">正在更新，当前显示上次结果。</div>}
+        {creditsOverviewError && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground"><span>{creditsOverviewError === 'forbidden' ? '当前账号无权查看积分' : co ? '积分读取失败，当前显示上次结果。' : '积分统计暂时不可用'}</span><button type="button" onClick={() => void loadCreditsOverview()} className="min-h-11 min-w-11 rounded-md border border-border px-3">重试</button></div>}
+
         {/* Tab 切换 */}
-        <div className="flex items-center gap-6 border-b border-border/20">
+        <div className="flex flex-wrap items-center gap-2 border-b border-border/20 sm:gap-6">
           {creditTabs.map(t => (
-            <button key={t} onClick={() => setCreditSubTab(t)} className={`text-sm font-medium pb-3 cursor-pointer bg-transparent border-none transition-colors ${creditSubTab === t ? 'text-primary border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}`}>{creditTabLabels[t]}</button>
+            <button key={t} onClick={() => setCreditSubTab(t)} className={`max-md:min-h-11 max-md:min-w-11 text-sm font-medium pb-3 cursor-pointer bg-transparent border-none transition-colors ${creditSubTab === t ? 'text-primary border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}`}>{creditTabLabels[t]}</button>
           ))}
         </div>
 
@@ -1390,7 +1646,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                 </div>
               </div>
               <div className="text-xs text-muted-foreground">
-                共 <span className="text-foreground font-medium font-mono">{creditUsers.length}</span> 用户
+                共 <span className="text-foreground font-medium font-mono">{co ? creditUsers.length : '—'}</span> 用户
               </div>
             </div>
             <div className="bg-card rounded-lg shadow-card overflow-hidden border border-border/50">
@@ -1407,14 +1663,14 @@ export default function AdminTabs(props: AdminTabsProps) {
                       </div>
                     </div>
                     <span className="text-sm font-bold text-primary font-mono">{u.balance.toLocaleString('zh-CN')}</span>
-                    <span className="text-sm text-foreground font-mono">{u.totalRecharged.toLocaleString('zh-CN')}</span>
+                    <span className="text-sm text-foreground font-mono">{u.totalRecharged === null ? '—' : u.totalRecharged.toLocaleString('zh-CN')}</span>
                     <span className="text-sm text-muted-foreground font-mono">{u.consumed.toLocaleString('zh-CN')}</span>
                     <div className="flex justify-end">
                       <button onClick={() => { setRechargeUserId(u.userId || u.name); setRechargeAmount(100); setShowRechargeModal(true); }} className="bg-primary/10 text-primary px-3 py-1.5 rounded-md text-xs font-medium hover:bg-primary/20 active:scale-[0.98] transition-all">充值</button>
                     </div>
                   </div>
                 ))}
-                {creditUsers.length === 0 && <div className="py-8 text-center text-sm text-muted-foreground">暂无用户积分数据</div>}
+                {co && creditUsers.length === 0 && <div className="py-8 text-center text-sm text-muted-foreground">暂无用户积分数据</div>}
               </div>
               {/* 分页 */}
               {creditUsers.length > 20 && (
@@ -1429,8 +1685,8 @@ export default function AdminTabs(props: AdminTabsProps) {
         {/* Tab 2: 消耗明细 */}
         {creditSubTab === 'consumption' && (
           <div>
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+              <div className="flex flex-wrap items-center gap-3">
                 <select
                   value={filterConsumptionUser}
                   onChange={e => setFilterConsumptionUser(e.target.value)}
@@ -1451,6 +1707,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                   <option value="refund">退款</option>
                   <option value="compensation">补偿</option>
                   <option value="adjustment">扣减</option>
+                  <option value="unknown">类型待确认</option>
                 </select>
               </div>
               <button
@@ -1481,8 +1738,8 @@ export default function AdminTabs(props: AdminTabsProps) {
                 <Download className="w-3.5 h-3.5" />导出 CSV
               </button>
             </div>
-            <div className="bg-card rounded-lg shadow-card overflow-hidden border border-border/50">
-              <div className="grid grid-cols-6 px-5 py-3 bg-muted text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            <div className="bg-card rounded-lg shadow-card overflow-x-auto border border-border/50">
+              <div className="grid grid-cols-6 max-sm:min-w-[700px] px-5 py-3 bg-muted text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                 <span>时间</span><span>用户</span><span>类型</span><span>说明</span><span>积分变化</span><span>状态</span>
               </div>
               <div className="divide-y divide-border/30">
@@ -1490,7 +1747,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                   .filter(t => !filterConsumptionUser || t.user === filterConsumptionUser)
                   .filter(t => !filterConsumptionType || t.type === filterConsumptionType)
                   .map((t, i) => (
-                  <div key={i} className="grid grid-cols-6 px-5 py-3 hover:bg-muted/30 transition-colors items-center">
+                  <div key={i} className="grid grid-cols-6 max-sm:min-w-[700px] px-5 py-3 hover:bg-muted/30 transition-colors items-center">
                     <span className="text-sm text-muted-foreground font-mono">{t.time}</span>
                     <span className="text-sm font-medium text-foreground">{t.user}</span>
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium w-fit ${t.type === 'recharge' || t.type === 'compensation' ? 'bg-primary/15 text-primary' : t.type === 'refund' ? 'bg-blue-500/15 text-blue-500' : t.type === 'video' ? 'bg-blue-500/15 text-blue-500' : 'bg-green-500/15 text-green-500'}`}>{t.typeLabel}</span>
@@ -1499,7 +1756,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                     <span className="inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium bg-green-500/15 text-green-500 w-fit">已完成</span>
                   </div>
                 ))}
-                {(!co?.recentTransactions || co.recentTransactions.length === 0) && <div className="py-8 text-center text-sm text-muted-foreground">暂无消耗明细</div>}
+                {co && co.recentTransactions.length === 0 && <div className="py-8 text-center text-sm text-muted-foreground">暂无消耗明细</div>}
               </div>
             </div>
           </div>
@@ -1507,21 +1764,18 @@ export default function AdminTabs(props: AdminTabsProps) {
 
         {/* Tab 3: 统计分析 */}
         {creditSubTab === 'statistics' && (
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="bg-card rounded-lg shadow-card p-5 border border-border/50">
               <h2 className="text-base font-semibold text-foreground mb-4">积分消耗分布</h2>
-              <DonutChart segments={co?.distribution || [
-                { label: '图像生成', value: 45, color: '#d4af37', pct: '45%' },
-                { label: 'AI 对话', value: 25, color: '#22c55e', pct: '25%' },
-                { label: '视频生成', value: 18, color: '#3b82f6', pct: '18%' },
-                { label: '其他', value: 12, color: '#a1a1aa', pct: '12%' },
-              ]} />
-              <div className="grid grid-cols-2 gap-x-5 gap-y-2 mt-5 pt-4 border-t border-border/40 text-xs">
-                <div className="flex justify-between gap-3"><span className="text-muted-foreground">毛消费</span><span className="font-mono text-foreground">{formatNumber(co?.flows?.consumed ?? 0)}</span></div>
-                <div className="flex justify-between gap-3"><span className="text-muted-foreground">退款</span><span className="font-mono text-blue-500">{formatNumber(co?.flows?.refunded ?? 0)}</span></div>
-                <div className="flex justify-between gap-3"><span className="text-muted-foreground">充值</span><span className="font-mono text-green-500">{formatNumber(co?.flows?.recharged ?? 0)}</span></div>
-                <div className="flex justify-between gap-3"><span className="text-muted-foreground">补偿</span><span className="font-mono text-primary">{formatNumber(co?.flows?.compensated ?? 0)}</span></div>
-              </div>
+              {creditsOverviewLoading && !co ? <p role="status" className="text-sm text-muted-foreground">正在加载积分统计…</p>
+                : co?.distribution ? <DonutChart segments={co.distribution} />
+                  : co ? <p className="text-sm text-muted-foreground">分类统计待确认</p> : null}
+              {co && <div className="grid grid-cols-2 gap-x-5 gap-y-2 mt-5 pt-4 border-t border-border/40 text-xs">
+                <div className="flex justify-between gap-3"><span className="text-muted-foreground">毛消费</span><span className="font-mono text-foreground">{formatCreditFlow(co?.flows?.consumed)}</span></div>
+                <div className="flex justify-between gap-3"><span className="text-muted-foreground">退款</span><span className="font-mono text-blue-500">{formatCreditFlow(co?.flows?.refunded)}</span></div>
+                <div className="flex justify-between gap-3"><span className="text-muted-foreground">充值</span><span className="font-mono text-green-500">{formatCreditFlow(co?.flows?.recharged)}</span></div>
+                <div className="flex justify-between gap-3"><span className="text-muted-foreground">补偿</span><span className="font-mono text-primary">{formatCreditFlow(co?.flows?.compensated)}</span></div>
+              </div>}
             </div>
             <div className="bg-card rounded-lg shadow-card p-5 border border-border/50">
               <h2 className="text-base font-semibold text-foreground mb-4">消耗排行 Top 10</h2>
@@ -1587,7 +1841,7 @@ export default function AdminTabs(props: AdminTabsProps) {
               ))}
             </div>
             <div className="overflow-x-auto border border-border/60 rounded-md">
-              <table className="w-full min-w-[700px] text-sm">
+              <table className="w-full min-w-[700px] max-md:whitespace-nowrap text-sm">
                 <thead className="bg-muted/50 text-xs text-muted-foreground">
                   <tr>
                     <th className="px-3 py-2 text-left font-medium">供应商</th>
@@ -1843,9 +2097,9 @@ export default function AdminTabs(props: AdminTabsProps) {
     };
 
     return (
-      <div className="space-y-4 px-6 pt-6 pb-8">
+      <div className="space-y-4 p-4 sm:p-6 pb-8 [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:whitespace-nowrap [&_svg]:shrink-0">
         {/* 页面标题 */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold text-foreground">操作日志</h1>
             <p className="text-sm text-muted-foreground mt-0.5">追踪用户操作、错误记录与系统事件</p>
@@ -1855,19 +2109,33 @@ export default function AdminTabs(props: AdminTabsProps) {
           </button>
         </div>
 
+        {auditLoadError && (
+          <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-foreground">
+            <p>{auditLoadError === 'forbidden' ? '没有权限查看操作日志' : '操作日志加载失败' + (auditHasSnapshot ? '，当前显示上次读取结果' : '')}</p>
+            <button onClick={() => loadAuditLogs(auditPage, auditFilterAction, auditFilterLevel, auditFilterUserId)} className="min-h-11 min-w-11 rounded-lg bg-muted px-3 text-sm text-foreground">重试读取日志</button>
+          </div>
+        )}
+
+        {(auditStatsLoading || auditStatsError) && auditLoadError !== 'forbidden' && (
+          <div role={auditStatsError ? 'alert' : 'status'} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-foreground">
+            <p>{auditStatsError ? '日志统计加载失败' : '日志统计加载中'}</p>
+            <button onClick={() => void loadAuditStats()} className="min-h-11 min-w-11 rounded-lg bg-muted px-3 text-sm text-foreground">重试日志统计</button>
+          </div>
+        )}
+
         {/* 摘要卡片 */}
-        <div className="grid grid-cols-3 lg:grid-cols-6 gap-3">
-          <StatCard icon={ShieldCheck} label="今日操作" value={as ? formatNumber(as.todayCount) : '-'} colorClass="text-primary" iconBg="bg-primary/15" />
-          <StatCard icon={Activity} label="本周操作" value={as ? formatNumber(as.weekCount) : '-'} colorClass="text-blue-500" iconBg="bg-blue-500/15" />
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 [&>div]:p-3 [&>div>div]:gap-2">
+          <StatCard icon={ShieldCheck} label="今日操作" value={as ? formatNumber(as.todayCount) : '-'} sub="UTC 日期" colorClass="text-primary" iconBg="bg-primary/15" />
+          <StatCard icon={Activity} label="本周操作" value="-" sub="暂不支持" colorClass="text-blue-500" iconBg="bg-blue-500/15" />
           <StatCard icon={Database} label="总记录" value={as ? formatNumber(as.totalCount) : '-'} colorClass="text-green-500" iconBg="bg-green-500/15" />
-          <StatCard icon={AlertTriangle} label="今日错误" value={as ? formatNumber(as.errorCount || 0) : '-'} colorClass="text-destructive" iconBg="bg-destructive/15" />
-          <StatCard icon={AlertTriangle} label="今日警告" value={as ? formatNumber(as.warnCount || 0) : '-'} colorClass="text-yellow-500" iconBg="bg-yellow-500/15" />
-          <StatCard icon={Wrench} label="未处理" value={as ? formatNumber(as.unresolvedCount || 0) : '-'} colorClass="text-orange-500" iconBg="bg-orange-500/15" />
+          <StatCard icon={AlertTriangle} label="累计错误" value={as ? formatNumber(as.errorCount) : '-'} sub="含严重错误" colorClass="text-destructive" iconBg="bg-destructive/15" />
+          <StatCard icon={AlertTriangle} label="累计警告" value={as ? formatNumber(as.warnCount) : '-'} colorClass="text-yellow-500" iconBg="bg-yellow-500/15" />
+          <StatCard icon={Wrench} label="未处理错误" value={as ? formatNumber(as.unresolvedCount) : '-'} colorClass="text-orange-500" iconBg="bg-orange-500/15" />
         </div>
 
         {/* 筛选栏 */}
         <div className="flex items-center gap-3 flex-wrap">
-          <select value={auditFilterAction} onChange={e => { setAuditFilterAction(e.target.value); setAuditPage(1); loadAuditLogs(1, e.target.value, auditFilterLevel, auditFilterUserId); }} className="h-9 px-3 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30">
+          <select aria-label="操作类型筛选" value={auditFilterAction} onChange={e => { setAuditFilterAction(e.target.value); setAuditPage(1); loadAuditLogs(1, e.target.value, auditFilterLevel, auditFilterUserId); }} className="h-11 min-w-0 max-w-full px-3 rounded-lg bg-background border border-border text-base md:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30">
             <option value="all">全部操作</option>
             <optgroup label="管理员操作">
               <option value="user_create">用户创建</option>
@@ -1888,17 +2156,17 @@ export default function AdminTabs(props: AdminTabsProps) {
               <option value="workflow_execute">工作流执行</option>
             </optgroup>
           </select>
-          <select value={auditFilterLevel} onChange={e => { setAuditFilterLevel(e.target.value); setAuditPage(1); loadAuditLogs(1, auditFilterAction, e.target.value, auditFilterUserId); }} className="h-9 px-3 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30">
+          <select aria-label="日志级别筛选" value={auditFilterLevel} onChange={e => { setAuditFilterLevel(e.target.value); setAuditPage(1); loadAuditLogs(1, auditFilterAction, e.target.value, auditFilterUserId); }} className="h-11 min-w-0 max-w-full px-3 rounded-lg bg-background border border-border text-base md:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30">
             <option value="all">全部级别</option>
             <option value="error">错误</option>
             <option value="warn">警告</option>
             <option value="info">信息</option>
           </select>
           <input
-            type="text" placeholder="用户ID筛选" value={auditFilterUserId}
+            aria-label="用户ID筛选" type="text" placeholder="用户ID筛选" value={auditFilterUserId}
             onChange={e => setAuditFilterUserId(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') { setAuditPage(1); loadAuditLogs(1, auditFilterAction, auditFilterLevel, auditFilterUserId); } }}
-            className="h-9 px-3 rounded-lg bg-background border border-border text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 w-36"
+            className="h-11 min-w-0 max-w-full px-3 rounded-lg bg-background border border-border text-base md:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 w-36"
           />
           <div className="flex-1" />
           <button onClick={() => { setAuditFilterAction('all'); setAuditFilterLevel('all'); setAuditFilterUserId(''); setAuditPage(1); loadAuditLogs(1, 'all', 'all', ''); }} className="h-9 px-3 rounded-lg bg-muted text-muted-foreground hover:text-foreground transition-colors text-sm">重置筛选</button>
@@ -1906,8 +2174,8 @@ export default function AdminTabs(props: AdminTabsProps) {
 
         {/* 日志表格 */}
         <div className="bg-card rounded-lg shadow-card border border-border/50 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <div role="region" aria-label="操作日志列表，可横向滚动" tabIndex={0} className="overflow-x-auto focus-visible:outline-2 focus-visible:outline-primary">
+            <table className="w-full min-w-[760px] text-sm">
               <thead>
                 <tr className="text-xs text-muted-foreground bg-muted/30">
                   <th className="text-left py-3 px-3 font-medium w-32">时间</th>
@@ -1950,12 +2218,12 @@ export default function AdminTabs(props: AdminTabsProps) {
                       {isExpanded && (
                         <tr className="bg-muted/20">
                           <td colSpan={7} className="py-3 px-4">
-                            <div className="space-y-2">
+                            <div className="max-w-[calc(100vw-4.5rem)] space-y-2 [overflow-wrap:anywhere]">
                               {/* 基础信息 */}
-                              <div className="grid grid-cols-2 gap-2 text-xs">
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
                                 <div><span className="text-muted-foreground">用户ID:</span> <span className="text-foreground font-mono">{String(log.user_id || '-')}</span></div>
                                 <div><span className="text-muted-foreground">目标:</span> <span className="text-foreground">{String(log.target_type || '')}{log.target_id ? ` #${log.target_id}` : ''}</span></div>
-                                {log.errorMessage && <div className="col-span-2"><span className="text-muted-foreground">错误信息:</span> <span className="text-destructive font-mono">{String(log.errorMessage)}</span></div>}
+                                {log.errorMessage && <div className="md:col-span-2"><span className="text-muted-foreground">错误信息:</span> <span className="text-destructive font-mono">{String(log.errorMessage)}</span></div>}
                                 {log.model && <div><span className="text-muted-foreground">模型:</span> <span className="text-foreground">{String(log.model)}</span></div>}
                                 {log.providerId && <div><span className="text-muted-foreground">提供商:</span> <span className="text-foreground">{String(log.providerId)}</span></div>}
                                 {log.duration && <div><span className="text-muted-foreground">耗时:</span> <span className="text-foreground">{Number(log.duration).toFixed(0)}ms</span></div>}
@@ -1963,29 +2231,29 @@ export default function AdminTabs(props: AdminTabsProps) {
                               {/* 堆栈 */}
                               {Boolean(log.stackTrace) && (
                                 <details className="text-xs">
-                                  <summary className="text-muted-foreground cursor-pointer hover:text-foreground">堆栈跟踪</summary>
-                                  <pre className="text-destructive/80 whitespace-pre-wrap font-mono max-h-32 overflow-auto mt-1 p-2 bg-background rounded">{String(log.stackTrace)}</pre>
+                                  <summary className="text-muted-foreground cursor-pointer hover:text-foreground max-md:min-h-11 max-md:py-3">堆栈跟踪</summary>
+                                  <pre className="text-destructive/80 whitespace-pre-wrap break-words font-mono max-h-32 overflow-auto mt-1 p-2 bg-background rounded">{String(log.stackTrace)}</pre>
                                 </details>
                               )}
                               {/* 请求数据 */}
                               {Boolean(log.requestData) && (
                                 <details className="text-xs">
-                                  <summary className="text-muted-foreground cursor-pointer hover:text-foreground">请求数据</summary>
-                                  <pre className="text-muted-foreground whitespace-pre-wrap font-mono max-h-32 overflow-auto mt-1 p-2 bg-background rounded">{typeof log.requestData === 'string' ? log.requestData : JSON.stringify(log.requestData, null, 2)}</pre>
+                                  <summary className="text-muted-foreground cursor-pointer hover:text-foreground max-md:min-h-11 max-md:py-3">请求数据</summary>
+                                  <pre className="text-muted-foreground whitespace-pre-wrap break-words font-mono max-h-32 overflow-auto mt-1 p-2 bg-background rounded">{typeof log.requestData === 'string' ? log.requestData : JSON.stringify(log.requestData, null, 2)}</pre>
                                 </details>
                               )}
                               {/* 详情 */}
                               {log.detail != null && (
                                 <details open className="text-xs">
                                   <summary className="text-muted-foreground cursor-pointer hover:text-foreground">详情</summary>
-                                  <pre className="text-muted-foreground whitespace-pre-wrap font-mono max-h-32 overflow-auto mt-1 p-2 bg-background rounded">{typeof log.detail === 'string' ? log.detail : JSON.stringify(log.detail, null, 2)}</pre>
+                                  <pre className="text-muted-foreground whitespace-pre-wrap break-words font-mono max-h-32 overflow-auto mt-1 p-2 bg-background rounded">{typeof log.detail === 'string' ? log.detail : JSON.stringify(log.detail, null, 2)}</pre>
                                 </details>
                               )}
                               {/* AI分析结果 */}
                               {auditAiAnalysis[logId] && (
                                 <div className="p-3 bg-primary/5 rounded-lg border border-primary/20">
                                   <div className="flex items-center gap-1.5 text-xs font-medium text-primary mb-1"><Brain className="w-3.5 h-3.5" /> AI 分析</div>
-                                  <pre className="text-xs text-foreground whitespace-pre-wrap font-mono max-h-48 overflow-auto">{auditAiAnalysis[logId]}</pre>
+                                  <pre className="text-xs text-foreground whitespace-pre-wrap break-words font-mono max-h-48 overflow-auto">{auditAiAnalysis[logId]}</pre>
                                 </div>
                               )}
                               {/* AI加载中 */}
@@ -1994,7 +2262,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                               )}
                               {/* 解决状态操作 */}
                               {isDanger && (
-                                <div className="flex items-center gap-2 pt-1">
+                                <div className="flex flex-wrap items-center gap-2 pt-1">
                                   <span className="text-xs text-muted-foreground">处理状态:</span>
                                   {Object.entries(resolutionLabels).map(([key, info]) => (
                                     <button key={key} onClick={() => handleResolution(logId, key)} className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${resStatus === key ? info.color : 'bg-muted text-muted-foreground hover:text-foreground'}`}>{info.label}</button>
@@ -2011,7 +2279,7 @@ export default function AdminTabs(props: AdminTabsProps) {
               </tbody>
             </table>
           </div>
-          {auditLogs.length === 0 && <div className="text-center py-12 text-muted-foreground">暂无操作日志</div>}
+          {!auditLoading && !auditLoadError && auditLogs.length === 0 && <div className="text-center py-12 text-muted-foreground">暂无操作日志</div>}
         </div>
 
         {/* 分页 */}
@@ -2036,16 +2304,19 @@ export default function AdminTabs(props: AdminTabsProps) {
     const toggleBtn = (key: string) => {
       const on = s(key) === 'true';
       return (
-        <button onClick={() => { setSystemSettings(prev => ({ ...prev, [key]: on ? 'false' : 'true' })); setSettingsDirty(true); }}
-          className={`relative w-11 h-6 rounded-full transition-colors cursor-pointer ${on ? 'bg-primary' : 'bg-muted-foreground/30'}`}>
-          <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${on ? 'left-[22px]' : 'left-[2px]'}`} />
+        <button onClick={() => { editSetting(key, on ? 'false' : 'true'); }}
+          aria-label={ ({ registrationEnabled: '允许用户注册', quickCreateAutoModelRouting: '按任务自动匹配模型', videoGenerationEnabled: '视频生成功能', '3dModelEnabled': '3D 模型预览', announcementEnabled: '启用公告' } as Record<string, string>)[key] || key } aria-pressed={on}
+          className="relative w-11 h-11 shrink-0 cursor-pointer">
+          <span aria-hidden="true" className={`absolute left-0 top-2.5 w-11 h-6 rounded-full transition-colors ${on ? 'bg-primary' : 'bg-muted-foreground/30'}`}>
+            <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${on ? 'left-[22px]' : 'left-[2px]'}`} />
+          </span>
         </button>
       );
     };
 
     const numInput = (key: string, w = 'w-32', unit?: string, min?: number, max?: number) => (
       <div className="flex items-center gap-2">
-        <input type="number" value={s(key)} min={min} max={max} onChange={e => { setSystemSettings(prev => ({ ... prev, [key]: e.target.value })); setSettingsDirty(true); }}
+        <input type="number" value={s(key)} min={min} max={max} onChange={e => { editSetting(key, e.target.value); }}
           className={`${w} bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground text-right focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors`} />
         {unit && <span className="text-xs text-muted-foreground">{unit}</span>}
       </div>
@@ -2059,48 +2330,53 @@ export default function AdminTabs(props: AdminTabsProps) {
           <p className="text-sm text-muted-foreground mt-1">管理平台全局配置，修改后请点击底部保存按钮生效</p>
         </div>
 
+        {settingsLoadError && <div role="alert" className="mx-4 my-2 text-sm text-destructive">
+          {settingsLoadError === 'forbidden' ? '权限已失效，设置与未保存草稿已清除。' : '读取设置失败，当前草稿已保留。'}
+          <button type="button" onClick={() => void loadSystemSettings()} className="ml-2 min-h-11 underline">{settingsLoadError === 'forbidden' ? '重新读取设置' : '保留草稿并重试'}</button>
+        </div>}
+
         {/* 可滚动内容区域 */}
-        <div className="flex-1 overflow-y-auto px-2">
+        {settingsLoadError !== 'forbidden' && <div className="flex-1 overflow-y-auto px-2">
 
         {/* 基础设置 */}
-        <div className="px-8 mt-6">
+        <div className="px-2 sm:px-8 mt-6">
           <div className="bg-card rounded-lg shadow-card p-5">
             <div className="flex items-center gap-2 mb-5">
               <SlidersHorizontal className="w-4 h-4 text-primary" />
               <h2 className="text-base font-semibold text-foreground">基础设置</h2>
             </div>
             <div className="space-y-5">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
                 <div>
                   <div className="text-sm font-medium text-foreground">允许用户注册</div>
                   <div className="text-xs text-muted-foreground mt-0.5">关闭后新用户将无法自行注册账号</div>
                 </div>
                 {toggleBtn('registrationEnabled')}
               </div>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
                 <div>
                   <div className="text-sm font-medium text-foreground">新用户默认积分</div>
                   <div className="text-xs text-muted-foreground mt-0.5">新注册用户获得的初始积分数量</div>
                 </div>
                 {numInput('initialCredits', 'w-32')}
               </div>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
                 <div>
                   <div className="text-sm font-medium text-foreground">新用户默认角色</div>
                   <div className="text-xs text-muted-foreground mt-0.5">新注册用户自动分配的角色</div>
                 </div>
-                <select value={s('defaultUserRole')} onChange={e => { setSystemSettings(prev => ({ ...prev, defaultUserRole: e.target.value })); setSettingsDirty(true); }}
+                <select value={s('defaultUserRole')} onChange={e => { editSetting('defaultUserRole', e.target.value); }}
                   className="w-32 bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer">
                   <option value="user">user</option>
                   <option value="vip">vip</option>
                 </select>
               </div>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
                 <div>
                   <div className="text-sm font-medium text-foreground">平台名称</div>
                   <div className="text-xs text-muted-foreground mt-0.5">显示在浏览器标题栏和登录页面</div>
                 </div>
-                <input type="text" value={s('platformName')} onChange={e => { setSystemSettings(prev => ({ ...prev, platformName: e.target.value })); setSettingsDirty(true); }}
+                <input type="text" value={s('platformName')} onChange={e => { editSetting('platformName', e.target.value); }}
                   className="w-48 bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground text-right focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
               </div>
             </div>
@@ -2108,7 +2384,7 @@ export default function AdminTabs(props: AdminTabsProps) {
         </div>
 
         {/* 安全设置 */}
-        <div className="px-8 mt-6">
+        <div className="px-2 sm:px-8 mt-6">
           <div className="bg-card rounded-lg shadow-card p-5">
             <div className="flex items-center gap-2 mb-5">
               <Shield className="w-4 h-4 text-primary" />
@@ -2118,24 +2394,24 @@ export default function AdminTabs(props: AdminTabsProps) {
               <div>
                 <div className="text-sm font-medium text-foreground">管理端IP白名单</div>
                 <div className="text-xs text-muted-foreground mt-0.5 mb-2">每行一个IP地址，留空则不限制</div>
-                <textarea value={s('ipWhitelist')} onChange={e => { setSystemSettings(prev => ({ ...prev, ipWhitelist: e.target.value })); setSettingsDirty(true); }}
+                <textarea value={s('ipWhitelist')} onChange={e => { editSetting('ipWhitelist', e.target.value); }}
                   rows={4} className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors resize-none" placeholder="192.168.1.0/24&#10;10.0.0.1" />
               </div>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
                 <div>
                   <div className="text-sm font-medium text-foreground">会话超时时间</div>
                   <div className="text-xs text-muted-foreground mt-0.5">用户无操作后自动登出的时间</div>
                 </div>
                 {numInput('sessionTimeout', 'w-24', '分钟')}
               </div>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
                 <div>
                   <div className="text-sm font-medium text-foreground">强制密码修改周期</div>
                   <div className="text-xs text-muted-foreground mt-0.5">设为 0 则不强制修改密码</div>
                 </div>
                 {numInput('passwordExpiryDays', 'w-24', '天')}
               </div>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
                 <div>
                   <div className="text-sm font-medium text-foreground">用户可执行任务数量</div>
                   <div className="text-xs text-muted-foreground mt-0.5">单个用户同时执行的异步任务上限</div>
@@ -2147,42 +2423,42 @@ export default function AdminTabs(props: AdminTabsProps) {
         </div>
 
         {/* 存储设置 */}
-        <div className="px-8 mt-6">
+        <div className="px-2 sm:px-8 mt-6">
           <div className="bg-card rounded-lg shadow-card p-5">
             <div className="flex items-center gap-2 mb-5">
               <HardDrive className="w-4 h-4 text-primary" />
               <h2 className="text-base font-semibold text-foreground">存储设置</h2>
             </div>
             <div className="space-y-5">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
                 <div>
                   <div className="text-sm font-medium text-foreground">单用户存储配额</div>
                   <div className="text-xs text-muted-foreground mt-0.5">每个用户可使用的最大存储空间</div>
                 </div>
                 {numInput('storageQuotaMB', 'w-24', 'MB')}
               </div>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
                 <div>
                   <div className="text-sm font-medium text-foreground">图片最大分辨率</div>
                   <div className="text-xs text-muted-foreground mt-0.5">上传图片允许的最大边长度（像素）</div>
                 </div>
                 {numInput('imageMaxEdge', 'w-24', 'px')}
               </div>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
                 <div>
                   <div className="text-sm font-medium text-foreground">图片最大大小</div>
                   <div className="text-xs text-muted-foreground mt-0.5">单张图片文件的最大体积</div>
                 </div>
                 {numInput('imageMaxSizeMB', 'w-24', 'MB')}
               </div>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
                 <div>
                   <div className="text-sm font-medium text-foreground">单文件上传限制</div>
                   <div className="text-xs text-muted-foreground mt-0.5">单个文件的最大上传大小</div>
                 </div>
                 {numInput('maxUploadMB', 'w-24', 'MB')}
               </div>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
                 <div>
                   <div className="text-sm font-medium text-foreground">视频最大时长</div>
                   <div className="text-xs text-muted-foreground mt-0.5">用户可生成的视频最大时长</div>
@@ -2194,41 +2470,41 @@ export default function AdminTabs(props: AdminTabsProps) {
         </div>
 
         {/* 默认模型配置 */}
-        <div className="px-8 mt-6">
+        <div className="px-2 sm:px-8 mt-6">
           <div className="bg-card rounded-lg shadow-card p-5">
             <div className="flex items-center gap-2 mb-5">
               <Brain className="w-4 h-4 text-primary" />
               <h2 className="text-base font-semibold text-foreground">默认模型配置</h2>
             </div>
             <div className="space-y-5">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
                 <div>
                   <div className="text-sm font-medium text-foreground">默认图像模型</div>
                   <div className="text-xs text-muted-foreground mt-0.5">用户生成图像时的默认模型</div>
                 </div>
-                <select value={s('defaultImageModel')} onChange={e => { setSystemSettings(prev => ({ ...prev, defaultImageModel: e.target.value })); setSettingsDirty(true); }}
+                <select value={s('defaultImageModel')} onChange={e => { editSetting('defaultImageModel', e.target.value); }}
                   className="w-56 bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer">
                   <option value="">未选择</option>
                   {imageModelOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
               </div>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
                 <div>
                   <div className="text-sm font-medium text-foreground">默认 LLM 模型</div>
                   <div className="text-xs text-muted-foreground mt-0.5">对话和文本生成的默认语言模型</div>
                 </div>
-                <select value={s('defaultChatModel')} onChange={e => { setSystemSettings(prev => ({ ...prev, defaultChatModel: e.target.value })); setSettingsDirty(true); }}
+                <select value={s('defaultChatModel')} onChange={e => { editSetting('defaultChatModel', e.target.value); }}
                   className="w-56 bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer">
                   <option value="">未选择</option>
                   {chatModelOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
               </div>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
                 <div>
                   <div className="text-sm font-medium text-foreground">默认视频模型</div>
                   <div className="text-xs text-muted-foreground mt-0.5">视频生成任务的默认模型</div>
                 </div>
-                <select value={s('defaultVideoModel') || ''} onChange={e => { setSystemSettings(prev => ({ ...prev, defaultVideoModel: e.target.value })); setSettingsDirty(true); }}
+                <select value={s('defaultVideoModel') || ''} onChange={e => { editSetting('defaultVideoModel', e.target.value); }}
                   className="w-56 bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer">
                   <option value="">未选择</option>
                   {videoModelOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -2245,7 +2521,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                       <div className="text-sm font-medium text-foreground">快速创作图像模型</div>
                       <div className="text-xs text-muted-foreground mt-0.5">留空时由路由策略自动选择（自动路由开启时按优先级回退全局默认）</div>
                     </div>
-                    <select value={s('quickCreateImageModel')} onChange={e => { setSystemSettings(prev => ({ ...prev, quickCreateImageModel: e.target.value })); setSettingsDirty(true); }}
+                    <select value={s('quickCreateImageModel')} onChange={e => { editSetting('quickCreateImageModel', e.target.value); }}
                       className="w-56 bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer">
                       <option value="">跟随全局默认</option>
                       {imageModelOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -2256,7 +2532,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                       <div className="text-sm font-medium text-foreground">快速创作 LLM</div>
                       <div className="text-xs text-muted-foreground mt-0.5">用于理解需求、补全专业参数和编译提示词</div>
                     </div>
-                    <select value={s('quickCreateChatModel')} onChange={e => { setSystemSettings(prev => ({ ...prev, quickCreateChatModel: e.target.value })); setSettingsDirty(true); }}
+                    <select value={s('quickCreateChatModel')} onChange={e => { editSetting('quickCreateChatModel', e.target.value); }}
                       className="w-56 bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer">
                       <option value="">跟随全局默认</option>
                       {chatModelOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -2271,14 +2547,14 @@ export default function AdminTabs(props: AdminTabsProps) {
                   </div>
                 </div>
               </div>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
                 <div>
                   <div className="text-sm font-medium text-foreground">视频生成功能</div>
                   <div className="text-xs text-muted-foreground mt-0.5">启用后用户可以使用文生视频和图生视频功能</div>
                 </div>
                 {toggleBtn('videoGenerationEnabled')}
               </div>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
                 <div>
                   <div className="text-sm font-medium text-foreground">3D 模型预览</div>
                   <div className="text-xs text-muted-foreground mt-0.5">启用后用户可以生成和预览3D模型</div>
@@ -2290,39 +2566,39 @@ export default function AdminTabs(props: AdminTabsProps) {
         </div>
 
         {/* 公告管理 */}
-        <div className="px-8 mt-6">
+        <div className="px-2 sm:px-8 mt-6">
           <div className="bg-card rounded-lg shadow-card p-5">
             <div className="flex items-center gap-2 mb-5">
               <Megaphone className="w-4 h-4 text-primary" />
               <h2 className="text-base font-semibold text-foreground">公告管理</h2>
             </div>
             <div className="space-y-5">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
                 <div>
                   <div className="text-sm font-medium text-foreground">启用公告</div>
                   <div className="text-xs text-muted-foreground mt-0.5">开启后公告将对所有用户展示</div>
                 </div>
                 {toggleBtn('announcementEnabled')}
               </div>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
                 <div>
                   <div className="text-sm font-medium text-foreground">公告类型</div>
                   <div className="text-xs text-muted-foreground mt-0.5">选择公告的展示形式</div>
                 </div>
-                <select value={s('announcementType')} onChange={e => { setSystemSettings(prev => ({ ...prev, announcementType: e.target.value })); setSettingsDirty(true); }}
+                <select value={s('announcementType')} onChange={e => { editSetting('announcementType', e.target.value); }}
                   className="w-44 bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors appearance-none cursor-pointer">
                   <option value="banner">顶部横幅</option>
                   <option value="popup">弹窗模式</option>
                   <option value="sidebar">侧边通知</option>
                 </select>
               </div>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between max-sm:flex-col max-sm:items-stretch max-sm:gap-2">
                 <div>
                   <div className="text-sm font-medium text-foreground">公告到期时间</div>
                   <div className="text-xs text-muted-foreground mt-0.5">到期后公告自动隐藏</div>
                 </div>
-                <input type="datetime-local" value={s('announcementExpiry')} onChange={e => { setSystemSettings(prev => ({ ...prev, announcementExpiry: e.target.value })); setSettingsDirty(true); }}
-                  className="w-52 bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
+                <input type="datetime-local" value={s('announcementExpiry')} onChange={e => { editSetting('announcementExpiry', e.target.value); }}
+                  className="w-52 max-w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors" />
               </div>
               <div>
                 <div className="text-sm font-medium text-foreground mb-2">公告内容</div>
@@ -2345,7 +2621,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                     <List className="w-4 h-4 text-muted-foreground" />
                   </button>
                 </div>
-                <textarea value={s('announcement')} onChange={e => { setSystemSettings(prev => ({ ...prev, announcement: e.target.value })); setSettingsDirty(true); }}
+                <textarea value={s('announcement')} onChange={e => { editSetting('announcement', e.target.value); }}
                   placeholder="输入公告内容…" rows={5}
                   className="w-full bg-background border border-border rounded-b-md px-3 py-3 text-sm text-foreground min-h-[120px] focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors resize-none" />
               </div>
@@ -2353,17 +2629,23 @@ export default function AdminTabs(props: AdminTabsProps) {
           </div>
         </div>
 
-        </div>
+        </div>}
+
+        {confirmSettingsReset && <div role="group" aria-label="确认重置设置" className="bg-card border-t border-border px-4 py-2 flex flex-wrap items-center gap-2">
+          <span className="text-sm text-foreground">放弃已有未保存更改并重新读取？</span>
+          <button type="button" className="min-h-11 px-3 text-sm" onClick={() => setConfirmSettingsReset(false)}>取消</button>
+          <button type="button" className="min-h-11 px-3 text-sm" onClick={() => { setConfirmSettingsReset(false); void loadSystemSettings(true); }}>放弃草稿并重置</button>
+        </div>}
 
         {/* 底部保存栏（sticky在内容区底部，不遮挡整个页面） */}
-        <div className="sticky bottom-0 bg-card border-t border-border/50 px-6 py-3 z-10 flex items-center justify-between mt-2">
+        <div className="sticky bottom-0 bg-card border-t border-border/50 px-6 py-3 z-10 flex items-center justify-between mt-2 max-sm:flex-wrap max-sm:gap-2">
           <div className={`flex items-center gap-2 transition-opacity ${settingsDirty ? 'opacity-100' : 'opacity-0'}`}>
             <AlertCircle className="w-4 h-4 text-amber-400" />
             <span className="text-sm text-amber-400 font-medium">有未保存的更改</span>
           </div>
           <div className="flex items-center gap-3 ml-auto">
-            <button onClick={() => loadSystemSettings()} className="bg-muted text-foreground border border-border/50 px-5 py-2 rounded-md text-sm font-medium hover:bg-muted/80 active:scale-[0.98] transition-all cursor-pointer">重置</button>
-            <button onClick={() => handleSaveSettings()} className={`bg-primary text-primary-foreground px-6 py-2 rounded-md text-sm font-medium hover:opacity-90 active:scale-[0.98] transition-all inline-flex items-center gap-2 cursor-pointer ${settingsDirty ? 'shadow-glow' : ''}`}>
+            <button onClick={() => { if (settingsDirty) setConfirmSettingsReset(true); else void loadSystemSettings(true); }} className="bg-muted text-foreground border border-border/50 px-5 py-2 rounded-md text-sm font-medium hover:bg-muted/80 active:scale-[0.98] transition-all cursor-pointer">重置</button>
+            <button disabled={!settingsVerified || settingsLoading || !!settingsLoadError} onClick={() => handleSaveSettings()} className={`bg-primary text-primary-foreground px-6 py-2 rounded-md text-sm font-medium hover:opacity-90 active:scale-[0.98] transition-all inline-flex items-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${settingsDirty ? 'shadow-glow' : ''}`}>
               <Save className="w-4 h-4" />保存设置
             </button>
           </div>

@@ -1627,7 +1627,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               : <span className="shrink-0 text-[10px] px-1 py-0.5 bg-orange-500/20 text-orange-400 rounded">仅文字修图</span>
             }
           </div>
-          <div className={`text-xs ${thTextMuted} truncate`}>{fixProviderName(model.providerName)}{hint ? ` · ${hint}` : ''}</div>
+          <div className={`text-xs ${thTextMuted} ${panelViewport.width < 768 ? 'whitespace-normal break-words' : 'truncate'}`}>{fixProviderName(model.providerName)}{hint ? ` · ${hint}` : ''}</div>
         </div>
         {isSelected && <Check size={12} className={`${isMonochrome ? "text-blue-500" : "text-[#d4af37]"} flex-shrink-0`} />}
       </button>
@@ -1679,7 +1679,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       {/* 主编辑器面板 */}
       <div
         ref={containerRef}
-        className={`fixed z-[200] flex min-w-0 flex-col ${isDragging ? '' : thPanel} rounded-xl overflow-hidden`}
+        className={`fixed z-[200] flex min-w-0 flex-col ${isDragging ? '' : thPanel} rounded-xl overflow-hidden ${panelViewport.width < 768 ? '[&_button]:min-h-[44px]! [&_button]:min-w-[44px]! [&_input]:min-h-[44px]! [&_input]:text-base! [&_select]:min-h-[44px]! [&_select]:text-base! [&_textarea]:text-base!' : ''}`}
         style={{
           left: position.x,
           top: position.y,
@@ -1803,7 +1803,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             }}
           >
             {/* 缩放工具 - 固定在容器右上角 */}
-            <div className="absolute top-1 right-1 z-20 flex items-center gap-0.5" onMouseDown={e => e.stopPropagation()}>
+            <div className={`absolute top-1 right-1 z-20 flex items-center ${panelViewport.width < 768 ? 'gap-0' : 'gap-0.5'}`} onMouseDown={e => e.stopPropagation()}>
 
               <button
                 onClick={(e) => { e.stopPropagation(); setPreviewZoom(prev => Math.min(5, prev + 0.25)); }}
@@ -1970,15 +1970,15 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                     onDragOver={(e) => handleRefDragOver(e, idx)}
                     onDrop={() => handleRefDrop(idx)}
                     onDragEnd={() => { setDragRefIdx(null); setDragOverIdx(null); }}
-                    className={`relative flex-shrink-0 w-14 h-14 rounded-lg overflow-hidden border-2 transition-all cursor-grab group ${
+                    className={`relative flex-shrink-0 ${panelViewport.width < 768 ? 'flex w-24 flex-col p-1' : 'w-14 h-14'} rounded-lg overflow-hidden border-2 transition-all cursor-grab group ${
                       dragOverIdx === idx ? (isMonochrome ? 'border-gray-600' : 'border-[#d4af37]') + ' scale-105' :
                       dragRefIdx === idx ? (isMonochrome ? 'border-gray-400 opacity-50' : 'border-[#666] opacity-50') :
                       isMonochrome ? 'border-gray-200 hover:border-gray-400' : 'border-white/[0.08] hover:border-white/[0.15]'
                     }`}
                   >
-                    <img src={ref.url} alt={`参考${idx + 1}`} className="w-full h-full object-cover" crossOrigin="anonymous" />
+                    <img src={ref.url} alt={`参考${idx + 1}`} className={panelViewport.width < 768 ? 'h-20 w-full rounded object-cover' : 'w-full h-full object-cover'} crossOrigin="anonymous" />
                     {/* 序号 */}
-                    <div className={`absolute bottom-0 left-0 right-0 ${isMonochrome ? 'bg-white/70' : 'bg-black/60'} text-[8px] text-center ${isMonochrome ? 'text-gray-600' : 'text-[#ccc]'}`}>
+                    <div className={`${panelViewport.width < 768 ? 'relative text-xs' : 'absolute bottom-0 left-0 right-0 text-[8px]'} ${isMonochrome ? 'bg-white/70' : 'bg-black/60'} text-center ${isMonochrome ? 'text-gray-600' : 'text-[#ccc]'}`}>
                       {idx + 1}
                     </div>
                     {/* 拖拽手柄 */}
@@ -1988,9 +1988,11 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                     {/* 删除按钮 */}
                     <button
                       onClick={(e) => { e.stopPropagation(); handleRemoveRef(ref.id); }}
-                      className="absolute top-0 right-0 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 bg-red-500/80 rounded-bl-lg"
+                      aria-label={`移除参考图 ${idx + 1}`}
+                      className={panelViewport.width < 768 ? `mt-1 flex h-11 w-full items-center justify-center gap-1 rounded text-xs ${isMonochrome ? 'bg-red-50 text-red-700' : 'bg-red-950 text-red-200'}` : 'absolute top-0 right-0 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 bg-red-500/80 rounded-bl-lg'}
                     >
                       <X className={`h-2.5 w-2.5 ${isMonochrome ? "text-gray-500" : "text-white"}`} />
+                      {panelViewport.width < 768 && <span>移除</span>}
                     </button>
                     {/* prompt提示 */}
                     {ref.prompt && (
@@ -2260,7 +2262,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             <button
               type="button"
               onClick={() => setPromptExpanded(!promptExpanded)}
-              className={`absolute right-1.5 ${promptExpanded ? 'bottom-1.5' : 'bottom-1.5'} p-0.5 rounded ${isMonochrome ? 'hover:bg-gray-100 text-gray-400' : 'hover:bg-[#2a2a2a] text-gray-500'} transition-colors`}
+              className={`${panelViewport.width < 768 ? 'relative ml-auto flex h-11 w-11 items-center justify-center' : 'absolute right-1.5 bottom-1.5 p-0.5'} rounded ${isMonochrome ? 'hover:bg-gray-100 text-gray-400' : 'hover:bg-[#2a2a2a] text-gray-500'} transition-colors`}
               title={promptExpanded ? '收起输入框' : '展开输入框'}
             >
               {promptExpanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
@@ -2560,9 +2562,8 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
               </div>
             ) : resultImages.length > 0 ? (
               <div className="flex flex-col gap-1.5">
-              <div className={`flex gap-2 overflow-x-auto pb-1`}>
                 {resultImages.length > 1 && (
-                  <div className="flex items-center gap-1.5 mb-1 flex-shrink-0">
+                  <div className="flex min-w-0 items-center justify-between gap-2">
                     <button
                       onClick={() => {
                         if (selectedResultIndexes.size === resultImages.length) {
@@ -2585,9 +2586,10 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                       </svg>
                       全选
                     </button>
-                    <span className={`text-xs ${thTextMuted}`}>已选 {selectedResultIndexes.size}/{resultImages.length}</span>
+                    <span className={`shrink-0 text-xs tabular-nums ${thTextMuted}`}>已选 {selectedResultIndexes.size}/{resultImages.length}</span>
                   </div>
                 )}
+              <div className={`flex gap-2 overflow-x-auto pb-1`}>
                 {resultImages.map((url, idx) => {
                   const ratioParts = aspectRatio.split(':').map(Number);
                   const ratioW = ratioParts[0] || 1;

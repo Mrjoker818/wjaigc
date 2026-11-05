@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Hand, Menu, MousePointer2, Upload, X } from 'lucide-react';
 
 import {
@@ -27,6 +27,23 @@ export function MobileBottomToolbar({
   isMonochrome = false,
 }: MobileBottomToolbarProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const openerRef = useRef<HTMLButtonElement>(null);
+  const closeDrawer = useCallback((): void => {
+    setDrawerOpen(false);
+    openerRef.current?.focus();
+  }, []);
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return;
+      if (event.target instanceof Element && event.target.closest('[data-popup="context-menu"]')) return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeDrawer();
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => document.removeEventListener('keydown', onKeyDown, true);
+  }, [drawerOpen, closeDrawer]);
   const projection = useMemo(() => buildMobileCanvasToolbar(actions), [actions]);
   const actionById = useMemo(
     () => new Map(projection.drawer.map(action => [action.id, action])),
@@ -81,13 +98,14 @@ export function MobileBottomToolbar({
           return (
             <button
               key={slot.id}
+              ref={isAllTools ? openerRef : undefined}
               type="button"
               data-mobile-toolbar-primary
               aria-label={slot.label}
               aria-pressed={!isAllTools && action ? action.active : undefined}
               aria-expanded={isAllTools ? drawerOpen : undefined}
               disabled={!isAllTools && (!action || action.disabled)}
-              className={`flex min-h-10 min-w-10 flex-col items-center justify-center gap-0.5 rounded-md text-[9px] transition-colors ${
+              className={`flex h-11 min-h-10 min-w-10 flex-col items-center justify-center gap-0.5 rounded-md text-[9px] transition-colors ${
                 action?.active ? (isMonochrome ? 'bg-gray-900 text-white' : 'bg-white/15 text-white') : buttonClass
               }`}
               onClick={() => {
@@ -121,8 +139,8 @@ export function MobileBottomToolbar({
             <button
               type="button"
               aria-label="关闭全部工具"
-              className={`flex min-h-10 min-w-10 items-center justify-center rounded-md ${buttonClass}`}
-              onClick={() => setDrawerOpen(false)}
+              className={`flex h-11 w-11 min-h-10 min-w-10 items-center justify-center rounded-md ${buttonClass}`}
+              onClick={closeDrawer}
             >
               <X className="h-4 w-4" />
             </button>

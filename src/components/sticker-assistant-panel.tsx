@@ -81,6 +81,15 @@ interface ModelOption {
   displayLabel?: string;
 }
 
+function getModelOptionLabel(model: ModelOption): string {
+  const label = model.displayLabel || model.id;
+  if (!model.providerId) return label;
+  const provider = model.providerName && model.providerName !== model.providerId
+    ? `${model.providerName} (${model.providerId})`
+    : model.providerId;
+  return `${provider} · ${label}`;
+}
+
 /* ──────────────────── 预设数据 (from Zinxtick) ──────────────────── */
 const STYLE_PRESETS: StylePreset[] = [
   {
@@ -1488,7 +1497,7 @@ ${themeDesc}
                       return Object.entries(grouped).map(([providerName, models]) => (
                         <optgroup key={providerName} label={providerName}>
                           {models.map(m => (
-                            <option key={m.id} value={m.id}>{m.displayLabel || m.id}</option>
+                            <option key={m.id} value={m.id}>{getModelOptionLabel(m)}</option>
                           ))}
                         </optgroup>
                       ));
@@ -1527,7 +1536,7 @@ ${themeDesc}
                       return Object.entries(grouped).map(([providerName, ms]) => (
                         <optgroup key={providerName} label={providerName}>
                           {ms.map(m => (
-                            <option key={m.id} value={m.id}>{m.displayLabel || m.id}</option>
+                            <option key={m.id} value={m.id}>{getModelOptionLabel(m)}</option>
                           ))}
                         </optgroup>
                       ));

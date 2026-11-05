@@ -23,8 +23,12 @@ import {
 } from './model-type-classification';
 export { inferModelType, resolveEffectiveModelType } from './model-type-classification';
 
-const SYSTEM_DIR = getServerSystemDir();
-const CONFIG_PATH = path.join(SYSTEM_DIR, 'api-providers.json');
+// Resolved on first use. Computing this at import time caches the data root before a test
+// (or a late WUJIE_DATA_DIR) can point it elsewhere.
+function configPath(): { dir: string; file: string } {
+  const dir = getServerSystemDir();
+  return { dir, file: path.join(dir, 'api-providers.json') };
+}
 const DISCOVERY_TIMEOUT_MS = 30000;
 
 /**
@@ -354,7 +358,7 @@ async function readConfig(options: ReadConfigOptions = {}): Promise<StoredApiCon
 
   // Fallback to file system
   try {
-    const raw = await readFile(CONFIG_PATH, 'utf8');
+    const raw = await readFile(configPath().file, 'utf8');
     const parsed = JSON.parse(raw) as StoredApiConfig;
     if (options.strict && (!parsed || !Array.isArray(parsed.providers))) {
       throw new Error('Invalid API provider configuration');
@@ -410,8 +414,9 @@ async function persistProviderToDb(provider: ApiProvider, fallbackSortOrder: num
 }
 
 async function writeConfigBackup(config: StoredApiConfig): Promise<void> {
-  await mkdir(SYSTEM_DIR, { recursive: true });
-  await writeFile(CONFIG_PATH, JSON.stringify({ ...config, updatedAt: Date.now() }, null, 2), 'utf8');
+  const { dir, file } = configPath();
+  await mkdir(dir, { recursive: true });
+  await writeFile(file, JSON.stringify({ ...config, updatedAt: Date.now() }, null, 2), 'utf8');
 }
 
 async function writeConfig(config: StoredApiConfig): Promise<void> {

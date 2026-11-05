@@ -35,10 +35,37 @@ const eslintConfig = defineConfig([
     },
   },
   {
-    files: ['.superpowers/sdd/**/*.cjs'],
+    // These local evidence runners are CommonJS; keep all other rules active.
+    files: [
+      '.superpowers/sdd/**/*.cjs',
+      'OWN/mobile-switch-candidate-20261028/**/*.cjs',
+      'OWN/mobile-switch-component-diagnostic-20261028/**/*.cjs',
+      'OWN/simple-chat-identity-scroll-regression/**/*.cjs',
+      'OWN/display3d-project-20261029/vitest.config.cjs',
+      'OWN/favorites-actor-switch-20261029/vitest.config.cjs',
+      'OWN/favorites-canvas-candidate-20261029/no-network.cjs',
+      'OWN/favorites-local-candidate-20261029/actor-vitest.config.cjs',
+      'OWN/favorites-local-candidate-20261029/vitest.config.cjs',
+      'OWN/favorites-stale-response-20261029/vitest.config.cjs',
+      'OWN/favorites-v1-actor-contract-20261029/vitest.config.cjs',
+      'OWN/full-qa-guard-rebind-20261029/no-network.cjs',
+    ],
     rules: {
       '@typescript-eslint/no-require-imports': 'off',
     },
+  },
+  {
+    // These generated fixtures deliberately reproduce old and candidate callbacks.
+    files: [
+      'OWN/favorites-canvas-candidate-20261029/baseline-callback-harness.mjs',
+      'OWN/favorites-canvas-candidate-20261029/candidate-callback-harness.mjs',
+    ],
+    rules: { 'react-hooks/refs': 'off' },
+  },
+  {
+    // The local VM fixture creates a CommonJS module object, not a Next.js module.
+    files: ['OWN/full-qa-guard-rebind-20261029/test-ports.mjs'],
+    rules: { '@next/next/no-assign-module-variable': 'off' },
   },
   // Override default ignores of eslint-config-next.
   globalIgnores([
@@ -54,6 +81,8 @@ const eslintConfig = defineConfig([
     '.worktrees/**',
     'worktrees/**',
     '_refs-*/**',
+    // Non-product diagnostic tools and frozen evidence are reviewed independently.
+    '.superpowers/**',
     // Generated Playwright reports and captured evidence contain third-party bundled code.
     '.playwright-cli/**',
     '.playwright-output/**',

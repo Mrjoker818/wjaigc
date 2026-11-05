@@ -353,7 +353,7 @@ export function NodeAnnotationWorkspace({
   return (
     <div
       data-testid="node-annotation-workspace"
-      className="fixed inset-0 z-[210] bg-black/75"
+      className="fixed inset-0 z-[210] bg-black/75 max-lg:flex max-lg:flex-col max-lg:gap-3 max-lg:p-3 max-lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]"
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
@@ -364,7 +364,7 @@ export function NodeAnnotationWorkspace({
     >
       <div
         ref={imageFrameRef}
-        className="absolute left-1/2 top-[44%] h-[min(64vh,760px)] w-[min(76vw,1120px)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-md border border-white/15 bg-[#0d1117] shadow-2xl"
+        className="relative min-h-0 w-full flex-1 touch-none overflow-hidden rounded-md border border-white/15 bg-[#0d1117] shadow-2xl lg:absolute lg:left-1/2 lg:top-[44%] lg:h-[min(64vh,760px)] lg:w-[min(76vw,1120px)] lg:flex-none lg:-translate-x-1/2 lg:-translate-y-1/2"
       >
         <NextImage
           unoptimized
@@ -398,6 +398,7 @@ export function NodeAnnotationWorkspace({
       />
 
       <AnnotationComposer
+        layout="workspace"
         annotations={state.annotations}
         selectedAnnotationId={state.selectedAnnotationId}
         tool={state.tool}

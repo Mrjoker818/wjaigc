@@ -229,7 +229,7 @@ function BriefToVideoApprovalCardInstance({
             rows={3}
             disabled={busy || submitting}
             onChange={event => setRevisionInstruction(event.target.value)}
-            className="w-full resize-y rounded-lg border border-current/20 bg-transparent px-3 py-2 text-xs outline-none focus-visible:border-[#d4af37]"
+            className="w-full resize-y rounded-lg border border-current/20 bg-transparent px-3 py-2 text-base outline-none focus-visible:border-[#d4af37]"
           />
           <button type="button" className={`${primaryAction} w-full`} disabled={disabled || !revisionInstruction.trim()}
             onClick={() => { void perform(async () => {

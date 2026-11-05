@@ -1,70 +1,92 @@
-# WJ-STABLE-001 Stage 2 Task 2 Brief
+### Task 2: 扩展通用图片数组扇出编译器
 
-## Task 2: 实现原子素材仓储、所有权与幂等流转
+**Files:**
+- Modify: `src/lib/skill-runtime/types.ts`
+- Modify: `src/lib/skill-runtime/step-compiler.ts`
+- Modify: `src/lib/skill-runtime/storage.ts`
+- Modify: `src/lib/skill-runtime/service.ts`
+- Modify: `src/lib/agent-runtime/service.ts`
+- Test: `src/__tests__/lib/skill-runtime-step-compiler.test.ts`
+- Test: `src/__tests__/lib/skill-runtime-storage.test.ts`
+- Test: `src/__tests__/lib/skill-runtime-continuation.test.ts`
 
-### Files
+**Interfaces:**
+- Consumes: 既有 dataset 扇出合同和 `images` 类型输入。
+- Produces: 可选 `keyField`、冻结的 `compiledFanOut` 身份，以及 `compiledSkillFanOutValue(step, inputValues): string | Record<string, unknown>`。
 
-- Create: `src/lib/asset-core/storage.ts`
-- Create: `src/lib/asset-core/service.ts`
-- Test: `src/__tests__/lib/asset-service.test.ts`
-- Test: `tests/integration/stage-2-asset-storage-postgres.test.ts`
-
-### Interfaces
-
-Consumes Task 1 types and tables. Produces:
-
-```ts
-createAssetVersion(input: CreateAssetVersionInput): Promise<{ asset: Asset; version: AssetVersion; reused: boolean }>;
-createWorkspacePlacement(input: CreatePlacementInput): Promise<{ placement: WorkspacePlacement; reused: boolean }>;
-sendVersionToWorkspace(input: TransferVersionInput): Promise<{ version: AssetVersion; placement: WorkspacePlacement; reused: boolean }>;
-trashPlacement(input: PlacementCommand): Promise<{ placementTrashed: boolean; assetTrashed: boolean }>;
-restorePlacement(input: PlacementCommand): Promise<{ placement: WorkspacePlacement; asset: Asset }>;
-```
-
-### Required TDD Sequence
-
-1. Write pure-service RED coverage for same-key/same-digest reuse, same-key/different-digest `ASSET_IDEMPOTENCY_CONFLICT`, stable parent order, deleting one placement without deleting a shared asset, and trashing the asset after deleting its last active placement.
-2. Write real PostgreSQL concurrency RED coverage: 20 concurrent `sendVersionToWorkspace()` calls create one target placement; cross-user sourceVersion, cross-user targetProject, forged ownerId, and concurrent delete/restore are rejected or serialized by transaction and owner/project predicates.
-3. Run RED:
-
-```powershell
-pnpm exec vitest run src/__tests__/lib/asset-service.test.ts tests/integration/stage-2-asset-storage-postgres.test.ts
-```
-
-4. Implement a PostgreSQL repository. Every write uses one transaction. User identity comes only from the server-side session caller. Queries include `owner_id=$1 AND project_id=$2`; absent and foreign resources share a not-found result to avoid IDOR enumeration.
-5. Implement transfer idempotency with this exact input:
+- [ ] **Step 1: 写图片值扇出与旧 dataset 兼容失败测试**
 
 ```ts
-type TransferVersionInput = {
-  actorUserId: string;
-  sourceVersionId: string;
-  targetProjectId: string;
-  targetWorkspaceId: string;
-  entityType: WorkspaceEntityType;
-  entityId: string;
-  idempotencyKey: string;
-  requestDigest: string;
-  transform?: WorkspaceTransform;
-  metadata?: Record<string, unknown>;
-};
+it('fans out an images field in stable chunks without exposing URLs', () => {
+  const steps = compileConditionalSkillSteps(imageAuditSkill, {
+    sourceImages: ['asset_version_a', 'asset_version_b', 'asset_version_c'],
+  });
+  expect(steps.map(step => step.compiledFanOut)).toEqual([
+    { inputKey: 'sourceImages', itemIndex: 0, itemDigest: expect.any(String) },
+    { inputKey: 'sourceImages', itemIndex: 1, itemDigest: expect.any(String) },
+    { inputKey: 'sourceImages', itemIndex: 2, itemDigest: expect.any(String) },
+  ]);
+  expect(steps.map(step => step.parallelGroup)).toEqual([
+    'audit:chunk:0', 'audit:chunk:0', 'audit:chunk:0',
+  ]);
+});
+
+it('keeps the existing sku dataset expansion unchanged', () => {
+  expect(compileConditionalSkillSteps(batchSkuSkill, skuInputs)).toEqual(previousSkuSnapshot);
+});
 ```
 
-The uniqueness scope is actor + sourceVersion + targetProject + targetWorkspace + entityType + entityId + idempotencyKey. The same key with a different digest conflicts.
+- [ ] **Step 2: 运行测试并确认 RED**
 
-6. Run GREEN with the same focused command. Unit tests must all pass; real PostgreSQL must prove 20 concurrent calls create exactly one placement.
-7. Commit as `feat: add transactional asset graph service`.
+Run: `pnpm exec vitest run src/__tests__/lib/skill-runtime-step-compiler.test.ts src/__tests__/lib/skill-runtime-storage.test.ts src/__tests__/lib/skill-runtime-continuation.test.ts`
 
-### Binding Global Constraints
+Expected: FAIL，当前编译器只接受 `dataset` 且要求对象 `keyField`。
 
-- Work only on `codex/wj-stable-s2` in `.worktrees/wj-stable-s2`; the implementation baseline is `origin/main@ffe810939a446bbf7288d177b95040b36a05484c`.
-- `stable@a53da24aa9f3813aae24f697dfb90d0b67f0a455` is permanently read-only.
-- Preserve all 38 protected functions, 5 product surfaces, and the infinite-canvas/node/standalone-chat workspace entries.
-- Do not refactor the canvas kernel, node editor, Agent, or unrelated P2 defects.
-- Legacy projects are read-only until explicit write; copy-on-write belongs to Task 3.
-- URLs remain compatibility render/provider fields and never prove ownership.
-- All new writes require authenticated actor and target-project authorization.
-- Deleting a workspace node only trashes its `WorkspacePlacement`; an `Asset` becomes trashed only after its final active placement disappears. No physical file deletion.
-- Failed/cancelled/timeout/late task results cannot become current versions; projection belongs to Task 7.
-- Preserve parent-version order.
-- `WUJIE_ASSET_GRAPH_MODE=legacy|shadow|asset-v3`, default `legacy`; Task 2 must not change rollout mode.
-- Without real PostgreSQL evidence, conclusions remain BLOCKED/UNVERIFIED.
+- [ ] **Step 3: 实现通用图片值扇出与冻结身份**
+
+```ts
+export interface SkillStepFanOut {
+  inputKey: string;
+  itemAlias: string;
+  keyField?: string;
+  maximumItems: number;
+  concurrency: number;
+}
+
+export interface CompiledSkillStepFanOut {
+  inputKey: string;
+  itemIndex: number;
+  itemDigest: string;
+}
+
+export interface SkillStepDefinition {
+  id: string;
+  label: string;
+  toolId: string;
+  execution: 'sequential' | 'parallel';
+  parallelGroup?: string;
+  promptTemplate: string;
+  promptInstructionTemplate?: string;
+  modelRole: SkillModelBinding['role'];
+  qualityGateIds: readonly string[];
+  when?: SkillStepCondition;
+  fanOut?: SkillStepFanOut;
+  compiledFanOut?: CompiledSkillStepFanOut;
+}
+```
+
+当字段为 `dataset` 时继续要求对象与 `keyField`；当字段为 `images` 时要求 1–20 个非空 AssetVersion ID、禁止 `keyField`，用值摘要生成稳定步骤 ID，并通过 `compiledFanOut.itemIndex` 重新读取冻结输入。所有 skill snapshot 读写路径必须接受并校验 `compiledFanOut`，旧快照没有该字段时保持兼容。
+
+- [ ] **Step 4: 运行扇出和第二批保护测试**
+
+Run: `pnpm exec vitest run src/__tests__/lib/skill-runtime-step-compiler.test.ts src/__tests__/lib/skill-runtime-storage.test.ts src/__tests__/lib/skill-runtime-continuation.test.ts src/__tests__/lib/skill-runtime-content-commerce-presets.test.ts src/__tests__/lib/skill-content-commerce-execution.test.ts`
+
+Expected: 全部 PASS；SKU 三行步骤 ID、顺序和并发分片不变。
+
+- [ ] **Step 5: 提交扇出扩展**
+
+```bash
+git add src/lib/skill-runtime/types.ts src/lib/skill-runtime/step-compiler.ts src/lib/skill-runtime/storage.ts src/lib/skill-runtime/service.ts src/lib/agent-runtime/service.ts src/__tests__/lib/skill-runtime-step-compiler.test.ts src/__tests__/lib/skill-runtime-storage.test.ts src/__tests__/lib/skill-runtime-continuation.test.ts
+git commit -m "feat: fan out skill image inputs"
+```
+

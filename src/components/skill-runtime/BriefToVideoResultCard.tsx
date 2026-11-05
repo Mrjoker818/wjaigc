@@ -68,7 +68,7 @@ export function BriefToVideoResultCard({
           href={value.asset.url}
           download
           aria-label="下载成片"
-          className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg bg-[#d4af37] px-3 text-xs font-semibold text-[#0a0a0b] hover:bg-[#e2c45c] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4af37]"
+          className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg bg-[#d4af37] px-3 text-xs font-semibold text-[#0a0a0b] hover:bg-[#e2c45c] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4af37]"
         >
           <Download className="h-4 w-4" aria-hidden="true" />下载成片
         </a>

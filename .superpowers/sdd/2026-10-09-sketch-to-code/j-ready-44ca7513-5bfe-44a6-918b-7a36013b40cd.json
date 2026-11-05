@@ -1,0 +1,27 @@
+{
+  "kind": "TASK6_NEW_EXCLUSIVE_POSTGRESQL_FIXTURE_READY_NOT_PRODUCT_ACCEPTANCE",
+  "ready": true,
+  "oldFixturesUntouched": true,
+  "loopbackOnly": true,
+  "databaseUrl": "postgresql://wujie_full_341db62fb624f9f63bfe@127.0.0.1:49841/wujie_bridge_test_fullreg_136c2314159689de",
+  "runtimeDatabaseUrl": "postgresql://wujie_full_341db62fb624f9f63bfe@127.0.0.1:49841/wujie_bridge_test_metadata_511c1ace8b7aaa1b3ec021f6",
+  "dataDirectory": "J:\\无界本地版\\projects\\_task6-sketch-pg-20261010-01a12225\\data",
+  "identity": {
+    "database": "wujie_bridge_test_fullreg_136c2314159689de",
+    "username": "wujie_full_341db62fb624f9f63bfe",
+    "serverPort": "49841",
+    "listenAddresses": "127.0.0.1",
+    "systemIdentifier": "7694774214099586376",
+    "postmasterStartedAt": "2026-11-01 21:20:59.973395+08",
+    "dataDirectoryHex": "4a3a2fcedebde7b1beb5d8b0e62f70726f6a656374732f5f7461736b362d736b657463682d70672d32303236313031302d30316131323232352f64617461",
+    "dataDirectory": "J:\\无界本地版\\projects\\_task6-sketch-pg-20261010-01a12225\\data"
+  },
+  "runtimeEndpointMetadataOnly": true,
+  "runtimeAccepted": false,
+  "runtimeCreatedByThisPreparation": false,
+  "identityEvidenceScope": "historical inspector; fresh proof required at launch",
+  "historicalDataPathAndListenSettingOnly": true,
+  "currentProofSha256": "5d804158ff34481a3546da06ffb1cdefda4d422a7ad97605c2c01c274184109f",
+  "currentProofObservedAtMs": 1793570847280,
+  "historicalInspectorRecordSha256": "f1bc731a74498ef39fb8618a7f3350ad931306cc96ae929c5f9fa44e8c5932cd"
+}

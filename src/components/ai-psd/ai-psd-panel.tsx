@@ -8,7 +8,7 @@
  * 主题：黑金配色，与品牌工厂/精修引擎一致
  */
 
-import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useId, useLayoutEffect, useRef, useCallback } from 'react';
 import { constrainFloatingPanelPosition, getCenteredFloatingPanelPosition, getFloatingPanelViewport,
   subscribeFloatingPanelViewport, type FloatingPanelPosition, type FloatingPanelViewport } from '@/lib/floating-panel-position';
 import { useProgressTimer } from '@/hooks/useProgressTimer';
@@ -267,6 +267,7 @@ const thLight = {
 // ─── Component ────────────────────────────────────────────────
 
 export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false, sourceImageUrl }: AiPsdPanelProps) {
+  const formId = useId();
   const th = isMonochrome ? thLight : thDark;
   // === Panel drag state ===
   const [panelPos, setPanelPos] = useState<FloatingPanelPosition>({ x: 8, y: 8 });
@@ -739,8 +740,8 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
     return (
       <div className={`${th.card} mx-3 mt-1 mb-2 p-3 space-y-3`}>
         <div>
-          <label className={th.sectionLabel}>图像模型</label>
-          <select className={th.select} value={selectedImageModel}
+          <label htmlFor={`${formId}-image-model`} className={th.sectionLabel}>图像模型</label>
+          <select id={`${formId}-image-model`} className={th.select} value={selectedImageModel}
             onChange={e => { setSelectedImageModel(e.target.value); localStorage.setItem('wujie_psd_image_model', e.target.value); }}>
             <option value="" className={th.optionBg}>选择图像模型</option>
             {imageModels.map(m => (
@@ -749,8 +750,8 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
           </select>
         </div>
         <div>
-          <label className={th.sectionLabel}>LLM 模型</label>
-          <select className={th.select} value={selectedLlmModel}
+          <label htmlFor={`${formId}-llm-model`} className={th.sectionLabel}>LLM 模型</label>
+          <select id={`${formId}-llm-model`} className={th.select} value={selectedLlmModel}
             onChange={e => { setSelectedLlmModel(e.target.value); localStorage.setItem('wujie_psd_llm_model', e.target.value); }}>
             <option value="" className={th.optionBg}>选择LLM模型</option>
             {llmModels.map(m => (
@@ -786,8 +787,8 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
 
       {/* Creative description */}
       <div>
-        <label className={th.sectionLabel}>创意描述</label>
-        <textarea className={th.textarea} rows={3} placeholder="描述你想要的画面效果..."
+        <label htmlFor={`${formId}-prompt`} className={th.sectionLabel}>创意描述</label>
+        <textarea id={`${formId}-prompt`} className={th.textarea} rows={3} placeholder="描述你想要的画面效果..."
           value={prompt} onChange={e => setPrompt(e.target.value)} />
       </div>
 
@@ -819,14 +820,14 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
         {aspectRatio === 'custom' && (
           <div className="mt-2 flex items-center gap-2">
             <div className="flex-1">
-              <label className="text-[10px] text-gray-500 mb-0.5 block">宽度(px)</label>
-              <input type="number" className={th.input} min={512} max={4096} value={customWidth}
+              <label htmlFor={`${formId}-custom-width`} className="text-[10px] text-gray-500 mb-0.5 block">宽度(px)</label>
+              <input id={`${formId}-custom-width`} type="number" className={th.input} min={512} max={4096} value={customWidth}
                 onChange={e => setCustomWidth(Math.min(4096, Math.max(512, parseInt(e.target.value) || 512)))} />
             </div>
             <ArrowRight className="w-4 h-4 text-gray-500 mt-4" />
             <div className="flex-1">
-              <label className="text-[10px] text-gray-500 mb-0.5 block">高度(px)</label>
-              <input type="number" className={th.input} min={512} max={4096} value={customHeight}
+              <label htmlFor={`${formId}-custom-height`} className="text-[10px] text-gray-500 mb-0.5 block">高度(px)</label>
+              <input id={`${formId}-custom-height`} type="number" className={th.input} min={512} max={4096} value={customHeight}
                 onChange={e => setCustomHeight(Math.min(4096, Math.max(512, parseInt(e.target.value) || 512)))} />
             </div>
           </div>
@@ -981,13 +982,13 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
       {generateMode === 'brand' && (
         <>
           <div>
-            <label className={th.sectionLabel}>品牌名称</label>
-            <input className={th.input} placeholder="品牌名称" value={brandName}
+            <label htmlFor={`${formId}-brand-name`} className={th.sectionLabel}>品牌名称</label>
+            <input id={`${formId}-brand-name`} className={th.input} placeholder="品牌名称" value={brandName}
               onChange={e => setBrandName(e.target.value)} />
           </div>
           <div>
-            <label className={th.sectionLabel}>品牌 Slogan</label>
-            <input className={th.input} placeholder="品牌广告语" value={brandSlogan}
+            <label htmlFor={`${formId}-brand-slogan`} className={th.sectionLabel}>品牌 Slogan</label>
+            <input id={`${formId}-brand-slogan`} className={th.input} placeholder="品牌广告语" value={brandSlogan}
               onChange={e => setBrandSlogan(e.target.value)} />
           </div>
           <div>
@@ -1011,8 +1012,8 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
             </div>
           </div>
           <div>
-            <label className={th.sectionLabel}>品牌字体</label>
-            <input className={th.input} placeholder="如: 思源黑体, Helvetica..." value={brandFont}
+            <label htmlFor={`${formId}-brand-font`} className={th.sectionLabel}>品牌字体</label>
+            <input id={`${formId}-brand-font`} className={th.input} placeholder="如: 思源黑体, Helvetica..." value={brandFont}
               onChange={e => setBrandFont(e.target.value)} />
           </div>
           <div>

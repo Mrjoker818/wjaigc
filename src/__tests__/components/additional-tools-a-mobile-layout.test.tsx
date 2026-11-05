@@ -996,3 +996,27 @@ describe('mobile additional-a continuity', () => {
     });
   }, 45000);
 });
+
+// A native-scroll regression: scrollIntoView can move overflow:hidden main
+// programmatically and previously hid the user-visible mobile failure.
+describe('mobile packaging native-scroll', () => {
+  const cases = THEMES.flatMap(theme => [[320, 640], [390, 844]].map(([width, height]) => ({ theme, width, height })));
+  it.each(cases)('$theme $width x $height reaches final action without programmatic reveal', async ({ theme, width, height }) => {
+    await withSession('packaging', 'probe', async s => {
+      await mount(s, theme);
+      await modelSelect(s, 'image').waitFor({ state: 'visible' });
+      await viewport(s, width, height);
+      await rootChecks(s);
+      // Only native wheel input may reveal the final action. Do not call
+      // prepare(), reach(), click() or scrollIntoView on any form field here.
+      await s.page.mouse.move(width / 2, height - 160);
+      await s.page.mouse.wheel(0, 12000);
+      await settle(s);
+      expect(await mainControl(s).isDisabled()).toBe(true);
+      await screenBox(s, mainControl(s), true);
+      expect(await s.page.evaluate(() => document.scrollingElement?.scrollTop ?? 0)).toBe(0);
+      expect(s.submissions).toEqual([]);
+      await closeNormally(s);
+    });
+  }, 25000);
+});

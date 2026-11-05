@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useId, useRef, useLayoutEffect } from 'react';
 import {
   Coins, ArrowUpRight, ArrowDownRight, Gift, Clock,
   TrendingUp, Zap, History, RefreshCw, CreditCard,
@@ -11,7 +11,7 @@ import { RECHARGE_PACKAGES, CREDITS_TO_CNY } from '@/lib/credits-constants';
 interface UserCreditsTabProps {
   isDark: boolean;
   userId: string;
-  onToast?: (msg: string) => void;
+  onToast?: (msg: string, type: 'success' | 'error' | 'info') => void;
 }
 
 interface CreditTransaction {
@@ -37,11 +37,15 @@ export default function UserCreditsTab({
   userId,
   onToast
 }: UserCreditsTabProps) {
+  const quantityId = useId();
   const [balance, setBalance] = useState(0);
   const [totalEarned, setTotalEarned] = useState(0);
   const [totalSpent, setTotalSpent] = useState(0);
   const [transactions, setTransactions] = useState<CreditTransaction[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [hasBalance, setHasBalance] = useState(false);
+  const [hasTransactions, setHasTransactions] = useState(false);
+  const [loadError, setLoadError] = useState<'balance' | 'transactions' | null>(null);
   const [filter, setFilter] = useState<'all' | 'earn' | 'spend'>('all');
 
   // 充值相关状态
@@ -51,6 +55,9 @@ export default function UserCreditsTab({
   const [customAmount, setCustomAmount] = useState<number>(0);
   const [paymentMethod, setPaymentMethod] = useState<'wechat' | 'alipay'>('wechat');
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus | null>(null);
+  const [paymentStatusError, setPaymentStatusError] = useState(false);
+  const [paymentStatusLoading, setPaymentStatusLoading] = useState(false);
+  const paymentStatusRequest = useRef(0);
   const [orderInfo, setOrderInfo] = useState<{
     orderId: string;
     amount: number;
@@ -67,6 +74,8 @@ export default function UserCreditsTab({
 
   const loadCredits = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
+    let reading: 'balance' | 'transactions' = 'balance';
     try {
       const res = await fetch('/api/credits');
       const data = await res.json();
@@ -75,6 +84,8 @@ export default function UserCreditsTab({
         setBalance(c.balance || 0);
         setTotalEarned(c.totalRecharged || 0);
         setTotalSpent(c.totalUsed || 0);
+        setHasBalance(true);
+        reading = 'transactions';
         const txRes = await fetch('/api/credits?action=transactions');
         const txData = await txRes.json();
         if (txData.success) {
@@ -86,28 +97,53 @@ export default function UserCreditsTab({
             description: (t.description || '') as string,
             created_at: (t.createdAt || t.created_at || '') as string,
           })));
+          setHasTransactions(true);
+        } else {
+          setLoadError('transactions');
         }
+      } else {
+        setLoadError('balance');
       }
     } catch (err) {
+      setLoadError(reading);
       console.error('Failed to load credits:', err);
     } finally {
       setLoading(false);
     }
   }, []);
 
+  // Invalidate in-flight reads before an account switch or unmount can paint.
+  useLayoutEffect(() => {
+    paymentStatusRequest.current++;
+    setPaymentStatus(null);
+    setPaymentStatusError(false);
+    setPaymentStatusLoading(false);
+    return () => { paymentStatusRequest.current++; };
+  }, [userId]);
+
   const loadPaymentStatus = useCallback(async () => {
+    const requestId = ++paymentStatusRequest.current;
+    setPaymentStatusLoading(true);
     try {
       const res = await fetch('/api/credits/payment-status');
       const data = await res.json();
-      if (data.success) {
-        setPaymentStatus(data as PaymentStatus);
-        if (data.methods?.includes('wechat')) setPaymentMethod('wechat');
-        else if (data.methods?.includes('alipay')) setPaymentMethod('alipay');
-      }
-    } catch { /* ignore */ }
+      if (requestId !== paymentStatusRequest.current) return;
+      if (!res.ok || !data.success) throw new Error('PAYMENT_STATUS_READ_FAILED');
+      setPaymentStatus(data as PaymentStatus);
+      if (data.methods?.includes('wechat')) setPaymentMethod('wechat');
+      else if (data.methods?.includes('alipay')) setPaymentMethod('alipay');
+      setPaymentStatusError(false);
+    } catch {
+      if (requestId !== paymentStatusRequest.current) return;
+      setPaymentStatus(null);
+      setPaymentStatusError(true);
+    } finally {
+      if (requestId === paymentStatusRequest.current) setPaymentStatusLoading(false);
+    }
   }, []);
 
-  useEffect(() => { loadCredits(); loadPaymentStatus(); }, [loadCredits, loadPaymentStatus]);
+  useEffect(() => { loadCredits(); }, [loadCredits]);
+  useEffect(() => { loadPaymentStatus(); }, [loadPaymentStatus, userId]);
 
   const filteredTransactions = filter === 'all'
     ? transactions
@@ -140,11 +176,11 @@ export default function UserCreditsTab({
   const handleCreateOrder = async () => {
     const rechargeAmount = isCustomAmount ? customAmount : selectedPackage;
     if (!rechargeAmount || rechargeAmount <= 0) {
-      onToast?.('请选择充值套餐或输入自定义金额');
+      onToast?.('请选择充值套餐或输入自定义金额', 'error');
       return;
     }
     if (isCustomAmount && rechargeAmount < 10) {
-      onToast?.('自定义金额最少10积分');
+      onToast?.('自定义金额最少10积分', 'error');
       return;
     }
 
@@ -172,13 +208,13 @@ export default function UserCreditsTab({
           paymentQrUrl: data.paymentQrUrl || undefined,
           paymentPageUrl: data.paymentPageUrl || undefined,
         });
-        onToast?.('订单创建成功，请点击立即支付');
+        onToast?.('订单创建成功，请点击立即支付', 'success');
       } else {
-        onToast?.(data.error || '创建订单失败');
+        onToast?.(data.error || '创建订单失败', 'error');
       }
     } catch (err) {
       console.error('Create order error:', err);
-      onToast?.('创建订单失败，请稍后重试');
+      onToast?.('创建订单失败，请稍后重试', 'error');
     } finally {
       setConfirming(false);
     }
@@ -187,7 +223,7 @@ export default function UserCreditsTab({
   // 立即支付 - 直接打开微信/支付宝
   const handlePayNow = () => {
     if (!orderInfo?.payLink) {
-      onToast?.('支付链接未配置，请联系管理员');
+      onToast?.('支付链接未配置，请联系管理员', 'error');
       return;
     }
     // Directly redirect to payment (mobile browser)
@@ -212,15 +248,15 @@ export default function UserCreditsTab({
       });
       const data = await res.json();
       if (data.success) {
-        onToast?.('已提交付款确认，请等待管理员审核（通常几分钟内到账）');
+        onToast?.('已提交付款确认，请等待管理员审核（通常几分钟内到账）', 'info');
         // 不关闭弹窗，让用户看到待审核状态，可点击查询状态
         loadCredits();
       } else {
-        onToast?.(data.error || '提交失败');
+        onToast?.(data.error || '提交失败', 'error');
       }
     } catch (err) {
       console.error('Confirm paid error:', err);
-      onToast?.('确认付款失败，请稍后重试');
+      onToast?.('确认付款失败，请稍后重试', 'error');
     } finally {
       setConfirming(false);
     }
@@ -243,22 +279,22 @@ export default function UserCreditsTab({
       if (data.success) {
         const order = data.order;
         if (order?.paymentStatus === 'paid' || order?.status === 'paid') {
-          onToast?.('订单已确认，积分已到账');
+          onToast?.('订单已确认，积分已到账', 'success');
           setOrderInfo(null);
           setShowRecharge(false);
           setSelectedPackage(null);
           loadCredits();
         } else if (order?.paymentStatus === 'submitted' || order?.status === 'submitted') {
-          onToast?.('订单正在等待管理员审核，请耐心等待');
+          onToast?.('订单正在等待管理员审核，请耐心等待', 'info');
         } else if (order?.paymentStatus === 'rejected' || order?.status === 'rejected') {
           const reason = order?.rejectReason || order?.admin_note || '支付未确认';
-          onToast?.(`订单已被驳回：${reason}`);
+          onToast?.(`订单已被驳回：${reason}`, 'error');
         } else {
-          onToast?.('订单尚未提交，请在手机页面点击"我已完成付款"');
+          onToast?.('订单尚未提交，请在手机页面点击"我已完成付款"', 'info');
         }
       }
     } catch {
-      onToast?.('查询订单失败');
+      onToast?.('查询订单失败', 'error');
     } finally {
       setOrderQuerying(false);
     }
@@ -268,18 +304,18 @@ export default function UserCreditsTab({
   const inputBg = 'bg-background border border-border rounded-md';
 
   return (
-    <div className="space-y-5 p-6">
+    <div className="min-w-0 flex flex-col gap-5 p-4 sm:p-6">
       {/* 页面头部 */}
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="min-w-0 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
           <h1 className="text-xl font-bold text-foreground">我的积分</h1>
           <p className="text-sm text-muted-foreground mt-0.5">查看积分余额、充值和使用记录</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           {paymentStatus?.canRecharge && (
             <button
               onClick={() => setShowRecharge(true)}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+              className="min-h-11 flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
             >
               <CreditCard className="w-4 h-4" />
               充值
@@ -288,7 +324,7 @@ export default function UserCreditsTab({
           <button
             onClick={loadCredits}
             disabled={loading}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm ${inputBg} text-muted-foreground hover:text-foreground transition-colors`}
+            className={`min-h-11 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm ${inputBg} text-muted-foreground hover:text-foreground transition-colors`}
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             刷新
@@ -296,55 +332,88 @@ export default function UserCreditsTab({
         </div>
       </div>
 
+      {paymentStatusError && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-foreground">
+          <span>充值状态暂时不可用，请重试</span>
+          <button type="button" onClick={loadPaymentStatus} disabled={paymentStatusLoading} className="min-h-11 min-w-11 rounded-md bg-muted px-3 text-sm text-foreground disabled:opacity-50">重试充值状态</button>
+        </div>
+      )}
+
+      {loading && (
+        <div role="status" className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+          <RefreshCw aria-hidden="true" className="h-4 w-4 shrink-0 animate-spin motion-reduce:animate-none" />
+          <span>正在加载积分数据</span>
+        </div>
+      )}
+      {loadError && (
+        <div role="alert" className="flex min-w-0 flex-col gap-3 rounded-lg border border-destructive/30 bg-card p-4 sm:flex-row sm:items-center">
+          <div className="flex min-w-0 flex-1 items-start gap-2">
+            <AlertCircle aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+            <div className="min-w-0">
+              <p className="text-base font-medium text-foreground">{loadError === 'balance' ? '积分数据加载失败' : '积分记录加载失败'}</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {(loadError === 'balance' ? hasBalance : hasTransactions)
+                  ? '刷新未完成，保留上次成功加载的数据。'
+                  : '可点击下方按钮重新读取。'}
+              </p>
+            </div>
+          </div>
+          <button onClick={loadCredits} disabled={loading} className={`min-h-11 min-w-11 shrink-0 rounded-md px-3 py-2 text-sm text-foreground ${inputBg} hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary`}>
+            重试加载
+          </button>
+        </div>
+      )}
+
       {/* 余额卡片 */}
       <div className="bg-gradient-to-br from-primary/10 to-card border border-primary/20 rounded-lg p-5">
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <div className="min-w-0 flex-1">
             <div className="text-sm text-muted-foreground flex items-center gap-1.5">
               <Coins className="w-4 h-4 text-primary" />
               当前余额
             </div>
-            <div className="text-4xl font-bold text-primary mt-1">
-              {balance.toLocaleString('zh-CN')}
+            <div className="whitespace-nowrap text-[clamp(1.25rem,5vw,2.25rem)] font-bold text-primary mt-1">
+              {hasBalance ? balance.toLocaleString('zh-CN') : '—'}
             </div>
           </div>
-          <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
-            <Coins className="w-8 h-8 text-primary" />
+          <div className="w-10 h-10 sm:w-16 sm:h-16 shrink-0 rounded-full bg-primary/10 flex items-center justify-center">
+            <Coins className="w-5 h-5 sm:w-8 sm:h-8 text-primary" />
           </div>
         </div>
-        <div className="flex gap-4 mt-4 pt-3 border-t border-border/30">
-          <div className="flex items-center gap-1.5">
+        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 mt-4 pt-3 border-t border-border/30">
+          <div className="min-w-0 flex flex-wrap items-center gap-1.5">
             <TrendingUp className="w-3.5 h-3.5 text-green-500" />
-            <span className="text-xs text-muted-foreground">累计获得</span>
-            <span className="text-sm font-medium text-green-500">{totalEarned.toLocaleString('zh-CN')}</span>
+            <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">累计获得</span>
+            <span className="whitespace-nowrap text-sm font-medium text-green-500">{hasBalance ? totalEarned.toLocaleString('zh-CN') : '—'}</span>
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="min-w-0 flex flex-wrap items-center gap-1.5">
             <Zap className="w-3.5 h-3.5 text-destructive" />
-            <span className="text-xs text-muted-foreground">累计消费</span>
-            <span className="text-sm font-medium text-destructive">{totalSpent.toLocaleString('zh-CN')}</span>
+            <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">累计消费</span>
+            <span className="whitespace-nowrap text-sm font-medium text-destructive">{hasBalance ? totalSpent.toLocaleString('zh-CN') : '—'}</span>
           </div>
         </div>
       </div>
 
       {/* ===== 充值弹窗 ===== */}
       {showRecharge && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className={`w-full max-w-lg mx-4 ${isDark ? 'bg-[#1a1a1a]' : 'bg-white'} rounded-xl shadow-2xl border border-border/50 overflow-hidden`}>
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm">
+          <div className={`flex min-h-0 min-w-0 max-h-full w-full max-w-lg flex-col ${isDark ? 'bg-[#1a1a1a]' : 'bg-white'} rounded-xl shadow-2xl border border-border/50 overflow-hidden`}>
             {/* 弹窗头 */}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border/30">
+            <div className="flex shrink-0 items-center justify-between gap-3 px-4 sm:px-5 py-4 border-b border-border/30">
               <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
                 <CreditCard className="w-5 h-5 text-primary" />
                 积分充值
               </h2>
               <button
                 onClick={() => { setShowRecharge(false); setOrderInfo(null); setSelectedPackage(null); setIsCustomAmount(false); setCustomAmount(0); }}
-                className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                aria-label="关闭充值"
+                className="w-11 h-11 shrink-0 flex items-center justify-center rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="p-5 space-y-5 max-h-[70vh] overflow-y-auto">
+            <div className="min-h-0 p-4 sm:p-5 space-y-5 max-h-[70dvh] overflow-y-auto overscroll-contain">
               {/* 订单已创建 - 扫码支付 */}
               {orderInfo ? (
                 <div className="space-y-4">
@@ -458,6 +527,7 @@ export default function UserCreditsTab({
                       {RECHARGE_PACKAGES.map((pkg) => (
                         <button
                           key={pkg.amount}
+                          aria-pressed={selectedPackage === pkg.amount && !isCustomAmount}
                           onClick={() => { setSelectedPackage(pkg.amount); setIsCustomAmount(false); }}
                           className={`relative text-left p-3.5 rounded-lg border transition-all ${
                             selectedPackage === pkg.amount && !isCustomAmount
@@ -483,6 +553,7 @@ export default function UserCreditsTab({
                       {/* 自定义金额选项 */}
                       <button
                         onClick={() => { setIsCustomAmount(true); setSelectedPackage(null); }}
+                        aria-pressed={isCustomAmount}
                         className={`relative text-left p-3.5 rounded-lg border transition-all ${
                           isCustomAmount
                             ? 'border-primary bg-primary/5 ring-1 ring-primary/30'
@@ -504,15 +575,17 @@ export default function UserCreditsTab({
                     {/* 自定义金额输入框 */}
                     {isCustomAmount && (
                       <div className="mt-3 space-y-2">
+                        <label htmlFor={quantityId} className="block text-sm font-medium text-foreground">积分数量</label>
                         <div className="flex items-center gap-2">
                           <input
+                            id={quantityId}
                             type="number"
                             min={10}
                             step={10}
                             value={customAmount || ''}
                             onChange={(e) => setCustomAmount(Math.max(0, parseInt(e.target.value) || 0))}
                             placeholder="输入积分数量"
-                            className={`flex-1 px-3 py-2.5 rounded-lg text-sm ${inputBg} text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
+                            className={`h-11 min-w-0 flex-1 px-3 py-2.5 rounded-lg text-base ${inputBg} text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
                           />
                           <span className="text-sm text-muted-foreground whitespace-nowrap">积分</span>
                         </div>
@@ -523,12 +596,13 @@ export default function UserCreditsTab({
                           </div>
                         )}
                         {/* 快捷金额 */}
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap gap-2">
                           {[100, 200, 500, 1000, 2000, 5000].map(val => (
                             <button
                               key={val}
+                              aria-pressed={customAmount === val}
                               onClick={() => setCustomAmount(val)}
-                              className={`px-2.5 py-1 rounded-md text-xs transition-colors ${
+                              className={`min-h-11 min-w-11 px-2.5 py-1 rounded-md text-sm transition-colors ${
                                 customAmount === val
                                   ? 'bg-primary/10 text-primary border border-primary/30'
                                   : `${inputBg} text-muted-foreground hover:text-foreground`
@@ -549,6 +623,7 @@ export default function UserCreditsTab({
                       {paymentStatus?.status?.wechat && (
                         <button
                           onClick={() => setPaymentMethod('wechat')}
+                          aria-pressed={paymentMethod === 'wechat'}
                           className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg border transition-all ${
                             paymentMethod === 'wechat'
                               ? 'border-green-500 bg-green-500/5 ring-1 ring-green-500/30'
@@ -562,6 +637,7 @@ export default function UserCreditsTab({
                       {paymentStatus?.status?.alipay && (
                         <button
                           onClick={() => setPaymentMethod('alipay')}
+                          aria-pressed={paymentMethod === 'alipay'}
                           className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg border transition-all ${
                             paymentMethod === 'alipay'
                               ? 'border-blue-500 bg-blue-500/5 ring-1 ring-blue-500/30'
@@ -584,18 +660,23 @@ export default function UserCreditsTab({
                   {/* 充值流程说明 */}
                   <div className={`${cardBg} p-3`}>
                     <p className="text-xs text-muted-foreground mb-2 font-medium">充值流程</p>
-                    <div className="flex items-center gap-1 text-[10px] text-muted-foreground/70">
-                      <span className="bg-primary/10 text-primary px-1.5 py-0.5 rounded">1</span>
-                      <span>选择套餐</span>
-                      <span className="mx-1">→</span>
-                      <span className="bg-primary/10 text-primary px-1.5 py-0.5 rounded">2</span>
-                      <span>扫码进入充值页</span>
-                      <span className="mx-1">→</span>
-                      <span className="bg-primary/10 text-primary px-1.5 py-0.5 rounded">3</span>
-                      <span>点击付款</span>
-                      <span className="mx-1">→</span>
-                      <span className="bg-green-500/10 text-green-500 px-1.5 py-0.5 rounded">✓</span>
-                      <span>积分到账</span>
+                    <div className="grid grid-cols-1 gap-2 text-sm text-muted-foreground sm:grid-cols-2">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="shrink-0 bg-primary/10 text-primary px-1.5 py-0.5 rounded">1</span>
+                        <span className="whitespace-nowrap">选择套餐</span>
+                      </span>
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="shrink-0 bg-primary/10 text-primary px-1.5 py-0.5 rounded">2</span>
+                        <span className="whitespace-nowrap">扫码进入充值页</span>
+                      </span>
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="shrink-0 bg-primary/10 text-primary px-1.5 py-0.5 rounded">3</span>
+                        <span className="whitespace-nowrap">点击付款</span>
+                      </span>
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="shrink-0 bg-green-500/10 text-green-500 px-1.5 py-0.5 rounded">✓</span>
+                        <span className="whitespace-nowrap">积分到账</span>
+                      </span>
                     </div>
                   </div>
 
@@ -651,7 +732,7 @@ export default function UserCreditsTab({
       )}
 
       {/* 筛选栏 */}
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         {[
           { id: 'all' as const, label: '全部' },
           { id: 'earn' as const, label: '收入' },
@@ -659,8 +740,9 @@ export default function UserCreditsTab({
         ].map(({ id, label }) => (
           <button
             key={id}
+            aria-pressed={filter === id}
             onClick={() => setFilter(id)}
-            className={`px-3 py-1.5 rounded-md text-sm transition-colors ${
+            className={`min-h-11 min-w-11 px-3 py-1.5 rounded-md text-sm transition-colors ${
               filter === id
                 ? 'bg-primary/10 text-primary border border-primary/30'
                 : `${inputBg} text-muted-foreground hover:text-foreground`
@@ -670,13 +752,17 @@ export default function UserCreditsTab({
           </button>
         ))}
         <span className="ml-auto text-xs text-muted-foreground">
-          共 {filteredTransactions.length} 条记录
+          {hasTransactions ? `共 ${filteredTransactions.length} 条记录` : loading ? '记录加载中' : '记录暂不可用'}
         </span>
       </div>
 
       {/* 交易列表 */}
       <div className={`${cardBg} overflow-hidden`}>
-        {filteredTransactions.length === 0 ? (
+        {!hasTransactions ? (
+          <div className="p-8 text-center text-sm text-muted-foreground">
+            {loading ? '正在加载积分记录' : '积分记录暂不可用，请重试'}
+          </div>
+        ) : filteredTransactions.length === 0 ? (
           <div className="p-8 text-center">
             <History className="w-10 h-10 text-muted-foreground mx-auto mb-2 opacity-50" />
             <div className="text-sm text-muted-foreground">暂无{filter === 'earn' ? '收入' : filter === 'spend' ? '支出' : ''}记录</div>
@@ -684,24 +770,24 @@ export default function UserCreditsTab({
         ) : (
           <div className="divide-y divide-border/30">
             {filteredTransactions.map((t) => (
-              <div key={t.id} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/30 transition-colors">
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+              <div key={t.id} className="grid min-w-0 grid-cols-[2rem_minmax(0,1fr)] items-center gap-3 px-4 py-3 sm:grid-cols-[2rem_minmax(0,1fr)_auto] hover:bg-muted/30 transition-colors">
+                <div className={`w-8 h-8 shrink-0 rounded-full flex items-center justify-center ${
                   t.amount > 0 ? 'bg-green-500/10' : 'bg-destructive/10'
                 }`}>
                   {getTypeIcon(t.type, t.amount)}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm text-foreground truncate">{t.description || getTypeLabel(t.type)}</div>
-                  <div className="text-xs text-muted-foreground flex items-center gap-1">
+                  <div className="break-all text-sm text-foreground">{t.description || getTypeLabel(t.type)}</div>
+                  <div className="whitespace-nowrap text-xs text-muted-foreground flex items-center gap-1">
                     <Clock className="w-3 h-3" />
                     {formatDate(t.created_at)}
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className={`text-sm font-medium ${t.amount > 0 ? 'text-green-500' : 'text-destructive'}`}>
+                <div className="col-start-2 min-w-0 sm:col-start-auto sm:text-right">
+                  <div className={`whitespace-nowrap text-sm font-medium ${t.amount > 0 ? 'text-green-500' : 'text-destructive'}`}>
                     {t.amount > 0 ? '+' : ''}{t.amount}
                   </div>
-                  <div className="text-xs text-muted-foreground">余额 {t.balance_after}</div>
+                  <div className="whitespace-nowrap text-xs text-muted-foreground">余额 {t.balance_after}</div>
                 </div>
               </div>
             ))}

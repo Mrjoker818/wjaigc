@@ -840,7 +840,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
 
   const handleSaveVersion = async () => {
     if (!currentProject) return;
-    await apiCall('save-version', {
+    const result = await apiCall('save-version', {
       projectId: currentProject.id,
       targetType: versionType,
       targetId: currentProject.id,
@@ -848,6 +848,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
       note: versionNote,
       snapshot: { ...currentProject } as Record<string, unknown>,
     });
+    if (!result?.success) return;
     setVersions(prev => [...prev, {
       id: genId('ver'), projectId: currentProject.id, targetType: versionType as VersionRecord['targetType'],
       targetId: currentProject.id, versionName: `V${prev.length + 1}`, note: versionNote,
@@ -1108,8 +1109,8 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
                 {currentProject[field] ? (
                   <div className="relative group">
                     <img src={currentProject[field]} alt={labels[field]} className="w-full h-32 object-contain rounded bg-black/30" />
-                    <button className="absolute top-1 right-1 bg-red-500/80 text-white rounded p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
-                      onClick={() => setCurrentProject(p => p ? { ...p, [field]: '' } : p)}><X className="w-3 h-3" /></button>
+                    <button type="button" aria-label={`移除${labels[field]}`} title={`移除${labels[field]}`} className="absolute top-1 right-1 inline-flex h-11 w-11 items-center justify-center rounded bg-red-500/80 text-white opacity-100 transition-colors hover:bg-red-600 focus-visible:ring-2 focus-visible:ring-red-400"
+                      onClick={() => setCurrentProject(p => p ? { ...p, [field]: '' } : p)}><X className="w-4 h-4" aria-hidden="true" /></button>
                   </div>
                 ) : (
                   <label className={`flex flex-col items-center justify-center h-32 border-2 border-dashed ${th.borderLight} rounded-lg cursor-pointer hover:border-blue-300 transition-colors`}>
@@ -1148,7 +1149,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
               {currentProject.referenceUrls.map((url, i) => (
                 <div key={i} className="relative group">
                   <img src={url} alt="" className="w-full h-20 object-cover rounded" />
-                  <button className="absolute top-0.5 right-0.5 bg-red-500/80 text-white rounded p-0.5 opacity-0 group-hover:opacity-100"
+                  <button type="button" aria-label={`移除参考图 ${i + 1}`} title={`移除参考图 ${i + 1}`} className="absolute top-0.5 right-0.5 inline-flex h-11 w-11 items-center justify-center rounded bg-red-500/80 text-white opacity-100 transition-colors hover:bg-red-600 focus-visible:ring-2 focus-visible:ring-red-400"
                     onClick={() => {
                       setCurrentProject(p => p ? { ...p, referenceUrls: p.referenceUrls.filter((_, j) => j !== i) } : p);
                       // 同步到后端
@@ -1158,7 +1159,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ action: 'update-project', id: currentProject?.id, reference_urls: JSON.stringify(updatedRefs) }),
                       }).catch(() => {});
-                    }}><X className="w-2.5 h-2.5" /></button>
+                    }}><X className="w-4 h-4" aria-hidden="true" /></button>
                 </div>
               ))}
               <label className={`flex items-center justify-center h-20 border-2 border-dashed ${th.borderLight} rounded cursor-pointer hover:border-blue-300`}>
@@ -1580,7 +1581,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
             </select>
             <input className={`${th.input} w-full`} placeholder="版本备注" value={versionNote}
               onChange={e => setVersionNote(e.target.value)} />
-            <button className={`${th.btn} w-full`} onClick={handleSaveVersion}><Save className="w-4 h-4 inline mr-1" />保存当前版本</button>
+            <button className={`${th.btn} w-full`} onClick={handleSaveVersion} disabled={loading} aria-busy={loading}><Save className="w-4 h-4 inline mr-1" />保存当前版本</button>
           </div>
 
           <div className="space-y-2">

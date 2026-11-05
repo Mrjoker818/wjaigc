@@ -2987,6 +2987,9 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     // 直接返回processing状态，不做远程轮询，避免用本地taskId去查第三方API导致404
     if (registryTask && registryTask.status === 'processing') {
       const regResult = (registryTask.result as Record<string, unknown>) || {};
+      if (registryTask.type === 'display3d' && regResult.display3dOutcomeUnconfirmed === true) {
+        return NextResponse.json({ success: true, status: 'processing', code: 'DISPLAY3D_OUTCOME_UNCONFIRMED' }, { status: 200 });
+      }
       // ★ APImart 等异步供应商返回的 taskId 本身就是远程任务 ID（如 task_01KX...）
       const taskIdIsRemote = typeof taskId === 'string' && taskId.startsWith('task_');
       const effectiveRemoteTaskId = (regResult.remoteTaskId as string | undefined) || (taskIdIsRemote ? taskId : undefined);

@@ -64,6 +64,7 @@ describe('admin credit observability', () => {
     const percentages = body.distribution.map((item: { pct: string }) => Number.parseInt(item.pct, 10));
 
     expect(response.status).toBe(200);
+    expect(body.creditObservabilityVersion).toBe(1);
     expect(percentages.every((value: number) => value >= 0 && value <= 100)).toBe(true);
     expect(percentages.reduce((sum: number, value: number) => sum + value, 0)).toBe(100);
     expect(body.flows).toEqual({

@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
-import { Menu, Paperclip, ArrowUp, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search, Eye, EyeOff, Image, Download, Send, Shield, ThumbsUp, ThumbsDown, Pencil, PenSquare, Brain, PenLine, ScanSearch, Clock } from "lucide-react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, useId } from "react";
+import { Check, Menu, Paperclip, ArrowUp, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search, Eye, EyeOff, Image, Download, Send, Shield, ThumbsUp, ThumbsDown, Pencil, PenSquare, Brain, PenLine, ScanSearch, Clock } from "lucide-react";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { MarkdownRenderer } from "./markdown-renderer";
 import { ImageLightbox } from "./image-lightbox";
 import { QuickCommands } from "./quick-commands";
@@ -38,6 +39,7 @@ import { completedChatImageMessageContent } from "@/lib/chat-pending-generation"
 import {
   buildWorkflowChatReturnTransfer,
   createWorkflowChatReturnMessage,
+  hasAmbiguousWorkflowChatReturnParameters,
   parseWorkflowChatReturnIntent,
 } from "@/lib/asset-core/workflow-chat-return";
 import {
@@ -117,7 +119,7 @@ function AgentRunMessageProgress({ runId }: { runId: string }) {
     <AgentProgressTimeline
       projection={run.projection}
       stale={run.stale}
-      onCancel={() => { void run.cancel(); }}
+      onCancel={() => run.cancel()}
     />
   );
 }
@@ -125,6 +127,8 @@ function AgentRunMessageProgress({ runId }: { runId: string }) {
 function readWorkspaceAssetReference(value: unknown): WorkspaceAssetReference | null {
   return readSimpleChatStreamAssetReference(value);
 }
+export type KnowledgeItemsMutation = (items: ProjectKnowledgeItem[]) => ProjectKnowledgeItem[] | null;
+export type KnowledgeMutationResult = 'updated' | 'conflict' | 'scope';
 interface ChatAreaProps {
   user: User;
   project: SimpleChatProject | null;
@@ -132,6 +136,7 @@ interface ChatAreaProps {
   onUpdateTask: (task: SimpleChatTask) => void;
   onPersistTask: (task: SimpleChatTask) => Promise<void>;
   onUpdateProject: (project: SimpleChatProject) => void;
+  onUpdateKnowledge?: (actorId: string, projectId: string, createdAt: number, mutation: KnowledgeItemsMutation) => KnowledgeMutationResult;
   onCreateTask: (projectId: string, initialData?: { name?: string; messages?: SimpleChatMessage[]; model?: string; providerId?: string }) => void;
   onSelectTask: (task: SimpleChatTask) => void;
   onUpdateAgent: (agent: SimpleChatAgent) => void;
@@ -152,6 +157,31 @@ interface SimpleChatWorkspaceActionsProps {
   onSendToCanvas: (message: SimpleChatMessage) => void;
   onNotice: (notice: string) => void;
   navigate?: (url: string) => void;
+}
+
+export function simpleChatMessagesMatch(
+  left: readonly SimpleChatMessage[] | null | undefined,
+  right: readonly SimpleChatMessage[] | null | undefined,
+): boolean {
+  if (left === undefined || left === null || right === undefined || right === null) {
+    return JSON.stringify(left) === JSON.stringify(right);
+  }
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  let allEntriesShared = true;
+  for (let index = left.length - 1; index >= 0; index--) {
+    const previous = left[index];
+    const current = right[index];
+    if (previous === current) continue;
+    allEntriesShared = false;
+    // Required JSON string fields prove a difference without reading attachments.
+    if (previous && current && typeof previous.id === 'string' && typeof current.id === 'string'
+      && typeof previous.role === 'string' && typeof current.role === 'string'
+      && typeof previous.content === 'string' && typeof current.content === 'string'
+      && (previous.id !== current.id || previous.role !== current.role || previous.content !== current.content)) return false;
+  }
+  // Deep copies and every unexamined/nested field retain the original full comparison.
+  return allEntriesShared || JSON.stringify(left) === JSON.stringify(right);
 }
 
 export function hasSimpleChatAssistantOperationPayload(message: SimpleChatMessage): boolean {
@@ -195,12 +225,19 @@ export function SimpleChatWorkspaceActions({
   };
 
   return (
-    <div data-testid="simple-chat-workspace-actions" className="inline-flex gap-0.5">
+    <div data-testid="simple-chat-workspace-actions" className={canSendToCanvas || !message.images?.length
+      ? 'inline-flex gap-0.5'
+      : 'inline-flex max-w-full shrink-0 flex-wrap gap-0.5'}>
+      {Boolean(message.images?.length) && !canSendToCanvas && (
+        <span className="min-w-0 basis-full whitespace-normal text-[11px] leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
+          历史图片或登记失败的图片不可转移
+        </span>
+      )}
       {Boolean(message.images?.length) && (
         <button
           onClick={() => onSendToCanvas(message)}
           disabled={canvasTransferPending || !canSendToCanvas}
-          className="p-1 rounded hover:bg-blue-500/10 text-blue-500 transition-colors disabled:text-muted-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent"
+          className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-blue-500/10 text-blue-500 transition-colors disabled:text-muted-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent"
           title={canSendToCanvas ? '添加到画布' : '历史图片或登记失败的图片不可转移'}
         >
           <Send className="w-3 h-3" />
@@ -209,7 +246,7 @@ export function SimpleChatWorkspaceActions({
       <button
         onClick={sendToNodeMode}
         disabled={!canSendToNodeMode}
-        className="p-1 rounded hover:bg-amber-500/10 text-amber-500 transition-colors disabled:text-muted-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent"
+        className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-amber-500/10 text-amber-500 transition-colors disabled:text-muted-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent"
         title={!selectedCanvasProjectId || !project || !task
           ? '请先选择目标画布项目'
           : canSendToNodeMode
@@ -263,6 +300,8 @@ const MODEL_TAGS: Record<string, string[]> = {
   'qwen-max': ['中文', '推理'],
 };
 
+const WEB_SEARCH_UNAVAILABLE = '联网搜索未返回结果，可能无结果或搜索失败，请核实信息来源。';
+
 // 联网搜索结果卡片
 function SearchResultsCard({ content }: { content: string }) {
   const parsed = useMemo(() => {
@@ -270,7 +309,7 @@ function SearchResultsCard({ content }: { content: string }) {
     const keywordMatch = content.match(/搜索关键词[：:]\s*"?(.+?)"?\n/);
     const keyword = keywordMatch?.[1] || '';
 
-    const regex = /\[(\d+)\]\s+(.+?)\nURL:\s*(.+?)\n摘要:\s*(.+?)(?:\nAI摘要:\s*(.+?))?(?=\n\n\[|$)/g;
+    const regex = /\[(\d+)\][^\S\r\n]+([^\n]+)\nURL:[^\S\r\n]*([^\n]*)\n摘要:[^\S\r\n]*([\s\S]*?)(?:\nAI摘要:[^\S\r\n]*([\s\S]*?))?(?=\n\n\[\d+\][^\S\r\n]+[^\n]+\nURL:|\n\n## AI 搜索摘要(?:\n|$)|$)/g;
     let match;
     while ((match = regex.exec(content)) !== null) {
       items.push({
@@ -287,11 +326,11 @@ function SearchResultsCard({ content }: { content: string }) {
   return (
     <div className="w-full">
       <div className="bg-gradient-to-r from-blue-500/5 to-cyan-500/5 border border-blue-500/20 rounded-2xl p-4">
-        <div className="flex items-center gap-2 mb-3">
-          <div className="w-6 h-6 rounded-full bg-blue-500/10 flex items-center justify-center">
+        <div className="flex min-w-0 items-center gap-2 mb-3">
+          <div className="w-6 h-6 shrink-0 rounded-full bg-blue-500/10 flex items-center justify-center">
             <Globe className="w-3.5 h-3.5 text-blue-500" />
           </div>
-          <span className="text-sm font-medium text-blue-600 dark:text-blue-400">
+          <span className="min-w-0 [overflow-wrap:anywhere] text-sm font-medium text-blue-600 dark:text-blue-400">
             联网搜索{parsed.keyword ? ` · "${parsed.keyword}"` : ''} · {parsed.items.length} 条结果
           </span>
         </div>
@@ -300,20 +339,20 @@ function SearchResultsCard({ content }: { content: string }) {
             {parsed.items.map((item) => (
               <a
                 key={item.idx}
-                href={item.url}
-                target="_blank"
+                href={item.url && item.url !== '无' ? item.url : undefined}
+                target={item.url && item.url !== '无' ? '_blank' : undefined}
                 rel="noopener noreferrer"
                 className="block p-3 rounded-xl bg-background/50 hover:bg-background/80 border border-border/50 hover:border-border transition-all"
               >
                 <div className="flex items-start gap-2">
                   <span className="text-xs font-mono text-muted-foreground mt-0.5 shrink-0 w-5">[{item.idx}]</span>
                   <div className="min-w-0">
-                    <div className="text-sm font-medium text-foreground line-clamp-1">{item.title}</div>
-                    <div className="text-xs text-muted-foreground mt-1 line-clamp-2">{item.snippet}</div>
+                    <div className="text-sm font-medium text-foreground [overflow-wrap:anywhere]">{item.title}</div>
+                    <div className="text-xs text-muted-foreground mt-1 [overflow-wrap:anywhere]">{item.snippet}</div>
                     {item.summary && (
-                      <div className="text-xs text-blue-600/70 dark:text-blue-400/70 mt-1 line-clamp-2 italic">AI: {item.summary}</div>
+                      <div className="text-xs text-blue-600/70 dark:text-blue-400/70 mt-1 [overflow-wrap:anywhere] italic">AI: {item.summary}</div>
                     )}
-                    <div className="text-[10px] text-muted-foreground/50 mt-1 truncate">{item.url}</div>
+                    <div className="text-[10px] text-muted-foreground/50 mt-1 [overflow-wrap:anywhere]">{item.url}</div>
                   </div>
                 </div>
               </a>
@@ -326,7 +365,7 @@ function SearchResultsCard({ content }: { content: string }) {
 }
 
 export default function ChatArea({
-  user, project, task, onUpdateTask, onPersistTask, onUpdateProject, onCreateTask, onSelectTask,
+  user, project, task, onUpdateTask, onPersistTask, onUpdateProject, onUpdateKnowledge, onCreateTask, onSelectTask,
   onUpdateAgent, onDeleteAgent, onSkillToAgent,
   onLogout, onBackToWorkspace, sidebarOpen, onToggleSidebar
 }: ChatAreaProps) {
@@ -334,6 +373,7 @@ export default function ChatArea({
 
   // Local state
   const [input, setInput] = useState("");
+  const inputEditEpochRef = useRef(0);
   const [isStreaming, setIsStreaming] = useState(false);
   const [uploadedImages, setUploadedImages] = useState<ChatAttachment[]>([]);
   const [webSearch, setWebSearch] = useState(false);
@@ -346,15 +386,26 @@ export default function ChatArea({
   const [showShare, setShowShare] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchSubmitted, setSearchSubmitted] = useState(false);
   const [searchResults, setSearchResults] = useState<Array<{ taskId: string; taskName: string; messageIndex: number; snippet: string }>>([]);
   const [branchBaseMessageId, setBranchBaseMessageId] = useState<string | null>(null);
   const [searchStatus, setSearchStatus] = useState<string | null>(null);
+  const [workflowReturnConflict, setWorkflowReturnConflict] = useState(false);
   // Brand DNA injection
   const [brandActive, setBrandActive] = useState(false);
 
   // Image model
   const [imageModels, setImageModels] = useState<Array<ChatModelInfo>>([]);
   const [tempChat, setTempChat] = useState(false);
+  const messageScope = JSON.stringify([user.id, project?.id ?? null, task?.id ?? null]);
+  const draftScope = JSON.stringify([user.id, project?.id ?? null, task?.id ?? null, tempChat]);
+  const requestScopeEpochRef = useRef({ scope: draftScope, epoch: 0 });
+  const ordinaryRequestEpochRef = useRef<number | null>(null);
+  const activeSendRef = useRef<{ epoch: number } | null>(null);
+  if (requestScopeEpochRef.current.scope !== draftScope) {
+    requestScopeEpochRef.current = { scope: draftScope, epoch: requestScopeEpochRef.current.epoch + 1 };
+  }
+  useEffect(() => () => { requestScopeEpochRef.current.epoch += 1; }, []);
   const [temporaryImageSelection, setTemporaryImageSelection] = useState<(SimpleChatModelSelection & { taskId: string }) | null>(null);
   // Only a new, unconfigured task may adopt the catalog default.
   const defaultImageModel = !task?.imageModel && !task?.imageProviderId ? imageModels[0] : undefined;
@@ -385,16 +436,67 @@ export default function ChatArea({
     project?.instructions || { projectBackground: '', userPreference: '', outputFormat: '', styleRules: '', forbiddenRules: '', language: 'zh-CN' }
   );
 
-  // Knowledge
-  const [knowledgeItems, setKnowledgeItems] = useState<ProjectKnowledgeItem[]>(project?.knowledgeItems || []);
-  const [knowledgePreview, setKnowledgePreview] = useState<ProjectKnowledgeItem | null>(null);
+  // Knowledge: a mounted editor may receive a different actor or project instance.
+  const knowledgeDraftScope = JSON.stringify([user.id, project?.id ?? null, project?.createdAt ?? null]);
+  const knowledgeViewScopeRef = useRef({ scope: knowledgeDraftScope });
+  if (knowledgeViewScopeRef.current.scope !== knowledgeDraftScope) {
+    knowledgeViewScopeRef.current = { scope: knowledgeDraftScope };
+  }
+  const knowledgeViewScope = knowledgeViewScopeRef.current;
+  const knowledgeViewMountedRef = useRef(true);
+  // The parent project is authoritative; all edits are applied to its latest snapshot.
+  const knowledgeItems = project?.knowledgeItems || [];
+  const [knowledgeErrorState, setKnowledgeErrorState] = useState<{ scope: typeof knowledgeViewScope; message: string } | null>(null);
+  const knowledgeError = knowledgeErrorState?.scope === knowledgeViewScope ? knowledgeErrorState.message : null;
+  const updateKnowledge = (mutation: KnowledgeItemsMutation): boolean => {
+    if (!knowledgeViewMountedRef.current || knowledgeViewScopeRef.current !== knowledgeViewScope || !project) return false;
+    const result = onUpdateKnowledge?.(user.id, project.id, project.createdAt, mutation) ?? 'scope';
+    setKnowledgeErrorState(result === 'updated' ? null : {
+      scope: knowledgeViewScope,
+      message: result === 'conflict' ? '知识条目已发生变化，请检查当前内容后重试。' : '知识库当前不可更新，请返回项目后重试。',
+    });
+    return result === 'updated';
+  };
+  const [knowledgePreviewState, setKnowledgePreviewState] = useState<{ scope: typeof knowledgeViewScope; item: ProjectKnowledgeItem } | null>(null);
+  const knowledgePreview = knowledgePreviewState?.scope === knowledgeViewScope ? knowledgeItems.find(item => item.id === knowledgePreviewState.item.id) ?? null : null;
+  const setKnowledgePreview = (item: ProjectKnowledgeItem | null) => {
+    if (knowledgeViewMountedRef.current && knowledgeViewScopeRef.current === knowledgeViewScope) setKnowledgePreviewState(item ? { scope: knowledgeViewScope, item } : null);
+  };
   const [addingKnowledge, setAddingKnowledge] = useState<'file' | 'url' | 'note' | null>(null);
-  const [knowledgeUrl, setKnowledgeUrl] = useState('');
-  const [knowledgeNote, setKnowledgeNote] = useState('');
-  const [knowledgeNoteName, setKnowledgeNoteName] = useState('');
+  // Keep unsaved link/note drafts with the actor and project that created them.
+  // Like the original component state, drafts stay in memory only.
+  // Invalidate pending file reads on every actor/project transition, including A → B → A.
+  const knowledgeFileScopeRef = useRef({ scope: knowledgeDraftScope });
+  if (knowledgeFileScopeRef.current.scope !== knowledgeDraftScope) {
+    knowledgeFileScopeRef.current = { scope: knowledgeDraftScope };
+  }
+  useEffect(() => {
+    knowledgeViewMountedRef.current = true;
+    return () => {
+      knowledgeViewMountedRef.current = false;
+      knowledgeFileScopeRef.current = { scope: knowledgeFileScopeRef.current.scope };
+    };
+  }, []);
+  const [knowledgeDrafts, setKnowledgeDrafts] = useState<Record<string, { url: string; note: string; noteName: string }>>({});
+  const { url: knowledgeUrl = '', note: knowledgeNote = '', noteName: knowledgeNoteName = '' } = knowledgeDrafts[knowledgeDraftScope] ?? {};
+  const updateKnowledgeDraft = (patch: Partial<{ url: string; note: string; noteName: string }>) => {
+    setKnowledgeDrafts(previous => ({
+      ...previous,
+      [knowledgeDraftScope]: { ...(previous[knowledgeDraftScope] ?? { url: '', note: '', noteName: '' }), ...patch },
+    }));
+  };
 
   // Models
   const [chatModels, setChatModels] = useState<ChatModelInfo[]>([]);
+  const [chatCatalogState, setChatCatalogState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [imageCatalogState, setImageCatalogState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const chatCatalogInFlight = useRef(false);
+  const imageCatalogInFlight = useRef(false);
+  const catalogMountedRef = useRef(true);
+  useEffect(() => {
+    catalogMountedRef.current = true;
+    return () => { catalogMountedRef.current = false; };
+  }, []);
   const chatModelSelection = readSimpleChatModelSelection(task);
   const selectedModel = chatModelSelection.modelId;
   const selectedProviderId = chatModelSelection.providerId;
@@ -413,8 +515,10 @@ export default function ChatArea({
     top: 0,
     naturalTop: 0,
     headerBottom: 0,
+    agentBottom: 0,
   }));
   const compactHeader = chatViewport.width < 768 || chatViewport.height <= 430;
+  const shortChatViewport = chatViewport.height <= 430;
 
   const handleChatModelSelect = useCallback((selection: SimpleChatModelSelection) => {
     if (!task) return;
@@ -444,6 +548,7 @@ export default function ChatArea({
   const [showMemory, setShowMemory] = useState(false);
   const [memories, setMemories] = useState<MemoryItem[]>([]);
   const [memoriesLoading, setMemoriesLoading] = useState(false);
+  const memoryMutationInFlight = useRef(false);
   // 全局对话搜索
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
   const [showQuickCommands, setShowQuickCommands] = useState(false);
@@ -467,6 +572,9 @@ export default function ChatArea({
   const [historyImages, setHistoryImages] = useState<string[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
+  const followMessagesRef = useRef(true);
+  const userScrollVersionRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const chatModelMenuRef = useRef<HTMLDivElement>(null);
   const imageModelMenuRef = useRef<HTMLDivElement>(null);
@@ -474,6 +582,7 @@ export default function ChatArea({
   const imageModelButtonRef = useRef<HTMLButtonElement>(null);
   const chatAreaRef = useRef<HTMLDivElement>(null);
   const chatHeaderRef = useRef<HTMLElement>(null);
+  const chatAgentBarRef = useRef<HTMLDivElement>(null);
   const chatSettingsRef = useRef<HTMLDivElement>(null);
   const chatSettingsButtonRef = useRef<HTMLButtonElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
@@ -493,18 +602,20 @@ export default function ChatArea({
       top: viewport?.offsetTop ?? 0,
       naturalTop,
       headerBottom: chatHeaderRef.current?.getBoundingClientRect().bottom ?? naturalTop,
+      agentBottom: chatAgentBarRef.current?.getBoundingClientRect().bottom ?? naturalTop,
     };
     setChatViewport(previous => (
       previous.width === next.width && previous.height === next.height
       && previous.left === next.left && previous.top === next.top
       && previous.naturalTop === next.naturalTop && previous.headerBottom === next.headerBottom
+      && previous.agentBottom === next.agentBottom
     ) ? previous : next);
   }, []);
 
   useLayoutEffect(() => {
     updateChatViewport();
   }, [updateChatViewport, compactHeader, chatViewport.width, chatViewport.height,
-    chatViewport.left, chatViewport.top, project?.id, task?.id]);
+    chatViewport.left, chatViewport.top, project?.id, task?.id, task?.activeAgentId, controlNotice]);
 
   useLayoutEffect(() => {
     // When a keyboard leaves less room, scroll the existing composer rather
@@ -512,7 +623,7 @@ export default function ChatArea({
     if (compactHeader && chatViewport.height < window.innerHeight && composerRef.current) {
       composerRef.current.scrollTop = composerRef.current.scrollHeight;
     }
-  }, [compactHeader, chatViewport.width, chatViewport.height, chatViewport.top, chatViewport.headerBottom]);
+  }, [compactHeader, chatViewport.width, chatViewport.height, chatViewport.top, chatViewport.headerBottom, chatViewport.agentBottom]);
 
   useEffect(() => {
     const viewport = window.visualViewport;
@@ -560,13 +671,26 @@ export default function ChatArea({
     recoverInterruptedSimpleChatMessages((task?.messages || []).filter(Boolean)),
   );
   const artifacts = useMemo(() => messages.flatMap(message => message.artifacts || []), [messages]);
-  const [messagesTaskId, setMessagesTaskId] = useState(task?.id);
+  const [messagesScope, setMessagesScope] = useState<string | null>(messageScope);
+  const [draftReadyScope, setDraftReadyScope] = useState(draftScope);
+  const draftInputRef = useRef(input);
+  const draftImagesRef = useRef(uploadedImages);
+  const draftScopeRef = useRef(draftScope);
+  const draftByScopeRef = useRef(new Map<string, string>());
+  const draftImagesByScopeRef = useRef(new Map<string, ChatAttachment[]>());
+  const pendingImageReadsByScopeRef = useRef(new Map<string, ChatAttachment[]>());
+  const activeDraftScopeRef = useRef(draftScope);
+  draftInputRef.current = input;
+  draftImagesRef.current = uploadedImages;
+  activeDraftScopeRef.current = draftScope;
   const messagesRef = useRef(messages);
+  const messageScopeRef = useRef(messageScope);
   const projectIdRef = useRef(project?.id);
   const taskIdRef = useRef(task?.id);
   const latestTaskRef = useRef(task);
   const workflowReturnHandledRef = useRef<string | null>(null);
-  const workflowReturnPersistenceGuardRef = useRef<{ taskId: string; messageId: string } | null>(null);
+  const workflowReturnPersistenceGuardRef = useRef<{ scope: string; messageId: string } | null>(null);
+  messageScopeRef.current = messageScope;
   projectIdRef.current = project?.id;
   taskIdRef.current = task?.id;
   latestTaskRef.current = task;
@@ -577,9 +701,15 @@ export default function ChatArea({
   }, [project?.id]);
 
   useEffect(() => {
-    if (!project?.id || !task?.id) return;
+    const ambiguous = hasAmbiguousWorkflowChatReturnParameters(window.location.search);
+    setWorkflowReturnConflict(ambiguous);
+    if (ambiguous || !project?.id || !task?.id) return;
     const intent = parseWorkflowChatReturnIntent(window.location.search);
     if (!intent) return;
+    const initialParams = new URLSearchParams(window.location.search);
+    if ((initialParams.has('projectId') && initialParams.get('projectId') !== project.id)
+      || (initialParams.has('taskId') && initialParams.get('taskId') !== task.id)) return;
+    const intentPath = window.location.pathname;
     const intentKey = `${project.id}:${intent.executionId}:${intent.outputNodeId}:${intent.sourceVersionId}`;
     if (workflowReturnHandledRef.current === intentKey) return;
     workflowReturnHandledRef.current = intentKey;
@@ -589,7 +719,7 @@ export default function ChatArea({
       try {
         const response = await fetch('/api/assets/transfer', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'x-wujie-expected-actor-id': user.id },
           body: JSON.stringify(buildWorkflowChatReturnTransfer(intent, project.id)),
         });
         if (!response.ok) throw new Error(`Asset transfer failed (${response.status})`);
@@ -597,7 +727,7 @@ export default function ChatArea({
         if (!reference?.assetVersionId || !reference.placementId || !reference.entityId) {
           throw new Error('Asset transfer returned an incomplete reference');
         }
-        if (cancelled || projectIdRef.current !== project.id || taskIdRef.current !== task.id) return;
+        if (cancelled || messageScopeRef.current !== messageScope || projectIdRef.current !== project.id || taskIdRef.current !== task.id) return;
         const returned = createWorkflowChatReturnMessage(intent, reference);
         const latestTask = latestTaskRef.current;
         if (!latestTask || latestTask.id !== task.id) return;
@@ -606,15 +736,28 @@ export default function ChatArea({
           : [...(latestTask.messages || []), returned];
         guardedMessageId = returned.id;
         workflowReturnPersistenceGuardRef.current = {
-          taskId: task.id,
+          scope: messageScope,
           messageId: returned.id,
         };
         await onPersistTask({ ...latestTask, messages: persistedMessages, updatedAt: Date.now() });
-        if (cancelled || projectIdRef.current !== project.id || taskIdRef.current !== task.id) return;
-        setMessages(persistedMessages);
+        if (cancelled || messageScopeRef.current !== messageScope || projectIdRef.current !== project.id || taskIdRef.current !== task.id) return;
+        const currentMessages = messagesRef.current;
+        const mergedMessages = currentMessages.some(message => message.id === returned.id)
+          ? [...currentMessages]
+          : [...currentMessages, returned];
+        if (workflowReturnPersistenceGuardRef.current?.scope === messageScope
+          && workflowReturnPersistenceGuardRef.current.messageId === returned.id) {
+          workflowReturnPersistenceGuardRef.current = null;
+        }
+        setMessages(mergedMessages);
         const current = new URL(window.location.href);
+        const currentIntent = parseWorkflowChatReturnIntent(current.search);
+        if (current.pathname !== intentPath || !currentIntent
+          || JSON.stringify(currentIntent) !== JSON.stringify(intent)
+          || (current.searchParams.has('projectId') && current.searchParams.get('projectId') !== project.id)
+          || (current.searchParams.has('taskId') && current.searchParams.get('taskId') !== task.id)) return;
         for (const key of [
-          'assetProjectId', 'workflowVersionId', 'workflowId', 'workflowExecutionId',
+          'assetProjectId', 'workflowVersionId', 'sourceVersionId', 'workflowId', 'workflowExecutionId',
           'workflowOutputNodeId', 'workflowOutputLabel',
         ]) current.searchParams.delete(key);
         window.history.replaceState(null, '', `${current.pathname}${current.search}${current.hash}`);
@@ -624,39 +767,69 @@ export default function ChatArea({
     })();
     return () => {
       cancelled = true;
-      if (workflowReturnPersistenceGuardRef.current?.messageId === guardedMessageId) {
+      if (workflowReturnPersistenceGuardRef.current?.scope === messageScope
+        && workflowReturnPersistenceGuardRef.current.messageId === guardedMessageId) {
         workflowReturnPersistenceGuardRef.current = null;
       }
     };
-  }, [onPersistTask, project?.id, task?.id]);
+  }, [onPersistTask, project?.id, task?.id, user.id]);
+
+  // Keep unsent text and images attached to their account, task and chat mode.
+  useEffect(() => {
+    if (draftScopeRef.current !== draftScope) {
+      if (ordinaryRequestEpochRef.current !== null && ordinaryRequestEpochRef.current !== requestScopeEpochRef.current.epoch) {
+        ordinaryRequestEpochRef.current = null;
+        setIsStreaming(false);
+      }
+      draftByScopeRef.current.set(draftScopeRef.current, draftInputRef.current);
+      draftImagesByScopeRef.current.set(draftScopeRef.current, draftImagesRef.current);
+      draftScopeRef.current = draftScope;
+      setInput(draftByScopeRef.current.get(draftScope) ?? '');
+      const pendingImages = pendingImageReadsByScopeRef.current.get(draftScope) ?? [];
+      pendingImageReadsByScopeRef.current.delete(draftScope);
+      setUploadedImages([...(draftImagesByScopeRef.current.get(draftScope) ?? []), ...pendingImages]);
+      setDraftReadyScope(draftScope);
+    }
+  }, [draftScope]);
 
   // Sync when task changes
   useEffect(() => {
     if (task) {
       setIsStreaming(false);
+      followMessagesRef.current = true;
+      userScrollVersionRef.current += 1;
       setMessages(recoverInterruptedSimpleChatMessages((task.messages || []).filter(Boolean)));
-      setMessagesTaskId(task.id);
+      setMessagesScope(messageScope);
       setReasoningEffort(task.reasoningEffort || 'medium');
       setResponseSpeed(task.responseSpeed || 'balanced');
       setAppliedChatControls(task.appliedChatControls);
       setControlNotice(task.appliedChatControls?.notices[0] || null);
       setHistoryImages([]);
       setHistoryImageNotice(null);
-      setInput("");
-    }
-  }, [task?.id]);
+    } else setMessagesScope(null);
+  }, [messageScope]);
 
   // Sync when project changes
   useEffect(() => {
     if (project) {
       setInstructionsDraft(project.instructions || { projectBackground: '', userPreference: '', outputFormat: '', styleRules: '', forbiddenRules: '', language: 'zh-CN' });
-      setKnowledgeItems(project.knowledgeItems || []);
     }
   }, [project?.id]);
 
-  // Load models with tags
-  useEffect(() => {
-    fetch('/api/models?type=chat').then(r => r.json()).then(data => {
+  // Keep catalogue read failures distinct from a genuinely empty catalogue.
+  const fetchChatModels = useCallback(async (): Promise<void> => {
+    if (chatCatalogInFlight.current) return;
+    chatCatalogInFlight.current = true;
+    setChatCatalogState('loading');
+    try {
+      const response = await fetch('/api/models?type=chat');
+      if (!response.ok) throw new Error('聊天模型目录加载失败');
+      const data = await response.json();
+      if (!data || data.success === false || !Array.isArray(data.models)
+        || (data.providers !== undefined && !Array.isArray(data.providers))) {
+        throw new Error('聊天模型目录响应无效');
+      }
+      if (!catalogMountedRef.current) return;
       if (data.models) {
         // Build provider name map from providers array
         const providerMap = new Map<string, string>();
@@ -689,8 +862,15 @@ export default function ChatArea({
         });
         setChatModels(list);
       }
-    }).catch(() => {});
+      setChatCatalogState('ready');
+    } catch {
+      if (catalogMountedRef.current) setChatCatalogState('error');
+    } finally {
+      chatCatalogInFlight.current = false;
+    }
   }, []);
+
+  useEffect(() => { void fetchChatModels(); }, [fetchChatModels]);
 
   useEffect(() => {
     if (!task || chatModels.length === 0) return;
@@ -767,9 +947,20 @@ export default function ChatArea({
   }, [openModelMenu, updateModelMenuLayout, chatViewport.width, chatViewport.height,
     chatViewport.left, chatViewport.top, chatViewport.headerBottom]);
 
-  // Fetch image models
-  const fetchImageModels = useCallback(async () => {
-    fetch('/api/models?type=image').then(r => r.json()).then(data => {
+  // Fetch image models without confusing transport failure with an empty list.
+  const fetchImageModels = useCallback(async (): Promise<void> => {
+    if (imageCatalogInFlight.current) return;
+    imageCatalogInFlight.current = true;
+    setImageCatalogState('loading');
+    try {
+      const response = await fetch('/api/models?type=image');
+      if (!response.ok) throw new Error('图像模型目录加载失败');
+      const data = await response.json();
+      if (!data || data.success === false || !Array.isArray(data.models)
+        || (data.providers !== undefined && !Array.isArray(data.providers))) {
+        throw new Error('图像模型目录响应无效');
+      }
+      if (!catalogMountedRef.current) return;
       const models: ChatModelInfo[] = [];
       const rawModels = data.models || [];
       const providers = data.providers || [];
@@ -782,11 +973,144 @@ export default function ChatArea({
         models.push({ id: m.providerId ? `${m.providerId}::${m.id}` : m.id, modelId: m.id, name: m.name || m.id, providerId: m.providerId, providerName });
       }
       setImageModels(models);
-    }).catch(() => {});
+      setImageCatalogState('ready');
+    } catch {
+      if (catalogMountedRef.current) setImageCatalogState('error');
+    } finally {
+      imageCatalogInFlight.current = false;
+    }
   }, []);
 
-  useEffect(() => { fetchImageModels(); }, []);
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  useEffect(() => { void fetchImageModels(); }, [fetchImageModels]);
+  useEffect(() => {
+    const container = messagesScrollRef.current;
+    if (!container) return;
+    let frame = 0;
+    let touchTimer: ReturnType<typeof setTimeout> | undefined;
+    let settlingTouch = false;
+    let touch: { id: number; x: number; y: number; moved: boolean; wasSettling: boolean } | null = null;
+    let pointer: { id: number; x: number; y: number; moved: boolean } | null = null;
+    const userStartsScroll = () => {
+      cancelAnimationFrame(frame);
+      userScrollVersionRef.current += 1;
+      followMessagesRef.current = false;
+    };
+    const updateFollowAfterScroll = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = requestAnimationFrame(() => {
+          followMessagesRef.current = container.scrollHeight - container.clientHeight - container.scrollTop <= 4;
+        });
+      });
+    };
+    const finishTouchScroll = () => {
+      clearTimeout(touchTimer);
+      touchTimer = setTimeout(() => {
+        settlingTouch = false;
+        followMessagesRef.current = container.scrollHeight - container.clientHeight - container.scrollTop <= 4;
+      }, 250);
+    };
+    const onTouchStart = (event: TouchEvent) => {
+      const first = event.changedTouches[0];
+      if (!first || touch) return;
+      const wasSettling = settlingTouch;
+      clearTimeout(touchTimer);
+      settlingTouch = false;
+      touch = { id: first.identifier, x: first.clientX, y: first.clientY, moved: false, wasSettling };
+    };
+    const onTouchMove = (event: TouchEvent) => {
+      if (!touch || touch.moved) return;
+      const current = Array.from(event.changedTouches).find(item => item.identifier === touch?.id);
+      if (current && Math.hypot(current.clientX - touch.x, current.clientY - touch.y) > 3) {
+        touch.moved = true;
+        userStartsScroll();
+      }
+    };
+    const onTouchFinish = (event: TouchEvent) => {
+      if (!touch || !Array.from(event.changedTouches).some(item => item.identifier === touch?.id)) return;
+      const last = Array.from(event.changedTouches).find(item => item.identifier === touch?.id);
+      if (last && !touch.moved && Math.hypot(last.clientX - touch.x, last.clientY - touch.y) > 3) {
+        touch.moved = true;
+        userStartsScroll();
+      }
+      if (touch.moved || touch.wasSettling) {
+        settlingTouch = true;
+        finishTouchScroll();
+      }
+      touch = null;
+    };
+    const onScroll = () => { if (settlingTouch) finishTouchScroll(); };
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.pointerType !== 'touch') pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false };
+    };
+    const onPointerMove = (event: PointerEvent) => {
+      if (event.pointerType === 'touch' && touch && !touch.moved
+        && Math.hypot(event.clientX - touch.x, event.clientY - touch.y) > 3) {
+        touch.moved = true;
+        userStartsScroll();
+      }
+      if (!pointer || pointer.id !== event.pointerId || pointer.moved) return;
+      if (Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 3) {
+        pointer.moved = true;
+        userStartsScroll();
+      }
+    };
+    const onPointerFinish = (event: PointerEvent) => {
+      if (!pointer || pointer.id !== event.pointerId) return;
+      if (pointer.moved) updateFollowAfterScroll();
+      pointer = null;
+    };
+    const onWheel = () => { clearTimeout(touchTimer); settlingTouch = false; userStartsScroll(); updateFollowAfterScroll(); };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((container.contains(event.target as Node) || event.target === document.body)
+        && ['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) {
+        userStartsScroll(); updateFollowAfterScroll();
+      }
+    };
+    container.addEventListener('wheel', onWheel, { passive: true });
+    container.addEventListener('touchstart', onTouchStart, { passive: true });
+    container.addEventListener('touchmove', onTouchMove, { passive: true });
+    container.addEventListener('touchend', onTouchFinish, { passive: true });
+    container.addEventListener('touchcancel', onTouchFinish, { passive: true });
+    container.addEventListener('scroll', onScroll, { passive: true });
+    container.addEventListener('pointerdown', onPointerDown, { passive: true });
+    window.addEventListener('pointermove', onPointerMove, { passive: true });
+    window.addEventListener('pointerup', onPointerFinish, { passive: true });
+    window.addEventListener('pointercancel', onPointerFinish, { passive: true });
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(touchTimer);
+      container.removeEventListener('wheel', onWheel);
+      container.removeEventListener('touchstart', onTouchStart);
+      container.removeEventListener('touchmove', onTouchMove);
+      container.removeEventListener('touchend', onTouchFinish);
+      container.removeEventListener('touchcancel', onTouchFinish);
+      container.removeEventListener('scroll', onScroll);
+      container.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerFinish);
+      window.removeEventListener('pointercancel', onPointerFinish);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [messageScope, messagesScope, draftScope, draftReadyScope]);
+  useEffect(() => {
+    if (messages.length === 0 || messagesScope !== messageScope || !followMessagesRef.current) return;
+    const container = messagesScrollRef.current;
+    if (!container) return;
+    const scrollVersion = userScrollVersionRef.current;
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    messagesEndRef.current?.scrollIntoView({ behavior: reduceMotion ? 'instant' : 'smooth' });
+    let secondFrame = 0;
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => {
+        if (followMessagesRef.current && userScrollVersionRef.current === scrollVersion) {
+          container.scrollTop = container.scrollHeight;
+        }
+      });
+    });
+    return () => { cancelAnimationFrame(firstFrame); cancelAnimationFrame(secondFrame); };
+  }, [messages, messagesScope, messageScope]);
 
   useEffect(() => {
     let cancelled = false;
@@ -862,44 +1186,71 @@ export default function ChatArea({
   }
 
   // 记忆操作
-  async function addMemory(content: string, category: MemoryItem['category']) {
+  async function addMemory(content: string, category: MemoryItem['category']): Promise<void> {
+    if (memoryMutationInFlight.current) throw new Error('记忆操作尚未完成');
+    memoryMutationInFlight.current = true;
     setMemoriesLoading(true);
     try {
       const res = await fetch('/api/simple-chat/memory', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content, category }),
       });
-      const data = await res.json();
-      if (data.memory) setMemories(prev => [data.memory, ...prev]);
-    } catch {} finally { setMemoriesLoading(false); }
+      if (!res.ok) throw new Error('添加记忆失败');
+      const payload: unknown = await res.json();
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('记忆响应无效');
+      const data = payload as Record<string, unknown>;
+      if (typeof data.id !== 'string' || !data.id.trim() || typeof data.content !== 'string' || !data.content.trim()
+        || (data.category !== 'style' && data.category !== 'preference' && data.category !== 'background' && data.category !== 'other')) throw new Error('记忆响应无效');
+      const memory: MemoryItem = { id: data.id, content: data.content, category: data.category,
+        createdAt: typeof data.createdAt === 'number' && Number.isFinite(data.createdAt) ? data.createdAt : Date.now() };
+      setMemories(prev => [...prev, memory]);
+    } finally {
+      memoryMutationInFlight.current = false;
+      setMemoriesLoading(false);
+    }
   }
 
-  async function deleteMemory(id: string) {
+  async function deleteMemory(id: string): Promise<void> {
+    if (memoryMutationInFlight.current) throw new Error('记忆操作尚未完成');
+    memoryMutationInFlight.current = true;
     setMemoriesLoading(true);
     try {
-      await fetch(`/api/simple-chat/memory?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const response = await fetch(`/api/simple-chat/memory?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error('删除记忆失败');
+      const payload: unknown = await response.json();
+      if (!payload || typeof payload !== 'object' || !('success' in payload) || payload.success !== true) throw new Error('记忆响应无效');
       setMemories(prev => prev.filter(m => m.id !== id));
-    } catch {} finally { setMemoriesLoading(false); }
+    } finally {
+      memoryMutationInFlight.current = false;
+      setMemoriesLoading(false);
+    }
   }
+
+  useLayoutEffect(() => {
+    // Font scaling can resize the bars without a viewport resize event.
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(updateChatViewport);
+    for (const element of [chatAreaRef.current, chatHeaderRef.current, chatAgentBarRef.current]) {
+      if (element) observer.observe(element);
+    }
+    return () => observer.disconnect();
+  }, [updateChatViewport, project?.id, task?.id, messagesScope, draftReadyScope]);
 
   // Sync task to parent（临时聊天模式下跳过保存）
   useEffect(() => {
-    if (!task || !project || tempChat || messagesTaskId !== task.id) return;
+    if (!task || !project || tempChat || messagesScope !== messageScope) return;
     const workflowReturnGuard = workflowReturnPersistenceGuardRef.current;
-    if (workflowReturnGuard?.taskId === task.id) {
-      if (messages.some(message => message.id === workflowReturnGuard.messageId)) {
-        workflowReturnPersistenceGuardRef.current = null;
-      }
+    if (workflowReturnGuard?.scope === messageScope) {
       return;
     }
+    // Switching chat modes must not create a timestamp-only local mutation.
+    // Real message/model/control changes still use the original sync path.
+    if (task.model === selectedModel && task.providerId === selectedProviderId
+      && (task.reasoningEffort || 'medium') === reasoningEffort && (task.responseSpeed || 'balanced') === responseSpeed
+      && simpleChatMessagesMatch(task.messages, messages)
+      && JSON.stringify(task.appliedChatControls) === JSON.stringify(appliedChatControls)) return;
     onUpdateTask({ ...task, messages, model: selectedModel, providerId: selectedProviderId, reasoningEffort, responseSpeed, appliedChatControls, updatedAt: Date.now() });
-  }, [messages, messagesTaskId, selectedModel, selectedProviderId, reasoningEffort, responseSpeed, appliedChatControls, tempChat]);
-
-  // Sync knowledge
-  useEffect(() => {
-    if (!project) return;
-    onUpdateProject({ ...project, knowledgeItems, updatedAt: Date.now() });
-  }, [knowledgeItems]);
+  }, [messages, messagesScope, messageScope, selectedModel, selectedProviderId, reasoningEffort, responseSpeed, appliedChatControls, tempChat]);
 
   function getModelTags(id: string, name: string): string[] {
     const lower = (id + ' ' + name).toLowerCase();
@@ -914,17 +1265,24 @@ export default function ChatArea({
   const handleImageFiles = useCallback((files: File[]) => {
     const imageFiles = files.filter(f => f.type.startsWith('image/'));
     if (imageFiles.length === 0) return;
+    const sourceScope = activeDraftScopeRef.current;
     imageFiles.forEach(file => {
       const reader = new FileReader();
       reader.onload = () => {
         const dataUrl = reader.result as string;
-        setUploadedImages(prev => [...prev, {
+        const attachment: ChatAttachment = {
           id: Math.random().toString(36).slice(2, 10),
           type: 'image' as const,
           name: file.name || `粘贴图片-${Date.now()}.png`,
           url: dataUrl,
           mimeType: file.type || 'image/png',
-        }]);
+        };
+        if (activeDraftScopeRef.current === sourceScope && draftScopeRef.current === sourceScope) {
+          setUploadedImages(prev => [...prev, attachment]);
+        } else {
+          const pending = pendingImageReadsByScopeRef.current.get(sourceScope) ?? [];
+          pendingImageReadsByScopeRef.current.set(sourceScope, [...pending, attachment]);
+        }
       };
       reader.readAsDataURL(file);
     });
@@ -1149,14 +1507,20 @@ export default function ChatArea({
     context: SimpleChatRetryContextV1,
     userMessage: SimpleChatMessage,
   ): Promise<void> => {
+    const requestEpoch = requestScopeEpochRef.current.epoch;
     const requestScopeIsCurrent = () => (
-      isWorkspaceResultScopeCurrent(context.projectId, projectIdRef.current)
+      requestEpoch === requestScopeEpochRef.current.epoch
+      && isWorkspaceResultScopeCurrent(context.projectId, projectIdRef.current)
       && context.taskId === taskIdRef.current
     );
+    const updateRequestMessages = (updater: (previous: SimpleChatMessage[]) => SimpleChatMessage[]): void => {
+      setMessages(previous => requestScopeIsCurrent() ? updater(previous) : previous);
+    };
     if (!requestScopeIsCurrent()) return;
 
+    ordinaryRequestEpochRef.current = requestEpoch;
     setIsStreaming(true);
-    setMessages(previous => previous.map(message => (
+    updateRequestMessages(previous => previous.map(message => (
       message.id === context.assistantMessageId
         ? {
           ...message,
@@ -1203,7 +1567,7 @@ export default function ChatArea({
     let streamError: string | null = null;
 
     const failMessage = (errorMessage: string, content?: string) => {
-      setMessages(previous => previous.map(message => (
+      updateRequestMessages(previous => previous.map(message => (
         message.id === context.assistantMessageId
           ? {
             ...message,
@@ -1269,23 +1633,24 @@ export default function ChatArea({
             setAppliedChatControls(appliedControls);
           } else if (parsed.type === 'search_status') {
             const resultCount = typeof parsed.resultCount === 'number' ? parsed.resultCount : 0;
+            const searchUnavailable = parsed.status === 'failed' || parsed.status === 'error';
             setSearchStatus(parsed.status === 'completed'
               ? `搜索完成，找到 ${resultCount} 条结果`
-              : parsed.status === 'error' ? '搜索出错' : '正在搜索...');
-            if (parsed.status === 'completed') {
+              : searchUnavailable ? '搜索未返回结果' : '正在搜索...');
+            if (parsed.status === 'completed' || searchUnavailable) {
               const searchMessage: SimpleChatMessage = {
                 id: `${context.assistantMessageId}-search`,
-                role: resultCount > 0 ? 'search' : 'system',
-                content: resultCount > 0
-                  ? parsed.searchResults || ''
-                  : '🌐 联网搜索未找到相关结果',
+                role: searchUnavailable || resultCount > 0 ? 'search' : 'system',
+                content: searchUnavailable
+                  ? WEB_SEARCH_UNAVAILABLE
+                  : resultCount > 0 ? parsed.searchResults || '' : '🌐 联网搜索未找到相关结果',
                 createdAt: Date.now(),
               };
-              setMessages(previous => {
+              updateRequestMessages(previous => {
                 const existingIndex = previous.findIndex(message => message.id === searchMessage.id);
                 if (existingIndex < 0) {
                   const assistantIndex = previous.findIndex(message => message.id === context.assistantMessageId);
-                  const insertAt = assistantIndex < 0 ? previous.length : assistantIndex;
+                  const insertAt = assistantIndex < 0 ? previous.length : assistantIndex + (searchUnavailable ? 1 : 0);
                   return [...previous.slice(0, insertAt), searchMessage, ...previous.slice(insertAt)];
                 }
                 return previous.map(message => message.id === searchMessage.id ? searchMessage : message);
@@ -1293,7 +1658,7 @@ export default function ChatArea({
             }
           } else if (parsed.type === 'tool_status') {
             setSearchStatus(null);
-            setMessages(previous => previous.map(message => (
+            updateRequestMessages(previous => previous.map(message => (
               message.id === context.assistantMessageId
                 ? {
                   ...message,
@@ -1309,7 +1674,7 @@ export default function ChatArea({
           ) {
             setSearchStatus(null);
             fullContent = '批量导出任务已提交。';
-            setMessages(previous => previous.map(message => (
+            updateRequestMessages(previous => previous.map(message => (
               message.id === context.assistantMessageId
                 ? {
                     ...message,
@@ -1326,7 +1691,7 @@ export default function ChatArea({
           ) {
             setSearchStatus(null);
             fullContent = '视频成片任务已提交。';
-            setMessages(previous => previous.map(message => (
+            updateRequestMessages(previous => previous.map(message => (
               message.id === context.assistantMessageId
                 ? { ...message, content: fullContent, agentRunId: parsed.runId }
                 : message
@@ -1335,7 +1700,7 @@ export default function ChatArea({
             setSearchStatus(null);
             const parsedImageUrl = parsed.imageUrl;
             const imageRef = readWorkspaceAssetReference(parsed.imageRef);
-            setMessages(previous => previous.map(message => {
+            updateRequestMessages(previous => previous.map(message => {
               if (message.id !== context.assistantMessageId) return message;
               const imageUrl = imageRef?.url || parsedImageUrl;
               const imageIndex = message.images?.length || 0;
@@ -1369,7 +1734,7 @@ export default function ChatArea({
           } else if (parsed.type === 'text' && parsed.content) {
             setSearchStatus(null);
             fullContent += parsed.content;
-            setMessages(previous => previous.map(message => (
+            updateRequestMessages(previous => previous.map(message => (
               message.id === context.assistantMessageId
                 ? { ...message, content: fullContent }
                 : message
@@ -1379,7 +1744,7 @@ export default function ChatArea({
       });
       if (streamResult === 'cancelled' || !requestScopeIsCurrent()) return;
       if (!streamError) {
-        setMessages(previous => previous.map(message => (
+        updateRequestMessages(previous => previous.map(message => (
           message.id === context.assistantMessageId
             ? { ...message, status: 'completed', error: undefined, retryContext: context }
             : message
@@ -1395,6 +1760,7 @@ export default function ChatArea({
       failMessage(errorMessage);
     } finally {
       if (!requestScopeIsCurrent()) return;
+      if (ordinaryRequestEpochRef.current === requestEpoch) ordinaryRequestEpochRef.current = null;
       setIsStreaming(false);
       const estimateTokens = (text: string) => {
         const cn = (text.match(/[一-鿿]/g) || []).length;
@@ -1430,16 +1796,25 @@ export default function ChatArea({
       return;
     }
 
-    setIsStreaming(true);
     const requestProjectId = project.id;
     const requestTaskId = task.id;
     const requestActiveAgentId = task.activeAgentId;
+    const requestEpoch = requestScopeEpochRef.current.epoch;
+    if (activeSendRef.current?.epoch === requestEpoch) return;
+    const sendToken = { epoch: requestEpoch };
+    activeSendRef.current = sendToken;
+    try {
+    setIsStreaming(true);
+    const requestInputEditEpoch = inputEditEpochRef.current;
+    ordinaryRequestEpochRef.current = requestEpoch;
     const requestScopeIsCurrent = () => (
-      isWorkspaceResultScopeCurrent(requestProjectId, projectIdRef.current)
+      requestEpoch === requestScopeEpochRef.current.epoch
+      && isWorkspaceResultScopeCurrent(requestProjectId, projectIdRef.current)
       && requestTaskId === taskIdRef.current
     );
     const userMessageId = Math.random().toString(36).slice(2, 10);
     const assistantMessageId = Math.random().toString(36).slice(2, 10);
+    const sentAttachmentIds = new Set(uploadedImages.map(attachment => attachment.id));
     const attachmentRefs = await Promise.all(uploadedImages.map((attachment, index) => (
       registerChatAttachment(attachment, userMessageId, index, project.id, task.id)
     )));
@@ -1556,10 +1931,18 @@ export default function ChatArea({
       createdAt: Date.now(),
     };
 
-    setMessages(previous => [...previous, userMsg, aiMsg]);
-    setInput('');
-    setUploadedImages([]);
+    followMessagesRef.current = true;
+    setMessages(previous => requestScopeIsCurrent() ? [...previous, userMsg, aiMsg] : previous);
+    setInput(previous => requestScopeIsCurrent() && requestInputEditEpoch === inputEditEpochRef.current && previous === input ? '' : previous);
+    setUploadedImages(previous => requestScopeIsCurrent()
+      ? previous.filter(attachment => !sentAttachmentIds.has(attachment.id)) : previous);
     await executeChatRequest(retryContext, userMsg);
+    } finally {
+      if (activeSendRef.current === sendToken) {
+        activeSendRef.current = null;
+        if (requestScopeEpochRef.current.epoch === requestEpoch) setIsStreaming(false);
+      }
+    }
   }, [input, isStreaming, messages, project, task, uploadedImages, webSearch, memories, selectedImageModel, selectedImageProviderId, brandActive, selectedCanvasProjectId, registerChatAttachment, executeChatRequest, knowledgeItems, reasoningEffort, responseSpeed]);
 
   // 供消息编辑后重新生成调用
@@ -1779,7 +2162,7 @@ export default function ChatArea({
 
   // Project search
   const handleProjectSearch = useCallback(() => {
-    if (!searchQuery.trim() || !project) return;
+    if (!searchQuery.trim() || !project) { setSearchResults([]); setSearchSubmitted(false); return; }
     const results: typeof searchResults = [];
     project.tasks.forEach(t => {
       t.messages.forEach((m, i) => {
@@ -1789,6 +2172,7 @@ export default function ChatArea({
       });
     });
     setSearchResults(results);
+    setSearchSubmitted(true);
   }, [searchQuery, project]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -2049,8 +2433,9 @@ export default function ChatArea({
       // P3 fix: 用 DOM API 构建子节点，避免 innerHTML 拼接（低风险但非最佳实践）
       const span1 = document.createElement('span');
       span1.textContent = `已发送 ${transferredImages.length} 张图片，等待画布接收`;
-      const span2 = document.createElement('span');
-      span2.className = 'underline';
+      const span2 = document.createElement('button');
+      span2.type = 'button';
+      span2.className = 'inline-flex min-h-11 min-w-11 shrink-0 items-center whitespace-nowrap rounded-sm px-1 underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current';
       span2.textContent = '前往画布查看';
       toast.appendChild(span1);
       toast.appendChild(span2);
@@ -2130,23 +2515,42 @@ export default function ChatArea({
 
   // Knowledge
   const addKnowledgeItem = (item: ProjectKnowledgeItem) => {
-    setKnowledgeItems(prev => [...prev, item]);
-    setAddingKnowledge(null);
-    setKnowledgeUrl('');
-    setKnowledgeNote('');
-    setKnowledgeNoteName('');
+    if (!knowledgeViewMountedRef.current || knowledgeViewScopeRef.current !== knowledgeViewScope) return;
+    if (!updateKnowledge(items => items.some(current => current.id === item.id) ? null : [...items, item])) return;
+    if (item.type === 'file' || item.type === 'image') {
+      // File completion must not discard or close an unrelated draft.
+      setAddingKnowledge(current => current === 'file' ? null : current);
+    } else {
+      setAddingKnowledge(null);
+      updateKnowledgeDraft({ url: '', note: '', noteName: '' });
+    }
   };
   const removeKnowledgeItem = (id: string) => {
-    setKnowledgeItems(prev => prev.filter(k => k.id !== id));
+    const expected = knowledgeItems.find(item => item.id === id);
+    if (!expected) return;
+    updateKnowledge(items => {
+      const current = items.find(item => item.id === id);
+      return !current || JSON.stringify(current) !== JSON.stringify(expected) ? null : items.filter(item => item.id !== id);
+    });
   };
   const toggleKnowledgeItem = (id: string) => {
-    setKnowledgeItems(prev => prev.map(k => k.id === id ? { ...k, enabled: !k.enabled } : k));
+    const expected = knowledgeItems.find(item => item.id === id);
+    if (!expected) return;
+    updateKnowledge(items => {
+      const current = items.find(item => item.id === id);
+      return !current || JSON.stringify(current) !== JSON.stringify(expected) ? null : items.map(item => item.id === id ? { ...item, enabled: !item.enabled } : item);
+    });
   };
+
+  if (project && task && (messagesScope !== messageScope || draftReadyScope !== draftScope)) {
+    return <div role="status" className="flex-1 flex items-center justify-center text-sm text-muted-foreground">正在切换对话…</div>;
+  }
 
   if (!project || !task) {
     return (
       <div className="flex-1 flex items-center justify-center bg-background">
         <div className="text-center space-y-3">
+          {workflowReturnConflict && <p role="alert" className="text-sm text-muted-foreground">工作流返回参数存在冲突，未处理。请返回工作流重新发送。</p>}
           <BookOpen className="w-12 h-12 mx-auto text-muted-foreground/30" />
           <p className="text-muted-foreground text-lg">选择或创建一个对话</p>
           <button onClick={() => onCreateTask(project?.id || '')} className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm">
@@ -2176,8 +2580,14 @@ export default function ChatArea({
   } : undefined;
   const chatVisibleTop = Math.max(chatViewport.top, chatViewport.naturalTop);
   const chatAvailableHeight = Math.max(0, chatViewport.top + chatViewport.height - chatVisibleTop);
+  // The Page sync bar also consumes height. Compact message actions follow
+  // the actual chat budget, not the full window or a narrow-width heuristic.
+  const compactMessageActions = chatAvailableHeight <= 430;
+  // Preserve readable conversation space even in extra-short landscape;
+  // the existing composer scroll keeps every original control reachable.
   const composerMaxHeight = Math.max(44,
-    chatAvailableHeight - Math.max(0, chatViewport.headerBottom - chatVisibleTop) - 45 - 24);
+    chatAvailableHeight - Math.max(0, chatViewport.agentBottom - chatVisibleTop)
+      - (chatAvailableHeight <= 320 ? Math.max(80, chatAvailableHeight / 3) : 80));
 
   return (
     <div className="flex-1 min-w-0 flex flex-col h-screen supports-[height:100dvh]:h-dvh min-h-0 bg-background isolate"
@@ -2208,6 +2618,21 @@ export default function ChatArea({
             <ChevronDown className={`w-3 h-3 text-muted-foreground transition-transform ${openModelMenu === 'chat' ? 'rotate-180' : ''}`} />
           </button>
           <div className={`fixed bg-card border border-border rounded-xl shadow-xl z-[100] overflow-y-auto p-1 transition-opacity ${openModelMenu === 'chat' ? 'opacity-100 visible pointer-events-auto' : 'hidden'}`} style={modelMenuStyle} role="listbox">
+            {chatCatalogState === 'loading' && (
+              <div role="status" className="px-3 py-4 text-sm text-muted-foreground">正在加载模型目录…</div>
+            )}
+            {chatCatalogState === 'error' && (
+              <div className="space-y-2 p-2">
+                <p role="status" className="text-sm text-muted-foreground">聊天模型目录加载失败，请重试。</p>
+                <button type="button" onClick={() => { void fetchChatModels(); }}
+                  className="min-h-11 min-w-11 w-full whitespace-nowrap rounded-lg bg-muted px-3 text-sm font-medium text-foreground hover:bg-muted/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  重新加载
+                </button>
+              </div>
+            )}
+            {chatCatalogState === 'ready' && chatModels.length === 0 && (
+              <div role="status" className="px-3 py-4 text-center text-sm text-muted-foreground">暂无可用聊天模型</div>
+            )}
             {chatModels.map(m => (
               <button key={m.id} type="button" role="option" aria-selected={m.providerId === selectedProviderId && m.modelId === selectedModel} onClick={() => handleChatModelSelect({ modelId: m.modelId, providerId: m.providerId })}
                 className={`w-full text-left px-3 py-2 rounded-lg hover:bg-muted transition-colors cursor-pointer ${m.providerId === selectedProviderId && m.modelId === selectedModel ? 'bg-primary/10' : ''}`}>
@@ -2279,6 +2704,18 @@ export default function ChatArea({
           </button>
           <div className={`fixed bg-card border border-border rounded-xl shadow-xl z-[100] overflow-y-auto p-1 transition-opacity ${openModelMenu === 'image' ? 'opacity-100 visible pointer-events-auto' : 'hidden'}`} style={modelMenuStyle} role="listbox">
             <div className="px-3 py-1.5 text-[11px] text-muted-foreground/60 font-medium">图像生成模型</div>
+            {imageCatalogState === 'loading' && (
+              <div role="status" className="px-3 py-4 text-sm text-muted-foreground">正在加载模型目录…</div>
+            )}
+            {imageCatalogState === 'error' && (
+              <div className="space-y-2 p-2">
+                <p role="status" className="text-sm text-muted-foreground">图像模型目录加载失败，请重试。</p>
+                <button type="button" onClick={() => { void fetchImageModels(); }}
+                  className="min-h-11 min-w-11 w-full whitespace-nowrap rounded-lg bg-muted px-3 text-sm font-medium text-foreground hover:bg-muted/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  重新加载
+                </button>
+              </div>
+            )}
             {imageModels.map(m => (
               <button key={m.id} type="button" role="option" aria-selected={m.providerId === selectedImageProviderId && m.modelId === selectedImageModel} onClick={() => handleImageModelSelect({ modelId: m.modelId, providerId: m.providerId })}
                 className={`w-full text-left px-3 py-2 rounded-lg hover:bg-muted transition-colors cursor-pointer ${m.providerId === selectedImageProviderId && m.modelId === selectedImageModel ? 'bg-primary/10' : ''}`}>
@@ -2294,7 +2731,7 @@ export default function ChatArea({
                 </div>
               </button>
             ))}
-            {imageModels.length === 0 && (
+            {imageCatalogState === 'ready' && imageModels.length === 0 && (
               <div className="px-3 py-4 text-center text-xs text-muted-foreground/50">暂无可用图像模型</div>
             )}
           </div>
@@ -2359,10 +2796,10 @@ export default function ChatArea({
       </header>
 
       {/* Agent Bar */}
-      <div className={`flex min-w-0 items-center gap-2 px-4 border-b border-border bg-muted/30 shrink-0 ${compactHeader ? 'min-h-11 py-0' : 'py-1.5'}`}>
+      <div ref={chatAgentBarRef} className={`flex min-w-0 flex-col px-4 border-b border-border bg-muted/30 shrink-0 ${compactHeader ? 'min-h-11 py-0' : 'py-1.5'}`}>
+        <div className={`flex min-w-0 w-full items-center gap-2 ${compactHeader ? 'min-h-11' : ''}`}>
           <Bot className="w-4 h-4 shrink-0 text-muted-foreground" />
           <span className="shrink-0 text-xs text-muted-foreground">Agent:</span>
-          {controlNotice && <span className="min-w-0 max-w-[360px] truncate text-[11px] text-muted-foreground" title={controlNotice}>· {controlNotice}</span>}
           {historyImageNotice && <span className="min-w-0 max-w-[360px] truncate text-[11px] text-muted-foreground" title={historyImageNotice}>· {historyImageNotice}</span>}
           {activeAgent ? (
             <span className="min-w-0 text-xs font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full flex items-center gap-1">
@@ -2377,19 +2814,21 @@ export default function ChatArea({
           <button onClick={() => setShowAgentPanel(!showAgentPanel)} className={`text-xs text-muted-foreground hover:text-foreground transition-colors flex shrink-0 items-center justify-center gap-1 ${compactHeader ? 'min-h-11 min-w-11' : ''}`}>
             <Settings className="w-3 h-3" /> 管理
           </button>
+        </div>
+        {controlNotice && <span role="status" className="block min-w-0 max-w-full whitespace-normal pb-2 text-[11px] text-muted-foreground [overflow-wrap:anywhere]" title={controlNotice}>· {controlNotice}</span>}
       </div>
 
       {/* Messages */}
-      <div className={`flex-1 min-h-0 overflow-y-auto px-4 ${compactHeader ? 'py-2' : 'py-6'}`}>
+      <div ref={messagesScrollRef} className={`flex-1 min-h-0 overflow-y-auto px-4 ${compactHeader ? 'py-2' : 'py-6'}`}>
         <div className="max-w-3xl mx-auto space-y-6">
           {messages.length === 0 && (
-            <div className="text-center py-20 space-y-4">
-              <h1 className="text-3xl font-bold text-foreground">{activeAgent ? `${activeAgent.emoji || '🤖'} ${activeAgent.name}` : project.name}</h1>
+            <div className={chatAvailableHeight <= 320 ? 'flex flex-wrap items-center gap-x-2 gap-y-1 text-left' : `text-center ${compactMessageActions ? 'py-2 space-y-2' : 'py-20 space-y-4'}`}>
+              <h1 className={`${chatAvailableHeight <= 320 ? 'min-w-0 max-w-full [overflow-wrap:anywhere] text-sm leading-5' : compactMessageActions ? 'text-xl leading-7 truncate' : 'text-3xl'} font-bold text-foreground`} title={activeAgent ? `${activeAgent.emoji || '🤖'} ${activeAgent.name}` : project.name}>{activeAgent ? `${activeAgent.emoji || '🤖'} ${activeAgent.name}` : project.name}</h1>
               <p className="text-muted-foreground">开始一段新的对话吧</p>
-              <div className="flex flex-wrap justify-center gap-2 mt-4">
+              <div className={`flex flex-wrap justify-center gap-2 mt-4 ${chatAvailableHeight <= 320 ? 'w-full' : ''}`}>
                 {PRESET_SKILLS.slice(0, 6).map(skill => (
                   <button key={skill.id} onClick={() => onSkillToAgent(skill)}
-                    className="px-3 py-1.5 rounded-full border border-border hover:bg-muted text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1">
+                    className="min-h-11 min-w-11 px-3 py-1.5 rounded-full border border-border hover:bg-muted text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1">
                     <span>{skill.icon}</span> {skill.name}
                   </button>
                 ))}
@@ -2408,12 +2847,14 @@ export default function ChatArea({
               key={msg.id}
               data-chat-message-id={msg.id}
               data-chat-asset-placement-ids={(msg.imageRefs || []).map(reference => reference.placementId).filter(Boolean).join(' ')}
-              className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}
-              style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 120px' }}
+              className={`min-w-0 flex gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}
+              style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 120px',
+                marginBlockEnd: compactMessageActions && idx === messages.length - 1 ? 0 : undefined }}
             >
               {/* Search results card */}
-              {msg.role === 'search' && (
-                <SearchResultsCard content={msg.content} />
+              {msg.role === 'search' && (msg.content === WEB_SEARCH_UNAVAILABLE
+                ? <div role="status" className="max-w-full rounded-2xl border border-border bg-card px-4 py-3 text-sm text-foreground [overflow-wrap:anywhere]">{msg.content}</div>
+                : <SearchResultsCard content={msg.content} />
               )}
               {msg.role !== 'search' && (<>
               {msg.role === 'assistant' && (
@@ -2421,7 +2862,7 @@ export default function ChatArea({
                   {activeAgent?.emoji ? <span className="text-sm">{activeAgent.emoji}</span> : <Bot className="w-3.5 h-3.5 text-primary" />}
                 </div>
               )}
-              <div className={`max-w-[82%] ${msg.role === 'user' ? 'order-first' : ''}`}>
+              <div className={`min-w-0 max-w-[82%] ${msg.role === 'user' ? 'order-first' : ''}`}>
                 <div className={`rounded-2xl px-4 py-3 ${
                   msg.role === 'user'
                     ? 'bg-primary text-primary-foreground rounded-br-md'
@@ -2436,20 +2877,20 @@ export default function ChatArea({
                   ) : msg.role === 'assistant' ? (
                     <MarkdownRenderer content={msg.content} />
                   ) : editingMessageId === msg.id ? (
-                    <div className="space-y-2 min-w-[280px]">
+                    <div className="min-w-0 space-y-2">
                       <textarea
                         value={editingContent}
                         onChange={(e) => setEditingContent(e.target.value)}
-                        className="w-full bg-primary-foreground/10 text-primary-foreground rounded-lg px-3 py-2 text-sm outline-none resize-y min-h-[60px]"
+                        className="w-full bg-primary-foreground/10 text-primary-foreground rounded-lg px-3 py-2 text-base outline-none resize-y min-h-[60px]"
                         autoFocus
                       />
-                      <div className="flex gap-2 justify-end">
-                        <button onClick={() => { setEditingMessageId(null); setEditingContent(''); }} className="px-2.5 py-1 rounded text-xs bg-primary-foreground/20 hover:bg-primary-foreground/30">取消</button>
-                        <button onClick={() => handleEditSubmit(msg.id)} className="px-2.5 py-1 rounded text-xs bg-primary-foreground text-primary font-medium">保存并重新生成</button>
+                      <div className="flex flex-wrap gap-2 justify-end">
+                        <button onClick={() => { setEditingMessageId(null); setEditingContent(''); }} className="min-h-11 min-w-11 px-2.5 py-1 rounded text-xs bg-primary-foreground/20 hover:bg-primary-foreground/30">取消</button>
+                        <button onClick={() => handleEditSubmit(msg.id)} className="min-h-11 min-w-11 px-2.5 py-1 rounded text-xs bg-primary-foreground text-primary font-medium">保存并重新生成</button>
                       </div>
                     </div>
                   ) : (
-                    <div className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</div>
+                    <div className="whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-relaxed">{msg.content}</div>
                   )}
                   {msg.agentRunId && msg.content !== '视频成片任务已提交。' && (
                     <div className="mt-3">
@@ -2484,8 +2925,8 @@ export default function ChatArea({
                     />
                   )}
                   {msg.role === 'assistant' && msg.status === 'failed' && (
-                    <div className="mt-3 flex items-center justify-between gap-3 border-t border-destructive/20 pt-2">
-                      <span className="text-xs text-destructive">
+                    <div className="mt-3 flex min-w-0 flex-wrap items-center justify-between gap-3 border-t border-destructive/20 pt-2">
+                      <span className="min-w-0 [overflow-wrap:anywhere] text-xs text-destructive">
                         {msg.error?.message || '请求失败'}
                       </span>
                       {msg.error?.retryable && msg.retryContext && (
@@ -2493,7 +2934,7 @@ export default function ChatArea({
                           type="button"
                           onClick={() => void retryFailedMessage(msg.id)}
                           disabled={isStreaming}
-                          className="inline-flex shrink-0 items-center gap-1 rounded-md border border-destructive/30 px-2 py-1 text-xs text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-40"
+                          className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-md border border-destructive/30 px-2 py-1 text-xs text-destructive hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-40"
                           title="重试失败请求"
                         >
                           <RefreshCw className="h-3.5 w-3.5" />
@@ -2505,56 +2946,68 @@ export default function ChatArea({
                   {msg.images && msg.images.length > 0 && (
                     <div className="flex gap-2 mt-2 flex-wrap">
                       {msg.images.map((url, i) => (
-                        <img key={i} src={url} alt="" className="w-20 h-20 object-cover rounded-lg cursor-zoom-in hover:opacity-80 transition-opacity"
-                          onClick={() => setLightbox({ images: msg.images!, index: i })} />
+                        <button key={i} type="button" aria-label={`预览图片 ${i + 1}`}
+                          className="h-20 w-20 shrink-0 overflow-hidden rounded-lg cursor-zoom-in hover:opacity-80 transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                          onClick={() => setLightbox({ images: msg.images!, index: i })}>
+                          <img src={url} alt={`图片 ${i + 1}`} className="h-full w-full object-cover" />
+                        </button>
                       ))}
                     </div>
                   )}
                 </div>
                 {/* Message Operations */}
                 {shouldRenderSimpleChatWorkspaceActions(msg, isStreaming) && hasSimpleChatAssistantOperationPayload(msg) && (
-                  <div className="flex gap-0.5 mt-1 px-1 opacity-0 hover:opacity-100 transition-opacity flex-wrap">
-                    <button onClick={() => copyMessage(msg.content)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="复制"><Copy className="w-3 h-3" /></button>
-                    <button onClick={regenerateLast} className="p-1 rounded hover:bg-muted text-muted-foreground" title="重新生成"><RefreshCw className="w-3 h-3" /></button>
-                    <button onClick={() => makeShorter(msg)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="更短"><Minimize2 className="w-3 h-3" /></button>
-                    <button onClick={() => makeLonger(msg)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="更长"><Maximize2 className="w-3 h-3" /></button>
-                    <button onClick={() => continueConversation(msg)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="继续"><MoreHorizontal className="w-3 h-3" /></button>
-                    <button onClick={() => toImagePrompt(msg)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="转生图提示词"><Sparkles className="w-3 h-3" /></button>
-                    <button onClick={() => branchFromMessage(msg.id)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="从此分支"><GitBranch className="w-3 h-3" /></button>
-                    <button onClick={() => saveAsArtifact(msg)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="保存为 Artifact"><FileCode className="w-3 h-3" /></button>
+                  <div role={compactMessageActions ? 'group' : undefined}
+                    onFocusCapture={compactMessageActions ? event => {
+                      if (event.target instanceof HTMLElement && event.currentTarget.contains(event.target)) {
+                        event.target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                      }
+                    } : undefined}
+                    aria-label={compactMessageActions ? '回复操作' : undefined}
+                    className={compactMessageActions
+                      ? "flex max-w-full flex-nowrap gap-0.5 mt-1 px-1 overflow-x-auto overscroll-x-contain"
+                      : "flex flex-wrap gap-0.5 mt-1 px-1 opacity-100 sm:opacity-0 sm:hover:opacity-100 sm:focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity flex-wrap"}>
+                    <button onClick={() => copyMessage(msg.content)} className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-muted text-muted-foreground" title="复制"><Copy className="w-3 h-3" /></button>
+                    <button onClick={regenerateLast} className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-muted text-muted-foreground" title="重新生成"><RefreshCw className="w-3 h-3" /></button>
+                    <button onClick={() => makeShorter(msg)} className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-muted text-muted-foreground" title="更短"><Minimize2 className="w-3 h-3" /></button>
+                    <button onClick={() => makeLonger(msg)} className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-muted text-muted-foreground" title="更长"><Maximize2 className="w-3 h-3" /></button>
+                    <button onClick={() => continueConversation(msg)} className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-muted text-muted-foreground" title="继续"><MoreHorizontal className="w-3 h-3" /></button>
+                    <button onClick={() => toImagePrompt(msg)} className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-muted text-muted-foreground" title="转生图提示词"><Sparkles className="w-3 h-3" /></button>
+                    <button onClick={() => branchFromMessage(msg.id)} className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-muted text-muted-foreground" title="从此分支"><GitBranch className="w-3 h-3" /></button>
+                    <button onClick={() => saveAsArtifact(msg)} className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-muted text-muted-foreground" title="保存为 Artifact"><FileCode className="w-3 h-3" /></button>
                     {hasPptJson(msg.content) && (
                       <button onClick={() => downloadPptx(msg.content)} disabled={downloadingPptx}
-                        className="p-1 rounded hover:bg-primary/10 text-primary transition-colors" title="下载 PPTX">
+                        className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-primary/10 text-primary transition-colors" title="下载 PPTX">
                         {downloadingPptx ? <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" /> : <Download className="w-3 h-3" />}
                       </button>
                     )}
                     {hasExcelJson(msg.content) && (
                       <button onClick={() => { const d = extractJsonFromContent(msg.content); if (d) downloadExcel(d); }}
-                        className="p-1 rounded hover:bg-green-500/10 text-green-500 transition-colors" title="下载 Excel">
+                        className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-green-500/10 text-green-500 transition-colors" title="下载 Excel">
                         <Download className="w-3 h-3" />
                       </button>
                     )}
                     {hasWordJson(msg.content) && (
                       <button onClick={() => { const d = extractJsonFromContent(msg.content); if (d) downloadWord(d); }}
-                        className="p-1 rounded hover:bg-blue-500/10 text-blue-500 transition-colors" title="下载 Word">
+                        className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-blue-500/10 text-blue-500 transition-colors" title="下载 Word">
                         <Download className="w-3 h-3" />
                       </button>
                     )}
                     {hasMindmapJson(msg.content) && (
                       <button onClick={() => { const d = extractJsonFromContent(msg.content); if (d) downloadMindmap(d); }}
-                        className="p-1 rounded hover:bg-amber-500/10 text-amber-500 transition-colors" title="下载思维导图">
+                        className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-amber-500/10 text-amber-500 transition-colors" title="下载思维导图">
                         <Download className="w-3 h-3" />
                       </button>
                     )}
                     {hasFlowchartJson(msg.content) && (
                       <button onClick={() => { const d = extractJsonFromContent(msg.content); if (d) downloadFlowchart(d); }}
-                        className="p-1 rounded hover:bg-purple-500/10 text-purple-500 transition-colors" title="下载流程图">
+                        className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-purple-500/10 text-purple-500 transition-colors" title="下载流程图">
                         <Download className="w-3 h-3" />
                       </button>
                     )}
                     {hasPdfJson(msg.content) && (
                       <button onClick={() => { const d = extractJsonFromContent(msg.content); if (d) downloadPdf(d); }}
-                        className="p-1 rounded hover:bg-red-500/10 text-red-500 transition-colors" title="下载 PDF">
+                        className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-red-500/10 text-red-500 transition-colors" title="下载 PDF">
                         <Download className="w-3 h-3" />
                       </button>
                     )}
@@ -2571,16 +3024,16 @@ export default function ChatArea({
                     {/* 回复评分 */}
                     <span className="w-px h-4 bg-border mx-0.5 self-center" />
                     <button onClick={() => handleRateMessage(msg.id, 'up')}
-                      className={`p-1 rounded transition-colors ${messageRatings[msg.id] === 'up' ? 'text-green-500 bg-green-500/10' : 'hover:bg-muted text-muted-foreground'}`} title="有帮助">
+                      className={`inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded transition-colors ${messageRatings[msg.id] === 'up' ? 'text-green-500 bg-green-500/10' : 'hover:bg-muted text-muted-foreground'}`} title="有帮助">
                       <ThumbsUp className="w-3 h-3" />
                     </button>
                     <button onClick={() => handleRateMessage(msg.id, 'down')}
-                      className={`p-1 rounded transition-colors ${messageRatings[msg.id] === 'down' ? 'text-red-500 bg-red-500/10' : 'hover:bg-muted text-muted-foreground'}`} title="无帮助">
+                      className={`inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded transition-colors ${messageRatings[msg.id] === 'down' ? 'text-red-500 bg-red-500/10' : 'hover:bg-muted text-muted-foreground'}`} title="无帮助">
                       <ThumbsDown className="w-3 h-3" />
                     </button>
                     {/* 保存到 Canvas */}
                     <button onClick={() => { setCanvasContent(msg.content); setShowCanvas(true); }}
-                      className="p-1 rounded hover:bg-primary/10 text-primary transition-colors" title="在 Canvas 中编辑">
+                      className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-primary/10 text-primary transition-colors" title="在 Canvas 中编辑">
                       <PenSquare className="w-3 h-3" />
                     </button>
                   </div>
@@ -2599,10 +3052,19 @@ export default function ChatArea({
                 )}
                 {/* User Message Operations */}
                 {msg.role === 'user' && !isStreaming && editingMessageId !== msg.id && (
-                  <div className="flex gap-0.5 mt-1 px-1 opacity-0 hover:opacity-100 transition-opacity">
-                    <button onClick={() => copyMessage(msg.content)} className="p-1 rounded hover:bg-muted text-muted-foreground" title="复制"><Copy className="w-3 h-3" /></button>
-                    <button onClick={() => { setEditingMessageId(msg.id); setEditingContent(msg.content); }} className="p-1 rounded hover:bg-muted text-muted-foreground" title="编辑"><Pencil className="w-3 h-3" /></button>
-                    <button onClick={() => handleDeleteMessage(msg.id)} className="p-1 rounded hover:bg-red-500/10 text-red-500" title="删除"><Trash2 className="w-3 h-3" /></button>
+                  <div role={compactMessageActions ? 'group' : undefined}
+                    onFocusCapture={compactMessageActions ? event => {
+                      if (event.target instanceof HTMLElement && event.currentTarget.contains(event.target)) {
+                        event.target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                      }
+                    } : undefined}
+                    aria-label={compactMessageActions ? '消息操作' : undefined}
+                    className={compactMessageActions
+                      ? "flex max-w-full flex-nowrap gap-0.5 mt-1 px-1 overflow-x-auto overscroll-x-contain"
+                      : "flex flex-wrap gap-0.5 mt-1 px-1 opacity-100 sm:opacity-0 sm:hover:opacity-100 sm:focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity"}>
+                    <button onClick={() => copyMessage(msg.content)} className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-muted text-muted-foreground" title="复制"><Copy className="w-3 h-3" /></button>
+                    <button onClick={() => { setEditingMessageId(msg.id); setEditingContent(msg.content); }} className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-muted text-muted-foreground" title="编辑"><Pencil className="w-3 h-3" /></button>
+                    <button onClick={() => handleDeleteMessage(msg.id)} className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-red-500/10 text-red-500" title="删除"><Trash2 className="w-3 h-3" /></button>
                   </div>
                 )}
               </div>
@@ -2618,23 +3080,11 @@ export default function ChatArea({
         </div>
       </div>
 
-      {/* Quick Commands 快捷工作流 */}
-      {showQuickCommands && (
-        <div className="px-4 pb-1">
-          <div className="max-w-3xl mx-auto">
-            <QuickCommands
-              isMonochrome={false}
-              hasImages={uploadedImages.length > 0}
-              onSelect={prompt => { setInput(prompt); setShowQuickCommands(false); textareaRef.current?.focus(); }}
-              onClose={() => setShowQuickCommands(false)}
-            />
-          </div>
-        </div>
-      )}
-
       {/* Input */}
       <div className={`shrink-0 min-w-0 px-3 sm:px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] ${compactHeader ? 'pt-1 overflow-y-auto overscroll-contain' : 'pt-2'}`}
-        ref={composerRef} style={compactHeader ? { maxHeight: composerMaxHeight } : undefined}>
+        ref={composerRef} style={compactHeader ? { maxHeight: composerMaxHeight,
+          ...(shortChatViewport ? { paddingBottom: 'max(4px, env(safe-area-inset-bottom))' } : {}),
+        } : undefined}>
         <div className="min-w-0 max-w-3xl mx-auto">
           <div
             className={`relative bg-card border rounded-2xl shadow-sm focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/30 transition-all ${dragOver ? 'border-primary ring-2 ring-primary/30' : 'border-border'}`}
@@ -2662,17 +3112,19 @@ export default function ChatArea({
             {uploadedImages.length > 0 && (
               <div className="flex gap-2 px-4 pt-3 flex-wrap">
                 {uploadedImages.map((att, i) => (
-                  <div key={i} className="relative group">
-                    <img src={att.url} alt="" className="w-16 h-16 object-cover rounded-lg" />
-                    <button onClick={() => setUploadedImages(prev => prev.filter((_, j) => j !== i))}
-                      className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div key={i} className="relative flex w-24 shrink-0 flex-col gap-1">
+                    <img src={att.url} alt={att.name || "已上传图片"} className="w-24 h-20 object-cover rounded-lg" />
+                    <button type="button" onClick={() => setUploadedImages(prev => prev.filter((_, j) => j !== i))}
+                      aria-label={"移除图片：" + (att.name || "未命名图片")}
+                      title={"移除图片：" + (att.name || "未命名图片")}
+                      className="absolute top-0 right-0 inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-border bg-card text-foreground shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
                       <X className="w-3 h-3" />
                     </button>
-                    <button onClick={() => {
+                    <button type="button" onClick={() => {
                       setInput(`请对这张图片进行深度分析报告，从视觉风格、文案策略、目标受众、可复用技巧四个维度拆解，并给出可执行的创作建议：`);
                       textareaRef.current?.focus();
                     }}
-                      className="absolute -bottom-1 -left-1 px-1.5 py-0.5 rounded bg-primary text-primary-foreground text-[10px] opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                      className="inline-flex min-h-11 w-full items-center justify-center rounded-lg border border-border bg-muted px-2 py-1 text-xs text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
                       深度分析
                     </button>
                   </div>
@@ -2682,14 +3134,15 @@ export default function ChatArea({
             <textarea
               ref={textareaRef}
               value={input}
-              onChange={e => setInput(e.target.value)}
+              onChange={e => { inputEditEpochRef.current += 1; setInput(e.target.value); }}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
               placeholder={activeAgent ? `与 ${activeAgent.name} 对话...` : "输入消息，Enter 发送，支持 Ctrl+V 粘贴图片"}
               rows={1}
-              className="block w-full min-w-0 bg-transparent px-4 py-3 text-base sm:text-sm leading-relaxed resize-none outline-none placeholder:text-muted-foreground/50 min-h-[80px] sm:min-h-[60px] max-h-[min(200px,30dvh)]"
+              className="block w-full min-w-0 bg-transparent px-4 py-3 text-base sm:text-sm leading-relaxed resize-none outline-none placeholder:text-muted-foreground min-h-[80px] sm:min-h-[60px] max-h-[min(200px,30dvh)]"
               style={{ scrollbarWidth: 'thin', ...(compactHeader ? {
-                minHeight: 44, maxHeight: Math.max(44, Math.min(160, chatViewport.height * 0.2)),
+                minHeight: 44, maxHeight: shortChatViewport ? 44 : Math.max(44, Math.min(160, chatViewport.height * 0.2)),
+                fontSize: 16,
                 paddingTop: 8, paddingBottom: 8,
               } : {}) }}
             />
@@ -2700,6 +3153,8 @@ export default function ChatArea({
                 <Shield className="w-4 h-4" />
               </button>
               <button onClick={() => setWebSearch(!webSearch)}
+                aria-label="联网搜索"
+                aria-pressed={webSearch}
                 className={`p-1.5 rounded-lg transition-colors ${webSearch ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'}`}
                 title="联网搜索">
                 <Globe className="w-4 h-4" />
@@ -2722,11 +3177,19 @@ export default function ChatArea({
                 <Paperclip className="w-4 h-4" />
               </button>
               {/* 快捷工作流 */}
-              <button onClick={() => setShowQuickCommands(v => !v)}
-                className={`p-1.5 rounded-lg transition-colors ${showQuickCommands ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'}`}
-                title="快捷工作流">
-                <Zap className="w-4 h-4" />
-              </button>
+              <QuickCommands
+                open={showQuickCommands}
+                onOpenChange={setShowQuickCommands}
+                hasImages={uploadedImages.length > 0}
+                onSelect={prompt => { setInput(prompt); setShowQuickCommands(false); textareaRef.current?.focus(); }}
+                trigger={
+                  <button type="button"
+                    className={`p-1.5 rounded-lg transition-colors ${showQuickCommands ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'}`}
+                    title="快捷工作流">
+                    <Zap className="w-4 h-4" />
+                  </button>
+                }
+              />
               {/* 提示词优化器 */}
               <button onClick={() => setShowPromptOptimizer(true)}
                 className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors"
@@ -2747,22 +3210,12 @@ export default function ChatArea({
             </div>
             <input id="chat-file-upload" type="file" accept="image/*" multiple className="hidden"
               onChange={e => {
-                const files = Array.from(e.target.files || []);
-                files.forEach(f => {
-                  const reader = new FileReader();
-                  reader.onload = ev => {
-                    setUploadedImages(prev => [...prev, {
-                      id: Math.random().toString(36).slice(2, 10),
-                      type: 'image', name: f.name, mimeType: f.type,
-                      url: ev.target?.result as string
-                    }]);
-                  };
-                  reader.readAsDataURL(f);
-                });
+                handleImageFiles(Array.from(e.currentTarget.files || []));
+                e.currentTarget.value = "";
               }} />
           </div>
           <div className={`text-xs text-muted-foreground/50 flex min-w-0 flex-wrap items-center justify-center gap-x-3 gap-y-1 ${compactHeader ? 'mt-1' : 'mt-2'}`}>
-            <label className={`inline-flex min-w-0 items-center gap-2 ${compactHeader ? 'min-w-[100px] flex-1' : 'w-full sm:w-auto'}`}>
+            <label className={`inline-flex min-w-0 items-center gap-2 ${compactHeader ? 'min-w-[calc(4em+0.5rem+44px)] flex-1' : 'w-full sm:w-auto'}`}>
               <span className="shrink-0">目标画布</span>
               <select
                 aria-label="目标画布项目"
@@ -2795,34 +3248,40 @@ export default function ChatArea({
 
       {/* Agent Panel */}
       {showAgentPanel && (
-        <ModalOverlay onClose={() => setShowAgentPanel(false)}>
-          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-y-auto p-6" onClick={e => e.stopPropagation()}>
-            <ModalHeader title="Agent 管理" onClose={() => setShowAgentPanel(false)} />
+        <ProjectToolDialog title="Agent 管理" onClose={() => setShowAgentPanel(false)} className="max-w-lg sm:max-w-lg">
+          <div className="min-h-0 min-w-0 overflow-y-auto overscroll-contain p-3 sm:p-4">
             {project.agents.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-8">暂无 Agent，从 Skill 书创建</p>
             ) : (
               <div className="space-y-2">
                 {project.agents.map(agent => (
-                  <div key={agent.id} className="p-3 rounded-xl border border-border flex items-center gap-3">
-                    <span className="text-xl">{agent.emoji || '🤖'}</span>
+                  <div key={agent.id} className="min-w-0 p-3 rounded-xl border border-border flex items-center gap-3">
+                    <span className="shrink-0 text-xl">{agent.emoji || '🤖'}</span>
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm truncate">{agent.name}</div>
-                      <div className="text-xs text-muted-foreground truncate">{agent.description}</div>
+                      <div className="font-medium text-sm truncate" title={agent.name}>{agent.name}</div>
+                      <div className="text-xs text-muted-foreground truncate" title={agent.description}>{agent.description}</div>
                     </div>
-                    <button onClick={() => onUpdateTask({ ...task, activeAgentId: agent.id })} className="text-xs px-2 py-1 rounded-lg bg-primary/10 text-primary hover:bg-primary/20">使用</button>
-                    <button onClick={() => onDeleteAgent(agent.id)} className="p-1 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><Trash2 className="w-3.5 h-3.5" /></button>
+                    <button type="button" onClick={() => onUpdateTask({ ...task, activeAgentId: agent.id })}
+                      aria-pressed={task.activeAgentId === agent.id}
+                      className={"inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-lg px-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary " + (task.activeAgentId === agent.id ? 'bg-primary text-primary-foreground' : 'bg-primary/10 text-primary hover:bg-primary/20')}>
+                      使用{task.activeAgentId === agent.id && <Check aria-hidden="true" className="h-3.5 w-3.5" />}
+                    </button>
+                    <button type="button" onClick={() => onDeleteAgent(agent.id)} aria-label={"删除 " + agent.name}
+                      className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 ))}
               </div>
             )}
           </div>
-        </ModalOverlay>
+        </ProjectToolDialog>
       )}
 
       {/* Instructions Panel */}
       {showInstructionsPanel && (
         <ModalOverlay onClose={() => setShowInstructionsPanel(false)}>
-          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-xl max-h-[85vh] overflow-y-auto p-6" onClick={e => e.stopPropagation()}>
+          <div role="dialog" aria-label="项目指令" aria-modal="true" className="bg-card border border-border rounded-2xl shadow-2xl w-[calc(100%-2rem)] max-w-xl max-h-[85dvh] min-w-0 overflow-y-auto overscroll-contain p-4 sm:p-6" onClick={e => e.stopPropagation()}>
             <ModalHeader title="项目指令" onClose={() => setShowInstructionsPanel(false)} />
             <p className="text-xs text-muted-foreground mb-4">
               项目指令会自动注入到每次对话的 System Prompt 中，控制 AI 的行为、风格和约束。所有对话均生效，无需每次重复说明。
@@ -2833,7 +3292,7 @@ export default function ChatArea({
               <Field label="输出格式" value={instructionsDraft.outputFormat} onChange={v => setInstructionsDraft(d => ({ ...d, outputFormat: v }))} placeholder="例如：使用 Markdown 格式，代码用代码块..." />
               <Field label="风格规则" value={instructionsDraft.styleRules} onChange={v => setInstructionsDraft(d => ({ ...d, styleRules: v }))} placeholder="例如：正式商务风格，避免俚语..." />
               <Field label="禁止规则" value={instructionsDraft.forbiddenRules} onChange={v => setInstructionsDraft(d => ({ ...d, forbiddenRules: v }))} placeholder="例如：不要提及竞争对手，不要给出法律建议..." />
-              <button onClick={saveInstructions} className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors">保存指令</button>
+              <button onClick={saveInstructions} className="min-h-11 w-full py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors [.theme-monochrome_&]:bg-[color-mix(in_srgb,var(--primary)_80%,black)]">保存指令</button>
             </div>
           </div>
         </ModalOverlay>
@@ -2841,45 +3300,45 @@ export default function ChatArea({
 
       {/* Knowledge Panel */}
       {showKnowledgePanel && (
-        <ModalOverlay onClose={() => setShowKnowledgePanel(false)}>
-          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-xl max-h-[85vh] overflow-y-auto p-6" onClick={e => e.stopPropagation()}>
-            <ModalHeader title="知识库" onClose={() => setShowKnowledgePanel(false)} />
+        <ProjectToolDialog title="知识库" fallbackFocusRef={chatSettingsButtonRef} onClose={() => setShowKnowledgePanel(false)} className="max-w-xl sm:max-w-xl">
+          <div className="min-h-0 min-w-0 overflow-y-auto overscroll-contain p-3 sm:p-4">
             <p className="text-xs text-muted-foreground mb-4">
               上传文件、添加链接或笔记作为 AI 对话的知识来源。知识内容会自动注入到每次对话的上下文中，让 AI 基于你的资料回答。
             </p>
+            {knowledgeError && <p role="alert" className="mb-3 text-xs text-destructive">{knowledgeError}</p>}
             {/* Add buttons */}
             <div className="flex gap-2 mb-4">
-              <button onClick={() => setAddingKnowledge('file')} className="flex-1 py-2 rounded-lg border border-border hover:bg-muted text-xs transition-colors">📁 上传文件</button>
-              <button onClick={() => setAddingKnowledge('url')} className="flex-1 py-2 rounded-lg border border-border hover:bg-muted text-xs transition-colors">🔗 添加链接</button>
-              <button onClick={() => setAddingKnowledge('note')} className="flex-1 py-2 rounded-lg border border-border hover:bg-muted text-xs transition-colors">📝 添加笔记</button>
+              <button onClick={() => setAddingKnowledge('file')} className="min-h-11 min-w-0 flex-1 py-2 rounded-lg border border-border hover:bg-muted text-xs transition-colors">📁 上传文件</button>
+              <button onClick={() => setAddingKnowledge('url')} className="min-h-11 min-w-0 flex-1 py-2 rounded-lg border border-border hover:bg-muted text-xs transition-colors">🔗 添加链接</button>
+              <button onClick={() => setAddingKnowledge('note')} className="min-h-11 min-w-0 flex-1 py-2 rounded-lg border border-border hover:bg-muted text-xs transition-colors">📝 添加笔记</button>
             </div>
             {/* URL input */}
             {addingKnowledge === 'url' && (
               <div className="mb-4 p-3 rounded-xl border border-border space-y-2">
-                <input value={knowledgeUrl} onChange={e => setKnowledgeUrl(e.target.value)}
-                  placeholder="输入网址 https://..." className="w-full bg-transparent text-sm px-3 py-2 rounded-lg border border-border outline-none focus:border-primary/50" />
+                <input value={knowledgeUrl} onChange={e => updateKnowledgeDraft({ url: e.target.value })}
+                  placeholder="输入网址 https://..." className="min-h-11 w-full bg-transparent text-base px-3 py-2 rounded-lg border border-border outline-none focus:border-primary/50" />
                 <div className="flex gap-2">
                   <button onClick={() => addKnowledgeItem({
                     id: Math.random().toString(36).slice(2, 10), projectId: project.id,
                     type: 'url', name: knowledgeUrl, url: knowledgeUrl, tags: [], enabled: true, createdAt: Date.now(), updatedAt: Date.now()
-                  })} disabled={!knowledgeUrl} className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs disabled:opacity-40">添加</button>
-                  <button onClick={() => setAddingKnowledge(null)} className="px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:bg-muted">取消</button>
+                  })} disabled={!knowledgeUrl} className="min-h-11 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs disabled:opacity-40">添加</button>
+                  <button onClick={() => setAddingKnowledge(null)} className="min-h-11 px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:bg-muted">取消</button>
                 </div>
               </div>
             )}
             {/* Note input */}
             {addingKnowledge === 'note' && (
               <div className="mb-4 p-3 rounded-xl border border-border space-y-2">
-                <input value={knowledgeNoteName} onChange={e => setKnowledgeNoteName(e.target.value)}
-                  placeholder="笔记标题" className="w-full bg-transparent text-sm px-3 py-2 rounded-lg border border-border outline-none focus:border-primary/50" />
-                <textarea value={knowledgeNote} onChange={e => setKnowledgeNote(e.target.value)}
-                  placeholder="笔记内容..." rows={4} className="w-full bg-transparent text-sm px-3 py-2 rounded-lg border border-border outline-none focus:border-primary/50 resize-none" />
+                <input value={knowledgeNoteName} onChange={e => updateKnowledgeDraft({ noteName: e.target.value })}
+                  placeholder="笔记标题" className="min-h-11 w-full bg-transparent text-base px-3 py-2 rounded-lg border border-border outline-none focus:border-primary/50" />
+                <textarea value={knowledgeNote} onChange={e => updateKnowledgeDraft({ note: e.target.value })}
+                  placeholder="笔记内容..." rows={4} className="w-full bg-transparent text-base px-3 py-2 rounded-lg border border-border outline-none focus:border-primary/50 resize-none" />
                 <div className="flex gap-2">
                   <button onClick={() => addKnowledgeItem({
                     id: Math.random().toString(36).slice(2, 10), projectId: project.id,
                     type: 'note', name: knowledgeNoteName || '未命名笔记', textContent: knowledgeNote, tags: [], enabled: true, createdAt: Date.now(), updatedAt: Date.now()
-                  })} disabled={!knowledgeNote} className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs disabled:opacity-40">添加</button>
-                  <button onClick={() => setAddingKnowledge(null)} className="px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:bg-muted">取消</button>
+                  })} disabled={!knowledgeNote} className="min-h-11 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs disabled:opacity-40">添加</button>
+                  <button onClick={() => setAddingKnowledge(null)} className="min-h-11 px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:bg-muted">取消</button>
                 </div>
               </div>
             )}
@@ -2889,8 +3348,10 @@ export default function ChatArea({
                 <input type="file" onChange={e => {
                   const file = e.target.files?.[0];
                   if (!file) return;
+                  const fileScope = knowledgeFileScopeRef.current;
                   const reader = new FileReader();
                   reader.onload = ev => {
+                    if (knowledgeFileScopeRef.current !== fileScope) return;
                     addKnowledgeItem({
                       id: Math.random().toString(36).slice(2, 10), projectId: project.id,
                       type: file.type.startsWith('image/') ? 'image' : 'file',
@@ -2900,8 +3361,11 @@ export default function ChatArea({
                     });
                   };
                   reader.readAsDataURL(file);
-                }} className="text-xs" />
-                <button onClick={() => setAddingKnowledge(null)} className="mt-2 px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:bg-muted">取消</button>
+                }} className="block min-h-11 w-full min-w-0 text-xs file:min-h-11" />
+                <button onClick={() => {
+                  knowledgeFileScopeRef.current = { scope: knowledgeFileScopeRef.current.scope };
+                  setAddingKnowledge(null);
+                }} className="mt-2 min-h-11 px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:bg-muted">取消</button>
               </div>
             )}
             {/* Usage explanation */}
@@ -2920,15 +3384,17 @@ export default function ChatArea({
             ) : (
               <div className="space-y-2">
                 {knowledgeItems.map(item => (
-                  <div key={item.id} className="flex items-center gap-3 p-2.5 rounded-xl border border-border group hover:bg-muted/30 transition-colors">
-                    <button onClick={() => toggleKnowledgeItem(item.id)}
-                      className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${item.enabled ? 'bg-primary border-primary' : 'border-muted-foreground/30'}`}>
-                      {item.enabled && <div className="w-2 h-2 rounded-sm bg-primary-foreground" />}
+                  <div key={item.id} className="flex min-w-0 items-center gap-2 p-2 rounded-xl border border-border hover:bg-muted/30 transition-colors">
+                    <button type="button" onClick={() => toggleKnowledgeItem(item.id)} aria-label={(item.enabled ? '禁用' : '启用') + item.name} aria-pressed={item.enabled}
+                      className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg hover:bg-muted">
+                      <span className={`flex h-4 w-4 items-center justify-center rounded border-2 ${item.enabled ? 'bg-primary border-primary' : 'border-muted-foreground/30'}`}>
+                        {item.enabled && <span className="h-2 w-2 rounded-sm bg-primary-foreground" />}
+                      </span>
                     </button>
                     <span className="text-lg shrink-0">{item.type === 'file' ? '📄' : item.type === 'image' ? '🖼️' : item.type === 'url' ? '🔗' : '📝'}</span>
                     <div className="flex-1 min-w-0">
                       <div className="text-sm truncate">{item.name}</div>
-                      <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+                      <div className="text-[10px] text-muted-foreground flex min-w-0 flex-wrap items-center gap-1 break-all">
                         <span>{item.type === 'file' ? '文件' : item.type === 'image' ? '图片' : item.type === 'url' ? '链接' : '笔记'}</span>
                         {item.type === 'url' && item.url && <span>· {item.url.length > 40 ? item.url.slice(0, 40) + '...' : item.url}</span>}
                         {item.type === 'file' && <span>· {item.mimeType?.split('/')[1] || '未知'} 格式</span>}
@@ -2936,30 +3402,69 @@ export default function ChatArea({
                         {item.enabled ? <span className="text-primary">· 将注入上下文</span> : <span className="text-muted-foreground/60">· 已禁用</span>}
                       </div>
                     </div>
-                    <button onClick={() => setKnowledgePreview(item)}
-                      className="p-1 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-all">
-                      <Eye className="w-3.5 h-3.5" />
+                    <button type="button" onClick={() => setKnowledgePreview(item)} aria-label={"预览" + item.name}
+                      className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
+                      <Eye className="w-4 h-4" />
                     </button>
-                    <button onClick={() => removeKnowledgeItem(item.id)}
-                      className="p-1 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-all">
-                      <Trash2 className="w-3.5 h-3.5" />
+                    <button type="button" onClick={() => removeKnowledgeItem(item.id)} aria-label={"删除" + item.name}
+                      className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors">
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
                 ))}
               </div>
             )}
           </div>
-        </ModalOverlay>
+          {knowledgePreview && (
+            <ProjectToolDialog title={knowledgePreview.name} onClose={() => setKnowledgePreview(null)} className="max-w-lg sm:max-w-lg [&_[data-slot=dialog-title]]:line-clamp-2 [&_[data-slot=dialog-title]]:break-all">
+                <p className="shrink-0 px-3 py-2 text-xs text-muted-foreground sm:px-4">{knowledgePreview.type === 'image' ? '🖼️ 图片内容预览' : knowledgePreview.type === 'file' ? '📄 文件内容预览' : knowledgePreview.type === 'url' ? '🔗 URL 链接' : '📝 笔记内容'}</p>
+                <div className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain bg-muted/50 rounded-xl mx-3 p-3 text-sm sm:mx-4">
+                  {knowledgePreview.type === 'url' ? (
+                    <a href={knowledgePreview.url || knowledgePreview.textContent || ''} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-all">{knowledgePreview.url || knowledgePreview.textContent || ''}</a>
+                  ) : knowledgePreview.type === 'image' || (knowledgePreview.url && (knowledgePreview.url.startsWith('data:image/') || knowledgePreview.url.startsWith('blob:'))) ? (
+                    <div className="space-y-3">
+                      {knowledgePreview.url && (knowledgePreview.url.startsWith('data:image/') || knowledgePreview.url.startsWith('blob:')) ? (
+                        <img src={knowledgePreview.url} alt={knowledgePreview.name} className="max-w-full max-h-[50vh] rounded-lg object-contain bg-transparent" />
+                      ) : (
+                        <p className="text-muted-foreground text-center py-8">暂不支持预览此图片格式</p>
+                      )}
+                      <div className="text-xs text-muted-foreground space-y-1 break-all">
+                        <p>文件名：{knowledgePreview.name}</p>
+                        {knowledgePreview.mimeType && <p>类型：{knowledgePreview.mimeType}</p>}
+                      </div>
+                    </div>
+                  ) : knowledgePreview.type === 'note' ? (
+                    (knowledgePreview.textContent || '').length > 5000 ? (
+                      <div className="font-mono whitespace-pre-wrap break-all">
+                        {(knowledgePreview.textContent || '').slice(0, 5000)}
+                        <p className="text-muted-foreground mt-2">... 内容过长，已截断前 5000 字符</p>
+                      </div>
+                    ) : (
+                      <div className="font-mono whitespace-pre-wrap break-all">{knowledgePreview.textContent || '(空笔记)'}</div>
+                    )
+                  ) : (
+                    <div className="text-xs text-muted-foreground space-y-2 break-all text-center py-4">
+                      <p className="text-4xl">📄</p>
+                      <p className="font-medium text-foreground">{knowledgePreview.name}</p>
+                      {knowledgePreview.mimeType && <p>类型：{knowledgePreview.mimeType}</p>}
+                      <p className="text-muted-foreground/60">文件已上传，可在对话中作为知识上下文引用</p>
+                    </div>
+                  )}
+                </div>
+                <p className="shrink-0 px-3 py-3 text-xs text-muted-foreground sm:px-4">💡 知识库内容会自动注入到 AI 对话上下文中，帮助 AI 更准确地理解你的需求。</p>
+            </ProjectToolDialog>
+          )}
+        </ProjectToolDialog>
       )}
 
       {/* Artifacts Panel */}
       {showArtifacts && (
-        <div className="absolute right-0 top-0 bottom-0 w-80 bg-card border-l border-border z-40 flex flex-col shadow-xl" data-modal="true">
+        <div className="absolute right-0 top-0 bottom-0 z-[200] flex min-h-0 min-w-0 w-80 max-w-full flex-col border-l border-border bg-card shadow-xl" data-modal="true">
           <div className="flex items-center justify-between px-4 py-3 border-b border-border">
             <h3 className="font-semibold text-sm">Artifacts</h3>
-            <button onClick={() => setShowArtifacts(false)} className="p-1 rounded-lg hover:bg-muted"><X className="w-4 h-4" /></button>
+            <button onClick={() => setShowArtifacts(false)} aria-label="关闭 Artifacts 文档" className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg p-1 hover:bg-muted"><X className="w-4 h-4" /></button>
           </div>
-          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain p-3 space-y-2">
             {(() => { const allArtifacts = messages.flatMap(m => m.artifacts || []); return allArtifacts.length === 0 ? (
               <div className="text-center text-muted-foreground text-sm py-8">暂无 Artifacts<br />生成代码或文档后自动出现</div>
             ) : allArtifacts.map(a => (
@@ -2968,7 +3473,7 @@ export default function ChatArea({
                   {a.type === 'code' ? <FileCode className="w-4 h-4 text-primary" /> : <FileText className="w-4 h-4 text-primary" />}
                   <span className="text-xs font-medium truncate flex-1">{a.title}</span>
                 </div>
-                <pre className="text-[11px] text-muted-foreground line-clamp-4 whitespace-pre-wrap">{a.content}</pre>
+                <pre className="text-[11px] text-muted-foreground line-clamp-4 whitespace-pre-wrap break-all">{a.content}</pre>
               </div>
             ))})()}
           </div>
@@ -2976,78 +3481,31 @@ export default function ChatArea({
       )}
 
       {/* Knowledge Preview Modal */}
-      {knowledgePreview && (
-        <ModalOverlay onClose={() => setKnowledgePreview(null)}>
-          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg max-h-[70vh] flex flex-col p-6" onClick={e => e.stopPropagation()}>
-            <ModalHeader title={knowledgePreview.name} onClose={() => setKnowledgePreview(null)} />
-            <p className="text-xs text-muted-foreground mb-2">{knowledgePreview.type === 'file' ? '📄 文件内容预览' : knowledgePreview.type === 'url' ? '🔗 URL 链接' : '📝 笔记内容'}</p>
-            <div className="flex-1 overflow-auto bg-muted/50 rounded-xl p-4 text-sm">
-              {knowledgePreview.type === 'url' ? (
-                <a href={knowledgePreview.url || knowledgePreview.textContent || ''} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-all">{knowledgePreview.url || knowledgePreview.textContent || ''}</a>
-              ) : knowledgePreview.type === 'image' || (knowledgePreview.url && (knowledgePreview.url.startsWith('data:image/') || knowledgePreview.url.startsWith('blob:'))) ? (
-                <div className="space-y-3">
-                  {knowledgePreview.url && (knowledgePreview.url.startsWith('data:image/') || knowledgePreview.url.startsWith('blob:')) ? (
-                    <img src={knowledgePreview.url} alt={knowledgePreview.name} className="max-w-full max-h-[50vh] rounded-lg object-contain bg-transparent" />
-                  ) : (
-                    <p className="text-muted-foreground text-center py-8">暂不支持预览此图片格式</p>
-                  )}
-                  <div className="text-xs text-muted-foreground space-y-1">
-                    <p>文件名：{knowledgePreview.name}</p>
-                    {knowledgePreview.mimeType && <p>类型：{knowledgePreview.mimeType}</p>}
-                  </div>
-                </div>
-              ) : knowledgePreview.type === 'note' ? (
-                (knowledgePreview.textContent || '').length > 5000 ? (
-                  <div className="font-mono whitespace-pre-wrap break-all">
-                    {(knowledgePreview.textContent || '').slice(0, 5000)}
-                    <p className="text-muted-foreground mt-2">... 内容过长，已截断前 5000 字符</p>
-                  </div>
-                ) : (
-                  <div className="font-mono whitespace-pre-wrap break-all">{knowledgePreview.textContent || '(空笔记)'}</div>
-                )
-              ) : (
-                <div className="text-xs text-muted-foreground space-y-2 text-center py-4">
-                  <p className="text-4xl">📄</p>
-                  <p className="font-medium text-foreground">{knowledgePreview.name}</p>
-                  {knowledgePreview.mimeType && <p>类型：{knowledgePreview.mimeType}</p>}
-                  <p className="text-muted-foreground/60">文件已上传，可在对话中作为知识上下文引用</p>
-                </div>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground mt-3">💡 知识库内容会自动注入到 AI 对话上下文中，帮助 AI 更准确地理解你的需求。</p>
-          </div>
-        </ModalOverlay>
-      )}
+      {/* Rendered inside its Knowledge Panel so touch dismissal stays nested. */}
 
-      {/* Search Panel */}
+      {/* Project Search */}
       {showSearch && (
-        <ModalOverlay onClose={() => setShowSearch(false)}>
-          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
-            <ModalHeader title="项目内搜索" onClose={() => setShowSearch(false)} />
-            <div className="flex gap-2 mb-4">
-              <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleProjectSearch()}
-                placeholder="搜索消息内容..."
-                className="flex-1 bg-muted px-3 py-2 rounded-lg border border-border text-sm outline-none focus:border-primary/50" />
-              <button onClick={handleProjectSearch} className="px-3 py-2 bg-primary text-primary-foreground rounded-lg text-sm">搜索</button>
-            </div>
-            <div className="space-y-2 max-h-60 overflow-y-auto">
-              {searchResults.map((r, i) => (
-                <button key={i} onClick={() => {
-                  if (task && task.id !== r.taskId) onSelectTask(project.tasks.find(t => t.id === r.taskId) || task);
-                  setShowSearch(false);
-                }}
-                  className="w-full text-left p-3 rounded-xl border border-border hover:bg-muted transition-colors">
-                  <div className="text-xs font-medium">{r.taskName}</div>
-                  <div className="text-[11px] text-muted-foreground line-clamp-2 mt-1">{r.snippet}</div>
-                </button>
-              ))}
-              {searchResults.length === 0 && searchQuery && (
-                <div className="text-center text-muted-foreground text-sm py-4">未找到匹配结果</div>
-              )}
-            </div>
+        <ProjectToolDialog title="项目内搜索" fallbackFocusRef={chatSettingsButtonRef} onClose={() => setShowSearch(false)} className="max-w-md sm:max-w-md">
+          <div className="flex min-w-0 shrink-0 gap-2 p-3 sm:p-4">
+            <input aria-label="搜索项目消息" value={searchQuery}
+              onChange={e => { setSearchQuery(e.target.value); setSearchResults([]); setSearchSubmitted(false); }}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleProjectSearch(); } }}
+              placeholder="搜索消息内容..."
+              className="min-h-11 min-w-0 flex-1 rounded-lg border border-border bg-muted px-3 text-base text-foreground outline-none placeholder:text-foreground/80 focus:border-primary/50" />
+            <button type="button" onClick={handleProjectSearch} className={"min-h-11 min-w-11 shrink-0 whitespace-nowrap rounded-lg px-3 text-sm " + (theme === "dark" ? "bg-primary text-primary-foreground" : "bg-foreground text-background")}>搜索</button>
           </div>
-        </ModalOverlay>
+          <div className="max-h-[60dvh] min-h-0 min-w-0 space-y-2 overflow-y-auto overscroll-contain px-3 pb-3 sm:px-4 sm:pb-4">
+            {searchResults.map((r, i) => (
+              <button key={i} onClick={() => { if (task && task.id !== r.taskId) onSelectTask(project.tasks.find(t => t.id === r.taskId) || task); setShowSearch(false); }}
+                className="min-h-11 w-full min-w-0 rounded-xl border border-border p-3 text-left transition-colors hover:bg-muted">
+                <div className="break-words text-sm font-medium">{r.taskName}</div>
+                <div className="mt-1 line-clamp-2 break-all text-sm text-muted-foreground">{r.snippet}</div>
+              </button>
+            ))}
+            {searchSubmitted && searchResults.length === 0 && <div role="status" className="py-6 text-center text-sm text-muted-foreground">未找到匹配结果</div>}
+            {!searchSubmitted && <div className="py-6 text-center text-sm text-muted-foreground">输入关键词后点击搜索或按回车</div>}
+          </div>
+        </ProjectToolDialog>
       )}
 
       {/* Share Dialog — 公开链接分享 */}
@@ -3076,14 +3534,9 @@ export default function ChatArea({
         <MemoryPanel
           memories={memories}
           onClose={() => setShowMemory(false)}
-          onAdd={async (content, category) => {
-            const res = await fetch('/api/simple-chat/memory', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content, category }) });
-            if (res.ok) { const m = await res.json(); setMemories(prev => [...prev, m]); }
-          }}
-          onDelete={async (id) => {
-            await fetch(`/api/simple-chat/memory?id=${id}`, { method: 'DELETE' });
-            setMemories(prev => prev.filter(m => m.id !== id));
-          }}
+          isPending={memoriesLoading}
+          onAdd={addMemory}
+          onDelete={deleteMemory}
         />
       )}
 
@@ -3137,7 +3590,7 @@ export default function ChatArea({
         <ModelCompare
           isMonochrome={theme !== 'dark'}
           prompt={input}
-          models={chatModels.map(m => ({ id: m.modelId, providerId: m.providerId, name: m.name, displayName: m.name }))}
+          models={chatModels.map(m => ({ id: m.modelId, providerId: m.providerId, providerName: m.providerName, name: m.originalName || m.name, displayName: m.originalName || m.name }))}
           onClose={() => setShowModelCompare(false)}
         />
       )}
@@ -3145,6 +3598,7 @@ export default function ChatArea({
       {/* 用量统计 */}
       {showUsageStats && (
         <UsageStats
+          fallbackFocusRef={chatSettingsButtonRef}
           usage={{
             prompt: tokenUsage?.promptTokens || 0,
             completion: tokenUsage?.completionTokens || 0,
@@ -3197,6 +3651,11 @@ export default function ChatArea({
       />
 
       {/* Search results info bar */}
+      {workflowReturnConflict && (
+        <div role="alert" className="px-4 py-2 bg-primary/5 border-b border-primary/10 text-xs text-muted-foreground shrink-0">
+          工作流返回参数存在冲突，未处理。请返回工作流重新发送。
+        </div>
+      )}
       {searchStatus && (
         <div className="flex items-center gap-2 px-4 py-2 bg-primary/5 border-b border-primary/10 text-xs text-muted-foreground shrink-0">
           <Globe className="w-3.5 h-3.5 text-primary animate-pulse" />
@@ -3219,44 +3678,75 @@ function ModalOverlay({ children, onClose }: { children: React.ReactNode; onClos
 
 function ModalHeader({ title, onClose }: { title: string; onClose: () => void }) {
   return (
-    <div className="flex items-center justify-between mb-4">
-      <h2 className="text-lg font-semibold">{title}</h2>
-      <button onClick={onClose} className="p-1 rounded-lg hover:bg-muted"><X className="w-5 h-5" /></button>
+    <div className="flex min-w-0 items-center justify-between gap-2 mb-4">
+      <h2 className="min-w-0 break-words text-lg font-semibold">{title}</h2>
+      <button onClick={onClose} aria-label={`关闭${title}`} className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg hover:bg-muted"><X className="w-5 h-5" /></button>
     </div>
   );
 }
 
 function Field({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder: string }) {
+  const id = useId();
   return (
     <div>
-      <label className="text-xs font-medium text-muted-foreground mb-1 block">{label}</label>
-      <textarea value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} rows={2}
-        className="w-full bg-muted text-sm px-3 py-2 rounded-lg border border-border outline-none focus:border-primary/50 resize-none placeholder:text-muted-foreground/40" />
+      <label htmlFor={id} className="text-xs font-medium text-muted-foreground mb-1 block">{label}</label>
+      <textarea id={id} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} rows={2}
+        className="min-h-11 w-full bg-muted text-base px-3 py-2 rounded-lg border border-border outline-none focus:border-primary/50 resize-none placeholder:text-foreground/75" />
     </div>
   );
 }
 
-function SkillPanel({ skills, onSelect, onClose }: { skills: PresetSkill[]; onSelect: (skill: PresetSkill) => void; onClose: () => void }) {
+
+function ProjectToolDialog({ title, onClose, children, className = "", fallbackFocusRef }: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+  className?: string;
+  fallbackFocusRef?: React.RefObject<HTMLButtonElement | null>;
+}): React.ReactElement {
+  const returnFocus = useRef<HTMLElement | null>(null);
   return (
-    <ModalOverlay onClose={onClose}>
-      <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-y-auto p-6" onClick={e => e.stopPropagation()}>
-        <ModalHeader title="Skill 书" onClose={onClose} />
-        <div className="space-y-2">
-          {skills.map(skill => (
-            <button key={skill.id} data-simple-chat-skill-id={skill.id} onClick={() => onSelect(skill)}
-              className="w-full text-left p-3 rounded-xl border border-border hover:bg-muted transition-colors flex items-start gap-3">
-              <span className="text-2xl">{skill.icon}</span>
-              <div>
-                <div className="font-medium text-sm">{skill.name}</div>
-                <div className="text-xs text-muted-foreground">{skill.description}</div>
-                <div className="flex gap-1 mt-1">
-                  {skill.tags.map(t => <span key={t} className="text-[10px] bg-muted px-1.5 py-0.5 rounded-full text-muted-foreground">{t}</span>)}
-                </div>
-              </div>
-            </button>
-          ))}
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent showCloseButton={false} aria-describedby={undefined}
+        onOpenAutoFocus={() => { returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; }}
+        onCloseAutoFocus={(event) => { const prior = returnFocus.current; const target = prior?.isConnected && prior.getClientRects().length > 0 ? prior : fallbackFocusRef?.current; if (target?.isConnected && target.getClientRects().length > 0) { event.preventDefault(); target.focus(); } }}
+        style={{ animation: "none" }}
+        className={"flex max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] min-w-0 flex-col gap-0 overflow-hidden p-0 text-foreground " + className}>
+        <div className="flex min-w-0 shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2 sm:px-4">
+          <DialogTitle className="min-w-0 break-words text-base font-semibold">{title}</DialogTitle>
+          <button type="button" onClick={onClose} aria-label={"关闭" + title}
+            className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted">
+            <X className="h-4 w-4" />
+          </button>
         </div>
+        {children}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SkillPanel({ skills, onSelect, onClose }: {
+  skills: PresetSkill[];
+  onSelect: (skill: PresetSkill) => void;
+  onClose: () => void;
+}): React.ReactElement {
+  return (
+    <ProjectToolDialog title="Skill 书" onClose={onClose} className="max-w-lg sm:max-w-lg">
+      <div className="min-h-0 min-w-0 space-y-2 overflow-y-auto overscroll-contain p-3 sm:p-4">
+        {skills.map(skill => (
+          <button key={skill.id} data-simple-chat-skill-id={skill.id} onClick={() => onSelect(skill)}
+            className="flex min-h-11 w-full min-w-0 items-start gap-3 rounded-xl border border-border p-3 text-left transition-colors hover:bg-muted">
+            <span className="shrink-0 text-2xl">{skill.icon}</span>
+            <div className="min-w-0 flex-1">
+              <div className="break-words text-sm font-medium">{skill.name}</div>
+              <div className="break-words text-sm text-muted-foreground">{skill.description}</div>
+              <div className="mt-1 flex min-w-0 flex-wrap gap-1">
+                {skill.tags.map(t => <span key={t} className="break-all rounded-full bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{t}</span>)}
+              </div>
+            </div>
+          </button>
+        ))}
       </div>
-    </ModalOverlay>
+    </ProjectToolDialog>
   );
 }

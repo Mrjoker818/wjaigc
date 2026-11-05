@@ -7,7 +7,8 @@ const boundary = vi.hoisted(() => ({ task: vi.fn() }));
 vi.mock('@/lib/api-auth', () => ({
   requireApiAuthOrReject: async () => ({ userId: 'source-editor' }),
 }));
-vi.mock('@/lib/cloud-task-storage', () => ({
+vi.mock('@/lib/cloud-task-storage', async (importOriginal) => ({
+  CloudTaskAdmissionError: (await importOriginal<typeof import('@/lib/cloud-task-storage')>()).CloudTaskAdmissionError,
   getCloudTaskForUserByIdempotencyKey: boundary.task,
   listCloudTasks: vi.fn(),
 }));
@@ -61,4 +62,17 @@ describe('document remove-background recovery publication', () => {
       maskUrl: '/api/serve-upload/exports/mask.png',
     });
   });
+});
+
+
+it('keeps the real admission constructor and derived error contract under the partial storage mock', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/cloud-task-storage')>('@/lib/cloud-task-storage');
+  const mocked = await import('@/lib/cloud-task-storage');
+  const { SketchAdmissionError } = await import('@/lib/sketch-to-code/admission');
+  expect(mocked.CloudTaskAdmissionError).toBe(actual.CloudTaskAdmissionError);
+  const error = new SketchAdmissionError('SYNTHETIC_PROJECT_DENIED', 403);
+  expect(error).toBeInstanceOf(actual.CloudTaskAdmissionError);
+  expect(error).toBeInstanceOf(Error);
+  expect(error).toMatchObject({ name: 'SketchAdmissionError', code: 'SYNTHETIC_PROJECT_DENIED', status: 403, message: 'SYNTHETIC_PROJECT_DENIED' });
+  expect(new Error('ordinary')).not.toBeInstanceOf(actual.CloudTaskAdmissionError);
 });

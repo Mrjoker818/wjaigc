@@ -57,6 +57,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!sessionUser) {
     return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
   }
+  const expectedActor = request.headers.get('x-wujie-expected-actor-id');
+  if (expectedActor !== null && expectedActor !== sessionUser.id) {
+    return NextResponse.json({ error: 'ACTOR_SCOPE_CHANGED' }, { status: 409 });
+  }
   let rawBody: unknown;
   try {
     rawBody = await request.json();

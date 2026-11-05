@@ -20,6 +20,25 @@ afterEach(() => {
 });
 
 describe('owner status read deadline and cancellation', () => {
+  it('sends the explicitly supplied actor and keeps old calls header-free', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => Response.json({ success: true, projectId: 'stored',
+      featureEnabled: true, enabled: false, currentRevision: 0 }));
+    vi.stubGlobal('fetch', fetcher);
+    await readOwnerProjectStatus('stored', new AbortController().signal, 'actor-a');
+    expect(new Headers(fetcher.mock.calls[0][1]?.headers).get('x-wujie-expected-actor-id')).toBe('actor-a');
+    await readOwnerProjectStatus('stored');
+    expect(new Headers(fetcher.mock.calls[1][1]?.headers).has('x-wujie-expected-actor-id')).toBe(false);
+  });
+
+  it('propagates an actor mismatch from the status endpoint without probing another owner', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ success: false, code: 'ACTOR_SCOPE_CHANGED' }, { status: 409 }));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(readOwnerProjectStatus('stored', undefined, 'actor-a'))
+      .rejects.toMatchObject({ code: 'ACTOR_SCOPE_CHANGED', status: 409, uncertain: false });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(new Headers(fetcher.mock.calls[0][1]?.headers).get('x-wujie-expected-actor-id')).toBe('actor-a');
+  });
+
   it.each(['transport', 'body'] as const)('bounds an unresponsive %s even when abort is ignored', async phase => {
     vi.useFakeTimers();
     const pending = deferred<Response>();

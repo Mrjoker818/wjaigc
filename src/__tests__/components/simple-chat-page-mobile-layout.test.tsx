@@ -123,7 +123,7 @@ Object.assign(window, { task5PageFixture: {
 `;
 
 type T5Theme = 'gold' | 'monochrome';
-type T5Variant = 'default' | 'active-agent';
+type T5Variant = 'default' | 'active-agent' | 'empty';
 type T5Locator = import('@playwright/test').Locator;
 interface T5Bridge {
   mount(theme: T5Theme): void;
@@ -146,6 +146,14 @@ interface T5Session {
   ready: boolean;
   mounted: boolean;
   variant: T5Variant;
+  u5?: U5Fault;
+}
+type U5Kind = 'failed' | 'conflict' | 'permission' | 'invalid' | 'offline' | 'held';
+type U5Envelope = import('@/lib/simple-chat-project-sync').SimpleChatSyncEnvelopeV1;
+interface U5Fault {
+  kind: U5Kind; active: boolean; baseRevision: number; attempts: number; successes: number;
+  reads: number[]; revisions: number[]; preservePending: boolean;
+  gate: Promise<void>; entered: Promise<void>; release(): void; enter(): void;
 }
 const T5_ORIGIN = 'https://simple-chat-task5.invalid';
 const T5_URL = `${T5_ORIGIN}/simple-chat?projectId=task5-project&taskId=task5-task`;
@@ -184,6 +192,7 @@ function t5Record(value: unknown): value is Record<string, unknown> {
 
 function t5SeedProjects(variant: T5Variant): SimpleChatProject[] {
   const projects = t5Projects();
+  if (variant === 'empty') projects[0].tasks[0].messages = [];
   if (variant === 'active-agent') {
     projects[0].agents = [{ ...T5_LONG_AGENT, tools: [] }];
     projects[0].tasks[0].activeAgentId = T5_LONG_AGENT.id;
@@ -417,6 +426,10 @@ describe('mobile simple-chat page layout', () => {
             await route.fulfill({ json: { success: true, user: { id: 'task5-user', name: 'Task5 离线用户', createdAt: 1, updatedAt: 1 } } }); return;
           }
           if (method === 'GET' && raw === null && url === `${T5_ORIGIN}/api/user-data/sync?key=chat_simple_projects`) {
+            if (session.u5) {
+              session.u5.reads.push(session.revision);
+              if (session.u5.reads.length > 4) throw new Error('U5_READ_LIMIT');
+            }
             await route.fulfill({ json: { success: true, key: 'chat_simple_projects', value: session.projects, syncRevision: session.revision } }); return;
           }
           if (method === 'GET' && raw === null && url === `${T5_ORIGIN}/api/user-data/sync?key=projects`) {
@@ -439,7 +452,8 @@ describe('mobile simple-chat page layout', () => {
             && request.headers()['content-type']?.split(';')[0] === 'application/json') {
             let body: unknown;
             try { body = JSON.parse(raw ?? 'null'); } catch { throw new Error('INVALID_SYNC_JSON'); }
-            if (!validWrite(body, session)) throw new Error('UNEXPECTED_SYNC_BODY_OR_REVISION');
+            if (!u5ValidWrite(body, session)) throw new Error('UNEXPECTED_SYNC_BODY_OR_REVISION');
+            if (session.u5 && await u5Intercept(session, body, route)) return;
             session.projects = body.value; session.revision++;
             await route.fulfill({ json: { success: true, key: 'chat_simple_projects', syncRevision: session.revision } }); return;
           }
@@ -652,7 +666,331 @@ describe('mobile simple-chat page layout', () => {
     expect(url.searchParams.get('taskId')).toBe('task5-task');
   }
 
+  // U: new real-Page scenarios. Original 22 cases, clocks, callbacks,
+  // native timer/IDB observers, defaults and original cleanup remain intact.
+  function u5ValidWrite(body: unknown, s: T5Session): body is { key: string; value: SimpleChatProject[]; expectedRevision: number } {
+    if (!s.u5) return validWrite(body, s);
+    if (!t5Record(body) || typeof body.expectedRevision !== 'number' || !Number.isSafeInteger(body.expectedRevision)
+      || body.expectedRevision < s.u5.baseRevision || body.expectedRevision > s.revision) return false;
+    // A real CAS client can legitimately send an older revision after the
+    // remote writer won. Keep every original shape/identity/value guard, then
+    // let the bounded synthetic server return 409 instead of accepting it.
+    return validWrite(body, { ...s, revision: body.expectedRevision });
+  }
+
+  function u5Arm(s: T5Session, kind: U5Kind): U5Fault {
+    let release: () => void = () => { throw new Error('U5_GATE_INIT'); };
+    let enter: () => void = () => { throw new Error('U5_GATE_INIT'); };
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    const fault: U5Fault = { kind, active: kind !== 'offline', baseRevision: s.revision, attempts: 0, successes: 0,
+      reads: [], revisions: [], preservePending: kind === 'permission' || kind === 'invalid', gate, entered,
+      release() { fault.active = false; release(); }, enter() { enter(); } };
+    s.u5 = fault; return fault;
+  }
+
+  const U5_PERMISSION_REASON = '合成权限已失效，请重新登录或联系管理员。' + '请保留当前项目和未同步修改，不要重复提交。'.repeat(12);
+  async function u5Intercept(s: T5Session, body: { value: SimpleChatProject[]; expectedRevision: number }, route: import('@playwright/test').Route): Promise<boolean> {
+    const fault = s.u5;
+    if (!fault) throw new Error('U5_MISSING_FAULT');
+    fault.attempts++; fault.revisions.push(body.expectedRevision);
+    if (fault.attempts > 8) throw new Error('U5_WRITE_LIMIT');
+    if (fault.active && fault.kind === 'held') { fault.enter(); await fault.gate; }
+    if (fault.active && fault.kind === 'failed') {
+      await route.fulfill({ status: 400, json: { code: 'SYNTHETIC_RETRYABLE_REFUSAL', message: '合成可重试同步失败', retryable: true } }); return true;
+    }
+    if (fault.active && fault.kind === 'permission') {
+      await route.fulfill({ status: 403, json: { code: 'SYNTHETIC_PERMISSION_DENIED', message: U5_PERMISSION_REASON, retryable: false } }); return true;
+    }
+    if (fault.active && fault.kind === 'invalid') {
+      await route.fulfill({ status: 200, contentType: 'text/html', body: '<html>synthetic invalid sync receipt</html>' }); return true;
+    }
+    if ((fault.active && fault.kind === 'conflict') || body.expectedRevision !== s.revision) {
+      // For the armed phase, a different synthetic writer advances the remote
+      // revision immediately before CAS. Stale manual retry is also refused.
+      if (fault.active && body.expectedRevision === s.revision) s.revision++;
+      await route.fulfill({ status: 409, json: { code: 'SYNTHETIC_REVISION_CONFLICT', message: '合成版本冲突', retryable: true } }); return true;
+    }
+    fault.successes++; return false; // Original exact success branch below.
+  }
+
+  function u5PendingMatches(value: U5Envelope | null | undefined, s: T5Session, expected?: U5Envelope): boolean {
+    const task = value?.currentProjects[0]?.tasks[0];
+    return !!value && value.userId === 'task5-user' && value.currentProjects.length === 1
+      && value.currentProjects[0].id === 'task5-project' && value.currentProjects[0].tasks.length === 1
+      && Number.isSafeInteger(value.baseRevision) && value.baseRevision >= (s.u5?.baseRevision ?? 0)
+      && value.baseRevision <= s.revision && value.pendingOperations.length > 0
+      && task?.id === 'task5-task' && task.projectId === 'task5-project' && task.model === T5_CHAT_ID
+      && task.providerId === T5_PROVIDERS[1].id && task.imageModel === T5_IMAGE_ID
+      && task.imageProviderId === T5_PROVIDERS[0].id && t5Equal(task.messages, t5Projects()[0].tasks[0].messages)
+      && (expected === undefined || t5Equal(value, expected));
+  }
+
+  async function u5PendingQuiet(s: T5Session, expected?: U5Envelope): Promise<U5Envelope> {
+    const deadline = Date.now() + 8_000;
+    let quietSince = 0, signature = '';
+    while (Date.now() < deadline) {
+      const observation = await t5Bounded(s.page.evaluate(async () => {
+        const fixture = window.task5PageFixture;
+        if (!fixture) throw new Error('U5_BRIDGE_REQUIRED');
+        const envelope = await fixture.envelope(); await fixture.settle();
+        return { envelope, ...fixture.diagnostics() };
+      }), 'U pending storage drain');
+      if (observation.faults.length) throw new Error(observation.faults.join('\n'));
+      const stable = u5PendingMatches(observation.envelope, s, expected)
+        && s.handlers.size === 0 && s.fetches.size === 0 && observation.timers === 0
+        && observation.intervals === 0 && observation.opens === 0 && observation.transactions === 0;
+      const next = JSON.stringify(observation.envelope);
+      if (!stable || signature !== next) { quietSince = 0; signature = next; }
+      if (stable) {
+        if (!quietSince) quietSince = Date.now();
+        if (Date.now() - quietSince >= 800) return observation.envelope!;
+      }
+      await t5Settle(s);
+    }
+    throw new Error('U5_PENDING_ASYNC_TAIL_NOT_DRAINED');
+  }
+
+  async function u5DisposePending(s: T5Session): Promise<void> {
+    const failures: string[] = [];
+    try {
+      // Unacknowledged business operations must remain durable, not be erased
+      // merely to make cleanup look idle. Actual native work must still end.
+      const before = await u5PendingQuiet(s);
+      await t5Bounded(s.page.evaluate(async () => { await window.task5PageFixture?.unmount(); }), 'U original Page unmount');
+      await u5PendingQuiet(s, before);
+      const diagnostics = await s.page.evaluate(() => window.task5PageFixture?.diagnostics());
+      if (diagnostics?.faults.length) failures.push(...diagnostics.faults);
+    } catch (error) { failures.push(`DRAIN: ${String(error)}`); }
+    finally {
+      try { await t5Bounded(Promise.all([...s.handlers]), 'U route handlers'); }
+      catch (error) { failures.push(`ROUTES: ${String(error)}`); }
+      if (s.handlers.size || s.fetches.size) failures.push(`UNSETTLED_HTTP: ${s.handlers.size}/${s.fetches.size}`);
+      try { await t5Bounded(s.context.close(), 'U context close'); }
+      catch (error) { failures.push(`CONTEXT_CLOSE: ${String(error)}`); }
+    }
+    failures.push(...s.faults); // Include late native faults during close.
+    if (failures.length) throw new Error('U5_PENDING_CLEANUP_ERROR:\n' + failures.join('\n'));
+  }
+
+  async function u5With(theme: T5Theme, width: number, height: number, run: (s: T5Session) => Promise<void>): Promise<void> {
+    const s = await t5Open(theme, width, height);
+    let primary: unknown;
+    try { await run(s); } catch (error) { primary = error; }
+    let cleanup: unknown;
+    try {
+      if (s.u5?.kind === 'held') s.u5.release();
+      await s.context.setOffline(false);
+      if (s.u5?.preservePending) await u5DisposePending(s); else await t5Dispose(s);
+      if (s.faults.length) throw new Error(s.faults.join('\n'));
+    } catch (error) { cleanup = error; }
+    if (primary && cleanup) throw new AggregateError([primary, cleanup], 'U5_TEST_AND_CLEANUP');
+    if (cleanup) throw cleanup;
+    if (primary) throw primary;
+  }
+
+  async function u5Status(s: T5Session, text: string): Promise<void> {
+    await s.page.waitForFunction(text => document.querySelector('[data-testid="simple-chat-sync-status"]')?.textContent?.includes(text), text);
+    await t5Settle(s);
+  }
+
+  async function u5Frame(s: T5Session, width: number, height: number): Promise<void> {
+    const sync = s.page.getByTestId('simple-chat-sync-status');
+    await t5Inside(sync, width, height);
+    const geometry = await s.page.locator('#task5-root header + div + div').evaluate(element => {
+      const own = element.getBoundingClientRect();
+      let left = Math.max(0, own.left), right = Math.min(innerWidth, own.right);
+      let top = Math.max(0, own.top), bottom = Math.min(innerHeight, own.bottom);
+      for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+        const box = parent.getBoundingClientRect(), style = getComputedStyle(parent);
+        if (/(auto|scroll|hidden|clip)/.test(style.overflowY)) { top = Math.max(top, box.top + parent.clientTop); bottom = Math.min(bottom, box.top + parent.clientTop + parent.clientHeight); }
+        if (/(auto|scroll|hidden|clip)/.test(style.overflowX)) { left = Math.max(left, box.left + parent.clientLeft); right = Math.min(right, box.left + parent.clientLeft + parent.clientWidth); }
+      }
+      return { width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
+    });
+    expect(geometry.height, 'real page sync u ancestor-clipped reading height').toBeGreaterThanOrEqual(80);
+    expect(geometry.width, 'real page sync u visible conversation width').toBeGreaterThan(0);
+    expect(await s.page.getByText(T5_MESSAGE, { exact: true }).count()).toBe(1);
+  }
+
+  async function u5NativeFooter(s: T5Session, width: number, height: number): Promise<void> {
+    const target = s.page.getByRole('button', { name: '全局搜索', exact: true });
+    const scrollHost = await target.evaluateHandle(element => {
+      for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+        if (['auto', 'scroll'].includes(getComputedStyle(parent).overflowY) && parent.scrollHeight > parent.clientHeight + 1) return parent;
+      }
+      return null;
+    });
+    const exists = await scrollHost.evaluate(element => element !== null);
+    if (exists) {
+      const bounds = await scrollHost.evaluate(element => { const box = (element as HTMLElement).getBoundingClientRect(); return { x: box.x + box.width / 2, y: Math.min(innerHeight - 12, box.bottom - 12), before: (element as HTMLElement).scrollTop }; });
+      await s.page.mouse.move(bounds.x, bounds.y);
+      for (let attempt = 0; attempt < 6; attempt++) { await s.page.mouse.wheel(0, 500); await t5Settle(s); }
+      expect(await scrollHost.evaluate(element => (element as HTMLElement).scrollTop), 'real page sync u native footer wheel moves composer').toBeGreaterThan(bounds.before);
+    }
+    await t5Inside(target, width, height, 0, true);
+    await u5Frame(s, width, height);
+  }
+
+  async function u5Retained(s: T5Session, input: import('@playwright/test').ElementHandle<HTMLElement | SVGElement>): Promise<void> {
+    expect(await input.evaluate(element => element.isConnected && element === document.querySelector('#task5-root textarea')), 'real page sync u same live input').toBe(true);
+    expect(await s.page.getByPlaceholder(T5_PLACEHOLDER).inputValue()).toBe(T5_DRAFT);
+    const stored = await s.page.evaluate(async () => await window.task5PageFixture?.envelope());
+    expect(stored?.userId).toBe('task5-user');
+    expect(stored?.currentProjects.map(project => project.id)).toEqual(['task5-project']);
+    const task = stored?.currentProjects[0]?.tasks[0];
+    expect(task?.id).toBe('task5-task'); expect(task?.providerId).toBe(T5_PROVIDERS[1].id);
+    expect(task?.model).toBe(T5_CHAT_ID); expect(task?.messages).toEqual(t5Projects()[0].tasks[0].messages);
+    expect(task?.imageModel).toBe(T5_IMAGE_ID); expect(task?.imageProviderId).toBe(T5_PROVIDERS[0].id);
+    expect(new URL(s.page.url()).searchParams.get('projectId')).toBe('task5-project');
+    expect(new URL(s.page.url()).searchParams.get('taskId')).toBe('task5-task');
+    expect(s.requests.some(request => /\/api\/(simple-chat\/chat|chat|generate)(?:\?|$)/.test(request))).toBe(false);
+  }
+
+  async function u5Reason(s: T5Session, dialog: T5Locator, width: number, height: number): Promise<void> {
+    await t5Inside(dialog, width, height);
+    const visible = async (last: boolean): Promise<boolean> => dialog.locator('p').evaluate((element, last) => {
+      const node = element.firstChild;
+      if (!node?.textContent) throw new Error('U5_REASON_TEXT_REQUIRED');
+      const range = document.createRange(), offset = last ? node.textContent.length - 1 : 0;
+      range.setStart(node, offset); range.setEnd(node, offset + 1);
+      const box = range.getBoundingClientRect();
+      let left = Math.max(0, box.left), right = Math.min(innerWidth, box.right);
+      let top = Math.max(0, box.top), bottom = Math.min(innerHeight, box.bottom);
+      for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+        const rect = parent.getBoundingClientRect(), style = getComputedStyle(parent);
+        if (/(auto|scroll|hidden|clip)/.test(style.overflowY)) { top = Math.max(top, rect.top + parent.clientTop); bottom = Math.min(bottom, rect.top + parent.clientTop + parent.clientHeight); }
+        if (/(auto|scroll|hidden|clip)/.test(style.overflowX)) { left = Math.max(left, rect.left + parent.clientLeft); right = Math.min(right, rect.left + parent.clientLeft + parent.clientWidth); }
+      }
+      const hit = document.elementFromPoint((left + right) / 2, (top + bottom) / 2);
+      return box.width > 0 && box.height > 0 && right - left >= box.width - 0.5
+        && bottom - top >= box.height - 0.5 && (hit === element || (hit !== null && element.contains(hit)));
+    }, last);
+    expect(await visible(false), 'real page sync u first error text is painted and not clipped').toBe(true);
+    expect(await dialog.evaluate(element => parseFloat(getComputedStyle(element).fontSize)), 'real page sync u error body readable at 16 CSS px').toBeGreaterThanOrEqual(16);
+    const before = await dialog.evaluate(element => ({ top: element.scrollTop, needsScroll: element.scrollHeight > element.clientHeight + 1 }));
+    const box = await dialog.boundingBox(); if (!box) throw new Error('U5_REASON_BOX_REQUIRED');
+    await s.page.mouse.move(box.x + box.width / 2, Math.min(height - 10, box.y + box.height - 10));
+    for (let attempt = 0; attempt < 6; attempt++) { await s.page.mouse.wheel(0, 500); await t5Settle(s); }
+    if (before.needsScroll) expect(await dialog.evaluate(element => element.scrollTop), 'real page sync u native wheel reads long error').toBeGreaterThan(before.top);
+    expect(await visible(true), 'real page sync u final error text is painted after native wheel').toBe(true);
+  }
+
+  async function u5Capture(s: T5Session, label: string): Promise<void> {
+    const { mkdir } = await import('node:fs/promises');
+    const dir = resolve('output/playwright/real-page-sync-native-20261019', String(process.pid));
+    await mkdir(dir, { recursive: true }); await s.page.screenshot({ path: resolve(dir, label + '.png') });
+  }
+
   for (const theme of ['gold', 'monochrome'] as const) {
+    for (const [width, height] of [[640, 320], [390, 844]] as const) {
+      it(`mobile simple-chat empty intro is visible ${theme} ${width}x${height}`, async () => {
+        await t5With(theme, width, height, async s => {
+          for (const control of [
+            s.page.getByRole('heading', { level: 1, name: 'Task5 真实独立聊天项目', exact: true }),
+            s.page.getByText('开始一段新的对话吧', { exact: true }),
+          ]) {
+            expect(await control.count()).toBe(1);
+            const visible = await control.evaluate(element => {
+              const range = document.createRange();
+              range.selectNodeContents(element);
+              const bounds = range.getBoundingClientRect();
+              let left = 0, top = 0, right = innerWidth, bottom = innerHeight;
+              for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+                const rect = parent.getBoundingClientRect();
+                const style = getComputedStyle(parent);
+                if (/(auto|scroll|hidden|clip)/.test(style.overflowX)) {
+                  left = Math.max(left, rect.left + parent.clientLeft);
+                  right = Math.min(right, rect.left + parent.clientLeft + parent.clientWidth);
+                }
+                if (/(auto|scroll|hidden|clip)/.test(style.overflowY)) {
+                  top = Math.max(top, rect.top + parent.clientTop);
+                  bottom = Math.min(bottom, rect.top + parent.clientTop + parent.clientHeight);
+                }
+              }
+              return bounds.width > 0 && bounds.height > 0 && bounds.left >= left - 0.5
+                && bounds.right <= right + 0.5 && bounds.top >= top - 0.5 && bounds.bottom <= bottom + 0.5;
+            });
+            expect(visible, 'empty-state text must be visible within every clipping ancestor').toBe(true);
+          }
+          expect(await s.page.getByRole('heading', { level: 1, name: 'Task5 真实独立聊天项目' }).locator('..').locator('button').count()).toBe(6);
+          expect(s.requests.some(request => /\/api\/(simple-chat\/chat|chat|generate)(?:\?|$)/.test(request))).toBe(false);
+        }, 'empty');
+      }, 30_000);
+    }
+    it(`mobile simple-chat extra-short landscape preserves messages and original controls (${theme})`, async () => {
+      await t5With(theme, 640, 320, async s => {
+        const messages = s.page.locator('#task5-root header + div + div');
+        const input = s.page.getByPlaceholder(T5_PLACEHOLDER, { exact: true });
+        const inputIdentity = await input.elementHandle();
+        if (!inputIdentity) throw new Error('TASK5_SHORT_INPUT_IDENTITY_MISSING');
+        const messageBox = await messages.boundingBox();
+        if (!messageBox) throw new Error('TASK5_SHORT_MESSAGES_NOT_RENDERED');
+        expect(messageBox.height, 'extra-short landscape keeps at least 80px of real conversation').toBeGreaterThanOrEqual(80);
+        await input.fill(T5_DRAFT);
+        await t5Settle(s);
+        const tools = s.page.locator(T5_TOOLS);
+        expect(await tools.count(), 'all original nine direct tools plus send remain single DOM controls').toBe(10);
+        for (const control of [input, ...await tools.all(),
+          s.page.getByLabel('目标画布项目', { exact: true }),
+          ...[theme === 'gold' ? '亮色模式' : '暗色模式', '临时聊天', '全局搜索']
+            .map(name => s.page.getByRole('button', { name, exact: true }))]) {
+          await control.scrollIntoViewIfNeeded();
+          await t5Settle(s);
+          await t5Inside(control, 640, 320, 0, true);
+          const retainedMessages = await messages.boundingBox();
+          expect(retainedMessages?.height, 'scrolling composer never consumes the conversation allocation').toBeGreaterThanOrEqual(80);
+        }
+        expect(await input.inputValue()).toBe(T5_DRAFT);
+        expect(await inputIdentity.evaluate(element => element.isConnected
+          && element === document.querySelector('#task5-root textarea'))).toBe(true);
+        expect(await s.page.getByText(T5_MESSAGE, { exact: true }).count()).toBe(1);
+        const url = new URL(s.page.url());
+        expect(url.searchParams.get('projectId')).toBe('task5-project');
+        expect(url.searchParams.get('taskId')).toBe('task5-task');
+        expect(s.requests.some(request => /\/api\/(simple-chat\/chat|chat|generate)(?:\?|$)/.test(request))).toBe(false);
+      });
+    }, 30_000);
+
+    it(`mobile simple-chat extra-short active-agent landscape preserves messages and original controls (${theme})`, async () => {
+      await t5With(theme, 640, 320, async s => {
+        const messages = s.page.locator('#task5-root header + div + div');
+        const input = s.page.getByPlaceholder(`与 ${T5_LONG_AGENT.name} 对话...`, { exact: true });
+        const inputIdentity = await input.elementHandle();
+        if (!inputIdentity) throw new Error('TASK5_SHORT_INPUT_IDENTITY_MISSING');
+        const agentBar = s.page.locator('#task5-root header + div');
+        expect(await agentBar.textContent()).toContain(T5_LONG_AGENT.name);
+        const messageBox = await messages.boundingBox();
+        if (!messageBox) throw new Error('TASK5_SHORT_MESSAGES_NOT_RENDERED');
+        expect(messageBox.height, 'extra-short landscape keeps at least 80px of real conversation').toBeGreaterThanOrEqual(80);
+        await input.fill(T5_DRAFT);
+        await t5Settle(s);
+        const tools = s.page.locator('#task5-root textarea + div > button');
+        expect(await tools.count(), 'all original nine direct tools plus send remain single DOM controls').toBe(10);
+        for (const control of [input, ...await tools.all(),
+          s.page.getByLabel('目标画布项目', { exact: true }),
+          ...[theme === 'gold' ? '亮色模式' : '暗色模式', '临时聊天', '全局搜索']
+            .map(name => s.page.getByRole('button', { name, exact: true }))]) {
+          await control.scrollIntoViewIfNeeded();
+          await t5Settle(s);
+          await t5Inside(control, 640, 320, 0, true);
+          const retainedMessages = await messages.boundingBox();
+          expect(retainedMessages?.height, 'scrolling composer never consumes the conversation allocation').toBeGreaterThanOrEqual(80);
+        }
+        expect(await input.inputValue()).toBe(T5_DRAFT);
+        expect(await inputIdentity.evaluate(element => element.isConnected
+          && element === document.querySelector('#task5-root textarea'))).toBe(true);
+        expect(await s.page.getByText(T5_MESSAGE, { exact: true }).count()).toBe(1);
+        const url = new URL(s.page.url());
+        expect(url.searchParams.get('projectId')).toBe('task5-project');
+        expect(url.searchParams.get('taskId')).toBe('task5-task');
+        expect(s.requests.some(request => /\/api\/(simple-chat\/chat|chat|generate)(?:\?|$)/.test(request))).toBe(false);
+        await t5Inside(agentBar.getByRole('button', { name: '移除当前 Agent', exact: true }), 640, 320, 0, true);
+        const retained = await s.page.evaluate(async () => await window.task5PageFixture?.envelope());
+        expect(retained?.currentProjects[0]?.tasks[0]?.activeAgentId).toBe(T5_LONG_AGENT.id);
+      }, 'active-agent');
+    }, 30_000);
+
     for (const [width, height] of T5_SIZES) {
       it(`mobile simple-chat page layout default ${width}x${height} (${theme})`, async () => {
         await t5With(theme, width, height, async s => {
@@ -721,6 +1059,7 @@ describe('mobile simple-chat page layout', () => {
         await s.page.getByRole('button', { name: '深度', exact: true }).click();
         await s.page.getByLabel('响应速度', { exact: true }).selectOption('quality');
         await t5Idle(s, true);
+        await s.page.getByRole('button', { name: '临时聊天', exact: true }).click();
         const input = s.page.getByPlaceholder(T5_PLACEHOLDER);
         await input.fill(T5_DRAFT);
         await s.page.getByTitle('上传图片', { exact: true }).click({ trial: true });
@@ -735,7 +1074,6 @@ describe('mobile simple-chat page layout', () => {
         await s.page.locator('#chat-file-upload').setInputFiles({ name: 'task5.png', mimeType: 'image/png', buffer: Buffer.from(png.split(',')[1], 'base64') });
         await s.page.waitForFunction(png => Array.from(document.images).some(image => image.src === png && image.complete && image.naturalWidth === 16), png);
         await s.page.getByLabel('目标画布项目', { exact: true }).selectOption('task5-canvas-second');
-        await s.page.getByRole('button', { name: '临时聊天', exact: true }).click();
         const textareaIdentity = await input.elementHandle();
         const pageIdentity = await s.page.locator('#task5-root > div').elementHandle();
         if (!textareaIdentity || !pageIdentity) throw new Error('TASK5_INITIAL_DOM_IDENTITY_MISSING');
@@ -884,4 +1222,510 @@ describe('mobile simple-chat page layout', () => {
       }, 'active-agent');
     }, 30_000);
   }
+  // U: real Page/coordinator/IndexedDB fault and recovery states; no model call.
+  it('real page sync fixture guard healthy defaults keep original ACK and cleanup', async () => {
+    await t5With('gold', 390, 844, async s => {
+      expect(s.u5).toBeUndefined();
+      const stored = await s.page.evaluate(async () => await window.task5PageFixture?.envelope());
+      expect(stored?.pendingOperations).toEqual([]); expect(stored?.baseRevision).toBe(s.revision);
+      expect(await s.page.getByTestId('simple-chat-sync-status').textContent()).toContain('已同步');
+      expect(await s.page.getByRole('button', { name: '重试同步', exact: true }).count()).toBe(0);
+    });
+  }, 30_000);
+
+  it('real page sync fixture guard pending ledger rejects owner message and ACK mutation', async () => {
+    await u5With('gold', 390, 844, async s => {
+      u5Arm(s, 'permission'); await t5ChooseSecond(s, 'chat', 390, 844);
+      await u5Status(s, '同步失败'); const saved = await u5PendingQuiet(s);
+      expect(u5PendingMatches(saved, s)).toBe(true);
+      expect(u5PendingMatches({ ...saved, userId: 'wrong-owner' }, s)).toBe(false);
+      expect(u5PendingMatches({ ...saved, pendingOperations: [] }, s)).toBe(false);
+      const changed = structuredClone(saved); changed.currentProjects[0].tasks[0].messages = [];
+      expect(u5PendingMatches(changed, s)).toBe(false);
+      expect(u5PendingMatches({ ...saved, baseRevision: s.revision + 1 }, s)).toBe(false);
+      expect(u5PendingMatches({ ...saved, baseRevision: -1 }, s)).toBe(false);
+      expect(u5PendingMatches({ ...saved, baseRevision: Number.NaN }, s)).toBe(false);
+      expect(u5PendingMatches(saved, s, saved)).toBe(true);
+    });
+  }, 30_000);
+
+  it('real page sync fixture guard actual clipped reading area rejects a tall hidden box', async () => {
+    await t5With('monochrome', 640, 320, async s => {
+      await u5Frame(s, 640, 320);
+      const messages = s.page.locator('#task5-root header + div + div');
+      const before = await messages.evaluate(element => ({ own: element.getAttribute('style'), parent: element.parentElement?.getAttribute('style') ?? null }));
+      try {
+        await messages.evaluate(element => {
+          (element as HTMLElement).style.cssText += ';height:120px!important;min-height:120px!important;flex:0 0 120px!important;';
+          if (!element.parentElement) throw new Error('U5_ANCESTOR_REQUIRED');
+          element.parentElement.style.cssText += ';max-height:20px!important;overflow:hidden!important;';
+        });
+        await t5Settle(s);
+        expect((await messages.boundingBox())?.height, 'negative guard own reading box stays tall').toBeGreaterThanOrEqual(80);
+        await expect(u5Frame(s, 640, 320)).rejects.toThrow('real page sync u ancestor-clipped reading height');
+      } finally { await messages.evaluate((element, styles) => {
+        if (styles.own === null) element.removeAttribute('style'); else element.setAttribute('style', styles.own);
+        if (!element.parentElement) throw new Error('U5_ANCESTOR_REQUIRED');
+        if (styles.parent === null) element.parentElement.removeAttribute('style'); else element.parentElement.setAttribute('style', styles.parent);
+      }, before); }
+    });
+  }, 30_000);
+
+  for (const theme of ['gold', 'monochrome'] as const) {
+    for (const [width, height] of [[320, 640], [640, 320]] as const) {
+      for (const kind of ['failed', 'conflict', 'permission', 'invalid', 'offline', 'held'] as const) {
+        it('real page sync u ' + kind + ' ' + theme + ' ' + width + 'x' + height, async () => {
+          await u5With(theme, width, height, async s => {
+            const input = s.page.getByPlaceholder(T5_PLACEHOLDER, { exact: true });
+            const identity = await input.elementHandle();
+            if (!identity) throw new Error('U5_INPUT_IDENTITY_MISSING');
+            await input.fill(T5_DRAFT);
+            const fault = u5Arm(s, kind);
+            if (kind === 'offline') {
+              await s.context.setOffline(true);
+              await s.page.waitForFunction(() => !navigator.onLine);
+              await u5Status(s, '离线');
+            }
+            await t5ChooseSecond(s, 'chat', width, height);
+            if (kind === 'held') {
+              await t5Bounded(fault.entered, 'U held original coordinator POST');
+              await u5Status(s, '正在同步');
+              expect(await s.page.getByRole('button', { name: '重试同步', exact: true }).count(), 'real page sync u held has no retry').toBe(0);
+              expect(s.handlers.size, 'real page sync u native handler is genuinely pending').toBe(1);
+              await t5OpenSettings(s, width, height); await t5CloseSettings(s, width, height);
+            } else {
+              await u5Status(s, kind === 'conflict' ? '同步冲突' : kind === 'offline' ? '离线' : '同步失败');
+              await u5PendingQuiet(s);
+            }
+            await u5Frame(s, width, height);
+            if (width === 640) await u5NativeFooter(s, width, height);
+            await u5Capture(s, kind + '-' + theme + '-' + width + 'x' + height);
+            if (kind === 'permission' || kind === 'invalid') {
+              expect(await s.page.getByTestId('simple-chat-sync-status').textContent(), 'real page sync u nonretryable status must not promise retry').not.toContain('点击重试');
+              expect(await s.page.getByRole('button', { name: '重试同步', exact: true }).count(), 'real page sync u nonretryable status has no ineffective retry').toBe(0);
+              const details = s.page.getByRole('button', { name: '同步错误详情', exact: true });
+              expect(await details.count(), 'real page sync u error reason has a mobile accessible entry').toBe(1);
+              await t5Inside(details, width, height, 0, true); const attempts = fault.attempts;
+              await details.click(); await t5Settle(s);
+              const dialog = s.page.getByRole('dialog', { name: '同步错误详情', exact: true });
+              expect(await dialog.count(), 'real page sync u error details opens').toBe(1);
+              await t5Inside(dialog, width, height);
+              expect(await dialog.textContent(), 'real page sync u exact original coordinator reason remains available').toContain(kind === 'permission' ? U5_PERMISSION_REASON : 'Simple chat sync received an invalid response');
+              await u5Reason(s, dialog, width, height);
+              if (kind === 'permission') await u5Capture(s, 'details-' + kind + '-' + theme + '-' + width + 'x' + height);
+              await s.page.keyboard.press('Escape'); await t5Settle(s);
+              await dialog.waitFor({ state: 'detached' });
+              expect(await dialog.count(), 'real page sync u error details Escape closes').toBe(0);
+              expect(await details.evaluate(element => element === document.activeElement), 'real page sync u details focus restores').toBe(true);
+              expect(fault.attempts, 'real page sync u read-only reason does not trigger retry').toBe(attempts);
+              expect(fault.successes, 'real page sync u denial never ACKed').toBe(0);
+              await u5Retained(s, identity); return;
+            }
+            if (kind === 'failed' || kind === 'conflict') {
+              const retry = s.page.getByRole('button', { name: '重试同步', exact: true });
+              expect(await retry.count(), 'real page sync u retryable state has one real retry').toBe(1);
+              await t5Inside(retry, width, height, 0, true);
+              if (kind === 'conflict') {
+                expect(fault.attempts, 'real page sync u automatic CAS attempts are bounded').toBe(3);
+                expect(fault.revisions, 'real page sync u automatic CAS uses actual rebases').toEqual([fault.baseRevision, fault.baseRevision + 1, fault.baseRevision + 2]);
+              } else expect(fault.attempts, 'real page sync u retryable refusal has one original POST').toBe(1);
+              fault.active = false; await retry.click();
+            } else if (kind === 'offline') {
+              expect(fault.attempts, 'real page sync u native offline did not POST').toBe(0);
+              await s.context.setOffline(false); await s.page.waitForFunction(() => navigator.onLine);
+            } else fault.release();
+            await u5Status(s, '已同步'); await t5Idle(s, true);
+            expect(fault.successes, 'real page sync u exactly one valid ACK').toBe(1);
+            if (kind === 'conflict') {
+              expect(fault.attempts, 'real page sync u manual stale CAS is refused then rebased').toBe(5);
+              expect(fault.revisions, 'real page sync u no stale success').toEqual([fault.baseRevision, fault.baseRevision + 1, fault.baseRevision + 2, fault.baseRevision + 2, fault.baseRevision + 3]);
+              expect(fault.reads, 'real page sync u original coordinator read remote before retry').toEqual([fault.baseRevision + 1, fault.baseRevision + 2, fault.baseRevision + 3]);
+              expect(s.revision).toBe(fault.baseRevision + 4);
+            } else {
+              expect(fault.attempts).toBe(kind === 'failed' ? 2 : 1); expect(s.revision).toBe(fault.baseRevision + 1);
+            }
+            await u5Retained(s, identity); await u5Frame(s, width, height);
+          });
+        }, 35_000);
+      }
+    }
+  }
+
+  // V: inspect actual message glyphs and native scrolling, not just a tall box.
+  interface V5Observation { label: string; readable: boolean; [key: string]: unknown }
+  async function v5Observe(s: T5Session, label: string, text: string = T5_MESSAGE): Promise<V5Observation> {
+    return await s.page.getByText(text, { exact: true }).evaluate((element, label) => {
+      const rect = (box: DOMRect): { x: number; y: number; width: number; height: number; bottom: number } => ({ x: box.x, y: box.y, width: box.width, height: box.height, bottom: box.bottom });
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT), glyphs = [];
+      while (walker.nextNode()) { if (!walker.currentNode.textContent?.trim()) continue; const range = document.createRange(); range.selectNodeContents(walker.currentNode); glyphs.push(...Array.from(range.getClientRects())); }
+      const ancestors: Array<{ tag: string; className: string; box: ReturnType<typeof rect>;
+        clientTop: number; clientLeft: number; clientHeight: number; clientWidth: number;
+        scrollTop: number; scrollHeight: number; overflowX: string; overflowY: string;
+        opacity: string; contentVisibility: string }> = []; let opacity = 1;
+      for (let parent: HTMLElement | null = element as HTMLElement; parent; parent = parent.parentElement) {
+        const style = getComputedStyle(parent), box = parent.getBoundingClientRect(); opacity *= Number(style.opacity);
+        ancestors.push({ tag: parent.tagName, className: parent.className, box: rect(box), clientTop: parent.clientTop, clientLeft: parent.clientLeft, clientHeight: parent.clientHeight, clientWidth: parent.clientWidth, scrollTop: parent.scrollTop, scrollHeight: parent.scrollHeight, overflowX: style.overflowX, overflowY: style.overflowY, opacity: style.opacity, contentVisibility: style.contentVisibility });
+      }
+      const clipped = glyphs.map(box => {
+        let left = Math.max(0, box.left), right = Math.min(innerWidth, box.right), top = Math.max(0, box.top), bottom = Math.min(innerHeight, box.bottom);
+        for (const parent of ancestors) {
+          if (/(auto|scroll|hidden|clip)/.test(parent.overflowY)) { top = Math.max(top, parent.box.y + parent.clientTop); bottom = Math.min(bottom, parent.box.y + parent.clientTop + parent.clientHeight); }
+          if (/(auto|scroll|hidden|clip)/.test(parent.overflowX)) { left = Math.max(left, parent.box.x + parent.clientLeft); right = Math.min(right, parent.box.x + parent.clientLeft + parent.clientWidth); }
+        }
+        const hit = document.elementFromPoint((left + right) / 2, (top + bottom) / 2);
+        return { original: rect(box), width: Math.max(0, right - left), height: Math.max(0, bottom - top), hit: hit === element || (hit !== null && element.contains(hit)), painted: opacity > 0 && right - left >= box.width - 0.5 && bottom - top >= box.height - 0.5 && box.width > 0 && box.height > 0 && (hit === element || (hit !== null && element.contains(hit))) };
+      });
+      const message = element.closest('[data-chat-message-id]');
+      const operationRows = message ? Array.from(message.querySelectorAll('div')).filter(node => Array.from(node.children).some(child => child.matches('button[title="复制"]'))).map(node => ({ box: rect(node.getBoundingClientRect()), opacity: getComputedStyle(node).opacity, buttons: node.querySelectorAll('button').length })) : [];
+      return { label, viewport: { width: innerWidth, height: innerHeight }, glyphs: clipped, readable: clipped.some(glyph => glyph.painted), ancestors, operationRows };
+    }, label);
+  }
+
+  for (const theme of ['gold', 'monochrome'] as const) {
+    it('real page reading v probe ' + theme, async () => {
+      await u5With(theme, 640, 320, async s => {
+        const observations = [await v5Observe(s, 'healthy-initial')];
+        const userObservations: V5Observation[] = []; let historyScrollTop: number | null = null; let nativeScrollStep: number | null = null;
+        const input = s.page.getByPlaceholder(T5_PLACEHOLDER, { exact: true }); await input.fill(T5_DRAFT);
+        const fault = u5Arm(s, 'failed');
+        try {
+          await t5ChooseSecond(s, 'chat', 640, 320); await u5Status(s, '同步失败'); await u5PendingQuiet(s);
+          observations.push(await v5Observe(s, 'failed-before-footer'));
+          await u5NativeFooter(s, 640, 320); observations.push(await v5Observe(s, 'failed-after-native-footer'));
+          await u5Capture(s, 'v-probe-after-footer-' + theme);
+          const messages = s.page.locator('#task5-root header + div + div'); const box = await messages.boundingBox();
+          if (!box) throw new Error('V5_READING_BOX_REQUIRED');
+          // Sample with overlapping half-viewport steps so complete lines cannot be skipped between samples.
+          nativeScrollStep = Math.max(1, Math.floor(box.height / 2));
+          await s.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+          for (let step = 0; step < 4; step++) { await s.page.mouse.wheel(0, -nativeScrollStep); await t5Settle(s); observations.push(await v5Observe(s, 'native-up-' + step)); userObservations.push(await v5Observe(s, 'earlier-user-up-' + step, '保留此对话的公开任务身份')); }
+          historyScrollTop = await messages.evaluate(element => element.scrollTop);
+          await s.page.mouse.wheel(0, 600); await t5Settle(s); observations.push(await v5Observe(s, 'native-back-to-latest'));
+        } finally {
+          fault.active = false;
+          await s.page.getByRole('button', { name: '重试同步', exact: true }).click();
+          await u5Status(s, '已同步'); await t5Idle(s, true);
+        }
+        observations.push(await v5Observe(s, 'recovered'));
+        const { mkdir, writeFile } = await import('node:fs/promises');
+        const dir = resolve('output/playwright/real-page-reading-native-20261019', String(process.pid));
+        await mkdir(dir, { recursive: true }); await writeFile(resolve(dir, 'v-probe-' + theme + '.json'), JSON.stringify({ theme, observations, userObservations, historyScrollTop, nativeScrollStep }, null, 2) + '\n', { flag: 'wx' });
+        expect(observations.filter(row => row.label.startsWith('native-up-')).some(row => row.readable), 'real page reading v native wheel can reveal original message').toBe(true);
+        expect(userObservations.some(row => row.readable), 'real page reading v native wheel reveals earlier original user message').toBe(true);
+        expect(historyScrollTop, 'real page reading v native wheel reaches conversation start').toBe(0);
+        expect(observations[0].readable, 'real page reading v latest actual message text must be readable on initial short landscape').toBe(true);
+        expect(observations.find(row => row.label === 'failed-after-native-footer')?.readable, 'real page reading v footer wheel must not leave a blank conversation').toBe(true);
+        expect(observations.find(row => row.label === 'native-back-to-latest')?.readable, 'real page reading v scrolling to latest retains the actual message').toBe(true);
+        expect(observations.find(row => row.label === 'recovered')?.readable, 'real page reading v recovered synchronization retains the actual message').toBe(true);
+        console.log('QF_READING_BODY_COMPLETE ' + JSON.stringify({ theme, originalLatestAssertions: true, earlierUserReadable: true,
+          historyScrollTop, nativeSamples: 4, nativeScrollStep, input: 'Chromium mouse/wheel', physicalAndroid: false }));
+      });
+      console.log('QF_READING_CLEANUP_COMPLETE ' + JSON.stringify({ theme, cleanupCompleted: true, wholeMobileAccepted: false }));
+    }, 35_000);
+  }
+
+  for (const theme of ['gold', 'monochrome'] as const) {
+    for (const [width, height] of [[640, 320], [844, 390]] as const) {
+      it('real page reading v short operations ' + theme + ' ' + width + 'x' + height, async () => {
+        await t5With(theme, width, height, async s => {
+          const before = await s.page.evaluate(async () => await window.task5PageFixture?.envelope());
+          const input = s.page.getByPlaceholder(T5_PLACEHOLDER, { exact: true }); const identity = await input.elementHandle();
+          if (!identity) throw new Error('V5_LIVE_INPUT_REQUIRED');
+          await input.fill(T5_DRAFT);
+          const message = s.page.locator('[data-chat-message-id="task5-assistant-message"]');
+          const operations = message.getByTitle('复制', { exact: true }).locator('..');
+          const box = await operations.boundingBox(); if (!box) throw new Error('V5_OPERATIONS_REQUIRED');
+          expect(box.height, 'real page reading v low-height actions reserve one row rather than displace body').toBeLessThanOrEqual(52);
+          expect(await operations.evaluate(element => Number(getComputedStyle(element).opacity)), 'real page reading v low-height actions never depend on hover').toBe(1);
+          expect((await v5Observe(s, 'short-initial')).readable, 'real page reading v actual last message remains painted').toBe(true);
+          const titles = ['复制', '重新生成', '更短', '更长', '继续', '转生图提示词', '从此分支', '保存为 Artifact', '发送到节点模式', '有帮助', '无帮助', '在 Canvas 中编辑'];
+          const buttons = operations.getByRole('button');
+          expect(await buttons.evaluateAll(elements => elements.map(element => element.getAttribute('title'))), 'real page reading v retains every original action').toEqual(titles);
+          await s.context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: T5_ORIGIN });
+          const copy = message.getByTitle('复制', { exact: true }); await t5Inside(copy, width, height, 0, true);
+          await copy.click(); expect(await s.page.evaluate(() => navigator.clipboard.readText()), 'real page reading v original copy handler preserves exact content').toBe(T5_MESSAGE);
+          for (let index = 0; index < titles.length; index++) {
+            const button = buttons.nth(index);
+            try { await t5Inside(button, width, height, 0, true); }
+            catch (error) {
+              const trace = await button.evaluate(element => {
+                const box = element.getBoundingClientRect(), hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+                const ancestors = [];
+                for (let parent = element.parentElement; parent; parent = parent.parentElement) { const rect = parent.getBoundingClientRect(), css = getComputedStyle(parent); ancestors.push({ tag: parent.tagName, className: parent.className, x: rect.x, y: rect.y, width: rect.width, height: rect.height, clientWidth: parent.clientWidth, clientHeight: parent.clientHeight, scrollLeft: parent.scrollLeft, scrollWidth: parent.scrollWidth, scrollTop: parent.scrollTop, overflowX: css.overflowX, overflowY: css.overflowY }); }
+                return { title: element.getAttribute('title'), focused: element === document.activeElement, active: document.activeElement?.outerHTML, box: { x: box.x, y: box.y, width: box.width, height: box.height }, hit: hit?.outerHTML.slice(0, 500), ancestors };
+              });
+              // Diagnostic intervention after the original failure only. Always
+              // rethrow; native scrolling here cannot turn a failing case green.
+              await button.evaluate(element => element.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
+              await t5Settle(s);
+              const scrollProbe = await button.evaluate(element => { const box = element.getBoundingClientRect(), hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2); return { x: box.x, y: box.y, hit: hit === element || (hit !== null && element.contains(hit)), scrollLeft: element.parentElement?.scrollLeft, scrollWidth: element.parentElement?.scrollWidth, clientWidth: element.parentElement?.clientWidth }; });
+              console.log('V5_FOCUS_TRACE ' + JSON.stringify({ theme, index, trace, scrollProbe })); throw error;
+            }
+            expect(await button.evaluate(element => element === document.activeElement), 'real page reading v native Tab reaches original action ' + titles[index]).toBe(true);
+            if (index + 1 < titles.length) { await s.page.keyboard.press('Tab'); await t5Settle(s); }
+          }
+          const metrics = await operations.evaluate(element => ({ left: element.scrollLeft, needsScroll: element.scrollWidth > element.clientWidth + 1 }));
+          if (metrics.needsScroll) {
+            const current = await operations.boundingBox(); if (!current) throw new Error('V5_OPERATIONS_REQUIRED');
+            await s.page.mouse.move(current.x + current.width / 2, current.y + Math.min(current.height / 2, 22));
+            await s.page.mouse.wheel(-800, 0); await t5Settle(s);
+            expect(await operations.evaluate(element => element.scrollLeft), 'real page reading v native wheel reaches first action').toBeLessThan(metrics.left);
+            await s.page.mouse.wheel(800, 0); await t5Settle(s);
+            expect(await operations.evaluate(element => element.scrollLeft), 'real page reading v native wheel reaches last action').toBeGreaterThan(0);
+          }
+          await t5Inside(message.getByTitle('在 Canvas 中编辑', { exact: true }), width, height, 0, true);
+          expect((await v5Observe(s, 'after-operation-strip')).readable, 'real page reading v horizontal action access keeps actual text visible').toBe(true);
+          if (width === 640) await u5NativeFooter(s, width, height);
+          expect((await v5Observe(s, 'after-composer-footer')).readable, 'real page reading v native footer access keeps actual text visible').toBe(true);
+          expect(await identity.evaluate(element => element.isConnected && element === document.querySelector('#task5-root textarea'))).toBe(true);
+          expect(await input.inputValue()).toBe(T5_DRAFT);
+          expect(await s.page.evaluate(async () => await window.task5PageFixture?.envelope()), 'real page reading v all project task provider message and ACK fields unchanged').toEqual(before);
+          expect(s.requests.some(request => /\/api\/(simple-chat\/chat|chat|generate)(?:\?|$)/.test(request))).toBe(false);
+        });
+      }, 35_000);
+    }
+    for (const [width, height] of [[320, 640], [1440, 900]] as const) {
+      it('real page reading v normal neighbor ' + theme + ' ' + width + 'x' + height, async () => {
+        await t5With(theme, width, height, async s => {
+          const before = await s.page.evaluate(async () => await window.task5PageFixture?.envelope());
+          expect((await v5Observe(s, 'normal-neighbor')).readable, 'real page reading v normal-height conversation remains visible').toBe(true);
+          await u5Frame(s, width, height);
+          expect(await s.page.evaluate(async () => await window.task5PageFixture?.envelope())).toEqual(before);
+          expect(s.requests.some(request => /\/api\/(simple-chat\/chat|chat|generate)(?:\?|$)/.test(request))).toBe(false);
+        });
+      }, 30_000);
+    }
+  }
+
+  for (const theme of ['gold', 'monochrome'] as const) {
+    it('real page reading v clipped glyph counterexample ' + theme, async () => {
+      await t5With(theme, 640, 320, async s => {
+        expect((await v5Observe(s, 'guard-before')).readable).toBe(true);
+        const text = s.page.getByText(T5_MESSAGE, { exact: true });
+        const before = await text.evaluate(element => element.parentElement?.getAttribute('style') ?? null);
+        try {
+          await text.evaluate(element => { if (!element.parentElement) throw new Error('V5_TEXT_ANCESTOR_REQUIRED'); element.parentElement.style.cssText += ';max-height:8px!important;overflow:hidden!important;'; });
+          await t5Settle(s);
+          expect((await text.boundingBox())?.height, 'real page reading v negative fixture keeps actual text box tall').toBeGreaterThanOrEqual(17);
+          const observation = await v5Observe(s, 'guard-partial-ancestor-clip');
+          expect(observation.readable, 'real page reading v partial glyph must not count as a readable line').toBe(false);
+        } finally {
+          await text.evaluate((element, style) => { if (!element.parentElement) throw new Error('V5_TEXT_ANCESTOR_REQUIRED'); if (style === null) element.parentElement.removeAttribute('style'); else element.parentElement.setAttribute('style', style); }, before);
+        }
+        expect((await v5Observe(s, 'guard-restored')).readable).toBe(true);
+      });
+    }, 30_000);
+    for (const height of [430, 431] as const) {
+      it('real page reading v height boundary ' + theme + ' 640x' + height, async () => {
+        await t5With(theme, 640, height, async s => {
+          const observation = await v5Observe(s, 'boundary-' + height);
+          expect(observation.readable, 'real page reading v adjacent height keeps actual latest text visible').toBe(true);
+          await u5Frame(s, 640, height);
+          const input = s.page.getByPlaceholder(T5_PLACEHOLDER, { exact: true }); await input.fill(T5_DRAFT);
+          expect((await v5Observe(s, 'boundary-with-draft')).readable, 'real page reading v adjacent height and draft retain actual text').toBe(true);
+          expect(await input.inputValue()).toBe(T5_DRAFT);
+          expect(s.requests.some(request => /\/api\/(simple-chat\/chat|chat|generate)(?:\?|$)/.test(request))).toBe(false);
+        });
+      }, 30_000);
+    }
+  }
+
+  it('QE latest reading stays pinned through viewport shrink while history position survives expansion', async () => {
+    await u5With('gold', 640, 400, async s => {
+      const input = s.page.getByPlaceholder(T5_PLACEHOLDER, { exact: true });
+      await input.fill(T5_DRAFT); const identity = await input.elementHandle();
+      if (!identity) throw new Error('QE_INPUT_IDENTITY_REQUIRED');
+      await t5ChooseSecond(s, 'chat', 640, 400);
+      await u5Status(s, '已同步'); await t5Idle(s, true); await u5Frame(s, 640, 400);
+      const owner = s.page.locator('#task5-root header + div + div');
+      const geometry = async () => await owner.evaluate(element => {
+        const r = element.getBoundingClientRect();
+        return { top: r.top, bottom: r.bottom, height: r.height, clientHeight: element.clientHeight,
+          scrollTop: element.scrollTop, scrollHeight: element.scrollHeight,
+          bottomGap: element.scrollHeight - element.clientHeight - element.scrollTop };
+      });
+      const initialBox = await owner.boundingBox(); if (!initialBox) throw new Error('QE_READING_OWNER_REQUIRED');
+      await s.page.mouse.move(initialBox.x + initialBox.width / 2, initialBox.y + initialBox.height / 2);
+      await s.page.mouse.wheel(0, 600); await t5Settle(s);
+      await expect.poll(async () => Math.abs((await geometry()).bottomGap), { timeout: 1500 }).toBeLessThanOrEqual(1);
+      expect((await v5Observe(s, 'qd-latest-before-shrink')).readable, 'QE_INITIAL_LATEST_GLYPH_READABLE').toBe(true);
+      const before = await geometry(); await u5Capture(s, 'qd-latest-before-shrink-gold');
+      await t5Viewport(s, 640, 320); await t5Settle(s);
+      expect(await s.page.evaluate(() => ({ width: innerWidth, height: innerHeight,
+        visualWidth: visualViewport?.width, visualHeight: visualViewport?.height, offsetTop: visualViewport?.offsetTop })),
+        'QE_NATIVE_AND_VISUAL_VIEWPORT_MATCH_SHRINK').toEqual({ width: 640, height: 320, visualWidth: 640, visualHeight: 320, offsetTop: 0 });
+      await u5Frame(s, 640, 320);
+      const shrunk = await geometry();
+      console.log('QE_RESIZE_LAYOUT ' + JSON.stringify({ theme: 'gold', before, shrunk, viewport: s.page.viewportSize(),
+        mouseWheel: true, physicalAndroid: false, syntheticKeyboard: false }));
+      await u5Capture(s, 'qd-latest-after-shrink-gold');
+      await expect.poll(async () => Math.abs((await geometry()).bottomGap), { timeout: 1500, message: 'QE_READING_BOTTOM_PINNED_AFTER_RESIZE' }).toBeLessThanOrEqual(1);
+      expect((await v5Observe(s, 'qd-latest-after-shrink')).readable, 'QE_SHRUNK_LATEST_GLYPH_READABLE').toBe(true);
+      const box = await owner.boundingBox(); if (!box) throw new Error('QE_HISTORY_OWNER_REQUIRED');
+      await s.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await s.page.mouse.wheel(0, -600); await t5Settle(s);
+      await expect.poll(async () => (await geometry()).scrollTop, { timeout: 1500 }).toBe(0);
+      const historyBefore = await v5Observe(s, 'qd-history-before-expand', '保留此对话的公开任务身份');
+      expect(historyBefore.readable, 'QE_ORIGINAL_HISTORY_GLYPH_READABLE').toBe(true);
+      await t5Viewport(s, 640, 400); await t5Settle(s);
+      expect(await s.page.evaluate(() => ({ width: innerWidth, height: innerHeight,
+        visualWidth: visualViewport?.width, visualHeight: visualViewport?.height, offsetTop: visualViewport?.offsetTop })),
+        'QE_NATIVE_AND_VISUAL_VIEWPORT_MATCH_EXPAND').toEqual({ width: 640, height: 400, visualWidth: 640, visualHeight: 400, offsetTop: 0 });
+      await u5Frame(s, 640, 400);
+      await expect.poll(async () => (await geometry()).scrollTop, { timeout: 1500, message: 'QE_HISTORY_READING_POSITION_NOT_HIJACKED' }).toBe(0);
+      const historyAfter = await v5Observe(s, 'qd-history-after-expand', '保留此对话的公开任务身份');
+      expect(historyAfter.readable, 'QE_EXPANDED_HISTORY_GLYPH_READABLE').toBe(true);
+      await u5Retained(s, identity); await t5Idle(s, true);
+      console.log('QE_READING_RESIZE_BODY_COMPLETE ' + JSON.stringify({ theme: 'gold', latestPinned: true,
+        historyPreserved: true, draftAndOriginalTaskRetained: true, viewport: s.page.viewportSize(),
+        physicalAndroid: false, syntheticKeyboard: false, noGeneration: true }));
+    });
+    console.log('QE_READING_RESIZE_CLEANUP_COMPLETE ' + JSON.stringify({ theme: 'gold', cleanupCompleted: true,
+      wholeMobileAccepted: false, originalCasesClosed: 0 }));
+  }, 35_000);
+
+
+  // Direct regressions use the same real Page, native storage and HTTP guards.
+  for (const theme of ['gold', 'monochrome'] as const) {
+    for (const [width, height] of [[640, 320], [320, 320]] as const) {
+it(`simple-chat direct regression enlarged-font intro visible ${theme} ${width}x${height}`, async () => {
+        await t5With(theme, width, height, async s => {
+          await s.page.evaluate(() => { document.documentElement.style.fontSize = '20px'; });
+          await t5Settle(s);
+          for (const control of [
+            s.page.getByRole('heading', { level: 1, name: 'Task5 真实独立聊天项目', exact: true }),
+            s.page.getByText('开始一段新的对话吧', { exact: true }),
+          ]) {
+            expect(await control.count()).toBe(1);
+            const visible = await control.evaluate(element => {
+              const range = document.createRange();
+              range.selectNodeContents(element);
+              const bounds = range.getBoundingClientRect();
+              let left = 0, top = 0, right = innerWidth, bottom = innerHeight;
+              for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+                const rect = parent.getBoundingClientRect();
+                const style = getComputedStyle(parent);
+                if (/(auto|scroll|hidden|clip)/.test(style.overflowX)) {
+                  left = Math.max(left, rect.left + parent.clientLeft);
+                  right = Math.min(right, rect.left + parent.clientLeft + parent.clientWidth);
+                }
+                if (/(auto|scroll|hidden|clip)/.test(style.overflowY)) {
+                  top = Math.max(top, rect.top + parent.clientTop);
+                  bottom = Math.min(bottom, rect.top + parent.clientTop + parent.clientHeight);
+                }
+              }
+              return bounds.width > 0 && bounds.height > 0 && bounds.left >= left - 0.5
+                && bounds.right <= right + 0.5 && bounds.top >= top - 0.5 && bounds.bottom <= bottom + 0.5;
+            });
+            expect(visible, 'empty-state text must be visible within every clipping ancestor').toBe(true);
+          }
+          expect(await s.page.getByRole('heading', { level: 1, name: 'Task5 真实独立聊天项目' }).locator('..').locator('button').count()).toBe(6);
+          expect(s.requests.some(request => /\/api\/(simple-chat\/chat|chat|generate)(?:\?|$)/.test(request))).toBe(false);
+        }, 'empty');
+      }, 30_000);
+    }
+it('simple-chat direct regression six Skills and composer stay reachable through font and viewport changes '+theme,async()=>{
+      await t5With(theme,640,320,async s=>{
+        await s.page.evaluate(()=>{document.documentElement.style.fontSize='20px';});await t5Settle(s);
+        const input=s.page.getByPlaceholder(T5_PLACEHOLDER);
+        await input.fill('字号及视口变化不丢草稿');
+        const {Buffer}=await import('node:buffer');
+        await s.page.locator('#chat-file-upload').setInputFiles({name:'font-scope.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLttAAAAABJRU5ErkJggg==','base64')});
+        const attachment=s.page.getByRole('button',{name:'移除图片：font-scope.png',exact:true});
+        await attachment.waitFor({state:'visible'});
+        for(const [width,height,font] of [[640,320,20],[320,320,20],[390,844,16]] as const){
+          await t5Viewport(s,width,height);await s.page.evaluate(font=>{document.documentElement.style.fontSize=font+'px';},font);await t5Settle(s);
+          const intro=s.page.getByRole('heading',{level:1,name:'Task5 真实独立聊天项目',exact:true}).locator('..');
+          const buttons=intro.locator('button');expect(await buttons.count()).toBe(6);
+          for(const button of await buttons.all()){
+            expect((await button.textContent())?.trim()).not.toBe('');
+            await button.scrollIntoViewIfNeeded();await button.focus();await t5Settle(s);
+            await t5Inside(button,width,height,0,true);
+            expect(await button.evaluate(el=>document.activeElement===el)).toBe(true);
+          }
+          for(const control of [input,s.page.getByRole('button',{name:'发送消息',exact:true}),s.page.getByLabel('目标画布项目',{exact:true}),attachment]){
+            await control.scrollIntoViewIfNeeded();await t5Settle(s);await t5Inside(control,width,height,0,true);
+          }
+          expect(await input.inputValue()).toBe('字号及视口变化不丢草稿');expect(await attachment.count()).toBe(1);
+        }
+        expect(s.projects[0].tasks[0].messages).toEqual([]);
+        expect(s.requests.some(r=>/\/api\/(simple-chat\/chat|chat|generate)(?:\?|$)/.test(r))).toBe(false);
+      },'empty');
+    },35_000);
+it(`simple-chat direct regression keeps ordinary and temporary drafts and attachments isolated (${theme})`, async () => {
+      await t5With(theme, 1440, 900, async s => {
+        await t5ChooseSecond(s, 'chat', 1440, 900);
+        await t5ChooseSecond(s, 'image', 1440, 900);
+        await t5Idle(s, true);
+        const input = s.page.getByPlaceholder(T5_PLACEHOLDER);
+        const { Buffer } = await import('node:buffer');
+        const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLttAAAAABJRU5ErkJggg==', 'base64');
+        await input.fill('普通模式草稿');
+        await s.page.locator('#chat-file-upload').setInputFiles({ name: 'normal.png', mimeType: 'image/png', buffer: png });
+        const normal = s.page.getByRole('button', { name: '移除图片：normal.png', exact: true });
+        await normal.waitFor({ state: 'visible' });
+        await s.page.getByRole('button', { name: '临时聊天', exact: true }).click();
+        await expect.poll(() => input.inputValue()).toBe('');
+        expect(await normal.count()).toBe(0);
+        await input.fill('临时模式草稿');
+        await s.page.locator('#chat-file-upload').setInputFiles({ name: 'temporary.png', mimeType: 'image/png', buffer: png });
+        const temporary = s.page.getByRole('button', { name: '移除图片：temporary.png', exact: true });
+        await temporary.waitFor({ state: 'visible' });
+        await s.page.getByRole('button', { name: '临时聊天中', exact: true }).click();
+        await expect.poll(() => input.inputValue()).toBe('普通模式草稿');
+        expect(await normal.count()).toBe(1);
+        expect(await temporary.count()).toBe(0);
+        await s.page.getByRole('button', { name: '临时聊天', exact: true }).click();
+        await expect.poll(() => input.inputValue()).toBe('临时模式草稿');
+        expect(await normal.count()).toBe(0);
+        expect(await temporary.count()).toBe(1);
+        await s.page.getByRole('button', { name: '临时聊天中', exact: true }).click();
+        await expect.poll(() => input.inputValue()).toBe('普通模式草稿');
+        expect(await normal.count()).toBe(1);
+
+        await t5Idle(s, true);
+        await t5PairsRetained(s);
+        expect(s.requests.some(request => /\/api\/(simple-chat\/chat|chat|generate)(?:\?|$)/.test(request))).toBe(false);
+      });
+    }, 35_000);
+  }
+it('simple-chat direct regression held ACK keeps real task changes, ordinary draft and attachment without a timestamp-only follow-up write', async () => {
+    await t5With('gold',1440,900,async s => {
+      await t5ChooseSecond(s,'image',1440,900);await t5Idle(s,true);
+      const before=structuredClone(s.projects);
+      const input=s.page.getByPlaceholder(T5_PLACEHOLDER);
+      await input.fill('受控回执期间保留的普通草稿');
+      const {Buffer}=await import('node:buffer');
+      const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLttAAAAABJRU5ErkJggg==','base64');
+      await s.page.locator('#chat-file-upload').setInputFiles({name:'held.png',mimeType:'image/png',buffer:png});
+      await s.page.getByRole('button',{name:'移除图片：held.png',exact:true}).waitFor({state:'visible'});
+      const fault=u5Arm(s,'held');
+      try {
+        await t5ChooseSecond(s,'chat',1440,900);
+        await t5Bounded(fault.entered,'held real sync request');
+        const pending=await s.page.evaluate(async()=>await window.task5PageFixture?.envelope());
+        expect(pending?.pendingOperations.length).toBeGreaterThan(0);
+        expect(pending?.baseRevision).toBe(s.revision);
+        expect(s.projects).toEqual(before);
+        await s.page.getByRole('button',{name:'临时聊天',exact:true}).click();
+        await expect.poll(()=>input.inputValue()).toBe('');
+        expect(await s.page.getByRole('button',{name:'移除图片：held.png',exact:true}).count()).toBe(0);
+        await input.fill('本次临时草稿不得保存到任务');
+        await s.page.getByRole('button',{name:'临时聊天中',exact:true}).click();
+        await expect.poll(()=>input.inputValue()).toBe('受控回执期间保留的普通草稿');
+        expect(await s.page.getByRole('button',{name:'移除图片：held.png',exact:true}).count()).toBe(1);
+        const during=await s.page.evaluate(async()=>await window.task5PageFixture?.envelope());
+        expect(during?.currentProjects[0].tasks[0].providerId).toBe(T5_PROVIDERS[1].id);
+        expect(during?.currentProjects[0].tasks[0].messages).toEqual(before[0].tasks[0].messages);
+        expect(s.projects).toEqual(before);
+      } finally {fault.release();}
+      await t5Idle(s,true);await t5PairsRetained(s);
+      expect(fault.attempts).toBe(1);expect(fault.successes).toBe(1);
+      expect(s.projects[0]).toEqual({...before[0],updatedAt:s.projects[0].updatedAt,tasks:[{
+        ...before[0].tasks[0],providerId:T5_PROVIDERS[1].id,updatedAt:s.projects[0].tasks[0].updatedAt,
+      }]});
+      expect(s.projects[0].tasks[0].messages.some(m=>m.content.includes('草稿'))).toBe(false);
+      expect(s.requests.some(request=>/\/api\/(simple-chat\/chat|chat|generate)(?:\?|$)/.test(request))).toBe(false);
+    });
+  },35_000);
 });

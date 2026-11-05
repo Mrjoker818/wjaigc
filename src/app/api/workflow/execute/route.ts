@@ -9,16 +9,26 @@
  * P0升级: 串行等待执行 — 上游节点失败时跳过下游节点
  */
 import { NextRequest, NextResponse } from 'next/server';
+import { observeWorkflowBackground } from '@/lib/workflow-background';
 import { isDeepStrictEqual } from 'node:util';
+import { randomUUID } from 'node:crypto';
 import { getInternalApiUrl } from '@/lib/api-helpers';
 import { getInternalRequestHeaders, requireApiAuthOrReject } from '@/lib/api-auth';
 import { resolveWorkflowInputImageForActor } from '@/lib/asset-core/workflow-resolver';
+import { readWorkflowImageInputTransform, selectWorkflowImageUpstream } from '../../../../lib/workflow-image-receiver';
+import type { WorkflowImageInputExecutionOutcome } from '../../../../lib/workflow-image-input-execution';
+import type { WorkflowImageExecutionFenceInput } from '../../../../lib/workflow-image-execution-fence';
+import type { WorkflowImageRetryMarker } from '../../../../lib/workflow-image-retry-admission';
 import type { WorkflowSketchIntent, WorkflowSketchHost } from '@/lib/sketch-to-code/workflow';
 import type { WorkflowSketchImageIntent } from '@/lib/sketch-to-code/image-workflow';
 import { sketchImageModels } from '@/lib/sketch-to-code/image-contract';
 import {
   topologicalSort,
   getNodeInputs,
+  canConnectPorts,
+  configureWorkflowSkillNodePorts,
+  createWorkflowNode,
+  createEmptyWorkflow,
   evaluateWorkflowCondition,
   resolveGroupOutput,
   resolveInlineSubgraph,
@@ -68,6 +78,7 @@ import {
   releaseCloudTaskLease,
   renewCloudTaskLease,
   updateCloudTask,
+  type CloudTask,
 } from '@/lib/cloud-task-storage';
 import {
   buildWorkflowLayerIdempotencyKey,
@@ -109,6 +120,19 @@ interface WorkflowExecutionState {
   recoveryLeaseTaskId?: string;
   recoveryLeaseLost?: boolean;
   recoveryLeaseState?: { lost: boolean };
+  recoveryLeaseAttemptCount?: number;
+  imageRuntime?: boolean;
+  imageRetry?: WorkflowImageRetryMarker;
+  imagePublicationUnconfirmed?: boolean;
+  imageRecoveryVerifying?: boolean;
+  imageRecoveryPauseUnconfirmed?: boolean;
+  imageRecoveryPauseReceipt?: {
+    executionId: string; revision: number; result: Record<string, unknown>; owner: string; attemptCount: number;
+  };
+  imageSubgraphPath?: readonly string[];
+  activeImageReads?: Map<string, { controller: AbortController; settled: Promise<void> }>;
+  imageCancellation?: Promise<void>;
+  persistenceTail?: Promise<void>;
   loopResume?: {
     loopNodeId: string;
     iterationIndex: number;
@@ -137,7 +161,150 @@ function isSketchWorkflowNode(node: Pick<WorkflowNode, 'type'>): boolean {
 
 function requiresRecoverableExecutionGraph(node: WorkflowNode): boolean {
   return node.type.startsWith('ai-') || node.type.startsWith('agent-')
-    || node.type === 'storyboard-sequence' || node.type === 'subgraph';
+    || node.type === 'storyboard-sequence' || node.type === 'subgraph'
+    || node.type === 'input-image' && node.config?.source === 'upstream';
+}
+
+function hasWorkflowImageReceivers(nodes: readonly WorkflowNode[], depth = 0): boolean {
+  return nodes.some(node => node.type === 'input-image' && node.config?.source === 'upstream'
+    || node.type === 'subgraph' && depth < 3 && hasWorkflowImageReceivers(resolveInlineSubgraph(node)?.nodes || [], depth + 1));
+}
+
+function collectDeferredImageParallelResults(
+  nodes: readonly WorkflowNode[], connections: readonly WorkflowConnection[], results: Map<string, ExecutionResult>,
+): void {
+  for (const parent of nodes) {
+    if (parent.type !== 'parallel') continue;
+    const result = results.get(parent.id), output = result?.output;
+    if (result?.status !== 'success' || !isRecord(output) || !Array.isArray(output.activePorts)) continue;
+    const activePorts = new Set(output.activePorts.filter((port): port is string => typeof port === 'string'));
+    const branches: Record<string, ExecutionResult> = {};
+    for (const edge of connections) {
+      if (edge.fromNodeId !== parent.id || !activePorts.has(edge.fromPortId)) continue;
+      const node = nodes.find(candidate => candidate.id === edge.toNodeId), branch = results.get(edge.toNodeId);
+      if (!node || !hasWorkflowImageReceivers([node]) || branch?.nodeId !== node.id
+        || !['success', 'failed', 'skipped'].includes(branch.status)) continue;
+      branches[node.id] = structuredClone(branch);
+    }
+    if (Object.keys(branches).length) result.output = { ...output,
+      parallelResults: { ...(isRecord(output.parallelResults) ? structuredClone(output.parallelResults) : {}), ...branches } };
+  }
+}
+
+function workflowParallelRegion(targets: ReadonlySet<string>, connections: readonly WorkflowConnection[]): Set<string> {
+  const outgoing = new Map<string, string[]>(), incoming = new Map<string, string[]>();
+  for (const edge of connections) {
+    const next = outgoing.get(edge.fromNodeId) || [], previous = incoming.get(edge.toNodeId) || [];
+    next.push(edge.toNodeId); previous.push(edge.fromNodeId);
+    outgoing.set(edge.fromNodeId, next); incoming.set(edge.toNodeId, previous);
+  }
+  const region = new Set(targets);
+  for (const edges of [outgoing, incoming]) {
+    const queue = [...region];
+    for (let index = 0; index < queue.length; index++) {
+      for (const id of edges.get(queue[index]) || []) {
+        if (!region.has(id)) { region.add(id); queue.push(id); }
+      }
+    }
+  }
+  return region;
+}
+
+interface ParallelApprovalDispatch {
+  allowed: Set<string>;
+  blocked: Set<string>;
+}
+
+function resolveParallelApprovalDispatch(
+  nodes: readonly WorkflowNode[], connections: readonly WorkflowConnection[], results: Map<string, ExecutionResult>,
+): ParallelApprovalDispatch | undefined {
+  const waiting = [...results].filter(([, result]) => result.status === 'waiting-approval');
+  if (!waiting.length) return undefined;
+  const byId = new Map(nodes.map(node => [node.id, node]));
+  const activeByParent = new Map<string, Set<string>>();
+  for (const node of nodes) {
+    const result = results.get(node.id), output = result?.output;
+    if (node.type === 'parallel' && result?.nodeId === node.id && result.status === 'success'
+      && isRecord(output) && Array.isArray(output.activePorts)) {
+      activeByParent.set(node.id, new Set(output.activePorts.filter((port): port is string => typeof port === 'string')));
+    }
+  }
+  const outgoing = new Map<string, string[]>(), incoming = new Map<string, string[]>();
+  for (const edge of connections) {
+    const next = outgoing.get(edge.fromNodeId) || [], previous = incoming.get(edge.toNodeId) || [];
+    next.push(edge.toNodeId); previous.push(edge.fromNodeId);
+    outgoing.set(edge.fromNodeId, next); incoming.set(edge.toNodeId, previous);
+  }
+  const parents = new Set<string>();
+  for (const [id, result] of waiting) {
+    if (result.nodeId !== id || byId.get(id)?.type !== 'ai-skill') return undefined;
+    const parentEdges = connections.filter(edge => edge.toNodeId === id && activeByParent.get(edge.fromNodeId)?.has(edge.fromPortId));
+    if (!parentEdges.length) return undefined;
+    for (const edge of parentEdges) parents.add(edge.fromNodeId);
+  }
+  const expand = (seeds: Iterable<string>, edges: Map<string, string[]>): Set<string> => {
+    const visited = new Set(seeds), queue = [...visited];
+    for (let index = 0; index < queue.length; index++) {
+      for (const id of edges.get(queue[index]) || []) {
+        if (!visited.has(id)) { visited.add(id); queue.push(id); }
+      }
+    }
+    return visited;
+  };
+  const blockingEdges = new Map([...outgoing].map(([id, targets]) => [id, [...targets]]));
+  for (const node of nodes) {
+    if (!['loop-for', 'loop-each', 'loop-while'].includes(node.type)) continue;
+    const edges = connections.filter(edge => edge.fromNodeId === node.id);
+    const explicitBody = edges.filter(edge => edge.fromPortId === 'out-loop');
+    for (const edge of explicitBody.length ? explicitBody : edges.filter(edge => edge.fromPortId !== 'out-done')) {
+      // A blocked body also blocks its owner and every completion descendant.
+      blockingEdges.set(edge.toNodeId, [...(blockingEdges.get(edge.toNodeId) || []), node.id]);
+    }
+  }
+  const blocked = expand(waiting.map(([id]) => id), blockingEdges);
+  const targets = connections.filter(edge => parents.has(edge.fromNodeId)
+    && activeByParent.get(edge.fromNodeId)?.has(edge.fromPortId)).map(edge => edge.toNodeId);
+  const allowed = expand(targets, outgoing);
+  for (const id of blocked) allowed.delete(id);
+  // Only prerequisites of independent work belong to this approval drain.
+  const withPrerequisites = expand(allowed, incoming);
+  for (const id of blocked) withPrerequisites.delete(id);
+  return { allowed: withPrerequisites, blocked };
+}
+
+function hasSafeImageInputCapture(node: WorkflowNode): boolean {
+  if (node.type !== 'input-image') return true;
+  const config = node.config;
+  if (config.entityId !== undefined && (typeof config.entityId !== 'string'
+    || !config.entityId.trim() || config.entityId.length > 256)) return false;
+  if (config.blockedInputs !== undefined && (!Array.isArray(config.blockedInputs)
+    || !config.blockedInputs.every(value => typeof value === 'string' && value.trim().length > 0))) return false;
+  try {
+    const transform = readWorkflowImageInputTransform(node);
+    const displayKeys = ['gridIndex', 'gridCol', 'gridRow'] as const;
+    if (!transform) return config.imageInputTransform === undefined && displayKeys.every(key => config[key] === undefined);
+    // A sketch elsewhere must not grant its PNG exception to any string in this receiver.
+    let unsafe = false;
+    JSON.stringify(config, (_key, value: unknown) => {
+      if (typeof value === 'string' && (value.length > 16_384
+        || /data:[^\s"'<>]*;base64,|blob:/i.test(value)
+        || /[?&](?:api.?key|token|secret|password|signature)=/i.test(value))) unsafe = true;
+      return value;
+    });
+    if (unsafe) return false;
+    // These one-based labels are presentation only; the zero-based transform is authoritative.
+    // An extracted identity receiver may retain grid labels from its former source.
+    if (displayKeys.some(key => config[key] !== undefined
+      && (typeof config[key] !== 'number' || !Number.isSafeInteger(config[key]) || Number(config[key]) < 1 || Number(config[key]) > 64))) return false;
+    if (transform.kind === 'grid') {
+      const display = { gridIndex: transform.row * transform.columns + transform.column + 1,
+        gridCol: transform.column + 1, gridRow: transform.row + 1 };
+      if (displayKeys.some(key => config[key] !== undefined && config[key] !== display[key])) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function captureRecoverableExecutionGraph(
@@ -170,9 +337,13 @@ async function captureRecoverableExecutionGraph(
       || node.ports.some(port => !isRecord(port) || Object.keys(port).some(key => !portKeys.has(key)))) {
       return undefined;
     }
+    if (!hasSafeImageInputCapture(node)) return undefined;
     const allowedKeys = new Set([
       ...getNodePropertyFields(node.type).map(field => field.key),
       ...executionConfigKeys,
+      ...(node.type === 'input-image'
+        ? ['entityId', 'imageInputTransform', 'gridIndex', 'gridCol', 'gridRow', 'blockedInputs']
+        : []),
       ...(node.type === 'ai-sketch-to-image' ? ['visionProviderId', 'imageProviderId'] : []),
       ...(node.type === 'ai-skill'
         ? ['skillId', 'version', 'inputValues', 'modelBindings', 'runId']
@@ -340,13 +511,15 @@ async function renewRecoveryLeaseBeforeDispatch(
     if (hasLostFence()) throw new Error('WORKFLOW_EXECUTION_FENCE_LOST');
     if (isWorkflowDispatchStopped(execState)) return false;
     // Another instance can stop this parent during renewal; read its fence after the last lease await.
-    if (Object.keys(root.state.sketchIntents || {}).length > 0) {
+    if (root.state.imageRuntime || Object.keys(root.state.sketchIntents || {}).length > 0) {
       const parent = root.state.userId ? await getCloudTaskForUser(root.executionId, root.state.userId) : null;
       if (hasLostFence()) throw new Error('WORKFLOW_EXECUTION_FENCE_LOST');
       if (!parent || parent.type !== 'workflow' || parent.userId !== root.state.userId || parent.projectId !== root.state.projectId
         || ['cancelled', 'failed', 'completed', 'timeout'].includes(parent.status)) {
         throw new Error('WORKFLOW_EXECUTION_FENCE_LOST');
       }
+      if (root.state.imageRuntime && (parent.leaseOwner !== root.state.recoveryLeaseOwner
+        || parent.attemptCount !== root.state.recoveryLeaseAttemptCount)) throw new Error('WORKFLOW_EXECUTION_FENCE_LOST');
       if (parent.result?.dispatchStopped === true) {
         root.state.cancellationState ||= { cancelled: false };
         root.state.cancellationState.dispatchStopped = true;
@@ -362,6 +535,163 @@ async function renewRecoveryLeaseBeforeDispatch(
   root.state.recoveryLeaseLost = true;
   if (execState.recoveryLeaseState) execState.recoveryLeaseState.lost = true;
   return false;
+}
+
+// Validate only edges the existing input reader will actually consume.
+// Conservative start-time check: only root inputs whose output cannot carry a
+// dynamic activePorts marker, and only outside a controller-dependent region.
+// Other edges still need the existing checks when they are actually consumed.
+async function preflightRootInputEdges(
+  nodes: WorkflowNode[], connections: WorkflowConnection[], actorUserId: string,
+): Promise<void> {
+  const byId = new Map(nodes.map(node => [node.id, node]));
+  const withIncoming = new Set(connections.map(edge => edge.toNodeId));
+  const rootIds = new Set(nodes.filter(node => ['input-image', 'input-text', 'input-param'].includes(node.type)
+    && !withIncoming.has(node.id)
+    && !Array.isArray(node.config?.activePorts)
+    && !(node.type === 'input-image' && node.config?.source === 'upstream')).map(node => node.id));
+  // Any upstream output may carry activePorts, not just explicit controllers.
+  // A target downstream of an unknown source is deferred as a whole.
+  const dynamic = new Set(connections.filter(edge => !rootIds.has(edge.fromNodeId)).map(edge => edge.toNodeId));
+  const candidates = connections.filter(edge => {
+    const target = byId.get(edge.toNodeId);
+    if (!rootIds.has(edge.fromNodeId) || !target || dynamic.has(edge.toNodeId)) return false;
+    if (target.type === 'input-image' && target.config?.source === 'upstream') return false;
+    return !(Array.isArray(target.config?.blockedInputs) && target.config.blockedInputs.includes(edge.id));
+  });
+  if (!candidates.length) return;
+  const results = new Map<string, ExecutionResult>();
+  for (const edge of candidates) results.set(edge.fromNodeId, {
+    nodeId: edge.fromNodeId, status: 'success', output: {}, durationMs: 0,
+  });
+  // The same checker is used again with actual results at dispatch. The empty
+  // synthetic output intentionally supplies no user data or active marker.
+  for (const targetId of new Set(candidates.map(edge => edge.toNodeId))) {
+    const target = byId.get(targetId)!;
+    await readValidatedNodeInputs(target, nodes, candidates, results, actorUserId);
+  }
+}
+
+async function readValidatedNodeInputs(
+  node: WorkflowNode, nodes: WorkflowNode[], connections: WorkflowConnection[],
+  results: Map<string, ExecutionResult>, actorUserId: string, forcedControlEdges: ReadonlySet<string> = new Set(),
+): Promise<Record<string, unknown>> {
+  const blocked = new Set(Array.isArray(node.config?.blockedInputs) ? node.config.blockedInputs as string[] : []);
+  const active = connections.filter(edge => {
+    if (edge.toNodeId !== node.id || (blocked.has(edge.id) && !forcedControlEdges.has(edge.id))) return false;
+    const output = results.get(edge.fromNodeId)?.output;
+    if (!output) return false;
+    return forcedControlEdges.has(edge.id) || !Array.isArray(output.activePorts) || output.activePorts.includes(edge.fromPortId);
+  });
+  if (active.length) {
+    const relevant = [node, ...active.map(edge => nodes.find(candidate => candidate.id === edge.fromNodeId)).filter((candidate): candidate is WorkflowNode => Boolean(candidate))];
+    const skills = relevant.some(candidate => candidate.type === 'ai-skill')
+      ? await loadUserSkillCatalog(actorUserId, 'workflow') : [];
+    const effective = (candidate: WorkflowNode): WorkflowNode => {
+      if (candidate.type !== 'ai-skill') return candidate;
+      const skill = skills.find(item => item.id === candidate.config.skillId && item.version === Number(candidate.config.version));
+      if (!skill) throw new Error(`工作流节点 ${candidate.id} 的 Skill 版本不可用，请重新选择`);
+      return configureWorkflowSkillNodePorts({ ...candidate, ports: createWorkflowNode('ai-skill', 0, 0).ports }, skill);
+    };
+    const target = effective(node);
+    for (const edge of active) {
+      const originalSource = nodes.find(candidate => candidate.id === edge.fromNodeId);
+      const source = originalSource && effective(originalSource);
+      const from = source?.ports.find(port => port.id === edge.fromPortId && port.direction === 'out');
+      const to = target.ports.find(port => port.id === edge.toPortId && port.direction === 'in');
+      // Loop control edges (out-loop/out-done, or a legacy body edge already selected by the
+      // executor) are untyped and may feed any existing input port.
+      const loopControl = ['loop-for', 'loop-each', 'loop-while'].includes(source?.type || '')
+        && (forcedControlEdges.has(edge.id) || ['out-loop', 'out-done'].includes(from?.id || ''));
+      if (!source || !to || source.id === target.id || (!loopControl && (!from || !canConnectPorts(from.type, to.type)
+        || (edge.type !== 'any' && edge.type !== from.type)))) {
+        throw new Error(`工作流连线 ${edge.id} 失配：${edge.fromNodeId}/${edge.fromPortId} → ${edge.toNodeId}/${edge.toPortId}，请检查端口`);
+      }
+    }
+  }
+  return getNodeInputs(node, connections, results);
+}
+
+// Receiver selection has a narrower, existing contract than generic getNodeInputs.
+// Verify precisely the upstream record that the receiver itself will consume.
+async function validateImageReceiverUpstream(
+  node: WorkflowNode, nodes: WorkflowNode[], connections: WorkflowConnection[],
+  results: Map<string, ExecutionResult>, actorUserId: string,
+): Promise<void> {
+  let selected: ReturnType<typeof selectWorkflowImageUpstream>;
+  try {
+    selected = selectWorkflowImageUpstream({ ...createEmptyWorkflow(''), nodes, connections }, node.id, results);
+  } catch (error) {
+    throw new Error(`图片接收节点 ${node.id} 来源校验失败: ${error instanceof Error ? error.message : '未知错误'}`);
+  }
+  const edge = connections.find(connection => connection.id === selected.connectionId);
+  const upstream = results.get(selected.sourceNodeId);
+  if (!edge || !upstream?.output) throw new Error(`图片接收节点 ${node.id} 来源未确认`);
+  // The receiver selects its image independently of activePorts; validate that
+  // exact selected edge even if a control-output marker is also present.
+  const output = { ...upstream.output };
+  delete output.activePorts;
+  const selectedResults = new Map(results);
+  selectedResults.set(selected.sourceNodeId, { ...upstream, output });
+  await readValidatedNodeInputs(node, nodes, [edge], selectedResults, actorUserId);
+}
+
+async function executeImageReceiver(
+  executionId: string, execState: WorkflowExecutionState, nodeId: string,
+  nodes: WorkflowNode[], connections: WorkflowConnection[], results: Map<string, ExecutionResult>,
+): Promise<WorkflowImageInputExecutionOutcome> {
+  const root = execState.sketchRoot?.state || execState;
+  const receiver = nodes.find(node => node.id === nodeId);
+  if (!receiver || !root.userId) throw new Error('WORKFLOW_EXECUTION_FENCE_LOST');
+  await validateImageReceiverUpstream(receiver, nodes, connections, results, root.userId);
+  return serializeWorkflowPersistence(root, () => executeImageReceiverCore(executionId, execState, nodeId, nodes, connections, results));
+}
+
+async function executeImageReceiverCore(
+  executionId: string, execState: WorkflowExecutionState, nodeId: string,
+  nodes: WorkflowNode[], connections: WorkflowConnection[], results: Map<string, ExecutionResult>,
+): Promise<WorkflowImageInputExecutionOutcome> {
+  const root = execState.sketchRoot || { executionId, state: execState };
+  const state = root.state;
+  if (!state.userId || !state.projectId || !state.workflowId || !state.executionGraph || !state.recoveryLeaseOwner
+    || !state.recoveryLeaseAttemptCount || state.recoveryLeaseLost || state.recoveryLeaseState?.lost) throw new Error('WORKFLOW_EXECUTION_FENCE_LOST');
+  const parent = await getCloudTaskForUser(root.executionId, state.userId);
+  if (!parent || parent.type !== 'workflow' || parent.userId !== state.userId || parent.projectId !== state.projectId
+    || parent.leaseOwner !== state.recoveryLeaseOwner || parent.attemptCount !== state.recoveryLeaseAttemptCount
+    || !Number.isSafeInteger(parent.revision)) throw new Error('WORKFLOW_EXECUTION_FENCE_LOST');
+  const execution: WorkflowImageExecutionFenceInput = {
+    actorUserId: state.userId, projectId: state.projectId, workflowId: state.workflowId, parentExecutionId: root.executionId,
+    nodeId, subgraphPath: execState.imageSubgraphPath || [], expectedGraph: state.executionGraph,
+    expectedRevision: parent.revision!, leaseOwner: state.recoveryLeaseOwner, leaseAttemptCount: state.recoveryLeaseAttemptCount,
+    attempt: execState.retryAttempts?.[nodeId] || 0,
+    ...(execState.loopResume ? { loop: { nodeId: execState.loopResume.loopNodeId, index: execState.loopResume.iterationIndex } } : {}),
+  };
+  // Ordinary workflows and rejected payloads retain their original dependency
+  // boundary. Load source/publication services only for an admitted receiver.
+  const { executeWorkflowImageInputForActor } = await import('../../../../lib/workflow-image-input-execution');
+  const { workflowImageRuntimeOperationId } = await import('../../../../lib/workflow-image-runtime-publication');
+  const key = workflowImageRuntimeOperationId(execution), controller = new AbortController();
+  state.activeImageReads ||= new Map();
+  if (state.activeImageReads.has(key)) throw new Error('WORKFLOW_IMAGE_PREPARATION_BUSY');
+  let finishRead!: () => void;
+  const settled = new Promise<void>(resolve => { finishRead = resolve; });
+  state.activeImageReads.set(key, { controller, settled });
+  if (isWorkflowDispatchStopped(execState)) controller.abort(new Error('用户取消任务'));
+  try {
+    const outcome = await executeWorkflowImageInputForActor({ id: state.workflowId, name: 'Execution', version: '1', status: 'idle',
+      createdAt: 0, updatedAt: 0, nodes, connections }, results, execution, controller.signal);
+    if (outcome.status === 'committed') {
+      // Publish the acknowledged checkpoint to both original memory views before
+      // a cancellation waiter can write a full parent result.
+      results.set(nodeId, outcome.nodeResult);
+      execState.results[nodeId] = outcome.nodeResult;
+    } else {
+      state.imagePublicationUnconfirmed = true; state.status = 'paused'; state.recoveryLeaseLost = true;
+      if (state.recoveryLeaseState) state.recoveryLeaseState.lost = true;
+      execState.status = 'paused'; execState.recoveryLeaseLost = true;
+    }
+    return outcome;
+  } finally { state.activeImageReads.delete(key); finishRead(); }
 }
 
 async function buildExecutableNodeRequest(
@@ -578,11 +908,11 @@ async function continueApprovedSkillWorkflow(input: {
     if (input.execState.recoveryLeaseState) input.execState.recoveryLeaseState.lost = true;
   };
   const leaseHeartbeat = setInterval(() => {
-    void renewCloudTaskLease(input.executionId, input.leaseOwner, 120_000)
+    void observeWorkflowBackground(renewCloudTaskLease(input.executionId, input.leaseOwner, 120_000)
       .then(renewed => {
         if (!renewed) markLeaseLost();
       })
-      .catch(markLeaseLost);
+      .catch(markLeaseLost));
   }, 30_000);
   leaseHeartbeat.unref?.();
   try {
@@ -667,6 +997,7 @@ async function continueApprovedSkillWorkflow(input: {
     await persistWorkflowExecution(input.executionId, input.execState);
   } finally {
     clearInterval(leaseHeartbeat);
+    await drainWorkflowPersistence(input.execState);
     delete input.execState.recoveryLeaseOwner;
     delete input.execState.recoveryLeaseTaskId;
     delete input.execState.recoveryLeaseState;
@@ -681,6 +1012,7 @@ async function continueAcceptedEditWorkflow(input: {
   nodes: WorkflowNode[];
   connections: WorkflowConnection[];
   leaseOwner: string;
+  imageRecoveryTask?: CloudTask;
 }): Promise<void> {
   const markLeaseLost = (): void => {
     input.execState.recoveryLeaseLost = true;
@@ -690,12 +1022,40 @@ async function continueAcceptedEditWorkflow(input: {
   input.execState.recoveryLeaseTaskId = input.executionId;
   input.execState.recoveryLeaseState = { lost: false };
   const leaseHeartbeat = setInterval(() => {
-    void renewCloudTaskLease(input.executionId, input.leaseOwner, 120_000)
+    void observeWorkflowBackground(renewCloudTaskLease(input.executionId, input.leaseOwner, 120_000)
       .then(renewed => { if (!renewed) markLeaseLost(); })
-      .catch(markLeaseLost);
+      .catch(markLeaseLost));
   }, 30_000);
   leaseHeartbeat.unref?.();
   try {
+    if (input.imageRecoveryTask) {
+      input.execState.activeImageReads ||= new Map();
+      const key = `recovery-receipts:${input.executionId}:${input.leaseOwner}`, controller = new AbortController();
+      let finish!: () => void;
+      const settled = new Promise<void>(resolve => { finish = resolve; });
+      input.execState.activeImageReads.set(key, { controller, settled });
+      if (isWorkflowDispatchStopped(input.execState)) controller.abort(new Error('用户取消任务'));
+      try {
+        let verificationFailed = false;
+        try {
+          const { verifyRunningWorkflowImageCheckpoints } = await import('../../../../lib/workflow-image-terminal-receipt');
+          await verifyRunningWorkflowImageCheckpoints(input.imageRecoveryTask, input.execState.userId!, controller.signal);
+          input.execState.imageRecoveryVerifying = false;
+        } catch { verificationFailed = true; }
+        if (verificationFailed) {
+          try {
+            if (!input.execState.recoveryLeaseLost && !isWorkflowDispatchStopped(input.execState)) {
+              await pauseWorkflowImageRecovery(input.executionId, input.execState, input.leaseOwner);
+            }
+          } catch {
+            input.execState.imageRecoveryPauseUnconfirmed = true;
+            input.execState.error = 'WORKFLOW_IMAGE_RECOVERY_RECEIPT_UNCONFIRMED';
+          }
+          return;
+        }
+      } finally { input.execState.activeImageReads.delete(key); finish(); }
+      if (!await renewRecoveryLeaseBeforeDispatch(input.executionId, input.execState)) return;
+    }
     await executeWorkflow(input.executionId, input.execState, input.nodes, input.connections);
   } catch (error) {
     if (!input.execState.recoveryLeaseLost) {
@@ -706,8 +1066,11 @@ async function continueAcceptedEditWorkflow(input: {
     }
   } finally {
     clearInterval(leaseHeartbeat);
+    await drainWorkflowPersistence(input.execState);
     delete input.execState.recoveryLeaseOwner;
     delete input.execState.recoveryLeaseTaskId;
+    delete input.execState.recoveryLeaseAttemptCount;
+    delete input.execState.imageRecoveryPauseReceipt;
     delete input.execState.recoveryLeaseState;
     if (input.execState.recoveryLeaseLost) executionCache.delete(input.executionId);
     await releaseCloudTaskLease(input.executionId, input.leaseOwner).catch(() => false);
@@ -867,6 +1230,16 @@ function fromCloudWorkflowStatus(status: string): WorkflowExecutionStatus {
       : 'failed';
 }
 
+async function drainWorkflowPersistence(execState: WorkflowExecutionState): Promise<void> {
+  const root = execState.sketchRoot?.state || execState;
+  while (root.imageCancellation || root.persistenceTail) {
+    const cancellation = root.imageCancellation;
+    if (cancellation) await cancellation;
+    const pending = root.persistenceTail;
+    if (pending) await pending;
+  }
+}
+
 async function persistWorkflowExecution(executionId: string, execState: WorkflowExecutionState,
   required = false): Promise<void> {
   if (execState.sketchRoot) {
@@ -875,6 +1248,44 @@ async function persistWorkflowExecution(executionId: string, execState: Workflow
     root.state.sketchNested[executionId] = { results: execState.results, currentNodeId: execState.currentNodeId, status: execState.status, loopResume: execState.loopResume };
     return persistWorkflowExecution(root.executionId, root.state, required);
   }
+  return serializeWorkflowPersistence(execState, () => persistWorkflowExecutionRoot(executionId, execState, required));
+}
+
+async function serializeWorkflowPersistence<T>(execState: WorkflowExecutionState, operation: () => Promise<T>): Promise<T> {
+  const pending = (execState.persistenceTail || Promise.resolve()).then(operation);
+  const settled = pending.then((): void => {}, (): void => {});
+  execState.persistenceTail = settled;
+  try { return await pending; }
+  finally { if (execState.persistenceTail === settled) delete execState.persistenceTail; }
+}
+
+async function pauseWorkflowImageRecovery(executionId: string, state: WorkflowExecutionState, owner: string): Promise<void> {
+  await serializeWorkflowPersistence(state, async (): Promise<void> => {
+    if (isWorkflowDispatchStopped(state)) return;
+    const current = state.userId ? await getCloudTaskForUser(executionId, state.userId) : null;
+    if (isWorkflowDispatchStopped(state)) return;
+    if (!current || current.status !== 'processing' || current.type !== 'workflow' || current.leaseOwner !== owner
+      || current.attemptCount !== state.recoveryLeaseAttemptCount || current.result?.workflowStatus !== 'running'
+      || current.result.dispatchStopped === true || !Number.isSafeInteger(current.revision)
+      || !Number.isSafeInteger(current.revision! + 1)
+      || !isDeepStrictEqual(current.result.executionGraph, state.executionGraph)) {
+      state.recoveryLeaseLost = true; return;
+    }
+    const error = 'WORKFLOW_IMAGE_RECOVERY_RECEIPT_UNCONFIRMED';
+    const result = { ...current.result, workflowStatus: 'paused' };
+    const applied = await updateCloudTask(executionId, { expectedRevision: current.revision, leaseOwner: owner,
+      status: 'processing', error, result });
+    if (!applied) { state.recoveryLeaseLost = true; return; }
+    state.imageRecoveryPauseReceipt = { executionId, revision: current.revision! + 1, result: structuredClone(result),
+      owner, attemptCount: current.attemptCount! };
+    if (isWorkflowDispatchStopped(state)) return;
+    state.status = 'paused'; state.error = error;
+    if (isRecord(current.result.results)) state.results = current.result.results as Record<string, ExecutionResult>;
+  });
+}
+
+async function persistWorkflowExecutionRoot(executionId: string, execState: WorkflowExecutionState,
+  required: boolean): Promise<void> {
   if (!execState.userId) return;
   try {
     if (execState.recoveryLeaseLost) {
@@ -885,10 +1296,18 @@ async function persistWorkflowExecution(executionId: string, execState: Workflow
     const durableStatus = current?.result?.workflowStatus;
     const confirmedSketchCancellation = durableStatus === 'paused' && execState.status === 'cancelled'
       && execState.cancellationState?.cancelled === true && Object.keys(execState.sketchIntents || {}).length > 0;
+    const pauseReceipt = execState.imageRecoveryPauseReceipt;
+    const confirmedImageRecoveryCancellation = Boolean(current && pauseReceipt && execState.imageRuntime && execState.recoveryStarted
+      && execState.status === 'cancelled' && execState.cancellationState?.cancelled === true
+      && execState.cancellationState.dispatchStopped === true && current.status === 'processing' && durableStatus === 'paused'
+      && pauseReceipt.executionId === executionId && execState.recoveryLeaseTaskId === executionId
+      && current.projectId === execState.projectId && current.attemptCount === pauseReceipt.attemptCount
+      && current.revision === pauseReceipt.revision && isDeepStrictEqual(current.result, pauseReceipt.result)
+      && execState.recoveryLeaseOwner === pauseReceipt.owner && current.leaseOwner === pauseReceipt.owner);
     if (current && (['completed', 'failed', 'cancelled', 'timeout'].includes(current.status)
       || current.result?.dispatchStopped === true && execState.cancellationState?.dispatchStopped !== true
       || (['paused', 'cancelled', 'completed', 'failed'].includes(String(durableStatus))
-        && durableStatus !== execState.status && !confirmedSketchCancellation))) {
+        && durableStatus !== execState.status && !confirmedSketchCancellation && !confirmedImageRecoveryCancellation))) {
       execState.recoveryLeaseLost = true;
       if (required) throw new Error('WORKFLOW_EXECUTION_FENCE_LOST');
       return;
@@ -901,7 +1320,9 @@ async function persistWorkflowExecution(executionId: string, execState: Workflow
         ? Math.min(99, Math.round((Object.keys(execState.results).length / Math.max(execState.totalNodes, 1)) * 100))
         : 100,
       label: execState.currentNodeId ? `执行节点 ${execState.currentNodeId}` : '工作流执行',
-      result: {
+      result: confirmedImageRecoveryCancellation ? {
+        ...current!.result, workflowStatus: 'cancelled', dispatchStopped: true, activeSkillRuns: {}, completedAt: execState.completedAt,
+      } : {
         workflowStatus: execState.status,
         projectId: execState.projectId,
         workflowId: execState.workflowId,
@@ -916,6 +1337,7 @@ async function persistWorkflowExecution(executionId: string, execState: Workflow
         sketchNested: execState.sketchNested,
         ...(execState.cancellationState?.dispatchStopped ? { dispatchStopped: true } : {}),
         retryAttempts: execState.retryAttempts,
+        ...(execState.imageRetry ? { imageRetry: execState.imageRetry } : {}),
         loopResume: execState.loopResume,
         ...(execState.executionGraph ? { executionGraph: execState.executionGraph } : {}),
         submissionPayload: {
@@ -943,16 +1365,29 @@ async function restorePausedWorkflowExecution(input: {
   userProductType?: string;
   expectedProjectId?: string;
   expectedWorkflowId?: string;
+  imageRetryNodeId?: string;
+  cache?: boolean;
+  expectedRevision?: number;
+  expectedResult?: Record<string, unknown>;
 }): Promise<WorkflowExecutionState | null> {
   const persisted = await getCloudTaskForUser(input.executionId, input.userId);
   if (!persisted || persisted.type !== 'workflow' || !isRecord(persisted.result)) return null;
+  if (input.expectedRevision !== undefined && persisted.revision !== input.expectedRevision
+    || input.expectedResult !== undefined && !isDeepStrictEqual(persisted.result, input.expectedResult)) return null;
   const persistedResult = persisted.result;
-  if (!['paused', 'running'].includes(String(persistedResult.workflowStatus))
+  const terminalImageRetry = typeof input.imageRetryNodeId === 'string'
+    && ['completed', 'failed', 'cancelled', 'timeout'].includes(persisted.status)
+    && ['completed', 'failed', 'cancelled'].includes(String(persistedResult.workflowStatus));
+  if ((!['paused', 'running'].includes(String(persistedResult.workflowStatus)) && !terminalImageRetry)
     || !isRecord(persistedResult.executionGraph)) return null;
   const graph = persistedResult.executionGraph;
   if (!Array.isArray(graph.nodes) || !Array.isArray(graph.connections)
     || !graph.nodes.every(node => isRecord(node) && typeof node.id === 'string')
     || !graph.connections.every(connection => isRecord(connection))) return null;
+  if (terminalImageRetry) {
+    const matches = graph.nodes.filter(node => node.id === input.imageRetryNodeId) as unknown as WorkflowNode[];
+    if (matches.length !== 1 || matches[0].type !== 'input-image' || !readWorkflowImageInputTransform(matches[0])) return null;
+  }
   const projectId = typeof persistedResult.projectId === 'string'
     ? persistedResult.projectId
     : persisted.projectId;
@@ -988,11 +1423,11 @@ async function restorePausedWorkflowExecution(input: {
       }
     : undefined;
   const restored: WorkflowExecutionState = {
-    status: persistedResult.workflowStatus as 'paused' | 'running',
+    status: persistedResult.workflowStatus as WorkflowExecutionStatus,
     results: persistedResult.results as Record<string, ExecutionResult>,
     currentNodeId: typeof persistedResult.currentNodeId === 'string' ? persistedResult.currentNodeId : null,
     startedAt: typeof persistedResult.startedAt === 'number' ? persistedResult.startedAt : persisted.createdAt,
-    completedAt: null,
+    completedAt: terminalImageRetry && typeof persistedResult.completedAt === 'number' ? persistedResult.completedAt : null,
     userId: input.userId,
     projectId,
     workflowId,
@@ -1012,10 +1447,15 @@ async function restorePausedWorkflowExecution(input: {
     executionNodes: graph.nodes as WorkflowNode[],
     executionConnections: graph.connections as unknown as WorkflowConnection[],
     executionGraph: graph as { nodes: WorkflowNode[]; connections: WorkflowConnection[] },
+    ...(hasWorkflowImageReceivers(graph.nodes as WorkflowNode[]) ? { imageRuntime: true, activeImageReads: new Map() } : {}),
+    ...(isRecord(persistedResult.imageRetry) && persistedResult.imageRetry.version === 1
+      && typeof persistedResult.imageRetry.sourceExecutionId === 'string' && typeof persistedResult.imageRetry.nodeId === 'string'
+      && ['admitted', 'running'].includes(String(persistedResult.imageRetry.phase))
+      ? { imageRetry: persistedResult.imageRetry as unknown as WorkflowImageRetryMarker } : {}),
     ...(persistedLoopResume ? { loopResume: persistedLoopResume } : {}),
   };
   restored.persistActiveSkillRuns = () => persistWorkflowExecution(input.executionId, restored);
-  executionCache.set(input.executionId, restored);
+  if (input.cache !== false) executionCache.set(input.executionId, restored);
   return restored;
 }
 
@@ -1058,6 +1498,7 @@ function getFeatureForNodeType(type: NodeType): 'imageEdit' | 'chat' | 'vectoriz
 export async function POST(request: NextRequest) {
   const auth = await requireApiAuthOrReject(request);
   if (auth instanceof NextResponse) return auth;
+  let finishImageCancellation: (() => void) | undefined;
   try {
     const body = await request.json();
     // 输入校验
@@ -1075,7 +1516,129 @@ export async function POST(request: NextRequest) {
       if (!executionId) {
         return NextResponse.json({ error: '缺少 executionId' }, { status: 400 });
       }
+      const terminalImageRetry = await getCloudTaskForUser(executionId, auth.userId);
+      const knownImageRetry = executionCache.get(executionId)?.imageRetry
+        || typeof executionId === 'string' && executionId.startsWith('exec-image-retry-')
+        || terminalImageRetry?.result?.imageRetry !== undefined;
+      const durableRetryMarker = terminalImageRetry?.result?.imageRetry;
+      const imageRetryResponse = async (durable: typeof terminalImageRetry): Promise<NextResponse> => {
+        try {
+          const saved = durable?.result, marker = saved?.imageRetry;
+          if (!durable || durable.type !== 'workflow' || durable.userId !== auth.userId || !saved
+            || !isRecord(marker) || marker.version !== 1 || typeof marker.sourceExecutionId !== 'string'
+            || typeof marker.nodeId !== 'string' || !['admitted', 'running'].includes(String(marker.phase))) {
+            throw new Error('WORKFLOW_IMAGE_TERMINAL_RECEIPT_UNCONFIRMED');
+          }
+          if (durable.status === 'completed') {
+            const { verifyCompletedWorkflowImageRetry } = await import('../../../../lib/workflow-image-terminal-receipt');
+            const results = await verifyCompletedWorkflowImageRetry(durable, auth.userId, request.signal);
+            return NextResponse.json({ executionId, status: 'completed', results, currentNodeId: saved.currentNodeId || null,
+              startedAt: saved.startedAt || durable.createdAt, completedAt: saved.completedAt || durable.updatedAt });
+          }
+          const cached = executionCache.get(executionId);
+          const uncertain = durable.status === 'processing' && (cached?.imagePublicationUnconfirmed || cached?.recoveryLeaseLost
+            || cached?.recoveryLeaseState?.lost || cached?.cancellationState?.dispatchStopped);
+          // Cached completion can precede the actual terminal write receipt.
+          // Keep progress/recovery available, but expose no unverified results.
+          return NextResponse.json({ executionId,
+            status: durable.status === 'processing' && (uncertain || saved.workflowStatus === 'paused' || saved.dispatchStopped === true)
+              ? 'paused' : fromCloudWorkflowStatus(durable.status),
+            currentNodeId: saved.currentNodeId || null, startedAt: saved.startedAt || durable.createdAt,
+            completedAt: ['failed', 'cancelled', 'timeout'].includes(durable.status) ? saved.completedAt || durable.updatedAt : null,
+            error: uncertain ? cached?.imagePublicationUnconfirmed ? 'WORKFLOW_IMAGE_REFERENCE_PUBLICATION_UNCONFIRMED' : 'WORKFLOW_EXECUTION_FENCE_LOST' : durable.error });
+        } catch (error) {
+          return NextResponse.json({ executionId, status: 'unconfirmed', error: error instanceof Error ? error.message : 'WORKFLOW_IMAGE_TERMINAL_RECEIPT_UNCONFIRMED' }, { status: 409 });
+        }
+      };
+      const normalImageResponse = async (state: WorkflowExecutionState): Promise<NextResponse> => {
+        const durable = await getCloudTaskForUser(executionId, auth.userId), saved = durable?.result;
+        if (!durable || durable.type !== 'workflow' || !saved) return NextResponse.json({ executionId,
+          status: 'unconfirmed', error: 'WORKFLOW_IMAGE_RECOVERY_RECEIPT_UNCONFIRMED' }, { status: 409 });
+        const verificationPaused = durable.error === 'WORKFLOW_IMAGE_RECOVERY_RECEIPT_UNCONFIRMED';
+        const pausedUnconfirmed = state.imagePublicationUnconfirmed || state.recoveryLeaseLost
+          || state.recoveryLeaseState?.lost || verificationPaused;
+        const unownedRunning = durable.status === 'processing' && saved.workflowStatus === 'running'
+          && (!state.recoveryLeaseOwner || state.recoveryLeaseOwner !== durable.leaseOwner
+            || state.recoveryLeaseAttemptCount !== undefined && state.recoveryLeaseAttemptCount !== durable.attemptCount);
+        const uncertain = state.imageRecoveryVerifying || state.imageRecoveryPauseUnconfirmed || pausedUnconfirmed || unownedRunning;
+        const terminal = ['completed', 'failed', 'cancelled', 'timeout'].includes(durable.status);
+        const trustedTerminal = terminal && (durable.status !== 'completed' || saved.workflowStatus === 'completed');
+        const status = durable.status === 'processing'
+          ? state.imageRecoveryPauseUnconfirmed ? 'unconfirmed' : pausedUnconfirmed || saved.workflowStatus === 'paused' ? 'paused' : 'running'
+          : durable.status === 'completed' && saved.workflowStatus !== 'completed' ? 'unconfirmed' : fromCloudWorkflowStatus(durable.status);
+        return NextResponse.json({ executionId, status,
+          currentNodeId: saved.currentNodeId || null,
+          ...(trustedTerminal || !uncertain && state.status !== 'completed' ? { results: saved.results || {} } : {}),
+          startedAt: saved.startedAt || durable.createdAt, completedAt: terminal ? saved.completedAt || durable.updatedAt : null,
+          error: durable.error || state.error || (state.imagePublicationUnconfirmed ? 'WORKFLOW_IMAGE_REFERENCE_PUBLICATION_UNCONFIRMED'
+            : state.recoveryLeaseLost || state.recoveryLeaseState?.lost ? 'WORKFLOW_EXECUTION_FENCE_LOST' : undefined) });
+      };
+      if (knownImageRetry && (terminalImageRetry?.status === 'completed' || !terminalImageRetry
+        || terminalImageRetry.type !== 'workflow' || !isRecord(durableRetryMarker) || durableRetryMarker.version !== 1
+        || typeof durableRetryMarker.sourceExecutionId !== 'string' || typeof durableRetryMarker.nodeId !== 'string'
+        || !['admitted', 'running'].includes(String(durableRetryMarker.phase)))) {
+        return imageRetryResponse(terminalImageRetry);
+      }
+      if (knownImageRetry && terminalImageRetry) {
+        try {
+          if (terminalImageRetry.status === 'processing') {
+            const owned = executionCache.get(executionId);
+            if (terminalImageRetry.result?.workflowStatus === 'paused' || terminalImageRetry.result?.dispatchStopped === true
+              || owned?.userId === auth.userId && (owned.cancellationState?.dispatchStopped
+                || body.reconcile !== true && (owned.imagePublicationUnconfirmed || owned.recoveryLeaseLost || owned.recoveryLeaseState?.lost))) {
+              return imageRetryResponse(await getCloudTaskForUser(executionId, auth.userId));
+            }
+            if (owned?.userId === auth.userId && (owned.recoveryLeaseOwner || owned.activeImageReads?.size || owned.imageCancellation)) {
+              return imageRetryResponse(await getCloudTaskForUser(executionId, auth.userId));
+            }
+            const marker = terminalImageRetry.result!.imageRetry as unknown as WorkflowImageRetryMarker;
+            const graph = terminalImageRetry.result!.executionGraph;
+            if (!isRecord(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.connections)) throw new Error('WORKFLOW_IMAGE_RETRY_CONFLICT');
+            const original = await getCloudTaskForUser(marker.sourceExecutionId, auth.userId);
+            if (!original) throw new Error('WORKFLOW_IMAGE_RETRY_ADMISSION_UNCONFIRMED');
+            const parentResult = isRecord(original.result) ? original.result : undefined;
+            if (!parentResult || !isRecord(parentResult.results) || !isDeepStrictEqual(parentResult.executionGraph, graph)) {
+              throw new Error('WORKFLOW_IMAGE_RETRY_CONFLICT');
+            }
+            const retryNodes = graph.nodes as WorkflowNode[], retryEdges = graph.connections as WorkflowConnection[];
+            const retryTarget = retryNodes.find(node => node.id === marker.nodeId);
+            if (!retryTarget) throw new Error('WORKFLOW_IMAGE_RETRY_CONFLICT');
+            const successful = Object.entries(parentResult.results).filter(([id, value]) => id !== marker.nodeId
+              && isRecord(value) && value.status === 'success') as Array<[string, ExecutionResult]>;
+            await validateImageReceiverUpstream(retryTarget, retryNodes, retryEdges, new Map(successful), auth.userId);
+            const { admitWorkflowImageRetry } = await import('../../../../lib/workflow-image-retry-admission');
+            // Status can reconcile only this existing admission, never insert a replacement.
+            const admitted = await admitWorkflowImageRetry({ actorUserId: auth.userId, original, nodeId: marker.nodeId,
+              expectedGraph: { nodes: graph.nodes as WorkflowNode[], connections: graph.connections as WorkflowConnection[] }, existingOnly: true });
+            if (admitted.task.id !== executionId) throw new Error('WORKFLOW_IMAGE_RETRY_CONFLICT');
+            await ensureWorkflowImageRetryRunning(admitted.task, { userId: auth.userId,
+              userRole: auth.userRole === 'admin' ? 'admin' : 'user', userProductType: auth.user.productType });
+          }
+          return imageRetryResponse(await getCloudTaskForUser(executionId, auth.userId));
+        } catch (error) {
+          return NextResponse.json({ executionId, status: 'unconfirmed', error: error instanceof Error ? error.message : 'WORKFLOW_IMAGE_RETRY_ADMISSION_UNCONFIRMED' }, { status: 409 });
+        }
+      }
       let exec = executionCache.get(executionId);
+      if (exec?.imageRuntime && !knownImageRetry) {
+        if (exec.userId !== auth.userId) return NextResponse.json({ error: '无权查看该执行记录' }, { status: 403 });
+        if (body.reconcile === true && terminalImageRetry && !exec.recoveryLeaseOwner && !exec.activeImageReads?.size && !exec.imageCancellation) {
+          const { supportsWorkflowImageCpuRecovery } = await import('../../../../lib/workflow-image-terminal-receipt');
+          if (supportsWorkflowImageCpuRecovery(terminalImageRetry)) {
+            await ensureWorkflowImageCpuRunning(terminalImageRetry, { userId: auth.userId,
+              userRole: auth.userRole === 'admin' ? 'admin' : 'user', userProductType: auth.user.productType });
+            exec = executionCache.get(executionId) || exec;
+          }
+        }
+        return normalImageResponse(exec);
+      }
+      if (exec?.imageRuntime && (exec.imagePublicationUnconfirmed || exec.recoveryLeaseLost || exec.recoveryLeaseState?.lost)) {
+        if (exec.userId !== auth.userId) return NextResponse.json({ error: '无权查看该执行记录' }, { status: 403 });
+        if (knownImageRetry) return imageRetryResponse(await getCloudTaskForUser(executionId, auth.userId));
+        return NextResponse.json({ executionId, status: 'paused', currentNodeId: exec.currentNodeId, results: exec.results,
+          startedAt: exec.startedAt, completedAt: exec.completedAt,
+          error: exec.imagePublicationUnconfirmed ? 'WORKFLOW_IMAGE_REFERENCE_PUBLICATION_UNCONFIRMED' : 'WORKFLOW_EXECUTION_FENCE_LOST' });
+      }
       if (exec?.recoveryLeaseLost) {
         executionCache.delete(executionId);
         exec = undefined;
@@ -1129,18 +1692,18 @@ export async function POST(request: NextRequest) {
                       && exec.results[node.id]?.output?.status === 'publication-pending') {
                       delete exec.results[node.id];
                     }
-                    void continueAcceptedEditWorkflow({
+                    void observeWorkflowBackground(continueAcceptedEditWorkflow({
                       executionId, execState: exec,
                       nodes: exec.executionNodes,
                       connections: exec.executionConnections,
                       leaseOwner,
-                    });
+                    }));
                   } else {
                     if (!node || typeof runId !== 'string') throw new Error('WORKFLOW_SKILL_RECOVERY_STATE_INVALID');
                     const internalHeaders = await getInternalRequestHeaders(
                       auth.userId, auth.userRole === 'admin' ? 'admin' : 'user', auth.user.productType,
                     );
-                    void continueApprovedSkillWorkflow({
+                    void observeWorkflowBackground(continueApprovedSkillWorkflow({
                       executionId,
                       execState: exec,
                       node,
@@ -1150,7 +1713,7 @@ export async function POST(request: NextRequest) {
                       headers: { 'Content-Type': 'application/json', ...internalHeaders },
                       runId,
                       leaseOwner,
-                    });
+                    }));
                   }
                   leaseAcquired = false;
                 } else {
@@ -1159,6 +1722,7 @@ export async function POST(request: NextRequest) {
                 }
               } catch (error) {
                 if (leaseAcquired) {
+                  if (exec) await drainWorkflowPersistence(exec);
                   await releaseCloudTaskLease(executionId, leaseOwner).catch(() => false);
                 }
                 executionCache.delete(executionId);
@@ -1167,7 +1731,19 @@ export async function POST(request: NextRequest) {
               }
             }
           }
+          if (exec?.imageRuntime && exec.status === 'running' && !exec.recoveryStarted) {
+            const durable = await getCloudTaskForUser(executionId, auth.userId);
+            const { supportsWorkflowImageCpuRecovery } = await import('../../../../lib/workflow-image-terminal-receipt');
+            if (durable && supportsWorkflowImageCpuRecovery(durable)) {
+              const admitted = await ensureWorkflowImageCpuRunning(durable, { userId: auth.userId,
+                userRole: auth.userRole === 'admin' ? 'admin' : 'user', userProductType: auth.user.productType });
+              if (!admitted) { executionCache.delete(executionId); exec.imageRecoveryVerifying = true; return normalImageResponse(exec); }
+              exec = executionCache.get(executionId) || exec;
+            }
+          }
           if (exec) {
+            if (knownImageRetry) return imageRetryResponse(await getCloudTaskForUser(executionId, auth.userId));
+            if (exec.imageRuntime) return normalImageResponse(exec);
             return NextResponse.json({
               executionId,
               status: exec.status,
@@ -1247,6 +1823,7 @@ export async function POST(request: NextRequest) {
           }
           if (persisted?.type === 'workflow') {
             const result = persisted.result || {};
+            if (knownImageRetry) return imageRetryResponse(persisted);
             return NextResponse.json({
               executionId,
               status: result.workflowStatus === 'paused' ? 'paused' : fromCloudWorkflowStatus(persisted.status),
@@ -1263,6 +1840,7 @@ export async function POST(request: NextRequest) {
       if (exec.userId && exec.userId !== auth.userId) {
         return NextResponse.json({ error: '无权访问该执行记录' }, { status: 403 });
       }
+      if (knownImageRetry) return imageRetryResponse(await getCloudTaskForUser(executionId, auth.userId));
       return NextResponse.json({
         executionId,
         status: exec.status,
@@ -1282,6 +1860,27 @@ export async function POST(request: NextRequest) {
       const exec = executionCache.get(executionId);
       if (exec?.userId && exec.userId !== auth.userId) {
         return NextResponse.json({ error: '无权取消该执行记录' }, { status: 403 });
+      }
+      if (exec?.imageRuntime) {
+        if (['completed', 'failed', 'cancelled'].includes(exec.status)) {
+          return NextResponse.json({ executionId, status: exec.status }, { status: 409 });
+        }
+        if (exec.imageCancellation) return NextResponse.json({ executionId, status: 'unconfirmed', error: 'WORKFLOW_IMAGE_CANCEL_PENDING' }, { status: 409 });
+        if (exec.recoveryStarted && !exec.recoveryLeaseOwner && (exec.imageRecoveryVerifying || exec.imageRecoveryPauseUnconfirmed)) {
+          return NextResponse.json({ executionId, status: 'unconfirmed', error: 'WORKFLOW_IMAGE_RECOVERY_RECEIPT_UNCONFIRMED' }, { status: 409 });
+        }
+        let finish!: () => void;
+        const settled = new Promise<void>(resolve => { finish = resolve; });
+        exec.imageCancellation = settled;
+        finishImageCancellation = () => { finish(); if (exec.imageCancellation === settled) delete exec.imageCancellation; };
+        exec.cancellationState ||= { cancelled: false };
+        exec.cancellationState.dispatchStopped = true;
+        const reads = [...(exec.activeImageReads?.values() || [])];
+        for (const read of reads) read.controller.abort(new Error('用户取消任务'));
+        await Promise.allSettled(reads.map(read => read.settled));
+        if (exec.imagePublicationUnconfirmed || exec.recoveryLeaseLost || exec.recoveryLeaseState?.lost) {
+          return NextResponse.json({ executionId, status: 'unconfirmed', error: 'WORKFLOW_IMAGE_REFERENCE_PUBLICATION_UNCONFIRMED' }, { status: 409 });
+        }
       }
       let persisted = !exec && auth.userId
         ? await getCloudTaskForUser(executionId, auth.userId)
@@ -1359,6 +1958,7 @@ export async function POST(request: NextRequest) {
       }
       const shouldCancelMemoryExecution = Boolean(exec && (
         exec.status === 'running'
+        || exec.imageRuntime && exec.recoveryStarted && exec.imageRecoveryPauseReceipt && exec.cancellationState?.dispatchStopped === true
         || Object.keys(sketchIntents).length > 0
         || Object.keys(exec.activeSkillRuns || {}).length > 0
         || childTaskEntries.length > 0
@@ -1544,7 +2144,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '缺少 nodeId' }, { status: 400 });
       }
       const exec = executionCache.get(executionId) || await restorePausedWorkflowExecution({ executionId, userId: auth.userId,
-        userRole: auth.userRole === 'admin' ? 'admin' : 'user', userProductType: auth.user.productType }) || undefined;
+        userRole: auth.userRole === 'admin' ? 'admin' : 'user', userProductType: auth.user.productType, imageRetryNodeId: nodeId, cache: false }) || undefined;
       if (!exec) {
         return NextResponse.json({ error: '执行实例不存在或已过期' }, { status: 404 });
       }
@@ -1552,7 +2152,8 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '无权重试该执行记录' }, { status: 403 });
       }
       // A lost cached object cannot dispatch or persist again; only status may replace it from the durable snapshot.
-      if (Object.keys(exec.sketchIntents || {}).length > 0
+      if (!exec.executionGraph?.nodes.some(node => node.id === nodeId && node.type === 'input-image' && readWorkflowImageInputTransform(node))
+        && Object.keys(exec.sketchIntents || {}).length > 0
         && (exec.cancellationState?.dispatchStopped || exec.recoveryLeaseLost || exec.recoveryLeaseState?.lost)) {
         return NextResponse.json({ executionId, status: 'paused', error: 'WORKFLOW_EXECUTION_FENCE_LOST' }, { status: 409 });
       }
@@ -1604,9 +2205,52 @@ export async function POST(request: NextRequest) {
       }
       const retryNode = frozenNode || requestedRetryNode;
       const retryConnections = exec.executionGraph?.connections || body.connections || [];
+      if (retryNode.type === 'input-image' && readWorkflowImageInputTransform(retryNode)) {
+        // This branch must precede the legacy retry catch, which writes back to
+        // its ancestor. A terminal image ancestor is strictly read-only.
+        try {
+          if (!exec.executionGraph || !exec.projectId || projectId !== undefined && projectId !== exec.projectId
+            || workflowId !== undefined && workflowId !== exec.workflowId) {
+            return NextResponse.json({ error: 'WORKFLOW_RETRY_GRAPH_CHANGED' }, { status: 409 });
+          }
+          const original = await getCloudTaskForUser(executionId, auth.userId);
+          if (!original || original.projectId !== exec.projectId) return NextResponse.json({ error: '执行记录不存在' }, { status: 404 });
+          const durable = isRecord(original.result) ? original.result : undefined;
+          const graph = durable?.executionGraph;
+          if (!durable || !isRecord(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.connections)
+            || !isRecord(durable.results) || !isDeepStrictEqual(graph, JSON.parse(JSON.stringify(exec.executionGraph)))) {
+            return NextResponse.json({ error: 'WORKFLOW_RETRY_GRAPH_CHANGED' }, { status: 409 });
+          }
+          const durableNodes = graph.nodes as WorkflowNode[], durableConnections = graph.connections as WorkflowConnection[];
+          const durableTarget = durableNodes.find(node => node.id === nodeId);
+          if (!durableTarget) return NextResponse.json({ error: 'WORKFLOW_RETRY_GRAPH_CHANGED' }, { status: 409 });
+          const successful = Object.entries(durable.results).filter(([id, value]) => id !== nodeId
+            && isRecord(value) && value.status === 'success') as Array<[string, ExecutionResult]>;
+          await validateImageReceiverUpstream(durableTarget, durableNodes, durableConnections, new Map(successful), auth.userId);
+          const { admitWorkflowImageRetry } = await import('../../../../lib/workflow-image-retry-admission');
+          const admitted = await admitWorkflowImageRetry({ actorUserId: auth.userId, original, nodeId, expectedGraph: exec.executionGraph });
+          const child = admitted.task;
+          const childResults = isRecord(child.result?.results) ? child.result.results : {};
+          if (['completed', 'failed', 'cancelled', 'timeout'].includes(child.status)) {
+            const results = child.status === 'completed'
+              ? await (await import('../../../../lib/workflow-image-terminal-receipt')).verifyCompletedWorkflowImageRetry(child, auth.userId, request.signal)
+              : childResults;
+            const result = results[nodeId] as ExecutionResult | undefined;
+            return NextResponse.json({ executionId: child.id, nodeId, status: fromCloudWorkflowStatus(child.status),
+              success: child.status === 'completed' && result?.status === 'success', output: result?.output, error: result?.error || child.error });
+          }
+          await ensureWorkflowImageRetryRunning(child, { userId: auth.userId,
+            userRole: auth.userRole === 'admin' ? 'admin' : 'user', userProductType: auth.user.productType });
+          return NextResponse.json({ executionId: child.id, nodeId, status: 'running', success: true, retrying: true }, { status: 202 });
+        } catch (error) {
+          const status = isRecord(error) && typeof error.status === 'number' ? error.status : 409;
+          return NextResponse.json({ success: false, nodeId, error: error instanceof Error ? error.message : '图片节点重试暂不可用' },
+            { status: [400, 403, 409, 503].includes(status) ? status : 503 });
+        }
+      }
       try {
         const retryResultMap = new Map(Object.entries(exec.results || {}));
-        const nodeInputs = getNodeInputs(retryNode, retryConnections, retryResultMap);
+        const nodeInputs = await readValidatedNodeInputs(retryNode, exec.executionGraph?.nodes || body.nodes || [], retryConnections, retryResultMap, auth.userId);
         const pausedSketchRetry = exec.status === 'paused' && Object.keys(exec.sketchIntents || {}).length > 0
           && (isSketchWorkflowNode(retryNode) && exec.sketchIntents?.[`${executionId}:${nodeId}`]
             || exec.loopResume && exec.sketchIntents?.[`${executionId}:${nodeId}:loop:${exec.loopResume.loopNodeId}:${exec.loopResume.iterationIndex}`]
@@ -1646,6 +2290,7 @@ export async function POST(request: NextRequest) {
             const result = exec.results[nodeId];
             return NextResponse.json({ success: (exec.status as WorkflowExecutionStatus) === 'completed' && result?.status === 'success', nodeId, output: result?.output, error: result?.error || exec.error });
           } finally {
+            await drainWorkflowPersistence(exec);
             delete exec.recoveryLeaseOwner; delete exec.recoveryLeaseTaskId;
             await releaseCloudTaskLease(executionId, owner).catch(() => false);
           }
@@ -1657,6 +2302,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ success: retryResult.status === 'success', nodeId, output: retryResult.output, error: retryResult.error });
           } finally {
             if (!previousOwner && exec.recoveryLeaseOwner) {
+              await drainWorkflowPersistence(exec);
               const owner = exec.recoveryLeaseOwner; delete exec.recoveryLeaseOwner; delete exec.recoveryLeaseTaskId;
               await releaseCloudTaskLease(executionId, owner).catch(() => false);
             }
@@ -1907,13 +2553,14 @@ export async function POST(request: NextRequest) {
       exec.currentNodeId = body.nodeId;
       await persistWorkflowExecution(executionId, exec);
       leaseTransferred = true;
-      void continueApprovedSkillWorkflow({
+      void observeWorkflowBackground(continueApprovedSkillWorkflow({
         executionId, execState: exec, node, nodes: approvalNodes, connections: approvalConnections,
         submitUrl, headers: { 'Content-Type': 'application/json', ...internalHeaders }, runId, leaseOwner,
-      });
+      }));
       return NextResponse.json({ accepted: true, executionId, status: 'running' });
       } finally {
         if (!leaseTransferred) {
+          await drainWorkflowPersistence(exec);
           await releaseCloudTaskLease(executionId, leaseOwner).catch(() => false);
         }
       }
@@ -1953,6 +2600,19 @@ export async function POST(request: NextRequest) {
       ? structuredClone(executionGraph.connections)
       : executionScope.connections;
 
+    try {
+      await preflightRootInputEdges(executionNodes, executionConnections, auth.userId);
+    } catch (error) {
+      return NextResponse.json({
+        error: error instanceof Error ? error.message : '工作流连线检查失败',
+        code: 'WORKFLOW_CONNECTION_PREFLIGHT_FAILED',
+      }, { status: 422 });
+    }
+
+    const imageRuntime = hasWorkflowImageReceivers(executionNodes);
+    if (imageRuntime && (typeof projectId !== 'string' || !projectId.trim())) {
+      return NextResponse.json({ error: '图片引用执行需要明确项目', code: 'WORKFLOW_IMAGE_PROJECT_REQUIRED' }, { status: 422 });
+    }
     const executionIdNew = `exec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const execState: WorkflowExecutionState = {
       status: 'running',
@@ -1962,7 +2622,7 @@ export async function POST(request: NextRequest) {
       completedAt: null,
       userId: auth.userId,
       projectId: typeof projectId === 'string' ? projectId : undefined,
-      workflowId: typeof workflowId === 'string' ? workflowId : undefined,
+      workflowId: typeof workflowId === 'string' ? (imageRuntime ? workflowId || projectId : workflowId) : imageRuntime ? projectId : undefined,
       userRole: auth.userRole === 'admin' ? 'admin' : 'user',
       userProductType: auth.user.productType,
       totalNodes: executionNodes.length,
@@ -1974,6 +2634,7 @@ export async function POST(request: NextRequest) {
       executionNodes,
       executionConnections,
       executionGraph,
+      ...(imageRuntime ? { imageRuntime: true, activeImageReads: new Map() } : {}),
     };
     execState.persistActiveSkillRuns = () => persistWorkflowExecution(executionIdNew, execState);
     executionCache.set(executionIdNew, execState);
@@ -2015,19 +2676,38 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    if (imageRuntime) {
+      const owner = `workflow-image:${randomUUID()}`;
+      let lease;
+      try { lease = await claimCloudTaskLease(executionIdNew, owner, 120_000); }
+      catch { executionCache.delete(executionIdNew); return NextResponse.json({ executionId: executionIdNew, error: 'WORKFLOW_EXECUTION_LEASE_UNAVAILABLE' }, { status: 503 }); }
+      if (!lease || lease.taskId !== executionIdNew || lease.owner !== owner || !Number.isSafeInteger(lease.attemptCount) || lease.attemptCount < 1) {
+        executionCache.delete(executionIdNew);
+        return NextResponse.json({ executionId: executionIdNew, error: 'WORKFLOW_EXECUTION_LEASE_UNAVAILABLE' }, { status: 409 });
+      }
+      execState.recoveryLeaseOwner = owner;
+      execState.recoveryLeaseTaskId = executionIdNew;
+      execState.recoveryLeaseAttemptCount = lease.attemptCount;
+      execState.recoveryLeaseState = { lost: false };
+    }
+
     // 异步执行工作流
-    executeWorkflow(executionIdNew, execState, executionNodes, executionConnections).catch(err => {
+    void observeWorkflowBackground(executeWorkflow(executionIdNew, execState, executionNodes, executionConnections).catch(err => {
       console.error('[Workflow] 执行异常:', err);
       execState.status = 'failed';
       execState.error = err instanceof Error ? err.message : String(err);
       execState.completedAt = Date.now();
-      void persistWorkflowExecution(executionIdNew, execState);
+      void observeWorkflowBackground(persistWorkflowExecution(executionIdNew, execState));
     }).finally(async () => {
-      if (execState.sketchIntents && execState.recoveryLeaseOwner) {
+      // Keep the original lease until an in-flight cancel has safely consumed
+      // its image receipt and finished its own guarded parent update.
+      await drainWorkflowPersistence(execState);
+      if (execState.recoveryLeaseOwner) {
         await releaseCloudTaskLease(executionIdNew, execState.recoveryLeaseOwner).catch(() => false);
         delete execState.recoveryLeaseOwner; delete execState.recoveryLeaseTaskId;
+        delete execState.recoveryLeaseAttemptCount;
       }
-    });
+    }));
 
     return NextResponse.json({
       executionId: executionIdNew,
@@ -2042,7 +2722,155 @@ export async function POST(request: NextRequest) {
       { error: error instanceof Error ? error.message : '工作流执行失败' },
       { status: 500 }
     );
+  } finally {
+    finishImageCancellation?.();
   }
+}
+
+
+/** Resume the original CPU-image task after claim and a fresh durable restore. */
+async function ensureWorkflowImageCpuRunning(task: CloudTask, actor: {
+  userId: string; userRole: 'user' | 'admin'; userProductType?: string;
+}): Promise<boolean> {
+  if (task.userId !== actor.userId || task.type !== 'workflow' || task.status !== 'processing'
+    || task.result?.workflowStatus !== 'running' || task.result.dispatchStopped === true || task.result.imageRetry !== undefined) return false;
+  const local = executionCache.get(task.id);
+  if (local?.recoveryLeaseOwner || local?.activeImageReads?.size || local?.imageCancellation) return true;
+  const owner = `workflow-image-recovery:${randomUUID()}`, lease = await claimCloudTaskLease(task.id, owner, 120_000);
+  if (!lease) return false;
+  let transferred = false, restored: WorkflowExecutionState | null = null, primaryFailure: unknown, hasPrimaryFailure = false;
+  try {
+    if (lease.taskId !== task.id || lease.owner !== owner || !Number.isSafeInteger(lease.attemptCount) || lease.attemptCount < 1) throw new Error('WORKFLOW_EXECUTION_FENCE_LOST');
+    const current = await getCloudTaskForUser(task.id, actor.userId);
+    if (!current || current.type !== 'workflow' || current.status !== 'processing' || current.projectId !== task.projectId
+      || current.leaseOwner !== owner || current.attemptCount !== lease.attemptCount || !Number.isSafeInteger(current.revision)
+      || current.result?.workflowStatus !== 'running' || current.result.dispatchStopped === true || current.result.imageRetry !== undefined
+      || !isDeepStrictEqual(current.result.executionGraph, task.result.executionGraph)) throw new Error('WORKFLOW_EXECUTION_FENCE_LOST');
+    restored = await restorePausedWorkflowExecution({ executionId: task.id, userId: actor.userId, userRole: actor.userRole,
+      userProductType: actor.userProductType, expectedProjectId: current.projectId || undefined, cache: false,
+      expectedRevision: current.revision, expectedResult: current.result });
+    const latest = await getCloudTaskForUser(task.id, actor.userId);
+    if (!restored || !restored.imageRuntime || restored.status !== 'running' || !restored.executionNodes || !restored.executionConnections
+      || !latest || latest.status !== 'processing' || latest.leaseOwner !== owner || latest.attemptCount !== lease.attemptCount
+      || latest.revision !== current.revision || latest.result?.workflowStatus !== 'running' || latest.result.dispatchStopped === true
+      || !isDeepStrictEqual(latest.result.executionGraph, restored.executionGraph)
+      || !isDeepStrictEqual(latest.result.results, restored.results)
+      || !isDeepStrictEqual(latest.result, current.result)) throw new Error('WORKFLOW_EXECUTION_FENCE_LOST');
+    const { supportsWorkflowImageCpuRecovery } = await import('../../../../lib/workflow-image-terminal-receipt');
+    if (!supportsWorkflowImageCpuRecovery(latest)) throw new Error('WORKFLOW_IMAGE_RECOVERY_RECEIPT_UNCONFIRMED');
+    restored.recoveryStarted = true; restored.recoveryLeaseOwner = owner; restored.recoveryLeaseTaskId = task.id;
+    restored.recoveryLeaseAttemptCount = lease.attemptCount; restored.recoveryLeaseState = { lost: false };
+    restored.imageRecoveryVerifying = true;
+    executionCache.set(task.id, restored);
+    void observeWorkflowBackground(continueAcceptedEditWorkflow({ executionId: task.id, execState: restored, nodes: restored.executionNodes,
+      connections: restored.executionConnections, leaseOwner: owner, imageRecoveryTask: latest }));
+    transferred = true; return true;
+  } catch (error) { primaryFailure = error; hasPrimaryFailure = true; throw error;
+  } finally {
+    if (!transferred) {
+      const failures: unknown[] = [];
+      if (restored) try { await drainWorkflowPersistence(restored); } catch (error) { failures.push(error); }
+      executionCache.delete(task.id);
+      try { await releaseCloudTaskLease(task.id, owner); } catch (error) { failures.push(error); }
+      if (failures.length) throw new AggregateError(hasPrimaryFailure ? [primaryFailure, ...failures] : failures, 'WORKFLOW_IMAGE_RECOVERY_PREPARATION_FAILURES_IN_ORDER');
+    }
+  }
+}
+
+/** A retry executes one frozen receiver; ancestors are read context only.
+ * Both explicit retry and cold status retain the original child and claim protocol. */
+async function ensureWorkflowImageRetryRunning(child: NonNullable<Awaited<ReturnType<typeof getCloudTaskForUser>>>, actor: {
+  userId: string; userRole: 'user' | 'admin'; userProductType?: string;
+}): Promise<void> {
+  const result = child.result, marker = isRecord(result?.imageRetry) ? result.imageRetry : undefined;
+  if (child.userId !== actor.userId || child.type !== 'workflow' || child.status !== 'processing' || !result
+    || result.workflowStatus !== 'running' || result.dispatchStopped === true || !marker || marker.version !== 1
+    || typeof marker.nodeId !== 'string' || typeof marker.sourceExecutionId !== 'string'
+    || !['admitted', 'running'].includes(String(marker.phase))) throw new Error('WORKFLOW_IMAGE_RETRY_CONFLICT');
+  const local = executionCache.get(child.id);
+  if (local?.userId && local.userId !== actor.userId) throw new Error('WORKFLOW_IMAGE_RETRY_CONFLICT');
+  if (local?.cancellationState?.dispatchStopped) throw new Error('WORKFLOW_EXECUTION_FENCE_LOST');
+  // A cached state alone is not a live worker. Its remaining owned IO/lease is.
+  if (local?.recoveryLeaseOwner || local?.activeImageReads?.size || local?.imageCancellation) return;
+  const owner = 'workflow-image-retry:' + randomUUID(), lease = await claimCloudTaskLease(child.id, owner, 120_000);
+  if (!lease) return;
+  let prepared: WorkflowExecutionState;
+  try {
+    if (lease.taskId !== child.id || lease.owner !== owner || !Number.isSafeInteger(lease.attemptCount) || lease.attemptCount < 1) throw new Error('WORKFLOW_EXECUTION_FENCE_LOST');
+    // Restore after claim: a checkpoint committed by the prior generation before
+    // the lease transfer must not be overwritten by a pre-claim memory snapshot.
+    const current = await getCloudTaskForUser(child.id, actor.userId), currentMarker = current?.result?.imageRetry;
+    if (!current || current.type !== 'workflow' || current.status !== 'processing' || current.projectId !== child.projectId
+      || current.leaseOwner !== owner || current.attemptCount !== lease.attemptCount || current.idempotencyKey !== child.idempotencyKey
+      || current.requestDigest !== child.requestDigest || current.result?.workflowStatus !== 'running' || current.result.dispatchStopped === true
+      || !isRecord(currentMarker) || currentMarker.version !== 1 || currentMarker.nodeId !== marker.nodeId
+      || currentMarker.sourceExecutionId !== marker.sourceExecutionId || !['admitted', 'running'].includes(String(currentMarker.phase))
+      || !isDeepStrictEqual(current.result.executionGraph, result.executionGraph)) throw new Error('WORKFLOW_EXECUTION_FENCE_LOST');
+    const restored = await restorePausedWorkflowExecution({ executionId: child.id, userId: actor.userId,
+      userRole: actor.userRole, userProductType: actor.userProductType, cache: false });
+    if (!restored?.imageRetry || !restored.executionGraph || restored.status !== 'running'
+      || restored.cancellationState?.dispatchStopped || restored.imageRetry.nodeId !== marker.nodeId
+      || restored.imageRetry.sourceExecutionId !== marker.sourceExecutionId) throw new Error('WORKFLOW_IMAGE_RETRY_CONFLICT');
+    prepared = restored;
+  } catch (error) { await releaseCloudTaskLease(child.id, owner).catch(() => false);throw error; }
+  const childState = prepared, nodeId = String(marker.nodeId);
+  const priorCheckpoint = childState.results[nodeId]?.status === 'success' ? structuredClone(childState.results[nodeId]) : undefined;
+  childState.recoveryLeaseOwner = owner; childState.recoveryLeaseTaskId = child.id;
+  childState.recoveryLeaseAttemptCount = lease.attemptCount; childState.recoveryLeaseState = { lost: false };
+  childState.imageRetry!.phase = 'running'; executionCache.set(child.id, childState);
+  void observeWorkflowBackground(executeWorkflowImageRetry(child.id, childState).catch(async error => {
+    if (!isWorkflowDispatchStopped(childState) && !childState.recoveryLeaseLost) {
+      if (priorCheckpoint) {
+        // This marker forbids destroying a committed checkpoint. It is never
+        // accepted as proof that the source, bytes or receipt are still valid.
+        childState.results[nodeId] = priorCheckpoint;
+        childState.status = 'paused'; childState.imagePublicationUnconfirmed = true; childState.recoveryLeaseLost = true;
+        if (childState.recoveryLeaseState) childState.recoveryLeaseState.lost = true;
+        childState.error = error instanceof Error ? error.message : String(error);
+        return;
+      }
+      childState.status = 'failed'; childState.completedAt = Date.now();
+      childState.error = error instanceof Error ? error.message : String(error);
+      childState.results[nodeId] = { nodeId, status: 'failed', error: childState.error, durationMs: 0 };
+      await persistWorkflowExecution(child.id, childState);
+    }
+  }).finally(async () => {
+    await drainWorkflowPersistence(childState);
+    await releaseCloudTaskLease(child.id, owner).catch(() => false);
+    delete childState.recoveryLeaseOwner; delete childState.recoveryLeaseTaskId; delete childState.recoveryLeaseAttemptCount;
+  }));
+}
+async function executeWorkflowImageRetry(executionId: string, state: WorkflowExecutionState): Promise<void> {
+  const marker = state.imageRetry, graph = state.executionGraph;
+  if (!marker || !graph || !state.imageRuntime) throw new Error('WORKFLOW_IMAGE_RETRY_CONFLICT');
+  let renewing: Promise<void> | undefined, finishing = false;
+  const timer = setInterval(() => {
+    if (renewing || finishing || state.status !== 'running') return;
+    const work = (async (): Promise<void> => {
+      let valid = false;
+      try { valid = Boolean(state.recoveryLeaseOwner && await renewCloudTaskLease(executionId, state.recoveryLeaseOwner, 120_000)); }
+      catch { /* The active generation stops below if renewal is unavailable. */ }
+      // A request started while running may finish after the node checkpoint.
+      // Its late reply cannot change a terminal state or the closing job.
+      if (valid || finishing || state.status !== 'running' || isWorkflowDispatchStopped(state)) return;
+      state.recoveryLeaseLost = true; if (state.recoveryLeaseState) state.recoveryLeaseState.lost = true;
+      state.status = 'paused';
+      for (const read of state.activeImageReads?.values() || []) read.controller.abort(new Error('WORKFLOW_EXECUTION_FENCE_LOST'));
+    })();
+    renewing = work;
+    void observeWorkflowBackground(work.finally(() => { if (renewing === work) renewing = undefined; }));
+  }, 30_000);
+  timer.unref?.();
+  try {
+    if (!await renewRecoveryLeaseBeforeDispatch(executionId, state)) return;
+    state.currentNodeId = marker.nodeId;
+    await persistWorkflowExecution(executionId, state, true);
+    if (isWorkflowDispatchStopped(state)) return;
+    const outcome = await executeImageReceiver(executionId, state, marker.nodeId, graph.nodes, graph.connections, new Map(Object.entries(state.results)));
+    if (outcome.status === 'unknown' || isWorkflowDispatchStopped(state) || state.recoveryLeaseLost) return;
+    state.status = 'completed'; state.currentNodeId = null; state.completedAt = Date.now();
+    await persistWorkflowExecution(executionId, state, true);
+  } finally { finishing = true; clearInterval(timer); await renewing; }
 }
 
 /**
@@ -2056,13 +2884,14 @@ async function executeWorkflow(
   nodes: WorkflowNode[],
   connections: WorkflowConnection[],
   depth = 0,
-) {
+): Promise<void> {
   console.debug(`[Workflow] 开始执行 ${executionId}, ${nodes.length} 个节点`);
   if (isWorkflowDispatchStopped(execState)) return;
 
   // 1. DAG拓扑排序
   const sorted = topologicalSort(nodes, connections);
   const resultMap = new Map<string, ExecutionResult>(Object.entries(execState.results));
+  collectDeferredImageParallelResults(nodes, connections, resultMap);
 
   if (execState.recoveryLeaseLost) return;
   const pendingApprovalNodeId = Object.entries(execState.results)
@@ -2073,6 +2902,7 @@ async function executeWorkflow(
     await persistWorkflowExecution(executionId, execState);
     return;
   }
+  let parallelApprovalDispatch: ParallelApprovalDispatch | undefined;
 
   // P1: 循环上下文栈 — 跟踪嵌套循环节点
   const loopContextStack: Array<{ loopNodeId: string; index: number; total: number }> = [];
@@ -2088,8 +2918,39 @@ async function executeWorkflow(
     }
   }
 
+  // Pending ordinary branches do not block other ready nodes in this same DAG.
+  const parallelWork = new Map<string, Promise<void>>(), allParallelWork: Promise<void>[] = [];
+  const parallelOwners = new Map<string, string>(), parallelRegions = new Map<string, Set<string>>();
+  const settledParallel: Array<{ nodeId: string; state: WorkflowExecutionState; parentId: string }> = [];
+  const observedParallel: Array<{ nodeId: string; state: WorkflowExecutionState }> = [];
+  const parallelErrors: unknown[] = [];
+  const collectParallel = (): string | undefined => {
+    for (const branch of settledParallel.splice(0)) {
+      observedParallel.push(branch);
+      const result = branch.state.results[branch.nodeId];
+      if (result) {
+        const output = resultMap.get(branch.parentId)?.output;
+        if (isRecord(output)) output.parallelResults = { ...(isRecord(output.parallelResults) ? output.parallelResults : {}),
+          [branch.nodeId]: structuredClone(result) };
+        resultMap.set(branch.nodeId, result); execState.results[branch.nodeId] = result;
+      }
+    }
+    const paused = observedParallel.filter(branch => branch.state.status === 'paused');
+    if (paused.length) {
+      const dispatch = resolveParallelApprovalDispatch(nodes, connections, resultMap);
+      if (dispatch && paused.every(branch => !branch.state.recoveryLeaseLost && !branch.state.recoveryLeaseState?.lost
+        && branch.state.currentNodeId === branch.nodeId && branch.state.results[branch.nodeId]?.status === 'waiting-approval')) {
+        parallelApprovalDispatch = dispatch;
+      } else return paused[0].state.currentNodeId || paused[0].nodeId;
+    }
+    return undefined;
+  };
+  let remaining = sorted;
+  try {
+  while (remaining.length) {
+  const deferred: WorkflowNode[] = [], deferredIds = new Set<string>();
   // 3. 逐节点执行
-  for (const node of sorted) {
+  for (const node of remaining) {
     if (execState.recoveryLeaseLost) return;
     if (!await renewRecoveryLeaseBeforeDispatch(executionId, execState)) return;
     // 检查是否被取消
@@ -2099,14 +2960,51 @@ async function executeWorkflow(
       break;
     }
 
+    if (parallelErrors.length) throw parallelErrors[0];
+    const parallelPause = collectParallel();
+    if (parallelPause) {
+      await Promise.all(allParallelWork); collectParallel();
+      if (execState.recoveryLeaseLost || isWorkflowDispatchStopped(execState)) return;
+      execState.status = 'paused'; execState.currentNodeId = parallelPause;
+      await persistWorkflowExecution(executionId, execState); return;
+    }
+
+    // Approval-dependent and unrelated work stays pending, without synthetic checkpoints.
+    if (parallelApprovalDispatch && (parallelApprovalDispatch.blocked.has(node.id)
+      || !resultMap.has(node.id) && !parallelApprovalDispatch.allowed.has(node.id))) continue;
+
     // 检查是否已在循环节点内执行过
     if (resultMap.has(node.id) && execState.loopResume?.loopNodeId !== node.id) {
       execState.results[node.id] = resultMap.get(node.id)!;
       continue;
     }
+    if (parallelWork.size && ![...parallelOwners.values()].some(id => parallelRegions.get(id)?.has(node.id))) {
+      deferred.push(node); deferredIds.add(node.id); continue;
+    }
 
     // P0: 串行等待 — 检查上游节点是否全部成功
     const upstreamIds = upstreamMap.get(node.id) || [];
+    const pendingInputs = [...upstreamIds];
+    if (['loop-for', 'loop-each', 'loop-while'].includes(node.type)) {
+      const outgoing = connections.filter(edge => edge.fromNodeId === node.id);
+      const explicitBody = outgoing.filter(edge => edge.fromPortId === 'out-loop');
+      const bodyIds = new Set((explicitBody.length ? explicitBody : outgoing.filter(edge => edge.fromPortId !== 'out-done'))
+        .map(edge => edge.toNodeId));
+      const approvalDispatch = parallelApprovalDispatch;
+      if (approvalDispatch && [...bodyIds].some(id => approvalDispatch.blocked.has(id))) continue;
+      const external = connections.filter(edge => bodyIds.has(edge.toNodeId) && edge.fromNodeId !== node.id
+        && !bodyIds.has(edge.fromNodeId)).map(edge => edge.fromNodeId);
+      const visited = new Set<string>();
+      for (let index = 0; index < external.length; index++) {
+        const id = external[index];
+        if (visited.has(id) || id === node.id || bodyIds.has(id)) continue;
+        visited.add(id); pendingInputs.push(id);
+        if (!resultMap.has(id)) external.push(...(upstreamMap.get(id) || []));
+      }
+    }
+    if (parallelWork.has(node.id) || pendingInputs.some(id => parallelWork.has(id) || deferredIds.has(id))) {
+      deferred.push(node); deferredIds.add(node.id); continue;
+    }
     const upstreamFailed = upstreamIds.some(uid => {
       const upResult = resultMap.get(uid);
       return !upResult || upResult.status === 'failed';
@@ -2150,7 +3048,8 @@ async function executeWorkflow(
 
     try {
       // P0: 真实数据传递 — 从上游节点获取输入
-      const inputs = getNodeInputs(node, connections, resultMap);
+      const inputs = node.type === 'input-image' && readWorkflowImageInputTransform(node)
+        ? {} : await readValidatedNodeInputs(node, nodes, connections, resultMap, execState.userId!);
 
       // P1: 对输入文本应用循环变量替换
       if (currentLoopContext) {
@@ -2212,6 +3111,12 @@ async function executeWorkflow(
         }
       }
       if (node.type === 'input-image') {
+        if (readWorkflowImageInputTransform(node)) {
+          const outcome = await executeImageReceiver(executionId, execState, node.id, nodes, connections, resultMap);
+          if (outcome.status === 'unknown') return;
+          collectDeferredImageParallelResults(nodes, connections, resultMap);
+          continue;
+        }
         const output = await resolveWorkflowInputImageForActor(execState.userId!, node, {
           projectId: execState.projectId || executionId,
           workspaceId: execState.workflowId || execState.projectId || executionId,
@@ -2278,6 +3183,7 @@ async function executeWorkflow(
             totalNodes: inlineSubgraph.nodes.length,
             sketchRoot: execState.sketchRoot || { executionId, state: execState },
             sketchIntents: execState.sketchIntents,
+            imageSubgraphPath: [...(execState.imageSubgraphPath || []), node.id],
           };
           const savedNested = (execState.sketchRoot?.state || execState).sketchNested?.[`${executionId}:${node.id}`];
           if (savedNested) { childState.results = savedNested.results; childState.currentNodeId = savedNested.currentNodeId; childState.loopResume = savedNested.loopResume; }
@@ -2286,7 +3192,10 @@ async function executeWorkflow(
           await executeWorkflow(`${executionId}:${node.id}`, childState, childNodes, inlineSubgraph.connections, depth + 1);
           if (childState.status !== 'completed') {
             if (childState.status === 'paused') { execState.status = 'paused'; await persistWorkflowExecution(executionId, execState); return; }
-            throw new Error(childState.error || '子图执行失败');
+            const edgeFailure = Object.values(childState.results).find(result => result.status === 'failed'
+              && typeof result.error === 'string'
+              && (result.error.startsWith('工作流连线 ') || result.error.startsWith('子图 ') && result.error.includes('工作流连线 ')));
+            throw new Error(edgeFailure?.error ? `子图 ${node.id}: ${edgeFailure.error}` : childState.error || '子图执行失败');
           }
           Object.assign(outputData, collectInlineSubgraphOutput(childNodes, inlineSubgraph.connections, childState.results));
           outputData.subgraphResults = childState.results;
@@ -2316,13 +3225,27 @@ async function executeWorkflow(
               .filter(connection => connection.fromNodeId === node.id && activePorts.has(connection.fromPortId))
               .map(connection => connection.toNodeId),
           );
+          parallelRegions.set(node.id, workflowParallelRegion(parallelTargetIds, connections));
           const parallelBranches = sorted.filter(candidate => {
             if (!parallelTargetIds.has(candidate.id)) return false;
+            if (parallelWork.has(candidate.id) || resultMap.has(candidate.id)) return false;
+            // A loop's body and its external inputs belong to the complete DAG.
+            if (['loop-for', 'loop-each', 'loop-while'].includes(candidate.type)) return false;
+            // The ordinary DAG owns these branches' real root, upstream graph,
+            // cursor and atomic image checkpoints. Its CPU work settles serially.
+            // Other branches retain the existing parallel dispatch below.
+            if (hasWorkflowImageReceivers([candidate])) return false;
             const incoming = connections.filter(connection => connection.toNodeId === candidate.id);
             return incoming.every(connection => connection.fromNodeId === node.id || resultMap.has(connection.fromNodeId));
           });
-          const branchStates = await Promise.all(parallelBranches.map(async branch => {
-            const branchInputs = getNodeInputs(branch, connections, resultMap);
+          outputData.parallelResults = {};
+          // Check this ready batch before starting any of its branch workers.
+          const validatedParallelBranches: Array<{ branch: WorkflowNode; branchInputs: Record<string, unknown> }> = [];
+          for (const branch of parallelBranches) {
+            const branchInputs = await readValidatedNodeInputs(branch, nodes, connections, resultMap, execState.userId!);
+            validatedParallelBranches.push({ branch, branchInputs });
+          }
+          for (const { branch, branchInputs } of validatedParallelBranches) {
             const branchNode = { ...branch, config: { ...branch.config, ...inputs, ...branchInputs } };
             const branchState: WorkflowExecutionState = {
               status: 'running',
@@ -2332,27 +3255,14 @@ async function executeWorkflow(
               completedAt: null,
               ...inheritNestedWorkflowExecutionContext(execState),
               totalNodes: 1,
+              sketchRoot: execState.sketchRoot || { executionId, state: execState },
             };
-            await executeWorkflow(`${executionId}:${node.id}:${branch.id}`, branchState, [branchNode], [], depth);
-            return { nodeId: branch.id, state: branchState };
-          }));
-          const parallelResults: Record<string, ExecutionResult> = {};
-          for (const branch of branchStates) {
-            const branchResult = branch.state.results[branch.nodeId];
-            if (!branchResult) continue;
-            parallelResults[branch.nodeId] = branchResult;
-            resultMap.set(branch.nodeId, branchResult);
-            execState.results[branch.nodeId] = branchResult;
+            const work = executeWorkflow(`${executionId}:${node.id}:${branch.id}`, branchState, [branchNode], [], depth)
+              .then((): void => { settledParallel.push({ nodeId: branch.id, state: branchState, parentId: node.id }); })
+              .catch((error: unknown): void => { parallelErrors.push(error); })
+              .finally((): void => { parallelWork.delete(branch.id); parallelOwners.delete(branch.id); });
+            parallelWork.set(branch.id, work); parallelOwners.set(branch.id, node.id); allParallelWork.push(work);
           }
-          const pausedBranch = branchStates.find(branch => branch.state.status === 'paused');
-          if (pausedBranch) {
-            execState.status = 'paused';
-            execState.currentNodeId = pausedBranch.state.currentNodeId || pausedBranch.nodeId;
-            outputData.parallelResults = parallelResults;
-            await persistWorkflowExecution(executionId, execState);
-            return;
-          }
-          outputData.parallelResults = parallelResults;
         }
 
         if (isLoopNode) {
@@ -2386,7 +3296,17 @@ async function executeWorkflow(
                 && downstreamIndex < resumeCursor.nextNodeIndex) continue;
               const dsNode = downstreamNodes[downstreamIndex];
               if (isWorkflowDispatchStopped(execState)) return;
-              const dsInputs = getNodeInputs(dsNode, connections, resultMap);
+              // Loop-control edges schedule this body even though the normal
+              // DAG sees only out-done as active. Check those edges without
+              // changing which values getNodeInputs maps.
+              const bodyEdgeIds = new Set(loopBodyConnections.filter(edge => edge.toNodeId === dsNode.id).map(edge => edge.id));
+              let dsInputs: Record<string, unknown>;
+              if (dsNode.type === 'input-image' && readWorkflowImageInputTransform(dsNode)) {
+                await readValidatedNodeInputs(dsNode, nodes, connections.filter(edge => bodyEdgeIds.has(edge.id)), resultMap, execState.userId!, bodyEdgeIds);
+                dsInputs = {};
+              } else {
+                dsInputs = await readValidatedNodeInputs(dsNode, nodes, connections, resultMap, execState.userId!, bodyEdgeIds);
+              }
               dsInputs._loopItem = loopIteration.item;
               dsInputs._loopIndex = loopIteration.index;
               dsInputs._loopTotal = loopIteration.total;
@@ -2396,6 +3316,15 @@ async function executeWorkflow(
                 if (typeof dsInputs[key] === 'string') {
                   dsInputs[key] = replaceLoopVariables(dsInputs[key] as string, loopCtx.index, loopCtx.total);
                 }
+              }
+              if (dsNode.type === 'input-image' && readWorkflowImageInputTransform(dsNode)) {
+                execState.loopResume = { loopNodeId: node.id, iterationIndex: loopIteration.index, nextNodeIndex: downstreamIndex, lastLoopOutput };
+                await persistWorkflowExecution(executionId, execState, true);
+                if (isWorkflowDispatchStopped(execState)) return;
+                const outcome = await executeImageReceiver(executionId, execState, dsNode.id, nodes, connections, resultMap);
+                if (outcome.status === 'unknown') return;
+                lastLoopOutput = outcome.nodeResult.output;
+                continue;
               }
               if (isSketchWorkflowNode(dsNode)) {
                 execState.loopResume = { loopNodeId: node.id, iterationIndex: loopIteration.index, nextNodeIndex: downstreamIndex };
@@ -2583,6 +3512,7 @@ async function executeWorkflow(
           }
           delete execState.loopResume;
         }
+        collectDeferredImageParallelResults(nodes, connections, resultMap);
         await persistWorkflowExecution(executionId, execState);
         continue;
       }
@@ -2668,6 +3598,8 @@ async function executeWorkflow(
         execState.results[node.id] = result;
         await persistWorkflowExecution(executionId, execState);
         if (result.status === 'waiting-approval') {
+          const dispatch = resolveParallelApprovalDispatch(nodes, connections, resultMap);
+          if (dispatch) { parallelApprovalDispatch = dispatch; continue; }
           execState.status = 'paused';
           execState.currentNodeId = node.id;
           await persistWorkflowExecution(executionId, execState);
@@ -2822,6 +3754,13 @@ async function executeWorkflow(
       }
 
     } catch (err) {
+      if ((execState.sketchRoot?.state || execState).imageRuntime && err instanceof Error && err.message === 'WORKFLOW_EXECUTION_FENCE_LOST') {
+        const root = execState.sketchRoot?.state || execState;
+        root.status = 'paused'; root.recoveryLeaseLost = true;
+        if (root.recoveryLeaseState) root.recoveryLeaseState.lost = true;
+        execState.status = 'paused'; execState.recoveryLeaseLost = true;
+        return;
+      }
       const result: ExecutionResult = {
         nodeId: node.id,
         status: 'failed',
@@ -2832,8 +3771,18 @@ async function executeWorkflow(
       execState.results[node.id] = result;
       console.error(`[Workflow] 节点 ${node.label} 异常:`, err);
     }
+    collectDeferredImageParallelResults(nodes, connections, resultMap);
     await persistWorkflowExecution(executionId, execState);
   }
+  if (execState.recoveryLeaseLost || isWorkflowDispatchStopped(execState)) break;
+  if (parallelWork.size) await Promise.race(parallelWork.values());
+  remaining = deferred;
+  }
+  } finally {
+    await Promise.all(allParallelWork);
+    collectParallel();
+  }
+  if (parallelErrors.length) throw parallelErrors[0];
 
   if (execState.cancellationState?.dispatchStopped && !execState.cancellationState.cancelled) return;
   if (execState.status === 'cancelled' || execState.cancellationState?.cancelled) {
@@ -3213,6 +4162,9 @@ function parseApiOutput(nodeType: NodeType, data: Record<string, unknown>): Reco
   if (data.videoUrl) output.videoUrl = data.videoUrl;
   if (data.videoThumbnailUrl) output.videoThumbnailUrl = data.videoThumbnailUrl;
   if (data.videoDuration) output.videoDuration = data.videoDuration;
+
+  // 音频输出（TTS）
+  if (typeof data.audioUrl === 'string' && data.audioUrl.trim()) output.audioUrl = data.audioUrl;
 
   // 条件评估结果
   if (nodeType.startsWith('condition-')) {

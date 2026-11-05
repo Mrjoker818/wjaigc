@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { CheckCircle2, Copy, ExternalLink, Loader2, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -31,6 +31,15 @@ interface CanvasShareCreateDialogProps {
   projectId: string;
   requestedViewport?: Partial<CanvasShareViewport> | null;
   onOpenManagement: (access?: CanvasShareCreatedAccess) => void;
+  returnFocusRef?: RefObject<HTMLElement | null>;
+  returnFocusScope?: string;
+}
+
+interface FocusSession {
+  generation: number;
+  scope: string | undefined;
+  target: HTMLElement | null;
+  handingOff: boolean;
 }
 
 interface OperationState {
@@ -101,13 +110,28 @@ export function CanvasShareCreateDialog({
   projectId,
   requestedViewport,
   onOpenManagement,
+  returnFocusRef,
+  returnFocusScope,
 }: CanvasShareCreateDialogProps) {
   const scopeKey = operationScopeKey(open, projectId);
+  const focusScope = returnFocusScope ?? projectId;
+  const focusGenerationRef = useRef(0);
+  const committedFocusScopeRef = useRef(focusScope);
+  const focusSessionsRef = useRef(new WeakMap<EventTarget, FocusSession>());
+  const activeFocusSessionRef = useRef<FocusSession | null>(null);
+  useLayoutEffect(() => {
+    if (committedFocusScopeRef.current !== focusScope) {
+      committedFocusScopeRef.current = focusScope;
+      focusGenerationRef.current += 1;
+    }
+  }, [focusScope]);
   const [preflight, setPreflight] = useState<CanvasSharePreflightResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [title, setTitle] = useState('');
+  const titleEditedRef = useRef(false);
+  const [requiresRecheck, setRequiresRecheck] = useState(false);
   const [expiresOn, setExpiresOn] = useState(defaultExpiryDate);
   const [allowDownload, setAllowDownload] = useState(false);
   const [created, setCreated] = useState<CanvasShareCreateResult | null>(null);
@@ -161,6 +185,8 @@ export function CanvasShareCreateDialog({
     setSubmitting(false);
     setError('');
     setTitle('');
+    titleEditedRef.current = false;
+    setRequiresRecheck(false);
     setExpiresOn(defaultExpiryDate());
     setAllowDownload(false);
     setCreated(null);
@@ -183,7 +209,8 @@ export function CanvasShareCreateDialog({
       }, operation.signal);
       if (!isCurrentOperation(operation)) return;
       setPreflight(result);
-      setTitle(`${result.projectName} 分享`);
+      setRequiresRecheck(false);
+      if (!titleEditedRef.current) setTitle(`${result.projectName} 分享`);
     } catch (requestError) {
       if (!isCurrentOperation(operation) || isAbortError(requestError)) return;
       setError(safeErrorAction(requestError));
@@ -216,7 +243,7 @@ export function CanvasShareCreateDialog({
   const visiblePopupBlocked = stateIsCurrent && popupBlocked;
 
   const handleCreate = async (): Promise<void> => {
-    if (visibleSubmitting || !visiblePreflight?.readiness.ready || !title.trim()) return;
+    if (visibleSubmitting || requiresRecheck || !visiblePreflight?.readiness.ready || !title.trim()) return;
     const operation = beginOperation();
     setSubmitting(true);
     setError('');
@@ -234,6 +261,9 @@ export function CanvasShareCreateDialog({
       setCreated(result);
     } catch (requestError) {
       if (!isCurrentOperation(operation) || isAbortError(requestError)) return;
+      if (['CANVAS_SHARE_PROJECT_CONFLICT', 'CANVAS_SHARE_MEDIA_NOT_READY', 'CANVAS_SHARE_UNSUPPORTED_ELEMENT'].includes(errorCode(requestError))) {
+        setRequiresRecheck(true);
+      }
       setError(safeErrorAction(requestError));
     } finally {
       if (isCurrentOperation(operation)) setSubmitting(false);
@@ -273,6 +303,7 @@ export function CanvasShareCreateDialog({
     const access = visibleCreated
       ? { shareId: visibleCreated.shareId, shareUrl: visibleCreated.shareUrl }
       : undefined;
+    if (activeFocusSessionRef.current) activeFocusSessionRef.current.handingOff = true;
     closeAndClear();
     onOpenManagement(access);
   };
@@ -291,6 +322,25 @@ export function CanvasShareCreateDialog({
       }}
     >
       <DialogContent
+        onOpenAutoFocus={event => {
+          const session: FocusSession = {
+            generation: ++focusGenerationRef.current,
+            scope: focusScope,
+            target: returnFocusRef?.current ?? null,
+            handingOff: false,
+          };
+          activeFocusSessionRef.current = session;
+          if (event.currentTarget) focusSessionsRef.current.set(event.currentTarget, session);
+        }}
+        onCloseAutoFocus={event => {
+          const session = event.currentTarget ? focusSessionsRef.current.get(event.currentTarget) : undefined;
+          if (!returnFocusRef && !session?.handingOff) return;
+          event.preventDefault();
+          const target = session?.target;
+          if (session && !session.handingOff && session.generation === focusGenerationRef.current
+            && session.scope === focusScope && target === returnFocusRef?.current
+            && target?.isConnected && target.getClientRects().length > 0) target.focus();
+        }}
         className="max-h-[calc(100dvh-1rem)] max-w-[calc(100%-1rem)] overflow-y-auto p-4 pr-12 sm:max-w-lg sm:p-6 sm:pr-12 [&_[data-slot=dialog-close]]:flex [&_[data-slot=dialog-close]]:size-11 [&_[data-slot=dialog-close]]:items-center [&_[data-slot=dialog-close]]:justify-center"
         data-modal="true"
       >
@@ -389,7 +439,7 @@ export function CanvasShareCreateDialog({
                     className="h-11"
                     value={title}
                     maxLength={200}
-                    onChange={event => setTitle(event.target.value)}
+                    onChange={event => { titleEditedRef.current = true; setTitle(event.target.value); }}
                   />
                 </div>
 
@@ -431,7 +481,7 @@ export function CanvasShareCreateDialog({
               <Button className="min-h-11" type="button" variant="outline" onClick={handleOpenManagement}>
                 管理已有分享
               </Button>
-              {(!visiblePreflight || !visiblePreflight.readiness.ready) && !visibleLoading && (
+              {(!visiblePreflight || !visiblePreflight.readiness.ready || requiresRecheck) && !visibleLoading && (
                 <Button className="min-h-11" type="button" variant="outline" onClick={() => void runPreflight()}>
                   重新检查
                 </Button>
@@ -439,7 +489,7 @@ export function CanvasShareCreateDialog({
               <Button
                 className="min-h-11"
                 type="button"
-                disabled={visibleLoading || visibleSubmitting || !visiblePreflight?.readiness.ready || !title.trim()}
+                disabled={visibleLoading || visibleSubmitting || requiresRecheck || !visiblePreflight?.readiness.ready || !title.trim()}
                 onClick={() => void handleCreate()}
               >
                 {visibleSubmitting && <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden="true" />}

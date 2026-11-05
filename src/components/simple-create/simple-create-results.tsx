@@ -47,7 +47,7 @@ export function SimpleCreateResults({
                 )}
               </div>
               <div className="space-y-3 p-3">
-                {slot.error?.message && <p className="text-xs text-red-300">{slot.error.message}</p>}
+                {slot.error?.message && <p className="text-xs text-red-300 [overflow-wrap:anywhere]">{slot.error.message}</p>}
                 <div className="flex flex-wrap gap-2">
                   {active && (
                     <ActionButton label={`取消 ${slot.id}`} onClick={() => onCancel(slot.id)} icon={<Ban className="h-4 w-4" />} />
@@ -77,7 +77,7 @@ function ActionButton({ label, onClick, icon }: { label: string; onClick(): void
       type="button"
       aria-label={label}
       onClick={onClick}
-      className="flex min-h-10 min-w-10 items-center justify-center gap-2 rounded-md border border-zinc-700 px-3 text-xs text-zinc-200 hover:border-amber-400 hover:text-white"
+      className="flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-md border border-zinc-700 px-3 text-xs text-zinc-200 hover:border-amber-400 hover:text-white"
     >
       {icon}
       <span aria-hidden="true">{label.split(' ')[0]}</span>

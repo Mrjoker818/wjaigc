@@ -1,9 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { findProviderForModel, findProviderById } from '@/lib/server-api-config';
+import { getApiProviders } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getSessionUser } from '@/lib/server-auth';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
-import { normalizeModelForApi } from '@/lib/model-capabilities';
+import { selectActivityVenueModel } from '@/lib/activity-venue-model';
+import { z } from 'zod';
+
+const score = z.number().finite().min(0).max(10);
+const qcDimension = z.object({ score, comment: z.string() }).passthrough();
+const qcResultSchema = z.object({
+  passed: z.boolean(), overallScore: score,
+  dimensions: z.object({
+    brandIdentity: qcDimension, styleConsistency: qcDimension, spaceLayout: qcDimension,
+    materialColor: qcDimension, overallQuality: qcDimension,
+  }).catchall(qcDimension),
+  issues: z.array(z.string()), suggestions: z.array(z.string()), verdict: z.string().min(1),
+}).passthrough();
 
 /**
  * POST /api/activity-venue/qc
@@ -20,17 +32,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '请提供效果图URL和DesignID' }, { status: 400 });
     }
 
-    const provider = providerId
-      ? await findProviderById(providerId)
-      : await findProviderForModel(model || '', 'chat');
-    if (!provider) {
-      return NextResponse.json({ error: '未找到可用的LLM视觉模型，请在管理员后台配置' }, { status: 400 });
+    if ((providerId !== undefined && typeof providerId !== 'string') || (model !== undefined && typeof model !== 'string')) {
+      return NextResponse.json({ error: '供应商或模型参数无效' }, { status: 400 });
     }
-
-    const rawModel = provider.selectedModels?.[0] || model || 'gemini-2.5-flash';
-    const { apiModelName: selectedModel } = normalizeModelForApi(rawModel);
-
-    const sessionUser = await getSessionUser(request).catch(() => null);
+    const sessionUser = await getSessionUser(request);
+    if (!sessionUser) return NextResponse.json({ error: '请登录后进行质检' }, { status: 401 });
+    const providers = await getApiProviders();
+    const selection = selectActivityVenueModel(providers, sessionUser, providerId, model);
+    if (!selection.ok) return NextResponse.json({ error: selection.error }, { status: selection.status });
+    const { provider, modelId: selectedModel } = selection;
     const taskId = `venue_qc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     registerTask(taskId, 'venue-qc', `效果图质检`, sessionUser?.id);
 
@@ -77,11 +87,12 @@ ${checkItems}
   "verdict": "通过 — 效果图符合设计规范，可用于方案汇报"
 }`;
 
-        let apiBase = provider.baseUrl.replace(/\/+$/, '');
-        if (apiBase.endsWith('/v1')) apiBase = apiBase.slice(0, -3);
+        const apiBase = provider.baseUrl.replace(/\/+$/, '');
 
         const response = await fetchWithV1Retry(apiBase, '/chat/completions', {
           method: 'POST',
+          skipV1Retry: true,
+          redirect: 'manual',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${provider.apiKey}`,
@@ -103,56 +114,43 @@ ${checkItems}
         });
 
         if (!response.ok) {
-          const errText = await response.text();
-          updateTaskProgress(taskId, { status: 'failed', error: `质检失败: ${response.status} ${errText.slice(0, 200)}` });
+          updateTaskProgress(taskId, { status: 'failed', error: `质检上游返回 HTTP ${response.status}（任务 ${taskId}），请核实供应商状态和费用` });
           return;
         }
 
         const apiResp = await response.json();
         const content = apiResp.choices?.[0]?.message?.content || '';
 
-        let qcResult = null;
+        let parsed: unknown;
         try {
-          const jsonMatch = content.match(/\{[\s\S]*\}/);
-          if (jsonMatch) qcResult = JSON.parse(jsonMatch[0]);
+          const jsonMatch = typeof content === 'string' ? content.match(/\{[\s\S]*\}/) : null;
+          if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
         } catch {
-          // ignore
+          // Invalid provider content is handled below.
         }
-
-        if (!qcResult) {
-          qcResult = {
-            passed: true,
-            overallScore: 7,
-            dimensions: {
-              brandIdentity: { score: 7, comment: '基本符合' },
-              styleConsistency: { score: 7, comment: '基本符合' },
-              spaceLayout: { score: 7, comment: '基本符合' },
-              materialColor: { score: 7, comment: '基本符合' },
-              overallQuality: { score: 7, comment: '效果良好' },
-            },
-            issues: [],
-            suggestions: [],
-            verdict: '通过 — 效果图基本符合设计规范',
-          };
+        const qcResult = qcResultSchema.safeParse(parsed);
+        if (!qcResult.success) {
+          updateTaskProgress(taskId, { status: 'failed', error: `质检结果格式无效（任务 ${taskId}），请核实供应商费用` });
+          return;
         }
 
         updateTaskProgress(taskId, {
           status: 'completed',
           progress: 100,
-          result: { qcResult, type: 'venue-qc' },
+          result: { qcResult: qcResult.data, type: 'venue-qc' },
         });
-      } catch (err) {
+      } catch {
         updateTaskProgress(taskId, {
           status: 'failed',
-          error: err instanceof Error ? err.message : '质检失败',
+          error: `质检结果暂无法确认（任务 ${taskId}），请核实供应商状态和费用`,
         });
       }
     })();
 
     return NextResponse.json({ success: true, taskId, status: 'running' });
-  } catch (err) {
+  } catch {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : '服务器错误' },
+      { error: '质检暂时不可用，请稍后查看任务状态' },
       { status: 500 },
     );
   }

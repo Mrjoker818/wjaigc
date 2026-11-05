@@ -1,5 +1,65 @@
 # WJ-STABLE-001 Stage 2 Progress
 
+## 2026-11-01 当前工作入口：移动端暂停，第七项恢复
+
+2026-11-02 06:03：原画布短用例已实际通过1项（j1156/0、原Vitest11944/0、迁移7740/0、主控84284/0，151项仅本轮筛选未执行），不重跑。原工作流编辑首例被私有FS_LINK_FORBIDDEN拦住（31660/1、1fail13筛选未执行），只修专属媒体内部原子发布的测试接线后复验，草图短例暂未启动。HTTP恢复4已达真实双账号并发与丢回执，恢复读取时私有descriptor比较失败（32556/1、主控31930/1），整例未通过；正在核字段语义和最小测试修正，保留身份保护。3合同24项继续关闭；原PG/库/锁/其他进程不动，移动端PAUSED、整体ACTIVE、第七项未验收，无Git同步、Coze指令或正式部署。
+
+2026-11-02 05:21：安全子集首轮已由主控主动中断（81867工具退出1），未完成、无原生终态，不是用户取消目标。已确认验收环境两项不兼容：媒体根目录名称不符合原夹具约定、固定迁移子进程被保护拒绝；另CLEAN缺合同测试所需docs/Git。保留所有原失败，不据此改业务。正在按原LT环境合同最小修复，并先用原单例/bail预检；合同项另用完整Git候选补验，避免再次盲跑全套。相关本轮父/入口/末worker快照未见，原PG27908仍在，不冒称全清理成功；下一先只读核新专库资源。HTTP2/WS14、类型/构建、lint及源码保护已闭结果继续复用。移动端PAUSED、整体ACTIVE、第七项未整体验收。
+
+2026-11-02 05:04：HTTP主通道完整本地UI已实际通过并独审（主控60356/0、服务20244/0、浏览器3852/0）；真实Next+双Edge的双向拖动、PG投影、双方重载后的新session/pull通过，文档WS计数0。192输入/32普通原件冻结7a75d6b7，查询调用2794、拒绝及PG错误观察0；仅此HTTP文档场景，不代表presence/云端。新库fresh核验与启动已串联，1160文件安全子集正在运行（入口13192、主控81867），未出终态；排除8文件及1用例明确未验。原WS流程不重跑，移动端PAUSED、第七项未整体验收，Git/Coze交付未执行。
+
+2026-11-02 04:46：独立候选的原quietlint已实际通过（29668/0，69项及2453文件前后字节绑定不变）；精确补登记24路径后，原固定7fd保护脚本也实际通过（2924/0，38功能/组件/合同保留，0警告）。仅允许清单文档新增24条完整路径，原779项、比较基线、保护脚本和业务69项不改，MAIN refs/index未动。原失败保留，不重跑已过场景。HTTP真实UI尚未执行：独审发现旧页请求可能误计为重载后请求，正仅修观察器的导航代次和迟到响应负例；不把测试观察修正当产品缺陷。全仓safe subset尚未启动，移动端PAUSED、第七项未整体验收。
+
+2026-11-02 04:38：原Vitest文件发现已实际完成1168个文件，子进程15104自然退出0；仅修正固定祖先lstat拒绝的异步回调，不读取该目录、不放宽保护。8项新输入+原19项与4份原件主控核对一致，冻结a678ec59；这是文件清单，不是测试通过数。原保护脚本在独立825+69 Git候选中实跑退出1/24BLOCK（23本轮新路径+1已提交历史证据），38功能ID/组件/合同仍在；正在按已授权精确范围处理正常准入，不替换比较基线。交付核对确认full14实际HTTP=false，仅闭合原WS真实画布UI；新增HTTP主通道的同等级UI实测尚缺，现优先准备独立HTTP案例，保留原断言和保护。全仓安全子集与quietlint接线另行准备；移动端PAUSED、第七项仍未整体验收，原库/锁/其他进程不动，Coze最后仍断开。
+
+2026-11-02 04:26：完整回归专属新库已唯一创建并核对身份（库OID97965688、既有受限角色OID97923495）；原保留库前后catalog的OID/owner不变。17份原件、20项输入冻结e1c6e57c，主控与独审核对一致。建库子进程/launcher实际退出0；外层路径解析失败退出1保留，仅另跑不含SQL的finalizer并退出0，未重发CREATE。该证据只证明建库与身份观察，不是全回归通过。文件发现第4次已取得明确的FS_PATH_UNRESOLVED诊断，尚无文件清单或测试执行；先修私有启动兼容，禁止无新证据原样重试。完整回归runner仅准备，复用此次新库；已通过full14等固定场景不单独重跑。移动端PAUSED，第七项未整体验收；Coze最后仍断开、presence后端终止分支继续HOLD，原库/锁/其他进程不动，无Git同步或正式部署。
+
+2026-11-02 04:00 本地完整双账号画布已验收：full14真实生产Next+双Edge上下文的登录/项目/上传/启用协作/邀请/拖动同步/双重载及PG投影断言全部通过；launcher30340/0、服务12112/0、浏览器控制33092/0已实际关闭，SQL拒绝及原生PG错误0，驱动调用2577。173输入/37普通原件+1未跟随链接/233SQL映射冻结03b98067，主控与独审一致。编辑者创建和初始布局用受控API夹具，不能称每一步都是UI。该本地固定流程关闭不重做；原失败全留。下一准备未验整仓回归的独立新测试库/只读文件发现，旧1146及构建不单独重跑。Coze项目最新只读仍断开，presence受阻分支待明确答复；移动端PAUSED、第七项未整体验收，原库/锁/其他进程不动、无Git同步或正式部署。
+
+2026-11-02 03:48 上传链路与预算检查点：full11以native42703/精确SQL摘要定位fixture遗漏transfer三字段的canonical迁移；36原件/166输入冻结19360533。full12仅补四份完整原始迁移及受限私有策略，上传保存、启用协作、邀请和编辑者登录已达，未再现42703；完整场景仍因测试1500累计调用预算耗尽失败，169拒绝全为statement-limit，native driver错误0。父/服务/浏览器均1已关闭；172输入/34普通原件+1未跟随链接冻结cf563085，主控核0差异。新full13仅提议3500有限预算及SQL摘要计数，若耗尽不得自动加码；173输入/230SQL/63原UI断言不变，待独审后定点复验。业务与原共享保护不改；移动端PAUSED、第七项未整体验收，原PG/库/锁/其他进程不动。
+
+2026-11-02 03:30 实际检查点：full8已确认新项目最终保存，但上传后sync返回500，165输入/31原件冻结44c6db1e，父33588/1、服务15680/1、浏览器17508/1已关闭；SQL拒绝0，不能据此判完整画布通过，也未证full6过渡ID假说。双实例文档实测已达ACK2、删除3、B补齐[2,3]及旧更新ACK4后不复活，两子1808/0、33272/0；18原件/166输入冻结136cef08并限范围采纳。主控汇总混合stdout解析失败，外层1458/1且父Node退出未落盘，完整父链仍失败；两子compiled启动连接限制/worker收尾警告保留，不称全Next健康。下一只定位上传500及修正汇总，不重跑已达场景。mobilePAUSED、第七项未整体验收；presence自动审批拒绝分支等待明确答复，Coze最后仍断开，原PG/库/锁/其他进程不动。
+
+2026-11-02 03:08 实际检查点：full5因组读取/保存围栏查询未列而失败，补精确三条后full6已无SQL拒绝，但创建项目后的保存确认仍未达；父87212/1及两个测试子均已关闭，原证据保留。先补脱敏阶段/HTTP元数据及页面截图定位，尚不能判业务根因，也不放宽断言或超时。login4、PC5及两类协议收敛已过结果沿用；双实例测试父/子接线在合并复审，未实际运行。原PG/库/锁/既有进程保持、移动端PAUSED、第七项未整体验收。
+
+2026-11-02 02:51 当前：真实生产Next/instrumentation+单人真实Edge登录已实际通过并独审，父64592/0、服务29660/0、浏览器控制32548/0，audit0/本轮清理通过；27原件、154/155/156组输入和530浏览器项冻结a40b8ad7。此前失败保留，不重跑login-only。双账号画布full4离线候选已形成，实际尚未运行；先无IO核验Next对内部上传fetch添加的框架参数能否被测试网络包装正确接收，再准入实际UI流程。双实例通知丢失场景另行准备，原PG实例不动；移动端PAUSED、第七项未整体验收，presence待明确答复、Coze断开。
+
+2026-11-02 02:43 当前：root3登录定点复验已结束，父92667/1；真实登录标记通过但仍3次拒绝，已逐哈希定位为项目revision读取及对话快照读取两条精确SQL。原件/证明链保留；新full-canvas-ui-login-4仅加这两条，132SQL/156输入、9项定点控制通过，等待准入后复验。未接完的双账号full-canvas-ui-4是另一个草稿，不混作本次登录包。已关闭PC5/协议冲突/1146/构建不重跑；不新增数据库重启门禁，原实例保持。移动端PAUSED、第七项未整体验收。
+
+2026-11-02 02:33 当前：完整Next+真实登录首轮实际运行已结束，父77272/1、服务20128/1、浏览器控制33640/0均退出。登录UI标记通过，但服务日志有20次原保护拒绝，并点名默认电商模板读/写和仪表盘活动记录函数，因此整例失败，不放行；未逐条记录SQL摘要，不能把全部拒绝追认为已证明的三种文本。原件保留，仅在新副本补这几处已实际触达的测试SQL清单及脱敏拒绝哈希观察；不改产品或保护，不重跑已通过的协议/跨进程/1146/构建。presence仍待明确答复、Coze断开，移动端PAUSED、第七项未整体验收。
+
+2026-11-02 02:22 当前：同素材双Edge协议冲突已实际通过且独审，44原件/814输入冻结e0793630；双方canonical[2,3]、ACK2/3、完整状态与PG序列3一致，获胜值80，服务12008/0及浏览器控制18332/0均实际关闭。pc5跨进程恢复fd90d5c1继续保留。下一为真实完整Next/登录/上传/邀请/画布拖动验收；尚未实际运行，不拿协议页替代。Coze最新只读仍断开，不重复刷新；presence明确授权问题仍待答复。原库/锁/既有进程不动，移动端PAUSED、第七项未整体验收。
+
+2026-11-02 02:19 当前：pc5真实独立进程恢复已通过并独审，56原件/156输入冻结fd90d5c1；父工具12672/0，first33380/0实际关闭后才开始第二条身份链，second25424/0恢复x45/20并实际关闭。仅编译路由+源码网关/原生HTTP/WS，不代表完整Next、PG重启或多实例。新的同素材双Edge冲突场景已独审并正在串行运行，未提前判通过；真实完整画布接线继续准备。presence特殊会话收尾仍待明确答复、Coze断开，原保护不绕过。移动端PAUSED、第七项未整体验收。
+
+2026-11-02 02:12 当前：pc4一次实际执行在OS身份解析处停止，父75459/1、采集子32016/2均退出，未进入身份SQL或服务。失败6319ff11保留。只读双组对照已实际证明：精简环境遗漏LANG/LC_ALL使pg_controldata输出本地语言；仅固定二者为C.UTF-8后，原严格英文身份/状态解析恢复，SID仍7694774214099586376、状态in production。正准备pc5最小启动环境修复，不放宽身份/SQL保护。presence特殊会话收尾仍待明确授权，不间接执行；既有通过不重跑、移动端PAUSED、第七项未整体验收。
+
+2026-11-02 02:02 当前执行边界：presence4实际命令被自动审批在CreateProcess前拒绝，理由为pg_terminate_backend误终止其他会话风险、原授权未覆盖；未执行该分支，已提出一次明确限定授权问题，等待答复不等于批准。继续不含该操作的文档进程恢复：pc3首轮2620/1停在OS采集器原生程序识别，尚无SQL/服务阶段，原始失败保留、只修测试启动环境/诊断记录；完整画布UI的本地接线另行准备。Browser4/nr9通过结果不重跑，移动端PAUSED、第七项未整体验收。
+
+2026-11-02 01:47 当前：Browser4本地双Edge协议一致性已实际通过并独审，32原件/810输入冻结41e87e20；服务ready后18ms才启动浏览器，父10054/0、server21844/0、browser控制器3324/0实际退出。双方ACK[3,2]、两端canonical[2,3]，完整视图与PG持久序列3/坐标45、80相符；仅固定私有页面协议场景，不是实际画布/登录/完整Next/Coze。nr9结果继续保留，旧2/3失败不改不重跑。接续补presence限定角色/关闭验真和独立PID恢复父控，未实际运行；Coze新鲜只读仍项目断开。整体ACTIVE、第七项未整体验收、移动端PAUSED；原库/锁/既有进程不动，无Git同步/付费/正式部署。
+
+2026-11-02 01:38 当前：nr9真实文档通道恢复序列的独审通过结果35787087保留。Browser2实际到双会话提交后在首条canonical帧断言失败，冻结bf78ad7d；Browser3尚未启动Edge即等待服务ready超时，冻结72bcd0f0，不能称帧修复通过。新Browser4仅调整父控先等服务ready再启动浏览器，15秒操作/60秒记录pending预算不变，完整双增量/ACK/PG投影断言保留；11离线控制已过，独审中，未实际运行。独立PID恢复控制器与presence限定自有连接适配/新鲜角色只读核验仍在准备，不视为完成。C盘118.96GiB/J盘41.02GiB；原库、锁、既有进程不动，移动端PAUSED、第七项未整体验收，无Git写入或部署。以下为历史，唯一resume最新段为准。
+
+2026-11-02 01:16 当前：nr9本地真实HTTP/WS文档通道实际通过并独审：顺序双向确认/转发、撤权1008关闭、重授新票据重连、同进程服务重开后持久坐标恢复，父31075/0、子33104/0均实际退出；41原件/264输入冻结35787087。保留nr8未达到的旧开放socket交错，不能替代真正并发、独立PID重启、浏览器、presence或完整Next/Coze。双隔离Edge上下文候选正在独审；presence已确认是原源码与测试关闭保护冲突，未证产品故障，仅在新测试副本设计定向自有连接收尾并补反例，不改产品或原保护文件、不触及其他既有连接。Coze最后观察仍实例不存在/项目断开；移动端PAUSED、第七项未整体验收。下列均为历史，唯一resume最新段为准。
+
+2026-11-02 01:06 当前：移动端PAUSED、第七项IN_PROGRESS/未整体验收，以下旧日期状态保留为历史。wr7原保留schema的只读完整投影补查已实际通过并独审，19原件/152输入冻结b65c7d12；只证明补查时状态。nr8实际HTTP/WS已到两账号顺序编辑和撤权重授，旧socket提前关闭导致指定“旧连接仍开”时序未达，原生子28044/1及父51820/1已实际退出；不是整例通过，准备独立确定性撤权关闭/重连/恢复场景。Coze曾恢复并新鲜核对源树/构建c293（与main82528099一致，非本轮69项）；一次后续诊断刷新又返回instance_not_found、项目页连接断开，云端门禁继续OPEN，不循环重试。未Git写入/正式部署，不重跑1146/构建；详情以唯一resume最新段为准。
+
+2026-11-02 00:29 最新：19例g6及p3性能已完成独立结果复核；a6/c6/s6/m6四例均实际通过、关闭并独审，84原件/271输入冻结f5af7e82。所有本轮主控真PG测试现已退出，原实例继续运行不动。下一是wr7只读完整投影补查和nr8真实HTTP/WS通道候选准备；尚未准入或实际运行，完整生产启动/浏览器/Coze仍OPEN。远端只读核实main=82528099、stable=52f7c601未动，本地main/tree c293与历史Coze报告源码树相同，云端当前断开未重新核验构建。整体ACTIVE、第七项未整体验收、移动端PAUSED；唯一resume最新段为准。
+
+2026-11-02 00:22 最新：整体ACTIVE、第七项未整体验收、移动端PAUSED。13服务+6回收的受影响接线复验已逐例实际通过并关闭，343原件/150去重输入冻结50423926；索引第7例沿用已独审原生helper证据未重跑。编译核心pn6与两写入进程/第三进程重载均已独审通过。性能p3一次30写入/32拉取实际通过：受计数1740/固定2000、拒绝及额外请求0，保存确认P50 99.3ms/P95 130.53ms/max430.72ms，仅两人/两对象本地直调；18原件/193输入冻结ccaf542b。新完整认证a6和客户端c6已实际通过，媒体s6执行中、通知m6待串行。真实HTTP/WS/浏览器、完整生产启动及Coze仍OPEN，当前不提交或部署，详情以唯一resume最新段为准。
+
+2026-11-02 00:02 最新：空间约41GiB，整体ACTIVE、第七项未整体验收、移动端PAUSED。修正测试消费者接线后，原生编译路由核心真PG用例已实际退出0并冻结（查询拒绝0、3池关闭）；结果独审中。同步性能首轮因1500语句预算拒绝而失败，原件已冻结且独审；必要30写入/32拉取静态下界1520，不冒充性能通过，正在新副本补计数及固定预算复核。跨进程与原WS/浏览器/云端门禁仍OPEN，Coze新鲜只读仍断开。下面23:55及更早段落为历史，以唯一resume最新增量为准；不重跑1146/构建。
+
+2026-11-01 23:55 接续：J盘已核验剩余41.01GiB，空间阻塞解除。离线真实消费者对照已证实测试侧缺少精确pg映射，Clean和WORK原入口均出现Pool/Client身份不匹配，补映射后均匹配且空池实际关闭；无网络或SQL。旧功能原件保留，不能追认逐物理连接保护。仅在新隔离候选补查询前的实际消费者身份核验，再独审和定点真PG复验；不重复1146或构建。编译路由仍需补自身新池的查询前证明，性能新192输入/150SQL待审，workers新接线准备中。唯一接续记录以下方链接的最新段为准，移动端继续暂停、第七项未整体验收。
+
+**最新执行状态：整体目标 ACTIVE / 未完成，第七项 IN_PROGRESS / 未整体验收。** 69项候选的1146受控项、类型/lint和构建保留；真实数据库功能原件保留，认证/客户端/媒体/通知恢复四项已实际通过。编译产物测试先遇路径过长，短路径复验又暴露池构造器/跟踪覆盖不一致，正在离线核验并准备原生Node替代；不得扩大旧证据为所有物理连接均已证明受保护，暂不追加真PG/PERF/workers或放行交付。原始失败、保护和断言不放宽。完整接续以唯一记录最新“编译产物测试保护复核中”段为准。浏览器/真实网络、跨进程/重启/性能及主线云端仍未验收；Coze连接断开，移动端暂停，原库、保留锁和其他现有进程不动。
+
+用户已明确调整优先级：移动端 **PAUSED / 未完成、未整体验收**，集中推进整体第七项多人协作。此处只登记工作入口，不另立平行验收台账；下方 Stage 2 及旧日期的“当前/下一步”均保留为历史，不据此重复执行。
+
+- 移动端已验证的局部修复和原失败证据保留；暂停时尚有 ConfirmDialog 候选、模型目录与账号作用域、视频来源及迟到回执、语言修图连续触摸/蒙版坐标、场馆任务交接、剩余页面覆盖和真实设备/云端验收未完成。未准入候选不视为交付。详见[原移动端台账的 2026-11-01 14:26 暂停点](2026-10-09-sketch-to-code/mobile-wn-continuation-20261028.md)。
+- 第七项 **IN_PROGRESS / 未验收**：已进入隔离协作入口、恢复机制、服务端切换与真实数据库验收准备；当前实现与验证范围以[唯一接续记录](2026-09-25-v588-yjs-canvas-collaboration/resume-20261101.md)为准。受控测试与本地构建不替代真实数据库、双账号、故障恢复、性能及 Coze / 新独立 Edge 预览页验收。
+- 原库、保留锁和其他现有进程不动；不恢复移动端测试，不重跑已完成阶段，不改 stable、不正式部署。Pear 已取消，PSD 核心保留；整体目标继续进行。
+
 ## 当前检查点（2026-08-31）
 
 当前是 V5.8.8 选择性吸收中的管理员云端收口与模型授权数据库补证；下方 Stage 2/3/4 和旧日期“下一步”仅为历史记录，不得据此重做已完成阶段。
@@ -566,3 +626,32 @@ Protected stable branch: read-only and untouched
 - Lovart 营销增量工作流 Task 3: complete (commits `ce6982ad..746198f6`, final re-review clean, Critical/Important/Minor `0/0/0`). 通用 `multi-select`、复选框上限交互、冻结快照与 continuation 复验、正向 AssetVersion ID 校验、绑定字段同序精确匹配及提示词隔离均已闭环；非法输入在真实 Agent 创建和恢复路径中于任务/扣费副作用前拒绝。Task 3 聚焦 `219/219`、相关回归 `234/234`、TypeScript、目标 ESLint 和 diff-check 通过。下一唯一动作是 Task 4，接通受控多参考图 `img2img`，复用既有持久任务、幂等、退款与 AssetVersion 链路。
 - Lovart 营销增量工作流 Task 4: complete (commit `eccda3d4`, independent review approved, Critical/Important/Minor `0/0/2`). continuation 重新授权持久化请求并同序解析 1-6 张受控参考图；通用 `img2img` 适配器复用既有 operation、恢复、账务、AssetVersion ID 聚合和 lineage，严格冻结 provider/model 并传递 `referenceImages`、比例与 Skill 账务上下文。聚焦及相关回归 `221/221`，PostgreSQL 18 真并发 `23/23` 且临时实例已停止，TypeScript、目标 ESLint 和 diff-check 通过。Minor 留给最终全分支复审：单元夹具 operation key 非生产生成逻辑；PG 用例验证 AssetVersion ID 聚合而非创建真实 AssetVersion。下一唯一动作是 Task 5，锁定 Canvas/Workflow 双入口及 Simple Chat 隔离。
 - Lovart 营销增量工作流 Task 5: complete (commit `e5580b99`, independent review clean, Critical/Important/Minor `0/0/0`). Canvas 与 Workflow 通过同一服务端 24 项目录获得三项营销 Skill，组件无营销 ID 静态卡或新增工具栏入口；Workflow 对所有绑定字段传递同序 AssetVersion ID，Simple Chat 继续独立 16 项且拒绝营销 Skill。组件与相关运行回归 `95/95`、TypeScript、目标 ESLint 和 diff-check 通过；本地 Chromium 因缺少数据库变量和运行服务形成 `1 skipped` 可审计证据，未记为通过。下一唯一动作是 Task 6，全量回归、最终全分支审查、Obsidian 更新、main 推送与云端真实验收。
+
+## Lovart 第三批：平台素材合规检查（2026-09-07）
+
+- 起点：`main@2443c0ae655b0bcf5b503a46b68998911cd42917`，`origin/main@386034722e7139953a925e762ef2c0d6e5ef09fd`，`origin/stable@52f7c601ed150769e15d06fb435c6e360e28c9e7`。
+- 规格：`docs/superpowers/specs/2026-09-07-lovart-platform-compliance-audit-design.md`（已批准）。
+- 计划：`docs/superpowers/plans/2026-09-07-lovart-platform-compliance-audit.md`，共 11 项。
+- 约束：只在 `main` 串行实施，`stable` 与 V5.8.8 donor 只读；Canvas/Workflow 27→28，Simple Chat 保持 16；每项必须 TDD、独立审查通过后才进入下一项。
+- Task 1: complete（commit `085be096`，最终独立审查 `APPROVED`，Critical/Important/Minor `0/0/0`）。Amazon 首批 US/EU/JP 规则、可审计来源快照、规范 JSON 安全边界、未知证据保护、深冻结与跨运行时稳定摘要均已闭环；聚焦 `30/30`、TypeScript、目标 ESLint、diff-check 通过。
+- Task 2: complete（commit `c7afc22f`，第三轮独立复审 `APPROVED`，Critical/Important/Minor `0/0/0`）。图片输入支持 1–20 个受控 AssetVersion 扇出，重复素材、伪造步骤摘要、字段越权、重复步骤 ID、重复输入索引及恢复摘要漂移均在存储、创建、continuation 与 retry 边界拒绝；旧 dataset 精确快照保持不变。控制端 RED 分别为 `4 failed / 183 passed` 与 `3 failed / 120 passed`，最终组合回归 `226/226`、TypeScript、目标 ESLint、diff-check 通过。下一唯一动作是 Task 3，建立受限 JSON Skill 输出；不得提前进入合规媒体检测、适配器、API 或 UI。
+- Task 3: complete（commits `33c28202..7931a2b`，第二轮独立复审 `APPROVED`，Critical/Important/Minor `0/0/0`）。仅注册 `platform-compliance-report-v1` 的受限 JSON 输出可持久化；服务端历史、Canvas、Workflow 恢复及 Workflow 轮询统一执行 schema、体积和规范化校验，字段缺失兼容旧历史，存在但非法时失败关闭；JSON 去重包含 `stepId + kind + schemaId`，旧 text/html 顺序和 Simple Chat 16 项隔离保持不变。控制端回归 `164/164`、复审扩大回归 `172/172`、TypeScript、目标 ESLint 和 diff-check 通过。下一唯一动作是 Task 4，建立确定性图片合规检查；不得提前进入视觉模型、报告适配器、API 或 UI。
+- Task 4: complete（commits `21701f84..c933511d`，第四轮独立复审 `APPROVED`，Critical/Important/Minor `0/0/0`）。确定性媒体审计统一复用安全图片读取和 Sharp 像素边界，补齐 TIFF、25 MiB data URL、有界解码和运行中取消稳定性；真实透明像素与仅含 Alpha 通道分离。纯白背景通过，透明或外缘非白阻断，厚白框与高占比居中商品的冲突证据诚实返回 `unknown`，留给视觉检查消歧。控制端回归 `59/59`、复审扩大回归 `89/89`、TypeScript、目标 ESLint 和 diff-check 通过。下一唯一动作是 Task 5，接入冻结的精确视觉模型并构建部分报告语义；不得提前进入 API、UI 或目录扩展。
+- Task 5: complete（commits `7019a60b..2608a081`，第五轮独立复审 `APPROVED`，Critical/Important/Minor `0/0/0`）。合规视觉检查严格绑定冻结 provider/model 和审计后的同一媒体字节，无供应商降级；响应字节、结构、字符串和 requestId 均有界。HTTP 已知结果、用户取消、响应流中断与 `submission_unknown` 已精确分类，部分报告持久化失败不会污染提交终态或触发不安全重放；实际字节摘要、免费技术部分报告、视觉 unknown 语义和逐图片 chat 计价均闭环。控制端回归 `88/88`，最终复审聚焦 `62/62`、扩大 `213/213`、Skill Run/账务/取消 `95/95`，TypeScript、目标 ESLint 和 diff-check 通过。下一唯一动作是 Task 6，持久化 document AssetVersion 并提供鉴权安全导出；不得提前进入 UI 或目录扩展。
+- Task 6: complete（commits `b6920680..6629980c`，最终独立复审 `APPROVED`，Critical/Important/Minor `0/0/0`）。合规报告以规范 JSON、SHA-256 与空父版本 document AssetVersion 持久化；下载路由按当前用户、项目、Skill Run、步骤事件、来源版本、schema、checksum 和 byteSize 反向授权，JSON/HTML 均强制附件、`nosniff` 与 `private, no-store`。远程视觉调用与本地报告持久化拆为独立持久操作，报告数据库失败只重放本地写入且供应商仍仅调用一次；供应商不可用、拒绝、取消及不确定响应均交付可下载的 `vision-error` 部分报告。控制端扩展回归 `113/113`，事件专项 `19/19`、TypeScript、目标 ESLint 和 diff-check 通过。下一唯一动作是 Task 7，仅注册第 28 个 Canvas/Workflow 平台合规 Skill；Simple Chat 必须保持 16 项。
+- Task 7: complete（commits `ca434bd4..37798ec9`，R3 独立复审 `APPROVED`，P0/P1/P2/P3 `0/0/0/0`）。第 28 个平台合规 Skill 已追加到 Canvas/Workflow，Simple Chat 保持 16；1–20 张来源版本、平台联动地区、素材类型、商品事实、声明与报告语言均进入冻结执行合同。Canvas 已支持精确 `vision` 模型绑定，复制、快照、continuation 与公共动态选项路径保留新元数据且 getter-safe，未改变旧 Skill 图片输入合同。审查修复扩大回归 `498/498`、TypeScript、目标 ESLint 和 diff-check 通过。下一唯一动作是 Task 8，仅在 Canvas AI 对话中增加逐图合规报告卡；不得改变 Simple Chat。
+- Task 8: complete（commits `835e155e..3b78d302`，R3 独立复审 `APPROVED`，P0/P1/P2/P3 `0/0/0/0`）。Canvas AI 对话已具备逐图合规报告卡、四状态与问题筛选、`sourceVersionId` 精确定位、同源鉴权 JSON/HTML 下载、失败可见重试和按当前规则新建 Run 复检；历史报告观察与当前模型解耦，旧摘要缺上下文时仅禁用复检，版本升级迁移到当前 Skill 后重新执行服务端输入、来源和模型授权。Simple Chat 保持隔离，深浅主题达到 WCAG AA。相关回归 `200/200`、TypeScript、目标 ESLint 和 diff-check 通过。下一唯一动作是 Task 9，仅在 Workflow 增加平台合规节点与报告投影。
+- Task 9: complete（commits `5141d546..cbec9bc8`，R3 独立复审 `APPROVED`，P0/P1/P2/P3 `0/0/0/0`）。Workflow 已将合法合规 JSON 报告和受信 document AssetVersion 投影为 `complianceReports`、`documentAssetVersionIds` 及完整下游输出；`Asset.kind` 从真实资产服务/API 返回，未知类型失败关闭，document 不进入图片端口。坏合规报告逐项隔离且保留终态身份，其他 Skill JSON 继续严格失败；引用稳定去重并校验版本一致，Legacy 与 React Flow 对畸形报告均显示待确认。扩大回归 `229/229`、TypeScript、目标 ESLint 和 diff-check 通过。全量测试仍有 1 个基线已有的 Stage 4 inventory 预期差异，留给计划中的清单更新任务。下一唯一动作是 Task 10，增加平台合规专用限流与体积门禁。
+- Task 10: complete（commits `c7caf8ee..50eefb79`，R4 独立复审 `APPROVED`，P0/P1/P2/P3 `0/0/0/0`）。隔离 PostgreSQL 18.4 已通过真实 `createSkillRun`、生产计价、三图 dispatcher、受控 HTTP 视觉调用、逐图 downstream operation、真实 document AssetVersion、规范报告元数据和账务流水验证。同用户幂等、跨用户隔离、digest 冲突、失败图重试、paused retry/cancel、重复取消、完成 revision 前移、迟到结果与精确退款均由数据库条件终态闭环；`compliance_audit` 仅允许经完整 Skill admission 使用。最终复审七文件 `157/157`、完整竞态三轮 `6/6`、授权与合规回归 `257/257`、TypeScript、ESLint、diff-check 通过；临时端口、进程、schema、data/log 全部清理。下一唯一动作是 Task 11，全量回归、清单/保护基线、中文报告、main 推送与云端验收。
+
+## V588-MEDIA-001 实施进度（2026-09-13）
+
+- Task 1: complete（commit `91c1f6c2` 已快进到 `main`，独立复审规格/质量双 `APPROVED`，未关闭发现 0）。追加三张网关表、必需约束/索引和领域错误合同；RED 已验证，权威 main 上 GREEN `12/12`、TypeScript 通过。真实 PostgreSQL 执行保留给 Task 8，不冒充完成；`stable@52f7c601` 未触碰。下一唯一动作是 Task 2 密钥生命周期与管理 API。
+- Task 2: complete（commits `bb7c4841..6f41d2a9`，第二轮修复后独立复审 `APPROVED`，Critical/Important/Minor `0/0/0`）。网关密钥仅保存 SHA-256 与前缀，明文只在签发响应出现一次；成功认证以条件式 UPDATE 原子更新时间，吊销后不可重新启用；管理员 POST/PATCH/DELETE 的成功、服务失败及校验失败均写入值级脱敏审计，审计故障不反转已完成的权威变更。控制端聚焦回归 `43/43` 与 TypeScript 通过；真实 PostgreSQL 生命周期和审计持久化保留为后续数据库门禁。下一唯一动作是 Task 3 请求边界、限流、配额和数据库原子准入。
+- Task 3: complete（commits `f227ea63..031c6a58`，修复后独立复审 `APPROVED`，Critical/Important/Minor `0/0/0`）。已建立 1 MiB 流式请求边界、fatal UTF-8 与严格十进制 Content-Length 校验、图像/视频白名单规范化、稳定请求摘要，以及按密钥行锁串行化的 RPM、日配额和幂等数据库准入。控制端聚焦 `51/51` 与 TypeScript 通过；两轮真实 PostgreSQL 18 验证均为 `5/5`，20 路同键只有 `1 execute + 19 reuse`，RPM/日配额不超卖，临时实例和目录已清理。下一唯一动作是 Task 4，使用受信内部调用接入既有图像/视频权威提交链路。
+- Task 4: complete（commits `86dc22d2..54e21e65`，两轮审查修复后独立复审 `APPROVED`，Critical/Important/Minor `0/0/0`）。网关图像/视频提交只通过内部鉴权调用既有权威生成路由；认证后先原子计入 RPM，再以一次性绑定凭证进入幂等/日配额准入。显式 provider/model 失败关闭，`n=2/3/4` taskIds 不折叠；任何 5xx、超时或畸形响应保持 reserved，仅结构明确的 4xx 进入稳定 rejected，首次与重放语义一致。Cookie/桌面伪造来源被忽略，内部来源行为级持久化验证通过。控制端扩大回归 `138/138`、TypeScript 通过，真实 PostgreSQL 18 并发 `5/5`；未执行真实第三方供应商调用。下一唯一动作是 Task 5 状态查询、取消与用户隔离。
+- Task 5: complete（commits `cb2801a4..b07c7f26`，最终独立复审 `APPROVED`，Critical/Important/Minor `0/0/0`）。网关状态查询与取消仅以持久化 `cloud_tasks` 为权威，未知与跨用户任务统一 404；取消委托既有原子终态/退款路径，耐久重读为 cancelled 才返回成功。结果投影只允许受控站内媒体路径及 `cdn.openai.com`、`media.openai.com` 两个精确 CDN，无 query/hash/userinfo/IP literal，长度、数量和总预算均失败关闭；关闭态在任何数据工作前直接 503。控制端新鲜相关回归 `191/191`、TypeScript、目标 ESLint 和 diff-check 通过；实施报告记录真实 PostgreSQL 18 并发 `2/2`、0 skipped，临时服务已停止。未执行第三方供应商或云端 rollout；下一唯一动作是 Task 6，复用既有 256/512 WebP 缩略图与原图回退。
+- Task 6: complete（commits `5d7872f9..9ecb8a06`，修复后独立复审 `APPROVED`，Critical/Important/Minor `0/0/0`）。网关仅对 completed 任务按 `assetVersionId + ownerId` 读取既有 ready 256/512 WebP 变体，预览按 512、256、权威原图/视频封面回退；pending、failed、查询异常和不安全 URL 均不改变任务终态。取消前后权威读取明确绕开缩略图查询，避免展示增强阻塞取消与退款确认。控制端新鲜回归 `93/93`、TypeScript、目标 ESLint 和 diff-check 通过；未新增 worker、任务状态机、账务或资产体系。下一唯一动作是 Task 7，管理员网关界面与脱敏审计。
+- Task 7: complete（commits `752b2504..a790f953`，三轮修复后独立复审 `APPROVED`，Critical/Important/Minor `0/0/0`）。管理员仪表盘已增加响应式媒体网关密钥管理、一次性 Secret 展示、严格响应解析、局部歧义锁与有界权威核对；审计只保留允许字段。准入与管理端用量共享显式 UTC 日边界，并从既有 `wujie_gateway_requests` 统计 `reserved/admitted`。控制端新鲜回归 `83/83`、TypeScript、目标 ESLint、diff-check 及真实 Chromium 375px 几何测试通过；非 UTC 会话交叉用例已建立，但真实 PostgreSQL 执行留给 Task 8，不能记为已通过。下一唯一动作是 Task 8 PostgreSQL 竞态、账务与安全回归。
+- Task 8: complete（commits `21e21c79..74716cb9`，独立复审 `APPROVED`，Critical/Important/Minor `0/0/0`）。真实 PostgreSQL 18.4 已证明 20 路同摘要并发仅产生 `1 execute + 19 reuse`、一条 gateway request、一条权威 cloud task 与一次扣费；异摘要冲突、跨用户隔离、RPM/UTC 日配额不超卖、终态竞态、迟到完成拒绝及一次退款均闭环。Task 7 的 `Asia/Shanghai` 非 UTC 交叉用例同样真实通过。专项 `24/24`、既有账务与终态 `25/25`、扩大网关回归 `333/333`，均 `0 skipped`；TypeScript、目标 ESLint 与 diff-check 通过。临时数据库、端口、账户、schema、数据目录和日志已清理。下一唯一动作是 Task 9 全量门禁、中文发布记录、main 推送与 Coze 云端验收。
+- Task 9 local gate: complete（commits `2b19d3f6..3f41bb02`，三轮独立复审后 `APPROVED`，Critical/Important/Minor `0/0/0`）。Doctor 开关态与数据库迁移检查通过 `24/24`；媒体网关专项最终 `340/340`，全仓 Vitest `803` 文件、`6750/6750`、0 failed/0 skipped，TypeScript、lint:build、保护基线 `38/38`、生产构建 `120/120` 全部通过。原始 stdout/stderr、命令、commit、时间、退出码和 SHA-256 已归档；E2E 已覆盖逐槽回图、取消/迟到回写、一次退款、配额/冲突、资源尺寸/归属和成功态浏览器证据采集。当前结论仍为 `LOCAL PASS / CLOUD UNVERIFIED`。下一唯一动作是推送 exact main 后执行 Coze 默认关闭与临时开启的真实云端验收。

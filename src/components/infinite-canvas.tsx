@@ -1,4 +1,5 @@
 'use client';
+import { WORKSPACE_PANEL_RAIL_WIDTH } from '@/lib/workspace-panel-layout';
 import NextImage from 'next/image';
 import { withClientImageOutputPreference } from '@/lib/image-generation-output-preference';
 import { claimUpscaleSubmissionMarker, clearUpscaleSubmissionMarker,
@@ -10,6 +11,8 @@ import { getTransparentOutputWarning } from '@/lib/image-generation-output';
 import { loadBrowserImageBlob } from '@/lib/browser-image-blob';
 import { getVideoDownloadLabel, resolveVideoDownloadFormat } from '@/lib/video-download-format';
 import { toast } from 'sonner';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { } from '@/lib/canvas-mode-handlers';
 import { findClosestStandardRatio, STANDARD_RATIOS, type StandardRatio } from '@/lib/canvas-utils';
 import { normalizeCanvasViewState, resolveCanvasUsableViewportSize } from '@/lib/canvas-view-state';
@@ -22,6 +25,7 @@ import {
 } from '@/lib/video-processing-state';
 import { getConstrainedImageToolbarPosition, type FixedPanelPosition } from '@/lib/image-toolbar-position';
 import { getBottomToolbarDrawerPlacement, trackToolbarTransitionFrames, type BottomToolbarDrawerPlacement } from '@/lib/canvas-toolbar-layout';
+import { resolveCanvasBottomDockLayout, type CanvasBottomDockPanel } from '@/lib/canvas-bottom-dock-layout';
 import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
 import {
   applyRecoveredCanvasMedia,
@@ -129,6 +133,8 @@ import { CanvasContextMenu } from '@/components/canvas/CanvasContextMenu';
 import { CanvasToolHost } from '@/components/canvas/CanvasToolHost';
 import { CanvasZoomCluster } from '@/components/canvas/CanvasZoomCluster';
 import { MobileBottomToolbar } from '@/components/canvas/mobile-bottom-toolbar';
+import { MobileGroupHeader } from '@/components/canvas/mobile-group-header';
+import { MobileGenerationGroupHost, ResponsiveGenerationGroupSlot, type MobileGenerationGroupSlots } from '@/components/canvas/mobile-generation-groups';
 import { CanvasEmptyState } from '@/components/canvas/CanvasEmptyState';
 import { CanvasImageActionToolbar } from '@/components/canvas/CanvasImageActionToolbar';
 import {
@@ -181,6 +187,7 @@ import {
 } from '@/lib/canvas-kernel/commands';
 import { resolveActiveCanvasImage } from '@/lib/canvas-active-image';
 import { commitAcceptedCanvasImageChange, commitCanvasImageRefChange } from '@/lib/collaboration/canvas-document-image-bridge';
+import { CANVAS_CROP_OPERATION } from '@/lib/canvas-incremental-history';
 import type { CanvasToolbarAction } from '@/lib/mobile-canvas-toolbar';
 import {
   THREE_D_POLL_INTERVAL_MS,
@@ -193,7 +200,7 @@ import {
   validateUpscaleTargetDimensions,
   type UpscaleTargetPreset,
 } from '@/lib/upscale-target';
-import type { UpscaleProductMode } from '@/lib/upscale-orchestrator';
+import { resolveUpscaleProductMode, type UpscaleProductMode } from '@/lib/upscale-orchestrator';
 import { resolveCanvasUpscaleSource } from '@/lib/canvas-upscale-source';
 import { deliverCanvasImageFiles, DocumentCanvasUploadError, isDocumentCanvasMediaFile } from '@/lib/collaboration/document-canvas-upload';
 import { getCenteredFloatingPanelPosition } from '@/lib/floating-panel-position';
@@ -206,6 +213,7 @@ const ModelViewer3D = dynamic(() => import('@/components/model-viewer-3d'), { ss
 const VideoPlayer = dynamic(() => import('@/components/video-player'), { ssr: false });
 const VideoEditPanel = dynamic(() => import('@/components/video-edit-panel').then(m => ({ default: m.VideoEditPanel })), { ssr: false });
 const VideoCompareDialog = dynamic(() => import('@/components/video-compare-dialog'), { ssr: false });
+const PanoramaViewer = dynamic(() => import('@/components/panorama-viewer'), { ssr: false });
 const MultiAngleSpherePreview = dynamic(() => import('@/components/canvas/MultiAngleSpherePreview').then(m => ({ default: m.MultiAngleSpherePreview })), { ssr: false });
 
 const PsdLayerEditor = lazy(() => import('@/components/psd-editor/PsdLayerEditor'));
@@ -377,6 +385,7 @@ export interface CanvasImage {
   isProcessingPlaceholder?: boolean;
   groupId?: string;
   processing?: {
+    [CANVAS_CROP_OPERATION]?: object;
     label: string;
     status: string;
     progress: number;
@@ -539,6 +548,7 @@ interface InfiniteCanvasProps {
   onExtractKeywords: (image: CanvasImage) => void;
   onFusion: (images: CanvasImage[]) => void;
   onAddImages: (imageUrls: string[], sourceImageId?: string, meta?: { modelName?: string; apiProvider?: string }) => void;
+  captureDisplay3dInsertion?: () => (imageUrls: string[], meta?: { modelName?: string; apiProvider?: string }) => Promise<void>;
   onUploadFiles?: (files: File[]) => Promise<void>;
   uploadAuthority?: 'unknown' | 'legacy' | 'document';
   onReferenceSelect?: (image: CanvasImage) => void;
@@ -550,9 +560,12 @@ interface InfiniteCanvasProps {
   visionPromptEnabled?: boolean;
   onToggleVisionPrompt?: () => void;
   ohMyPromptOpen?: boolean;
+  renderOhMyPromptExternally?: boolean;
   onCloseOhMyPrompt?: () => void;
   onToggleOhMyPrompt?: () => void;
   onInsertPrompt?: (prompt: string) => void;
+  onInsertVisionPrompt?: (prompt: string) => void;
+  visionScopeKey?: string;
   ohMyPromptThemeStyle?: 'gold' | 'default';
   isVisionAnalyzing?: boolean;
   visionResult?: import('@/components/oh-my-prompt').VisionApiResultData | null;
@@ -566,8 +579,12 @@ interface InfiniteCanvasProps {
   isAdmin?: boolean;
   onToggleHelp?: () => void;
   isPanelCollapsed?: boolean;
+  onCanvasToolActivated?: () => void;
+  onCaptureCropHistory?: (operation: object) => { current(id: string): CanvasImage[] | null; settle(id: string, patch: Partial<CanvasImage>): void } | null;
   onUndo?: () => void;
   onRedo?: () => void;
+  mobileCanUndo?: boolean;
+  mobileCanRedo?: boolean;
   onHistoryTransactionBegin?: (id: string) => void;
   onHistoryTransactionCommit?: (id: string) => void;
   onHistoryTransactionRollback?: (id: string) => void;
@@ -622,6 +639,8 @@ interface InfiniteCanvasProps {
   /** Re-submit a terminal video task using its persisted input payload. */
   onRetryProcessing?: (image: CanvasImage) => void;
   projectId?: string;
+  /** Identity used to isolate the canvas generator draft and upload callbacks. */
+  canvasGeneratorActorId?: string | null;
   initialAnnotations?: CanvasAnnotationV2[];
   onAnnotationsChange?: (annotations: CanvasAnnotationV2[], renderedBaseline?: CanvasAnnotationV2[]) => boolean | void;
   documentMetadataMode?: boolean;
@@ -732,6 +751,7 @@ interface CanvasScaledMenuSelectProps {
   isMonochrome: boolean;
   onOpenChange: (open: boolean) => void;
   onValueChange: (value: string) => void;
+  touchLayout?: boolean;
 }
 
 /**
@@ -746,6 +766,7 @@ function CanvasScaledMenuSelect({
   isMonochrome,
   onOpenChange,
   onValueChange,
+  touchLayout = false,
 }: CanvasScaledMenuSelectProps) {
   const selectedLabel = options.find(option => option.value === value)?.label || value;
 
@@ -754,6 +775,7 @@ function CanvasScaledMenuSelect({
       <button
         type="button"
         className={`flex min-w-[68px] items-center justify-between gap-1 rounded-lg border px-2.5 py-1.5 text-[13px] ${isMonochrome ? 'border-gray-200 bg-gray-50 text-gray-800' : 'border-white/[0.14] bg-white/5 text-text-bright'}`}
+        style={touchLayout ? { minHeight: 44, width: '100%', fontSize: 16 } : undefined}
         aria-label={label}
         aria-expanded={open}
         onPointerDown={(event) => event.stopPropagation()}
@@ -767,7 +789,7 @@ function CanvasScaledMenuSelect({
       </button>
       {open && (
         <div
-          className="absolute left-0 top-full z-50 mt-1 min-w-full overflow-hidden rounded-lg shadow-xl"
+          className={touchLayout ? 'relative z-50 mt-1 min-w-full max-h-48 overflow-y-auto rounded-lg shadow-xl' : 'absolute left-0 top-full z-50 mt-1 min-w-full overflow-hidden rounded-lg shadow-xl'}
           style={{
             background: isMonochrome ? '#fff' : 'rgba(20,20,20,0.98)',
             border: isMonochrome ? '1px solid #ddd' : '1px solid #333',
@@ -781,6 +803,7 @@ function CanvasScaledMenuSelect({
               <button
                 key={option.value}
                 type="button"
+                style={touchLayout ? { minHeight: 44, fontSize: 16 } : undefined}
                 className={`block w-full whitespace-nowrap px-3 py-1 text-left text-[13px] transition-colors ${selected ? (isMonochrome ? 'bg-blue-50 text-blue-800' : 'bg-gold/15 text-gold') : (isMonochrome ? 'text-gray-700 hover:bg-gray-100' : 'text-text-bright hover:bg-[#2a2a2a]')}`}
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
@@ -799,7 +822,7 @@ function CanvasScaledMenuSelect({
   );
 }
 
-export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, taskModelCatalog = [], taskModelOptions = [], catalogStatus = { loading: false, error: null }, images, onImagesChange, selectedImage, onSelectImage, onPreviewImage, onGenerateVariation, onExtractKeywords, onAddImages, onUploadFiles, uploadAuthority, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, onCloseOhMyPrompt, onInsertPrompt, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onUndo, onRedo, onHistoryTransactionBegin, onHistoryTransactionCommit, onHistoryTransactionRollback, isHistoryTransitionPending = false, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onDeleteImages, canRetryPendingDelete, onUploadEffectReverseSource, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, initialAnnotations = [], onAnnotationsChange, documentMetadataMode = false, annotationExecutionContext, onRequestTaskPoll }: InfiniteCanvasProps) {
+export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, taskModelCatalog = [], taskModelOptions = [], catalogStatus = { loading: false, error: null }, images, onImagesChange, selectedImage, onSelectImage, onPreviewImage, onGenerateVariation, onExtractKeywords, onAddImages, captureDisplay3dInsertion, onUploadFiles, uploadAuthority, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, renderOhMyPromptExternally = false, onCloseOhMyPrompt, onInsertPrompt, onInsertVisionPrompt, visionScopeKey, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onCanvasToolActivated, onCaptureCropHistory, onUndo, onRedo, mobileCanUndo, mobileCanRedo, onHistoryTransactionBegin, onHistoryTransactionCommit, onHistoryTransactionRollback, isHistoryTransitionPending = false, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onDeleteImages, canRetryPendingDelete, onUploadEffectReverseSource, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, canvasGeneratorActorId, initialAnnotations = [], onAnnotationsChange, documentMetadataMode = false, annotationExecutionContext, onRequestTaskPoll }: InfiniteCanvasProps) {
   const effectiveUploadAuthority = uploadAuthority ?? (projectId ? 'unknown' : 'legacy');
   const isMonochrome = themeStyle === 'monochrome';
   const taskModelCatalogIndex = useMemo(
@@ -867,6 +890,8 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   const [showHumanRepair, setShowHumanRepair] = useState(false);
   const [humanRepairImageUrl, setHumanRepairImageUrl] = useState<string>('');
   const [agentSelectingImage, setAgentSelectingImage] = useState(false);
+  const agentTouchSelectionRef = useRef<{ pointerId: number; imageId: string | null; x: number; y: number; cancelled: boolean } | null>(null);
+  const suppressAgentTouchClickRef = useRef(false);
 
   // Font design state
   const [showFontDesign, setShowFontDesign] = useState(false);
@@ -896,6 +921,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   const [aspectRecomposeRatio, setAspectRecomposeRatio] = useState<AspectRecomposeRatio>('1:1');
   const [aspectRecomposeProcessing, setAspectRecomposeProcessing] = useState(false);
   const [elementDecomposeOutputMode, setElementDecomposeOutputMode] = useState<ElementDecomposeOutputMode>('both');
+  const [elementDecomposeRecoveryFailed, setElementDecomposeRecoveryFailed] = useState(false);
   const [elementDecomposeTask, setElementDecomposeTask] = useState<ElementDecomposeTaskResponse | null>(null);
   const [elementDecomposeProjectId, setElementDecomposeProjectId] = useState<string | null>(null);
   const elementDecomposeControllerRef = useRef<AbortController | null>(null);
@@ -1003,7 +1029,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     spatialIndexRef.current = index;
     return index;
   }, [images, spatialIndexProjectKey]);
-  const canvasOccupiedRight = isPanelCollapsed ? 20 : 480;
+  const canvasOccupiedRight = canvasSize.width < 768 ? 0 : isPanelCollapsed ? WORKSPACE_PANEL_RAIL_WIDTH : 480;
   const minimapAvailable = isCanvasMinimapAvailable(canvasSize.width, canvasOccupiedRight);
   const usableMinimapViewport = useMemo(() => resolveCanvasUsableViewportSize(
     { width: canvasSize.width, height: canvasSize.height },
@@ -1016,10 +1042,6 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     offsetX: viewOffset.x,
     offsetY: viewOffset.y,
   }), [usableMinimapViewport.height, usableMinimapViewport.width, viewOffset.x, viewOffset.y, zoom]);
-  const minimapBottomOffset = (showLayerPanel || showVersionHistory)
-    ? 'calc(min(30dvh, 260px) + 28px)'
-    : '76px';
-
   const toggleCanvasMinimap = useCallback(() => {
     if (!minimapAvailable) return;
     setMinimapOpen(current => {
@@ -1382,6 +1404,8 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   }, [images, setSelectedIds, setViewOffset, setZoom, zoom]);
 
   const pendingDeleteIdsRef = useRef<Set<string>>(new Set());
+  const isMobileGroupUi = useIsMobile();
+  const groupEditTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [groups, setGroups] = useState<ImageGroup[]>(initialGroups || []);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [groupEditName, setGroupEditName] = useState('');
@@ -1391,6 +1415,10 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   // Refs for RAF-throttled drag updates to avoid excessive re-renders
   const dragOffsetRef = useRef({ x: 0, y: 0 });
   const dragTargetRef = useRef<string | null>(null);
+  const dragEligibleIdsRef = useRef(new Set<string>());
+  const resizeLockInvalidatedRef = useRef(false);
+  const groupLockInvalidatedRef = useRef(false);
+  const genGroupLockInvalidatedRef = useRef(false);
   const dragStartRef = useRef({ x: 0, y: 0 });
   const imageDragPointerIdRef = useRef<number | null>(null);
   const historyTransactionRef = useRef<{ pointerId: number; id: string } | null>(null);
@@ -1432,6 +1460,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       dragRafRef.current = null;
     }
     dragTargetRef.current = null;
+    dragEligibleIdsRef.current.clear();
     imageDragPointerIdRef.current = null;
     dragOffsetRef.current = { x: 0, y: 0 };
     imageDragReadyRef.current = false;
@@ -1502,6 +1531,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   const imageDragReadyRef = useRef(false);
   const activeTouchPointerIdsRef = useRef<Set<number>>(new Set());
   const touchGestureExclusiveRef = useRef(false);
+  const suppressContextMenuClickRef = useRef(false);
   const touchGestureIntentHandlerRef = useRef<(intent: CanvasTouchIntent) => void>(() => {});
   const touchGestureControllerRef = useRef<ReturnType<typeof createCanvasTouchGestureController>>(null!);
   if (touchGestureControllerRef.current === null) {
@@ -1525,6 +1555,19 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   const [canvasGenCount, setCanvasGenCount] = useState(1);
   const [canvasGenPartialFailCount, setCanvasGenPartialFailCount] = useState(0); // B3: 部分失败计数
   const [canvasGenRefImages, setCanvasGenRefImages] = useState<string[]>([]);
+  const canvasGenProjectScope = useRef({ projectId, actorId: canvasGeneratorActorId, generation: 0 });
+  if (canvasGenProjectScope.current.projectId !== projectId || canvasGenProjectScope.current.actorId !== canvasGeneratorActorId) {
+    canvasGenProjectScope.current = { projectId, actorId: canvasGeneratorActorId, generation: canvasGenProjectScope.current.generation + 1 };
+  }
+  // Clear a previous actor/project draft before the new scope is painted.
+  useLayoutEffect(() => {
+    setCanvasGenPrompt('');
+    setCanvasGenNegativePrompt('');
+    setCanvasGenRefImages([]);
+  }, [projectId, canvasGeneratorActorId]);
+  useLayoutEffect(() => () => {
+    canvasGenProjectScope.current.generation += 1;
+  }, []);
   const canvasGenModels = useMemo(
     () => taskModelOptions
       .filter(model => model.type === 'image')
@@ -1536,6 +1579,22 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       })),
     [taskModelOptions],
   );
+  const canvasGenSelectedDescriptor = taskModelCatalogIndex.get(taskModelKey(canvasGenModel.split('::')[0] || '', canvasGenModel.split('::')[1] || ''));
+  const canvasGenModelAvailable = canvasGenModels.some(model => `${model.providerId}::${model.id}` === canvasGenModel)
+    && Boolean(canvasGenSelectedDescriptor);
+  useEffect(() => {
+    if (!showCanvasGenerator || canvasGenModel || catalogStatus.loading || catalogStatus.error) return;
+    const firstModel = canvasGenModels[0];
+    if (!firstModel) return;
+    const descriptor = taskModelCatalogIndex.get(taskModelKey(firstModel.providerId, firstModel.id));
+    if (!descriptor) return;
+    setCanvasGenModel(`${firstModel.providerId}::${firstModel.id}`);
+    setCanvasGenAspectRatio(descriptor.allowedRatios.includes('1:1') ? '1:1' : descriptor.allowedRatios[0] || '');
+    setCanvasGenResolution(descriptor.allowedSizes[0] || '');
+    setCanvasGenQuality(descriptor.qualityOptions[0] || '');
+    setCanvasGenCount(previous => Math.min(previous, descriptor.maxOutputs));
+    setCanvasGenRefImages(previous => previous.slice(0, descriptor.maxReferenceImages || 0));
+  }, [showCanvasGenerator, canvasGenModel, catalogStatus.loading, catalogStatus.error, canvasGenModels, taskModelCatalogIndex]);
   // 模型ID → 提供商名称 映射（用于历史图片 apiProvider 回填）
   const modelProviderMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -1624,28 +1683,92 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   const [bottomBarHovered, setBottomBarHovered] = useState(false);
   const [bottomToolbarDrawerOpen, setBottomToolbarDrawerOpen] = useState(false);
   const bottomToolbarRef = useRef<HTMLDivElement | null>(null);
+  const minimapHostRef = useRef<HTMLDivElement | null>(null);
+  const previousBottomPanelsRef = useRef({ minimapOpen: false, showLayerPanel: false, showVersionHistory: false });
+  const lastOpenedBottomPanelRef = useRef<CanvasBottomDockPanel>('dock');
   const [bottomToolbarDrawerPlacement, setBottomToolbarDrawerPlacement] = useState<BottomToolbarDrawerPlacement | null>(null);
+  const versionHistorySuspended = isMobileGroupUi && !isPanelCollapsed && Boolean(onCanvasToolActivated);
 
   useLayoutEffect(() => {
-    const toolbar = bottomToolbarRef.current;
-    if (!toolbar || typeof window === 'undefined') return undefined;
+    const toolbarCandidate = bottomToolbarRef.current;
+    const scopeCandidate = toolbarCandidate?.parentElement;
+    if (!toolbarCandidate || !scopeCandidate || typeof window === 'undefined') return undefined;
+    const toolbar = toolbarCandidate;
+    const scope = scopeCandidate;
+    const previous = previousBottomPanelsRef.current;
+    const dockJustOpened = (showLayerPanel && !previous.showLayerPanel)
+      || (showVersionHistory && !previous.showVersionHistory);
+    if (dockJustOpened) lastOpenedBottomPanelRef.current = 'dock';
+    else if (minimapOpen && !previous.minimapOpen) lastOpenedBottomPanelRef.current = 'minimap';
+    previousBottomPanelsRef.current = { minimapOpen, showLayerPanel, showVersionHistory };
+
     const root = document.documentElement;
-    const syncOffset = () => {
+    let observedDock: HTMLElement | null = null;
+    let observedMap: HTMLElement | null = null;
+    const observer = new ResizeObserver(syncOffset);
+    function syncOffset(): void {
+      const dock = showLayerPanel ? scope.querySelector<HTMLElement>('[data-popup="layer-panel"]')
+        : showVersionHistory && !versionHistorySuspended ? scope.querySelector<HTMLElement>('[data-popup="version-history"]') : null;
+      const map = minimapHostRef.current?.querySelector<HTMLElement>('[data-canvas-minimap]') ?? null;
+      if (dock !== observedDock) {
+        if (observedDock) observer.unobserve(observedDock);
+        if (dock) observer.observe(dock);
+        observedDock = dock;
+      }
+      if (map !== observedMap) {
+        if (observedMap) observer.unobserve(observedMap);
+        if (map) observer.observe(map);
+        observedMap = map;
+      }
+      const canvas = toolbar.offsetParent instanceof HTMLElement ? toolbar.offsetParent : scope;
+      const dockEditing = !!dock && (dock.matches('[data-canvas-dock-editing="true"]')
+        || dock.querySelector('[data-canvas-dock-editing="true"]') !== null);
+      if (dock && (map || dockEditing)) toolbar.setAttribute('data-canvas-dock-compact', 'true');
+      else toolbar.removeAttribute('data-canvas-dock-compact');
+      const toolbarHeight = toolbar.getBoundingClientRect().height;
+      scope.style.setProperty('--canvas-bottom-toolbar-height', `${toolbarHeight}px`);
+      const layout = resolveCanvasBottomDockLayout({
+        viewportHeight: window.innerHeight,
+        canvasBottom: canvas.getBoundingClientRect().bottom,
+        dockTop: dock?.getBoundingClientRect().top ?? null,
+        toolbarHeight,
+        minimapHeight: map?.getBoundingClientRect().height ?? 0,
+        minimapOpen: minimapOpen && minimapAvailable && map !== null,
+        dockEditing,
+        lastOpened: lastOpenedBottomPanelRef.current,
+      });
+      scope.style.setProperty('--canvas-dock-toolbar-bottom', `${layout.toolbarBottom}px`);
+      scope.style.setProperty('--canvas-minimap-bottom', `${layout.minimapBottom}px`);
       const rect = toolbar.getBoundingClientRect();
       root.style.setProperty('--canvas-bottom-toolbar-offset', `${Math.max(0, window.innerHeight - rect.top + 8)}px`);
-    };
+      // Keep the most recently opened view usable when the full panels cannot coexist.
+      if (layout.dismissPanel === 'dock') {
+        setShowLayerPanel(false);
+        setShowVersionHistory(false);
+      } else if (layout.dismissPanel === 'minimap') setMinimapOpen(false);
+    }
     syncOffset();
-    const observer = new ResizeObserver(syncOffset);
     observer.observe(toolbar);
+    observer.observe(scope);
+    const mutations = new MutationObserver((records) => {
+      if (records.some(record => record.type === 'attributes' || record.target === scope || [...record.addedNodes, ...record.removedNodes]
+        .some(node => node instanceof Element && node.matches('[data-popup="layer-panel"], [data-popup="version-history"], [data-canvas-minimap]')))) syncOffset();
+    });
+    mutations.observe(scope, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-canvas-dock-editing'] });
     const stopTransitionTracking = trackToolbarTransitionFrames(toolbar, syncOffset);
     window.addEventListener('resize', syncOffset);
     return () => {
+      mutations.disconnect();
       observer.disconnect();
       stopTransitionTracking();
       window.removeEventListener('resize', syncOffset);
+      scope.style.removeProperty('--canvas-dock-toolbar-bottom');
+      scope.style.removeProperty('--canvas-minimap-bottom');
+      scope.style.removeProperty('--canvas-bottom-toolbar-height');
+      toolbar.removeAttribute('data-canvas-dock-compact');
       root.style.removeProperty('--canvas-bottom-toolbar-offset');
     };
-  }, [showLayerPanel, showVersionHistory]);
+  }, [minimapAvailable, minimapOpen, showLayerPanel, showVersionHistory, versionHistorySuspended]);
 
   const updateBottomToolbarDrawerPlacement = useCallback(() => {
     const trigger = bottomToolbarRef.current?.getBoundingClientRect();
@@ -1654,7 +1777,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       viewport: { width: window.innerWidth, height: window.innerHeight },
       trigger: { left: trigger.left, top: trigger.top, width: trigger.width, height: trigger.height },
       drawer: { width: 420, height: Math.min(window.innerHeight * 0.6, 520) },
-      occupiedRight: isPanelCollapsed ? 20 : 480,
+      occupiedRight: isPanelCollapsed ? WORKSPACE_PANEL_RAIL_WIDTH : 480,
       minWidth: Math.min(360, window.innerWidth - 16),
     }));
   }, [isPanelCollapsed]);
@@ -1727,6 +1850,25 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     upload: 'text-purple-500', fileText: 'text-emerald-500',
   } : {};
   const leftToolbarRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const navigation = leftToolbarRef.current?.firstElementChild;
+    const viewport = canvasRef.current;
+    if (!navigation || !viewport) return;
+    const syncWelcomeInset = (): void => {
+      const inset = Math.max(0, Math.ceil(navigation.getBoundingClientRect().right - viewport.getBoundingClientRect().left + 8));
+      viewport.style.setProperty('--canvas-empty-left-inset', `${inset}px`);
+    };
+    syncWelcomeInset();
+    const observer = new ResizeObserver(syncWelcomeInset);
+    observer.observe(navigation);
+    window.addEventListener('resize', syncWelcomeInset);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', syncWelcomeInset);
+      viewport.style.removeProperty('--canvas-empty-left-inset');
+    };
+  }, [leftToolbarExpanded]);
 
   // 点击外部关闭左侧工具栏
   const leftToolbarExpandedRef = useRef(leftToolbarExpanded);
@@ -2049,7 +2191,13 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   const [, setUpscaylChecking] = useState(true);
   const [upscalePreset, setUpscalePreset] = useState<UpscaleTargetPreset>('2x');
   const [showUpscalePresetMenu, setShowUpscalePresetMenu] = useState(false);
-  const [upscaleMode, setUpscaleMode] = useState<UpscaleProductMode>('auto');
+  const [upscaleMode, setUpscaleMode] = useState<UpscaleProductMode>(() => {
+    try {
+      const preference = localStorage.getItem('wujie_engine_upscale');
+      return preference === 'auto' || preference === 'ai' || preference === 'local'
+        ? resolveUpscaleProductMode(preference, false) : 'auto';
+    } catch { return 'auto'; }
+  });
   const [configuredUpscaleModels, setConfiguredUpscaleModels] = useState<ConfiguredUpscaleModel[]>([]);
   const [selectedUpscaleModelKey, setSelectedUpscaleModelKey] = useState('');
   const [isLoadingUpscaleModels, setIsLoadingUpscaleModels] = useState(false);
@@ -2111,7 +2259,6 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   const [isRemoveBgQuoteLoading, setIsRemoveBgQuoteLoading] = useState(false);
   const [isRemoveBgSubmitting, setIsRemoveBgSubmitting] = useState(false);
   const removeBgActionPendingRef = useRef(false);
-  const [, setUpscaleEnginePref] = useState<'auto' | 'ai' | 'local'>(() => getEnginePref('upscale'));
   const [, setSegmentEnginePref] = useState<'auto' | 'ai' | 'local'>(() => getEnginePref('segment'));
   const [engineDialog, setEngineDialog] = useState<null | 'upscale' | 'removebg' | 'svg' | 'segment'>(null);
   // Actual pixel dimensions of the image being upscaled (loaded from DOM)
@@ -2288,7 +2435,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   const inlineVideoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
   const [showVideoEditPanel, setShowVideoEditPanel] = useState(false);
   const [videoEditTarget, setVideoEditTarget] = useState<CanvasImage | null>(null);
-  const [, setVideoEditTab] = useState<'edit' | 'extend'>('edit');
+  const [videoEditTab, setVideoEditTab] = useState<'edit' | 'extend'>('edit');
   // AI视频配音
   const [showVideoDubPanel, setShowVideoDubPanel] = useState(false);
   const [videoDubTarget, setVideoDubTarget] = useState<CanvasImage | null>(null);
@@ -2369,7 +2516,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
 
         const dataUrl = canvas.toDataURL('image/png');
         const label = timestamp !== undefined
-          ? `帧 @ ${Math.floor(timestamp)}s`
+          ? `帧 @ ${video.currentTime}s`
           : '视频封面';
 
         // Save frame as image and add to canvas
@@ -2531,6 +2678,8 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   const closeCanvasToolPanels = useCallback(() => {
     setCanvasToolSession(current => closeCanvasToolSession(current));
     setShowAgentEditor(false);
+    setAgentSelectingImage(false);
+    agentTouchSelectionRef.current = null;
     setShowBrandEcommerce(false);
     setShowSvgTracePanel(false);
     setShowRefineEngine(false);
@@ -2597,7 +2746,6 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       });
       closeCanvasToolPanels();
       setCanvasToolSession(nextSession);
-      return true;
     } catch (error) {
       if (error instanceof Error && error.message.startsWith('CANVAS_TOOL_SELECTION_REQUIRED')) {
         toast.error('请先选择图片');
@@ -2607,7 +2755,13 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       toast.error('工具暂时无法打开');
       return false;
     }
-  }, [brandProject?.id, closeCanvasToolPanels, projectId, selectedIds, selectedImage?.id]);
+    try {
+      onCanvasToolActivated?.();
+    } catch (error) {
+      console.error('[CanvasToolSession] Parent handoff failed', error);
+    }
+    return true;
+  }, [brandProject?.id, closeCanvasToolPanels, onCanvasToolActivated, projectId, selectedIds, selectedImage?.id]);
 
   const handleToggleCanvasAnnotation = useCallback((
     entryPoint: Extract<CanvasToolEntryPoint, 'bottom-toolbar' | 'shortcut'> = 'bottom-toolbar',
@@ -2799,6 +2953,8 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   const canvasRef = useRef<HTMLDivElement>(null);
   const uploadFileInputRef = useRef<HTMLInputElement>(null);
   const imagesRef = useRef<CanvasImage[]>(images);
+  const cropOperationsRef = useRef(new Map<string, object>());
+  const activeCropOperationRef = useRef<object | null>(null);
   // ★ 组件挂载状态 ref：用于轮询循环检测组件是否已卸载，避免僵尸轮询
   const isMountedRef = useRef(true);
   // P2-4: 追踪所有活跃的setInterval，确保组件卸载时清理
@@ -2868,6 +3024,15 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
 
   // 【调整2&3】生成组状态 — Alt+左键参考图组 / Ctrl+左键融图组
   const [genGroups, setGenGroups] = useState<CanvasGenGroup[]>([]);
+  const [mobileGenerationGroupHosts, setMobileGenerationGroupHosts] = useState<Record<string, MobileGenerationGroupSlots>>({});
+  const registerMobileGenerationGroup = useCallback((id: string, slots: MobileGenerationGroupSlots | null): void => {
+    setMobileGenerationGroupHosts(previous => {
+      if (previous[id] === slots || (!slots && !previous[id])) return previous;
+      const next = { ...previous };
+      if (slots) next[id] = slots; else delete next[id];
+      return next;
+    });
+  }, []);
   const genGroupsRef = useRef<CanvasGenGroup[]>(genGroups);
   const [optimizingGroupId, setOptimizingGroupId] = useState<string | null>(null);
   const [openModelDropdownGroupId, setOpenModelDropdownGroupId] = useState<string | null>(null);
@@ -2893,6 +3058,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   const genGroupDragTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // HexCube 六面体组状态
   const [hexCubeGroups, setHexCubeGroups] = useState<HexCubeGroup[]>([]);
+  const [mobileHexCubeGroupId, setMobileHexCubeGroupId] = useState<string | null>(null);
   useRef<HexCubeGroup[]>(hexCubeGroups);
   const [hexCubeDragTarget, setHexCubeDragTarget] = useState<string | null>(null);
   const [hexCubeDragStart, setHexCubeDragStart] = useState({ x: 0, y: 0 });
@@ -2932,7 +3098,50 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   }, []);
   const [hexCube3dDragging, setHexCube3dDragging] = useState(false);
   const hexCube3dDragRef = useRef<{ groupId: string; startX: number; startY: number; startRotY: number; startTiltX: number } | null>(null);
+  const hexCubeTouchDragRef = useRef<{ pointerId: number; groupId: string; element: HTMLDivElement; startX: number; startY: number; startRotY: number; startTiltX: number } | null>(null);
+  const finishHexCubeTouchDrag = useCallback((notify: boolean = true): void => {
+    const owner = hexCubeTouchDragRef.current;
+    if (!owner) return;
+    hexCubeTouchDragRef.current = null;
+    try {
+      if (owner.element.hasPointerCapture(owner.pointerId)) owner.element.releasePointerCapture(owner.pointerId);
+    } finally {
+      if (notify) setHexCube3dDragging(false);
+    }
+  }, []);
+  useEffect(() => {
+    const onBlur = (): void => finishHexCubeTouchDrag();
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('blur', onBlur);
+      finishHexCubeTouchDrag(false);
+    };
+  }, [finishHexCubeTouchDrag]);
+  useEffect(() => {
+    const activeMobileId = hexCubeGroups.some(group => group.id === mobileHexCubeGroupId)
+      ? mobileHexCubeGroupId : hexCubeGroups[hexCubeGroups.length - 1]?.id;
+    const isActiveWindow = (id: string): boolean => hexCubeGroups.some(group => group.id === id)
+      && (!isMobileGroupUi || id === activeMobileId);
+    const isVisible = (id: string): boolean => isActiveWindow(id) && hexCubeGroups.some(group => group.id === id && !group.isCollapsed);
+    if (hexCubeTouchDragRef.current && !isVisible(hexCubeTouchDragRef.current.groupId)) finishHexCubeTouchDrag();
+    if (hexCube3dDragRef.current && !isVisible(hexCube3dDragRef.current.groupId)) {
+      hexCube3dDragRef.current = null;
+      setHexCube3dDragging(false);
+    }
+    if (hexCubeDragTarget && !isActiveWindow(hexCubeDragTarget)) {
+      if (hexCubeDragTimerRef.current) clearTimeout(hexCubeDragTimerRef.current);
+      hexCubeDragTimerRef.current = null;
+      if (hexCubeDragRafRef.current !== null) cancelAnimationFrame(hexCubeDragRafRef.current);
+      hexCubeDragRafRef.current = null;
+      hexCubeDragOffsetRef.current = { x: 0, y: 0 };
+      hexCubeDragReadyRef.current = false;
+      setHexCubeDragTarget(null);
+      setHexCubeDragOffset({ x: 0, y: 0 });
+    }
+  }, [finishHexCubeTouchDrag, hexCubeGroups, hexCubeDragTarget, isMobileGroupUi, mobileHexCubeGroupId]);
   const [hoveredGenGroupId, setHoveredGenGroupId] = useState<string | null>(null);
+  const multiAnglePreviewElementRef = useRef<HTMLDivElement>(null);
+  const multiAngleTouchDragRef = useRef<{ pointerId: number; startX: number; startY: number; startRotation: number; startTilt: number } | null>(null);
   const multiAngleDragRef = useRef<{
     active: boolean;
     startX: number;
@@ -2943,9 +3152,67 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   // Use a ref to track current stroke for reliable access in mouseUp
   const currentStrokeRef = useRef<{ x: number; y: number; reverse: boolean }[]>([]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     imagesRef.current = images;
-  }, [images]);
+    for (const image of images) {
+      if (image.locked) dragEligibleIdsRef.current.delete(image.id);
+    }
+    if (resizingImage && images.some(image => image.id === resizingImage && image.locked)) resizeLockInvalidatedRef.current = true;
+    if (groupDragTarget && images.some(image => image.groupId === groupDragTarget && image.locked)) groupLockInvalidatedRef.current = true;
+    const activeGroup = genGroupsRef.current.find(group => group.id === genGroupDragTarget);
+    if (activeGroup && images.some(image => image.locked && (activeGroup.sourceImageIds.includes(image.id) || activeGroup.resultImageIds?.includes(image.id)))) genGroupLockInvalidatedRef.current = true;
+  }, [images, resizingImage, groupDragTarget, genGroupDragTarget]);
+
+  const isAvailableComparisonVideo = useCallback((image: CanvasImage): image is CanvasImage & { videoUrl: string } => (
+    image.mediaType === 'video'
+    && typeof image.videoUrl === 'string'
+    && image.videoUrl.trim().length > 0
+    && !image.isProcessingPlaceholder
+    && (image.mediaAvailability === undefined || image.mediaAvailability === 'ready' || image.mediaAvailability === 'pending-persist')
+  ), []);
+  const comparisonSourceUrl = compareVideos?.a.url;
+  const comparisonVideoBOptions = useMemo((): Array<{ id: string; url: string; label: string }> => {
+    if (!comparisonSourceUrl) return [];
+    const source = images.find((image: CanvasImage): boolean => (
+      isAvailableComparisonVideo(image) && image.videoUrl === comparisonSourceUrl
+    ));
+    if (!source) return [];
+    const options = new Map<string, { id: string; url: string; label: string }>();
+    for (const image of images) {
+      if (!isAvailableComparisonVideo(image) || image.id === source.id || image.videoUrl === comparisonSourceUrl || options.has(image.videoUrl)) continue;
+      options.set(image.videoUrl, { id: image.id, url: image.videoUrl, label: image.prompt?.slice(0, 30) || image.name || '视频' });
+    }
+    return [...options.values()];
+  }, [images, comparisonSourceUrl, isAvailableComparisonVideo]);
+  const handleSelectCanvasComparisonVideoB = (id: string): void => {
+    const option = comparisonVideoBOptions.find((candidate: { id: string; url: string; label: string }): boolean => candidate.id === id);
+    if (!option) return;
+    const source = imagesRef.current.find((image: CanvasImage): boolean => (
+      isAvailableComparisonVideo(image) && image.videoUrl === comparisonSourceUrl
+    ));
+    const selected = imagesRef.current.find((image: CanvasImage): image is CanvasImage & { videoUrl: string } => (
+      isAvailableComparisonVideo(image) && image.id === id
+    ));
+    if (!source || !selected || selected.id === source.id || selected.videoUrl === comparisonSourceUrl || selected.videoUrl !== option.url) return;
+    setCompareVideos((current: typeof compareVideos): typeof compareVideos => (
+      current && current.a.url === comparisonSourceUrl
+        ? { ...current, b: { url: selected.videoUrl, label: option.label } }
+        : current
+    ));
+  };
+
+  const recoveryProjectId = projectId || brandProject?.id || '';
+  const recoveryScope = useRef({ projectId: recoveryProjectId, actorId: canvasGeneratorActorId, generation: 0 });
+  if (recoveryScope.current.projectId !== recoveryProjectId || recoveryScope.current.actorId !== canvasGeneratorActorId) {
+    recoveryScope.current = { projectId: recoveryProjectId, actorId: canvasGeneratorActorId, generation: recoveryScope.current.generation + 1 };
+  }
+  useLayoutEffect(() => () => { recoveryScope.current.generation += 1; }, []);
+  const recoveryController = useRef<AbortController | null>(null);
+  useLayoutEffect(() => {
+    const controller = new AbortController();
+    recoveryController.current = controller;
+    return () => { controller.abort(); if (recoveryController.current === controller) recoveryController.current = null; };
+  }, [recoveryProjectId, canvasGeneratorActorId]);
 
   const markCanvasMediaMissing = useCallback((imageId: string, mediaErrorCode: string) => {
     const nextImages = imagesRef.current.map((image) => (
@@ -2957,7 +3224,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   }, [onImagesChange]);
 
   const recoverMissingMedia = useCallback(async (image: CanvasImage) => {
-    const effectiveProjectId = projectId || brandProject?.id || '';
+    const effectiveProjectId = recoveryProjectId;
     const identityState = getCanvasMediaRecoveryIdentityState(image);
     if (identityState === 'legacy' && !effectiveProjectId) {
       const nextImages = imagesRef.current.map((candidate) => (
@@ -2998,26 +3265,43 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       return;
     }
 
+    const scope = { ...recoveryScope.current };
+    const isCurrentRecovery = (): boolean => {
+      const current = recoveryScope.current;
+      if (current.generation !== scope.generation || current.projectId !== scope.projectId || current.actorId !== scope.actorId) return false;
+      const target = imagesRef.current.find(candidate => candidate.id === image.id);
+      return Boolean(target && target.assetId === image.assetId && target.assetVersionId === image.assetVersionId
+        && target.placementId === image.placementId && target.url === image.url && target.sourceUrl === image.sourceUrl
+        && target.videoUrl === image.videoUrl && target.mediaAvailability === 'recovering');
+    };
     const recoveringImages = imagesRef.current.map((candidate) => (
       candidate.id === image.id
         ? { ...candidate, mediaAvailability: 'recovering' as const, mediaErrorCode: undefined }
         : candidate
     ));
-    commitCanvasImageRefChange(imagesRef, recoveringImages, onImagesChange);
+    if (!commitCanvasImageRefChange(imagesRef, recoveringImages, onImagesChange)) {
+      toast.error('媒体恢复未开始', { description: '当前画布暂不能修改，请稍后重试。' });
+      return;
+    }
 
-    const toastId = toast.loading('正在恢复媒体文件...');
+    const toastId = toast.loading('正在恢复媒体文件...', { className: 'wujie-media-recovery-toast' });
     try {
-      const result = await recoverCanvasMediaUntilTerminal({ projectId: effectiveProjectId, image });
+      const result = await recoverCanvasMediaUntilTerminal({ projectId: effectiveProjectId, actorId: canvasGeneratorActorId ?? undefined, signal: recoveryController.current?.signal, image });
+      if (!isCurrentRecovery()) { toast.dismiss(toastId); return; }
       const nextImages = imagesRef.current.map((candidate) => (
         candidate.id === image.id
           ? applyRecoveredCanvasMedia(candidate, result)
           : candidate
       ));
-      commitCanvasImageRefChange(imagesRef, nextImages, onImagesChange);
+      if (!commitCanvasImageRefChange(imagesRef, nextImages, onImagesChange)) {
+        toast.error('媒体状态未能更新', { id: toastId, description: '请刷新项目后查看恢复结果。' });
+        return;
+      }
       if (result.recovered) toast.success('媒体已恢复', { id: toastId });
-      else if (result.availability === 'recovering') toast.loading('媒体正在恢复中...', { id: toastId });
+      else if (result.availability === 'recovering') toast.loading('媒体正在恢复中...', { id: toastId, className: 'wujie-media-recovery-toast' });
       else toast.error('媒体恢复失败', { id: toastId, description: result.error });
     } catch (error) {
+      if (!isCurrentRecovery()) { toast.dismiss(toastId); return; }
       const nextImages = imagesRef.current.map((candidate) => (
         candidate.id === image.id
           ? { ...candidate, mediaAvailability: 'missing' as const, mediaErrorCode: 'MEDIA_RECOVERY_FAILED' }
@@ -3029,7 +3313,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         description: error instanceof Error ? error.message : '请稍后重试',
       });
     }
-  }, [brandProject?.id, onImagesChange, projectId]);
+  }, [canvasGeneratorActorId, onImagesChange, recoveryProjectId]);
 
   // 同步 genGroups ref
   useEffect(() => {
@@ -3413,8 +3697,49 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     return Math.max(min, Math.min(max, value));
   }, []);
 
+  const handleMultiAnglePreviewPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>): void => {
+    if (e.pointerType === 'mouse') return;
+    e.stopPropagation();
+    e.preventDefault();
+    if (isMultiAngleProcessing || multiAngleTouchDragRef.current || multiAngleDragRef.current?.active) return;
+    multiAngleTouchDragRef.current = { pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, startRotation: multiAngleRotation, startTilt: multiAngleTilt };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setIsMultiAngleDragging(true);
+  }, [isMultiAngleProcessing, multiAngleRotation, multiAngleTilt]);
+
+  const handleMultiAnglePreviewPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>): void => {
+    if (e.pointerType === 'mouse') return;
+    e.stopPropagation();
+    const drag = multiAngleTouchDragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    e.preventDefault();
+    setMultiAngleRotation(Math.round(clampMultiAngleValue(drag.startRotation + (e.clientX - drag.startX) * 0.55, -90, 90)));
+    setMultiAngleTilt(Math.round(clampMultiAngleValue(drag.startTilt - (e.clientY - drag.startY) * 0.55, -90, 90)));
+  }, [clampMultiAngleValue]);
+
+  const finishMultiAnglePreviewPointer = useCallback((e: React.PointerEvent<HTMLDivElement>, cancelled: boolean): void => {
+    if (e.pointerType === 'mouse') return;
+    e.stopPropagation();
+    const drag = multiAngleTouchDragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    multiAngleTouchDragRef.current = null;
+    if (cancelled) {
+      setMultiAngleRotation(drag.startRotation);
+      setMultiAngleTilt(drag.startTilt);
+    }
+    setIsMultiAngleDragging(false);
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+  }, []);
+
+  useEffect(() => {
+    if (activeTool !== 'multiAngle') {
+      multiAngleTouchDragRef.current = null;
+      setIsMultiAngleDragging(false);
+    }
+  }, [activeTool]);
+
   const handleMultiAnglePreviewMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.button !== 0 || isMultiAngleProcessing) return;
+    if (e.button !== 0 || isMultiAngleProcessing || multiAngleTouchDragRef.current) return;
     e.preventDefault();
     e.stopPropagation();
     multiAngleDragRef.current = {
@@ -3430,7 +3755,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   useEffect(() => {
     if (!isMultiAngleDragging) return;
     const handleMove = (event: MouseEvent) => {
-      if (isEventFromOverlay(event)) return;
+      if (isEventFromOverlay(event) && !multiAnglePreviewElementRef.current?.contains(event.target as Node)) return;
       const drag = multiAngleDragRef.current;
       if (!drag?.active) return;
       const dx = event.clientX - drag.startX;
@@ -3455,6 +3780,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   useEffect(() => {
     if (!hexCube3dDragging) return;
     const handleMove = (event: MouseEvent) => {
+      if (hexCubeTouchDragRef.current) return;
       if (isEventFromOverlay(event)) return;
       const drag = hexCube3dDragRef.current;
       if (!drag) return;
@@ -3465,6 +3791,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       setHexCubeGroups(prev => prev.map(g => g.id === drag.groupId ? { ...g, toolbar: { ...g.toolbar, rotationY: newRotY, tiltX: newTiltX } } : g));
     };
     const handleUp = (e: MouseEvent) => {
+      if (hexCubeTouchDragRef.current) return;
       if (isEventFromOverlay(e)) return;
       hexCube3dDragRef.current = null;
       setHexCube3dDragging(false);
@@ -3482,7 +3809,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       const img = images.find(i => i.id === id);
       onSelectImage(img || null);
       // Agent选择图片模式：点击图片后将其设为Agent编辑器的图片
-      if (agentSelectingImage && img) {
+      if (agentSelectingImage && img && !agentTouchSelectionRef.current) {
         setAgentEditImage(img);
         setAgentSelectingImage(false);
       }
@@ -3847,7 +4174,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       if ((e.ctrlKey || e.metaKey) && e.code === 'KeyA') {
         if (inputFocused) return;
         e.preventDefault();
-        const selectableImages = images.filter(img => !img.isProcessingPlaceholder);
+        const selectableImages = images.filter(img => !img.isProcessingPlaceholder && img.visible !== false);
         if (selectableImages.length > 0) {
           setSelectedIds(new Set(selectableImages.map(img => img.id)));
           selectImage(selectableImages[0].id);
@@ -3905,13 +4232,14 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         if (inputFocused) return;
         e.preventDefault();
         if (selectedIds.size > 1) {
-          const selImgs = images.filter(i => selectedIds.has(i.id));
+          const selImgs = imagesRef.current.filter(i => selectedIds.has(i.id) && !i.locked);
+          if (selImgs.length < 2) return;
           const COL_WIDTH = 280;
           const GAP = 16;
           const numCols = Math.min(5, Math.max(2, Math.ceil(Math.sqrt(selImgs.length))));
           const colHeights = new Array(numCols).fill(0);
-          const updated = images.map(img => {
-            if (!selectedIds.has(img.id)) return img;
+          const updated = imagesRef.current.map(img => {
+            if (!selectedIds.has(img.id) || img.locked) return img;
             const scale = COL_WIDTH / img.width;
             const newW = COL_WIDTH;
             const newH = Math.round(img.height * scale);
@@ -3930,13 +4258,14 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         if (inputFocused) return;
         e.preventDefault();
         if (selectedIds.size > 1) {
-          const selImgs = images.filter(i => selectedIds.has(i.id));
+          const selImgs = imagesRef.current.filter(i => selectedIds.has(i.id) && !i.locked);
+          if (selImgs.length < 2) return;
           const COL_WIDTH = 280;
           const GAP = 16;
           const numCols = Math.min(5, Math.max(2, Math.ceil(Math.sqrt(selImgs.length))));
           const colHeights = new Array(numCols).fill(0);
-          const updated = images.map(img => {
-            if (!selectedIds.has(img.id)) return img;
+          const updated = imagesRef.current.map(img => {
+            if (!selectedIds.has(img.id) || img.locked) return img;
             const scale = COL_WIDTH / img.width;
             const newW = COL_WIDTH;
             const newH = Math.round(img.height * scale);
@@ -4258,7 +4587,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     if (images.length > 20 && spatialIndexRef.current) {
       const candidates = spatialIndexRef.current.hitTestAll(canvasX, canvasY);
       return resolveTopmostHit(candidates
-        .filter(id => !genGroupResultIds.has(id))
+        .filter(id => !genGroupResultIds.has(id) && images.some(image => image.id === id && image.visible !== false))
         .map(id => {
           const order = images.findIndex(image => image.id === id);
           return { id, zIndex: order, order };
@@ -4268,7 +4597,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     // Fallback: linear scan for small image sets
     for (let i = images.length - 1; i >= 0; i--) {
       const img = images[i];
-      if (genGroupResultIds.has(img.id)) continue;
+      if (genGroupResultIds.has(img.id) || img.visible === false) continue;
       if (canvasX >= img.x && canvasX <= img.x + img.width &&
           canvasY >= img.y && canvasY <= img.y + img.height) {
         return img.id;
@@ -4492,6 +4821,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   }, [hitTestImage, screenToCanvas, selectImage, selectedIds, setSelectedIds]);
 
   const applyTouchGestureIntent = useCallback((intent: CanvasTouchIntent) => {
+    if (intent.type === 'long-press') suppressContextMenuClickRef.current = true;
     if (
       intent.type === 'cancel-default-interaction'
       || intent.type === 'pan-start'
@@ -4562,6 +4892,8 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   touchGestureIntentHandlerRef.current = applyTouchGestureIntent;
 
   const resetTouchGesture = useCallback(() => {
+    agentTouchSelectionRef.current = null;
+    suppressAgentTouchClickRef.current = true;
     const controller = touchGestureControllerRef.current;
     const pointerId = activeTouchPointerIdsRef.current.values().next().value as number | undefined;
     if (controller && pointerId !== undefined) {
@@ -4588,6 +4920,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   // Unified pointer handlers keep annotation gestures active for mouse, pen, and touch.
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (isEventFromOverlay(e.nativeEvent)) return;
+    if (agentSelectingImage) e.stopPropagation();
     if (isHistoryTransitionPending) return;
     const gesturePriority = resolveCanvasGesturePriority({
       overlay: false,
@@ -4810,6 +5143,13 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     const renderedHitElement = (e.target as Element).closest<HTMLElement>('[data-canvas-image-id]');
     const hitId = renderedHitElement?.dataset.canvasImageId || null;
     if (e.pointerType === 'touch') {
+      if (agentSelectingImage) {
+        if (activeTouchPointerIdsRef.current.size === 0) {
+          agentTouchSelectionRef.current = { pointerId: e.pointerId, imageId: hitId, x: e.clientX, y: e.clientY, cancelled: false };
+        } else if (agentTouchSelectionRef.current) {
+          agentTouchSelectionRef.current.cancelled = true;
+        }
+      }
       activeTouchPointerIdsRef.current.add(e.pointerId);
       const intents = touchGestureControllerRef.current.pointerDown({
         pointerId: e.pointerId,
@@ -4856,7 +5196,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     if (selectedIds.size === 1) {
       const selId = Array.from(selectedIds)[0];
       const selImg = images.find(i => i.id === selId);
-      if (selImg) {
+      if (selImg && !selImg.locked) {
         const handleSize = 8 / zoom;
         const corners = [
           { name: 'tl', x: selImg.x, y: selImg.y },
@@ -4867,11 +5207,11 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         for (const corner of corners) {
           if (Math.abs(canvasPos.x - corner.x) < handleSize &&
               Math.abs(canvasPos.y - corner.y) < handleSize) {
+            resizeLockInvalidatedRef.current = false;
             setResizingImage(selId);
             setResizeCorner(corner.name);
             setResizeStart({ x: canvasPos.x, y: canvasPos.y, w: selImg.width, h: selImg.height, imgX: selImg.x, imgY: selImg.y });
             e.currentTarget.setPointerCapture(e.pointerId);
-            beginHistoryTransaction('resize', e.pointerId);
             return;
           }
         }
@@ -4922,13 +5262,13 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         imageDragReadyRef.current = false;
         return;
       }
+      dragEligibleIdsRef.current = new Set(imagesRef.current.filter(image => nextSelection.ids.includes(image.id) && !image.locked).map(image => image.id));
       setDragTarget(hitId);
       dragTargetRef.current = hitId;
       imageDragPointerIdRef.current = e.pointerId;
       dragStartRef.current = canvasPos;
       setDragOffset({ x: 0, y: 0 });
       dragOffsetRef.current = { x: 0, y: 0 };
-      beginHistoryTransaction('drag', e.pointerId);
       e.currentTarget.setPointerCapture(e.pointerId);
     } else {
       mouseDownOnImageRef.current = false;
@@ -4946,7 +5286,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         e.currentTarget.setPointerCapture(e.pointerId);
       }
     }
-  }, [viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages, annotationMode, annotationTool, annotationBrushSize, annotationBrushColor, annotations, beginViewportPan, annotationV2State.isOpen, annotationV2State.annotations, annotationV2State.sourceLock, annotationV2State.tool, beginCanvasAnnotationV2Gesture, brandProject?.id, projectId, setAnnotationV2State, setSelectedIds, applyTouchGestureIntent, beginImageSelectionGesture, beginSelectionBox, isEventFromOverlay, showRefFusion, beginHistoryTransaction, isHistoryTransitionPending]);
+  }, [viewOffset, selectedIds, images, screenToCanvas, hitTestImage, selectImage, editMode, zoom, handleEditMouseDown, compareSelecting, compareImages, annotationMode, annotationTool, annotationBrushSize, annotationBrushColor, annotations, beginViewportPan, annotationV2State.isOpen, annotationV2State.annotations, annotationV2State.sourceLock, annotationV2State.tool, beginCanvasAnnotationV2Gesture, brandProject?.id, projectId, setAnnotationV2State, setSelectedIds, applyTouchGestureIntent, beginImageSelectionGesture, beginSelectionBox, isEventFromOverlay, showRefFusion, beginHistoryTransaction, isHistoryTransitionPending, agentSelectingImage]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     const annotationState = getAnnotationV2State();
@@ -5039,6 +5379,8 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     }
 
     if (e.pointerType === 'touch' && activeTouchPointerIdsRef.current.has(e.pointerId)) {
+      const pending = agentTouchSelectionRef.current;
+      if (pending?.pointerId === e.pointerId && Math.hypot(e.clientX - pending.x, e.clientY - pending.y) >= 10) pending.cancelled = true;
       const target = (e.target as Element).closest<HTMLElement>('[data-canvas-image-id]')
         ? 'image'
         : 'blank';
@@ -5082,7 +5424,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
 
     if (resizingImage && resizeCorner) {
       const img = images.find(i => i.id === resizingImage);
-      if (!img) return;
+      if (!img || img.locked || resizeLockInvalidatedRef.current) return;
       const dx = canvasPos.x - resizeStart.x;
       const aspect = resizeStart.w / resizeStart.h;
       let newW = resizeStart.w;
@@ -5126,7 +5468,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       let guides: SnapGuide[] = [];
 
       if (snapEnabledRef.current && editMode === 'none') {
-        const draggedImg = images.find(i => i.id === activeDragTarget);
+        const draggedImg = images.find(i => i.id === activeDragTarget && dragEligibleIdsRef.current.has(i.id) && !i.locked) ?? images.find(i => dragEligibleIdsRef.current.has(i.id) && !i.locked);
         if (draggedImg) {
           const dragBounds = {
             id: draggedImg.id,
@@ -5147,7 +5489,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       // ── Hover detection: check if dragged image is over a GenGroup container ──
       let hoveredGroup: string | null = null;
       if (imageDragReadyRef.current && activeDragTarget) {
-        const draggedImg = images.find(i => i.id === activeDragTarget);
+        const draggedImg = images.find(i => i.id === activeDragTarget && dragEligibleIdsRef.current.has(i.id) && !i.locked) ?? images.find(i => dragEligibleIdsRef.current.has(i.id) && !i.locked);
         if (draggedImg) {
           const imgCX = draggedImg.x + offsetX + draggedImg.width / 2;
           const imgCY = draggedImg.y + offsetY + draggedImg.height / 2;
@@ -5376,6 +5718,12 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
 
     if (e.pointerType === 'touch' && activeTouchPointerIdsRef.current.has(e.pointerId)) {
       const wasExclusive = touchGestureExclusiveRef.current;
+      const pending = agentTouchSelectionRef.current;
+      const releasedImageId = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('[data-canvas-image-id]')?.dataset.canvasImageId;
+      const confirmedImage = pending?.pointerId === e.pointerId && !pending.cancelled && !wasExclusive
+        && activeTouchPointerIdsRef.current.size === 1 && pending.imageId === releasedImageId
+        && Math.hypot(e.clientX - pending.x, e.clientY - pending.y) < 10
+        && agentSelectingImage ? images.find(image => image.id === pending.imageId) : undefined;
       const target = (e.target as Element).closest<HTMLElement>('[data-canvas-image-id]')
         ? 'image'
         : 'blank';
@@ -5386,6 +5734,14 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         target,
       });
       activeTouchPointerIdsRef.current.delete(e.pointerId);
+      if (pending?.pointerId === e.pointerId) {
+        agentTouchSelectionRef.current = null;
+        suppressAgentTouchClickRef.current = true;
+        if (confirmedImage) {
+          setAgentEditImage(confirmedImage);
+          setAgentSelectingImage(false);
+        }
+      }
       intents.forEach(applyTouchGestureIntent);
       if (e.currentTarget.hasPointerCapture(e.pointerId)) {
         e.currentTarget.releasePointerCapture(e.pointerId);
@@ -5469,7 +5825,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         hitIdsInZOrder = resolveBoxSelectionHitIds({
           images: images.flatMap((image) => {
             const bounds = renderedRects.get(image.id);
-            return bounds ? [{
+            return bounds && image.visible !== false ? [{
               id: image.id,
               x: bounds.left,
               y: bounds.top,
@@ -5499,8 +5855,9 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     }
 
     // Apply resize preview to images (single history entry instead of one per mousemove)
-    if (resizingImage && resizePreview) {
-      const resizedImages = applyCanvasCommand(images, {
+    if (resizingImage && resizePreview && !resizeLockInvalidatedRef.current && imagesRef.current.some(image => image.id === resizingImage && !image.locked)) {
+      beginHistoryTransaction('resize', e.pointerId);
+      const resizedImages = applyCanvasCommand(imagesRef.current, {
         type: 'resize',
         id: resizingImage,
         bounds: resizePreview,
@@ -5519,14 +5876,16 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       const finalDragOffset = dragOffsetRef.current;
       const imageMoved = finalDragOffset.x !== 0 || finalDragOffset.y !== 0;
       if (imageDragReadyRef.current && imageMoved) {
-        const committedIds = new Set(getSelectionState().ids);
         const currentImages = imagesRef.current;
+        const selected = new Set(getSelectionState().ids);
+        const committedIds = new Set(currentImages.filter(image => selected.has(image.id) && dragEligibleIdsRef.current.has(image.id) && !image.locked).map(image => image.id));
+        if (committedIds.size > 0) beginHistoryTransaction('drag', e.pointerId);
         const updatedImages = applyCanvasCommand(currentImages, {
           type: 'move',
           ids: [...committedIds],
           delta: finalDragOffset,
         });
-        const committed = commitAcceptedCanvasImageChange(currentImages, updatedImages, onImagesChange);
+        const committed = committedIds.size ? commitAcceptedCanvasImageChange(currentImages, updatedImages, onImagesChange) : { accepted: false, images: currentImages };
         imagesRef.current = committed.images;
         if (committed.accepted) onForceSave?.(updatedImages);
 
@@ -5613,6 +5972,9 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
             && !annotationMode
           ) {
             suppressSelectionClickRef.current = true;
+            const previewTrigger = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[data-canvas-image-id]'))
+              .find(element => element.dataset.canvasImageId === previewImage.id);
+            previewTrigger?.focus({ preventScroll: true });
             onPreviewImage(previewImage);
           }
         }
@@ -5629,11 +5991,12 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     // Group drag finish
     if (groupDragTarget) {
       const groupOffset = groupDragOffsetRef.current;
-      if (groupDragReadyRef.current && (groupOffset.x !== 0 || groupOffset.y !== 0)) {
+      if (groupDragReadyRef.current && !groupLockInvalidatedRef.current && !imagesRef.current.some(image => image.groupId === groupDragTarget && image.locked) && (groupOffset.x !== 0 || groupOffset.y !== 0)) {
+        beginHistoryTransaction('group-drag', e.pointerId);
         // Move all images in the group by the drag offset
-        onImagesChange(applyCanvasCommand(images, {
+        onImagesChange(applyCanvasCommand(imagesRef.current, {
           type: 'move',
-          ids: images.filter((image) => image.groupId === groupDragTarget).map((image) => image.id),
+          ids: imagesRef.current.filter((image) => image.groupId === groupDragTarget).map((image) => image.id),
           delta: groupOffset,
         }));
       }
@@ -5654,13 +6017,16 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     // GenGroup drag finish
     if (genGroupDragTarget) {
       const genGroupOffset = genGroupDragOffsetRef.current;
-      if (genGroupDragReadyRef.current && (genGroupOffset.x !== 0 || genGroupOffset.y !== 0)) {
+      const activeGroup = genGroupsRef.current.find(group => group.id === genGroupDragTarget);
+      const hasLockedMember = activeGroup && imagesRef.current.some(image => image.locked && (activeGroup.sourceImageIds.includes(image.id) || activeGroup.resultImageIds?.includes(image.id)));
+      if (genGroupDragReadyRef.current && !genGroupLockInvalidatedRef.current && !hasLockedMember && (genGroupOffset.x !== 0 || genGroupOffset.y !== 0)) {
         const dx = genGroupOffset.x;
         const dy = genGroupOffset.y;
+        beginHistoryTransaction('group-drag', e.pointerId);
         // Move all reference images in the gen group
-        const updatedImages = applyCanvasCommand(images, {
+        const updatedImages = applyCanvasCommand(imagesRef.current, {
           type: 'move',
-          ids: genGroupsRef.current.find((group) => group.id === genGroupDragTarget)?.sourceImageIds ?? [],
+          ids: activeGroup?.sourceImageIds ?? [],
           delta: { x: dx, y: dy },
         });
         onImagesChange(updatedImages);
@@ -5706,9 +6072,13 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
 
     commitHistoryTransaction(e.pointerId);
     mouseDownOnImageRef.current = false;
-  }, [annotationRegionStart, annotationMode, isDraggingRegion, annotationRegionCurrent, editMode, isMiddlePanning, isPanning, resizingImage, resizePreview, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, hitTestImage, images, annotationTool, screenToCanvas, handleEditMouseUp, genGroups, onImagesChange, onForceSave, onPreviewImage, zoom, viewOffset.x, viewOffset.y, commitViewportPan, getAnnotationV2State, commitAnnotationV2Text, commitAnnotationV2Gesture, moveAnnotationV2Text, resolveActiveSemanticGesture, applyTouchGestureIntent, cancelImageDragPreview, commitSelectionBox, finishCanvasPointerGesture, getBoxSelectionPreview, getSelectionState, selectImage, commitHistoryTransaction]);
+  }, [annotationRegionStart, annotationMode, isDraggingRegion, annotationRegionCurrent, editMode, isMiddlePanning, isPanning, resizingImage, resizePreview, groupDragTarget, genGroupDragTarget, hexCubeDragTarget, hitTestImage, images, annotationTool, screenToCanvas, handleEditMouseUp, genGroups, onImagesChange, onForceSave, onPreviewImage, zoom, viewOffset.x, viewOffset.y, commitViewportPan, getAnnotationV2State, commitAnnotationV2Text, commitAnnotationV2Gesture, moveAnnotationV2Text, resolveActiveSemanticGesture, applyTouchGestureIntent, cancelImageDragPreview, commitSelectionBox, finishCanvasPointerGesture, getBoxSelectionPreview, getSelectionState, selectImage, beginHistoryTransaction, commitHistoryTransaction, agentSelectingImage]);
 
   const handlePointerCancel = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (agentTouchSelectionRef.current) {
+      agentTouchSelectionRef.current = null;
+      suppressAgentTouchClickRef.current = true;
+    }
     if (e.pointerType === 'touch' && activeTouchPointerIdsRef.current.has(e.pointerId)) {
       touchGestureControllerRef.current.pointerCancel({
         pointerId: e.pointerId,
@@ -6066,10 +6436,55 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     return group;
   }, [findNonOverlappingPosition, getCurrentModel, taskModelCatalogIndex]);
 
+  const getGenerationGroupSourceAvailability = useCallback((
+    groupType: GenGroupType,
+    imageId: string | undefined,
+    currentGroups: CanvasGenGroup[],
+  ): { allowed: boolean; description: string } => {
+    const activeGroups = currentGroups.filter(group => group.type === groupType && group.status !== 'completed');
+    const activeGroup = activeGroups[activeGroups.length - 1];
+    // 已有组以组内精确的供应商与模型为准；只有新组读取全局选择。
+    const selected = activeGroup?.toolbar || getCurrentModel();
+    const descriptor = taskModelCatalogIndex.get(taskModelKey(selected.providerId || '', selected.model));
+    const unavailable = { allowed: false, description: '请先选择支持参考图的可用图像模型' };
+    if (catalogStatus.loading || catalogStatus.error || descriptor?.kind !== 'image'
+      || !descriptor.supportsReferenceImages || descriptor.allowedRatios.length === 0) return unavailable;
+    const limit = Math.min(14, descriptor.maxReferenceImages ?? 14);
+    if (!Number.isFinite(limit) || limit < 1) return unavailable;
+    if (activeGroup?.refImages.some(reference => reference.imageId === imageId)) {
+      return { allowed: false, description: '该图片已在当前组中' };
+    }
+    if ((activeGroup?.refImages.length || 0) >= limit) {
+      return { allowed: false, description: '当前模型最多支持 ' + limit + ' 张参考图' };
+    }
+    return { allowed: true, description: groupType === 'reference' ? '将当前图片加入参考图组，不会立即生成' : '将当前图片加入融图组，不会立即生成' };
+  }, [catalogStatus.loading, catalogStatus.error, getCurrentModel, taskModelCatalogIndex]);
+
+  const getGenerationGroupReferenceIssue = useCallback((group: CanvasGenGroup): string | null => {
+    if (catalogStatus.loading) return '模型能力目录正在加载，请稍后重试';
+    if (catalogStatus.error) return '模型能力目录暂不可用，请稍后重试';
+    if (!group.toolbar.model) return '请先选择模型';
+    if (!group.toolbar.providerId) return '当前参考图组未绑定提供商，请重新选择模型后重试';
+    const descriptor = taskModelCatalogIndex.get(taskModelKey(group.toolbar.providerId, group.toolbar.model));
+    if (!descriptor) return '模型能力目录不可用，请重新选择模型后重试';
+    if (descriptor.kind !== 'image' || !descriptor.supportsReferenceImages || descriptor.allowedRatios.length === 0) {
+      return '当前模型不支持参考图生成，请重新选择模型';
+    }
+    const limit = Math.min(14, descriptor.maxReferenceImages ?? 14);
+    if (!Number.isFinite(limit) || limit < 1) return '当前模型不支持参考图生成，请重新选择模型';
+    if (group.refImages.length === 0) return '请添加参考图后再生成';
+    if (group.refImages.length > limit) {
+      return '当前组最多支持 ' + limit + ' 张参考图，当前有 ' + group.refImages.length + ' 张，请移除参考图或重新选择模型';
+    }
+    return null;
+  }, [catalogStatus.loading, catalogStatus.error, taskModelCatalogIndex]);
+
   /** Alt+Click: 追加到参考图组或创建新组 */
   const handleAltClickAddToGroup = useCallback((image: CanvasImage) => {
+    if (image.mediaType === 'video' || image.threeDModelUrl) return;
     setGenGroups(prev => {
       const groupType: GenGroupType = 'reference';
+      if (!getGenerationGroupSourceAvailability(groupType, image.id, prev).allowed) return prev;
       // 查找同类型的活跃组（status不是completed的最近组）
       const activeGroups = prev.filter(g => g.type === groupType && g.status !== 'completed');
       if (activeGroups.length > 0) {
@@ -6109,12 +6524,14 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       const newGroup = createGenGroupLocal(image, groupType);
       return [...prev, newGroup];
     });
-  }, [createGenGroupLocal, images]);
+  }, [createGenGroupLocal, images, getGenerationGroupSourceAvailability]);
 
   /** Ctrl+Click: 追加到融图组或创建新组 */
   const handleCtrlClickAddToGroup = useCallback((image: CanvasImage) => {
+    if (image.mediaType === 'video' || image.threeDModelUrl) return;
     setGenGroups(prev => {
       const groupType: GenGroupType = 'fusion';
+      if (!getGenerationGroupSourceAvailability(groupType, image.id, prev).allowed) return prev;
       const activeGroups = prev.filter(g => g.type === groupType && g.status !== 'completed');
       if (activeGroups.length > 0) {
         const latestGroup = activeGroups[activeGroups.length - 1];
@@ -6147,7 +6564,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       const newGroup = createGenGroupLocal(image, groupType);
       return [...prev, newGroup];
     });
-  }, [createGenGroupLocal, images]);
+  }, [createGenGroupLocal, images, getGenerationGroupSourceAvailability]);
 
   useEffect(() => {
     addReferenceImageToGenGroupRef.current = handleAltClickAddToGroup;
@@ -6163,9 +6580,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       return prev.map(g => {
         if (g.id !== groupId) return g;
         const newRefs = g.refImages.filter(r => r.imageId !== imageId);
-        // 如果移除后没有参考图了，删除整个组
-        if (newRefs.length === 0) return g; // 返回原组，由调用者决定是否删除
-        // 重新编号
+        // 重新编号；最后一张移除后由末尾过滤清除空组，不删除画布素材
         const reindexed = newRefs.map((r, i) => ({ ...r, number: i + 1 }));
         const newSourceIds = g.sourceImageIds.filter(id => id !== imageId);
         const newSourcePositions = { ...g.sourcePositions };
@@ -6226,8 +6641,18 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     // 从 canvasGenModels 查找 providerName
     const currentModelObj = canvasGenModels.find(m => m.id === currentModelInfo.model && m.providerId === currentModelInfo.providerId);
     group.toolbar.providerName = currentModelObj?.providerName || '';
+    const descriptor = taskModelCatalogIndex.get(taskModelKey(group.toolbar.providerId, group.toolbar.model));
+    if (descriptor) {
+      const aspectRatio = descriptor.allowedRatios.includes('1:1') ? '1:1' : descriptor.allowedRatios[0] || '';
+      const resolution = descriptor.allowedSizes[0] || '';
+      group.toolbar.aspectRatio = aspectRatio;
+      group.toolbar.resolution = resolution;
+      group.toolbar.quality = descriptor.qualityOptions[0] || '';
+      group.toolbar.size = /^\d+x\d+$/i.test(resolution) ? resolution : calculateActualPixels(aspectRatio, resolution, group.toolbar.model);
+    }
     setHexCubeGroups(prev => [...prev, group]);
-  }, [canvasGenModels, getCurrentModel, viewOffset, zoom]);
+    setMobileHexCubeGroupId(group.id);
+  }, [canvasGenModels, getCurrentModel, taskModelCatalogIndex, viewOffset, zoom]);
 
   /** 删除六面体组 */
   const deleteHexCubeGroup = useCallback((groupId: string) => {
@@ -6292,6 +6717,11 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
 
   /** 处理生成组的生成请求 */
   const handleGroupGenerate = useCallback(async (group: CanvasGenGroup) => {
+    const referenceIssue = getGenerationGroupReferenceIssue(group);
+    if (referenceIssue) {
+      toast.error(referenceIssue);
+      return;
+    }
     const toolbar = group.toolbar;
     const effectivePrompt = toolbar.prompt.trim() || 'Generate a creative variation of the reference image(s).';
 
@@ -6873,7 +7303,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         return { ...g, status: 'idle' as const, resultPlaceholder: { ...g.resultPlaceholder, isProcessing: false, progress: 0, errorMsg: `生成失败: ${error instanceof Error ? error.message : String(error)}` } };
       }));
     }
-  }, [images, modelProviderMap, onImagesChange, setViewOffset, setZoom, taskModelCatalogIndex, zoom]);
+  }, [getGenerationGroupReferenceIssue, images, modelProviderMap, onImagesChange, setViewOffset, setZoom, taskModelCatalogIndex, zoom]);
 
   // handleGenGroupGenerate: 通过groupId查找组并调用handleGroupGenerate
   const handleGenGroupGenerate = useCallback((groupId: string) => {
@@ -6893,7 +7323,8 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     label: string,
     width = sourceImage.width,
     height = sourceImage.height,
-    status = '准备生成...'
+    status = '准备生成...',
+    cropOperation?: object,
   ): string => {
     const gap = 10;
     const placeholder: CanvasImage = {
@@ -6912,6 +7343,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         label,
         status,
         progress: 6,
+        ...(cropOperation ? { [CANVAS_CROP_OPERATION]: cropOperation } : {}),
         sourceUrl: sourceImage.url,
         startTime: Date.now(),
       },
@@ -7531,6 +7963,15 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       },
     };
 
+    // Local models
+    if (threeDBackend === 'local') {
+      return {
+        qualities: [{ value: 'standard', label: 'Standard' }, { value: 'high', label: 'High' }],
+        textures: [{ value: '1k', label: '1K' }, { value: '2k', label: '2K' }],
+        formats: [{ value: 'glb', label: 'GLB' }, { value: 'obj', label: 'OBJ' }],
+      };
+    }
+
     if (is302TripoProvider) return capMap['tripo-302'];
 
     // Match by preset name (case-insensitive partial match)
@@ -7552,15 +7993,6 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     }
     if (modelName.includes('pro') || modelName.includes('专业') || modelName.includes('standard')) {
       return capMap['hunyuan-pro'] || defaultCap;
-    }
-
-    // Local models
-    if (threeDBackend === 'local') {
-      return {
-        qualities: [{ value: 'standard', label: 'Standard' }, { value: 'high', label: 'High' }],
-        textures: [{ value: '1k', label: '1K' }, { value: '2k', label: '2K' }],
-        formats: [{ value: 'glb', label: 'GLB' }, { value: 'obj', label: 'OBJ' }],
-      };
     }
 
     return defaultCap;
@@ -8084,9 +8516,6 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     }));
     setCanvasGenMinimized(false);
     setShowCanvasGenerator(true);
-    setCanvasGenPrompt('');
-    setCanvasGenNegativePrompt('');
-    setCanvasGenRefImages([]);
     // Auto-select first model if none selected
     if (!canvasGenModel && canvasGenModels.length > 0) {
       const firstModel = canvasGenModels[0];
@@ -8115,12 +8544,16 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     const descriptor = canvasGenProviderId && canvasGenPureModel
       ? taskModelCatalogIndex.get(taskModelKey(canvasGenProviderId, canvasGenPureModel))
       : undefined;
-    if (!descriptor) {
+    if (!descriptor || !canvasGenModels.some(model => model.providerId === canvasGenProviderId && model.id === canvasGenPureModel)) {
       toast.error('模型能力目录不可用，请重新选择模型');
       return;
     }
     if (canvasGenCount > descriptor.maxOutputs) {
       toast.error(`当前模型最多生成 ${descriptor.maxOutputs} 张图片`);
+      return;
+    }
+    if (canvasGenRefImages.length > 0 && !descriptor.supportsReferenceImages) {
+      toast.error('当前模型不支持参考图，请移除参考图或选择其他模型');
       return;
     }
     if (canvasGenRefImages.length > (descriptor.maxReferenceImages || 0)) {
@@ -9963,9 +10396,11 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       abortElementDecomposeRequests();
       setElementDecomposeTask(null);
       setElementDecomposeProjectId(null);
+      setElementDecomposeRecoveryFailed(false);
     } else if (elementDecomposeProjectId && elementDecomposeProjectId !== activeCanvasToolProjectId) {
       setElementDecomposeTask(null);
       setElementDecomposeProjectId(null);
+      setElementDecomposeRecoveryFailed(false);
     }
   }, [abortElementDecomposeRequests, activeCanvasToolProjectId, elementDecomposeProjectId]);
 
@@ -9975,6 +10410,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
 
   useEffect(() => {
     if (!showDisplayDecomposePanel) {
+      setElementDecomposeRecoveryFailed(false);
       elementDecomposeRecoveryRef.current = {
         projectId: null,
         requestId: elementDecomposeRecoveryRef.current.requestId + 1,
@@ -9987,6 +10423,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
 
     const requestId = elementDecomposeRecoveryRef.current.requestId + 1;
     elementDecomposeRecoveryRef.current = { projectId: recoveryProjectId, requestId };
+    setElementDecomposeRecoveryFailed(false);
     elementDecomposeRecoveryControllerRef.current?.abort();
     const controller = new AbortController();
     elementDecomposeRecoveryControllerRef.current = controller;
@@ -10007,6 +10444,11 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       setElementDecomposeTask(finalTask);
     }).catch((error: unknown) => {
       if (error instanceof DOMException && error.name === 'AbortError') return;
+      if (!controller.signal.aborted
+        && elementDecomposeRecoveryRef.current.requestId === requestId
+        && activeCanvasToolProjectIdRef.current === recoveryProjectId) {
+        setElementDecomposeRecoveryFailed(true);
+      }
       console.warn('[element-decompose] Failed to restore or resume task:', error);
     }).finally(() => {
       if (elementDecomposeRecoveryRef.current.requestId === requestId) {
@@ -11287,7 +11729,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
 
   // 全景查看器
   const [panoramaViewerUrl, setPanoramaViewerUrl] = useState<string | null>(null);
-  useCallback((img: CanvasImage) => {
+  const handleViewPanorama = useCallback((img: CanvasImage) => {
         setPanoramaViewerUrl(img.url);
       }, []);
 
@@ -11444,6 +11886,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
 
   // Edit mode handlers
   const exitEditMode = useCallback(() => {
+    activeCropOperationRef.current = null;
     setEditMode('none');
     setEditImageId(null);
     setEditPrompt('');
@@ -11476,24 +11919,43 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         exitEditMode();
         return;
       }
+      const imageLeft = editImg.x * zoom + viewOffset.x;
+      const imageTop = editImg.y * zoom + viewOffset.y;
+      const imageRight = imageLeft + editImg.width * zoom;
+      const imageBottom = imageTop + editImg.height * zoom;
+      const cropLeft = Math.max(cropRect.x, imageLeft);
+      const cropTop = Math.max(cropRect.y, imageTop);
+      const cropRight = Math.min(cropRect.x + cropRect.w, imageRight);
+      const cropBottom = Math.min(cropRect.y + cropRect.h, imageBottom);
+      if (cropRight <= cropLeft || cropBottom <= cropTop) {
+        toast.warning('裁切区域已移出图片，请重新框选');
+        return;
+      }
+      const displayX = (cropLeft - imageLeft) / zoom;
+      const displayY = (cropTop - imageTop) / zoom;
+      const displayW = (cropRight - cropLeft) / zoom;
+      const displayH = (cropBottom - cropTop) / zoom;
+      const cropOperation = {};
+      activeCropOperationRef.current = cropOperation;
+      const cropHistory = onCaptureCropHistory?.(cropOperation) ?? null;
+      let placeholderId: string | null = null;
       try {
-        const placeholderId = createProcessingFrameRightOf(
+        placeholderId = createProcessingFrameRightOf(
           editImg,
           '裁切中',
-          Math.max(1, cropRect.w / zoom),
-          Math.max(1, cropRect.h / zoom),
-          '正在按选区裁切图片...'
+          Math.max(1, displayW),
+          Math.max(1, displayH),
+          '正在按选区裁切图片...',
+          cropOperation,
         );
+        cropOperationsRef.current.set(placeholderId, cropOperation);
         setIsEditProcessing(false);
         const img = new Image();
         img.crossOrigin = 'anonymous';
         await new Promise<void>((resolve, reject) => { img.onload = () => resolve(); img.onerror = reject; img.src = editImg.url; });
+        if (cropOperationsRef.current.get(placeholderId) !== cropOperation) return;
 
         const canvas = document.createElement('canvas');
-        const displayX = Math.max(0, (cropRect.x - editImg.x * zoom - viewOffset.x) / zoom);
-        const displayY = Math.max(0, (cropRect.y - editImg.y * zoom - viewOffset.y) / zoom);
-        const displayW = Math.min(editImg.width - displayX, cropRect.w / zoom);
-        const displayH = Math.min(editImg.height - displayY, cropRect.h / zoom);
         const sourceScaleX = img.naturalWidth / editImg.width;
         const sourceScaleY = img.naturalHeight / editImg.height;
         const sx = Math.max(0, displayX * sourceScaleX);
@@ -11507,13 +11969,25 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         if (ctx) {
           ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
           const newUrl = canvas.toDataURL('image/png');
-          updateProcessingFrame(placeholderId, { progress: 92, status: '正在生成裁切结果...' });
-          completeProcessingFrame(placeholderId, newUrl, displayW, displayH, { originalWidth: canvas.width, originalHeight: canvas.height, modelName: modelInfo.apiDisplayName || modelInfo.model, apiProvider: modelInfo.providerName || '' }, 'edit');
+          const cropPatch: Partial<CanvasImage> = { url: newUrl, isProcessingPlaceholder: false, processing: undefined, originalWidth: canvas.width, originalHeight: canvas.height, modelName: modelInfo.apiDisplayName || modelInfo.model, apiProvider: modelInfo.providerName || '' };
+          const currentImages = cropHistory?.current(placeholderId) ?? null;
+          if (!cropHistory || currentImages) {
+            if (currentImages) imagesRef.current = currentImages;
+            updateProcessingFrame(placeholderId, { progress: 92, status: '正在生成裁切结果...' });
+            const completed = completeProcessingFrame(placeholderId, newUrl, displayW, displayH, cropPatch, 'edit');
+            if (completed) cropHistory?.settle(placeholderId, cropPatch);
+          } else {
+            cropHistory.settle(placeholderId, cropPatch);
+          }
         }
       } catch (e) {
         console.error('Crop failed:', e);
+      } finally {
+        if (placeholderId && cropOperationsRef.current.get(placeholderId) === cropOperation) {
+          cropOperationsRef.current.delete(placeholderId);
+        }
+        if (activeCropOperationRef.current === cropOperation) exitEditMode();
       }
-      exitEditMode();
       return;
     }
 
@@ -11777,7 +12251,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     }
 
     exitEditMode();
-  }, [images, getCurrentModel, editMode, exitEditMode, editImageId, cropRect, createProcessingFrameRightOf, zoom, viewOffset.x, viewOffset.y, updateProcessingFrame, completeProcessingFrame, renderMaskFromStrokes, editStrokes.length, maskKeyword, editPrompt, getCurrentProviderId, eraseModelId, removeProcessingFrame, pollForResult, expandPadding]);
+  }, [images, getCurrentModel, editMode, exitEditMode, editImageId, cropRect, createProcessingFrameRightOf, onCaptureCropHistory, zoom, viewOffset.x, viewOffset.y, updateProcessingFrame, completeProcessingFrame, renderMaskFromStrokes, editStrokes.length, maskKeyword, editPrompt, getCurrentProviderId, eraseModelId, removeProcessingFrame, pollForResult, expandPadding]);
 
   // Mask keyword confirm
   // Download handlers
@@ -12084,7 +12558,8 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     return imageTools; // 默认图片类型
   };
 
-  const selectedMediaType = selectedImageData?.mediaType;
+  const selectedMediaType: 'image' | 'video' | '3d' = selectedImageData?.mediaType === 'video'
+    ? 'video' : selectedImageData?.threeDModelUrl ? '3d' : 'image';
   const availableTools = getAvailableToolsByMediaType(selectedMediaType);
 
   const visibleImageActions = fullOrder
@@ -12124,43 +12599,43 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     } }] : []),
     { label: '创建组', shortcut: 'Ctrl+G', action: () => { handleCreateGroup(); } },
     { label: '对齐-左', action: () => {
-      const selImgs = images.filter(i => selectedIds.has(i.id));
+      const selImgs = imagesRef.current.filter(i => selectedIds.has(i.id) && !i.locked);
       if (selImgs.length < 2) return;
       const minX = Math.min(...selImgs.map(i => i.x));
-      applyImageChanges(images.map(i => selectedIds.has(i.id) ? { ...i, x: minX } : i));
+      applyImageChanges(imagesRef.current.map(i => selectedIds.has(i.id) && !i.locked ? { ...i, x: minX } : i));
     } },
     { label: '对齐-右', action: () => {
-      const selImgs = images.filter(i => selectedIds.has(i.id));
+      const selImgs = imagesRef.current.filter(i => selectedIds.has(i.id) && !i.locked);
       if (selImgs.length < 2) return;
       const maxRight = Math.max(...selImgs.map(i => i.x + i.width));
-      applyImageChanges(images.map(i => selectedIds.has(i.id) ? { ...i, x: maxRight - i.width } : i));
+      applyImageChanges(imagesRef.current.map(i => selectedIds.has(i.id) && !i.locked ? { ...i, x: maxRight - i.width } : i));
     } },
     { label: '对齐-上', action: () => {
-      const selImgs = images.filter(i => selectedIds.has(i.id));
+      const selImgs = imagesRef.current.filter(i => selectedIds.has(i.id) && !i.locked);
       if (selImgs.length < 2) return;
       const minY = Math.min(...selImgs.map(i => i.y));
-      applyImageChanges(images.map(i => selectedIds.has(i.id) ? { ...i, y: minY } : i));
+      applyImageChanges(imagesRef.current.map(i => selectedIds.has(i.id) && !i.locked ? { ...i, y: minY } : i));
     } },
     { label: '对齐-下', action: () => {
-      const selImgs = images.filter(i => selectedIds.has(i.id));
+      const selImgs = imagesRef.current.filter(i => selectedIds.has(i.id) && !i.locked);
       if (selImgs.length < 2) return;
       const maxBottom = Math.max(...selImgs.map(i => i.y + i.height));
-      applyImageChanges(images.map(i => selectedIds.has(i.id) ? { ...i, y: maxBottom - i.height } : i));
+      applyImageChanges(imagesRef.current.map(i => selectedIds.has(i.id) && !i.locked ? { ...i, y: maxBottom - i.height } : i));
     } },
     { label: '水平居中', action: () => {
-      const selImgs = images.filter(i => selectedIds.has(i.id));
+      const selImgs = imagesRef.current.filter(i => selectedIds.has(i.id) && !i.locked);
       if (selImgs.length < 2) return;
       const center = (Math.min(...selImgs.map(i => i.x)) + Math.max(...selImgs.map(i => i.x + i.width))) / 2;
-      applyImageChanges(images.map(i => selectedIds.has(i.id) ? { ...i, x: center - i.width / 2 } : i));
+      applyImageChanges(imagesRef.current.map(i => selectedIds.has(i.id) && !i.locked ? { ...i, x: center - i.width / 2 } : i));
     } },
     { label: '垂直居中', action: () => {
-      const selImgs = images.filter(i => selectedIds.has(i.id));
+      const selImgs = imagesRef.current.filter(i => selectedIds.has(i.id) && !i.locked);
       if (selImgs.length < 2) return;
       const center = (Math.min(...selImgs.map(i => i.y)) + Math.max(...selImgs.map(i => i.y + i.height))) / 2;
-      applyImageChanges(images.map(i => selectedIds.has(i.id) ? { ...i, y: center - i.height / 2 } : i));
+      applyImageChanges(imagesRef.current.map(i => selectedIds.has(i.id) && !i.locked ? { ...i, y: center - i.height / 2 } : i));
     } },
     { label: '水平等间距', action: () => {
-      const selImgs = images.filter(i => selectedIds.has(i.id));
+      const selImgs = imagesRef.current.filter(i => selectedIds.has(i.id) && !i.locked);
       if (selImgs.length < 3) return;
       const sorted = [...selImgs].sort((a, b) => a.x - b.x);
       const leftMost = sorted[0].x;
@@ -12173,10 +12648,10 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         xMap.set(img.id, cx);
         cx += img.width + gap;
       }
-      applyImageChanges(images.map(i => selectedIds.has(i.id) && xMap.has(i.id) ? { ...i, x: xMap.get(i.id)! } : i));
+      applyImageChanges(imagesRef.current.map(i => selectedIds.has(i.id) && !i.locked && xMap.has(i.id) ? { ...i, x: xMap.get(i.id)! } : i));
     } },
     { label: '垂直等间距', action: () => {
-      const selImgs = images.filter(i => selectedIds.has(i.id));
+      const selImgs = imagesRef.current.filter(i => selectedIds.has(i.id) && !i.locked);
       if (selImgs.length < 3) return;
       const sorted = [...selImgs].sort((a, b) => a.y - b.y);
       const topMost = sorted[0].y;
@@ -12189,10 +12664,10 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         yMap.set(img.id, cy);
         cy += img.height + gap;
       }
-      applyImageChanges(images.map(i => selectedIds.has(i.id) && yMap.has(i.id) ? { ...i, y: yMap.get(i.id)! } : i));
+      applyImageChanges(imagesRef.current.map(i => selectedIds.has(i.id) && !i.locked && yMap.has(i.id) ? { ...i, y: yMap.get(i.id)! } : i));
     } },
     { label: '一键排版 Ctrl+Q', action: () => {
-      const selImgs = images.filter(i => selectedIds.has(i.id));
+      const selImgs = imagesRef.current.filter(i => selectedIds.has(i.id) && !i.locked);
       if (selImgs.length < 2) return;
       // Waterfall/masonry layout - like Pinterest/Huaban
       const COL_WIDTH = 280; // Column width in canvas pixels
@@ -12219,18 +12694,22 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         posMap.set(img.id, { x, y, width: newWidth, height: newHeight });
         colHeights[minColIdx] += newHeight + GAP;
       }
-      applyImageChanges(images.map(i => {
-        if (!selectedIds.has(i.id) || !posMap.has(i.id)) return i;
+      applyImageChanges(imagesRef.current.map(i => {
+        if (!selectedIds.has(i.id) || i.locked || !posMap.has(i.id)) return i;
         const pos = posMap.get(i.id)!;
         return { ...i, x: pos.x, y: pos.y, width: pos.width, height: pos.height };
       }));
     } },
     { label: '网格排版', action: () => {
-      const selImgs = images.filter(i => selectedIds.has(i.id));
+      const selImgs = imagesRef.current.filter(i => selectedIds.has(i.id) && !i.locked);
       if (selImgs.length < 2) return;
-      const colsStr = prompt(`输入列数（当前${selImgs.length}张）`, String(Math.ceil(Math.sqrt(selImgs.length))));
-      if (!colsStr) return;
-      const cols = Math.max(1, Math.min(10, parseInt(colsStr) || 3));
+      const colsStr = prompt(`输入列数（当前${selImgs.length}张）`, String(Math.min(10, Math.ceil(Math.sqrt(selImgs.length)))));
+      if (colsStr === null || colsStr.trim() === '') return;
+      const cols = Number(colsStr);
+      if (!Number.isInteger(cols) || cols < 1 || cols > 10) {
+        toast.error('请输入1到10之间的整数列数');
+        return;
+      }
       const gap = 20;
       // Determine cell size based on largest image
       const cellW = Math.max(...selImgs.map(i => i.width));
@@ -12243,8 +12722,8 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         const col = idx % cols;
         posMap.set(img.id, { x: startX + col * (cellW + gap), y: startY + row * (cellH + gap) });
       });
-      applyImageChanges(images.map(i => {
-        if (!selectedIds.has(i.id) || !posMap.has(i.id)) return i;
+      applyImageChanges(imagesRef.current.map(i => {
+        if (!selectedIds.has(i.id) || i.locked || !posMap.has(i.id)) return i;
         const pos = posMap.get(i.id)!;
         return { ...i, x: pos.x, y: pos.y };
       }));
@@ -12296,7 +12775,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     { label: '下载', action: () => { handleOpenDownload(); } },
     ...(selectedImageData?.threeDModelUrl ? [{ label: '3D 预览', action: () => { setViewer3DModelUrl(selectedImageData.threeDModelUrl || ''); setViewer3DPreviewUrl(selectedImageData.url); setViewer3DModelUrls(selectedImageData.threeDModelUrls || {}); setViewer3DThumbnailUrls(selectedImageData.threeDThumbnailUrls || {}); setViewer3DTextureUrls(selectedImageData.threeDTextureUrls || []); setViewer3DModelInfo(selectedImageData.threeDModelInfo || {}); setShow3DViewer(true); } }] : []),
     ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '播放视频', action: () => { setVideoPlayerUrl(selectedImageData.videoUrl!); setVideoPlayerVisible(true); } }] : []),
-    ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '视频编辑', action: () => { setVideoEditTarget(selectedImageData); setShowVideoEditPanel(true); } }] : []),
+    ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '视频编辑', action: () => { setVideoEditTarget(selectedImageData); setVideoEditTab('edit'); setShowVideoEditPanel(true); } }] : []),
     ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '视频延长', action: () => { setVideoEditTarget(selectedImageData); setShowVideoEditPanel(true); setVideoEditTab('extend'); } }] : []),
     ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '视频对比', action: () => { const img = selectedImageData; if (img?.videoUrl) setCompareVideos({ a: { url: img.videoUrl, label: img.prompt?.slice(0, 30) || '视频1' }, b: { url: img.videoUrl, label: '请选择第二个视频' } }); } }] : []),
     ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '提取帧生成视频', action: async () => { const img = selectedImageData; if (!img?.videoUrl) return; try { const video = document.createElement('video'); video.crossOrigin = 'anonymous'; video.src = img.videoUrl; video.muted = true; video.preload = 'auto'; await new Promise<void>((resolve, reject) => { video.onloadeddata = () => resolve(); video.onerror = () => reject(new Error('视频加载失败')); video.load(); }); video.currentTime = 0; await new Promise<void>(resolve => { video.onseeked = () => resolve(); }); const canvas = document.createElement('canvas'); canvas.width = video.videoWidth; canvas.height = video.videoHeight; const ctx = canvas.getContext('2d'); if (!ctx) throw new Error('Canvas context failed'); ctx.drawImage(video, 0, 0); const dataUrl = canvas.toDataURL('image/png'); const saveRes = await fetch('/api/save-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataUrl, filename: `frame-for-video-${Date.now()}.png` }), }); const saveData = await saveRes.json(); const frameUrl = saveData.url || saveData.localPath || dataUrl; onAddImages([frameUrl], undefined, { modelName: 'frame-extract', apiProvider: 'local' }); toast.success('已提取帧到画布，选中后可在视频面板中图生视频'); } catch (err) { console.error('[extract-frame-video] error:', err); toast.error('帧提取失败'); } } }] : []),
@@ -12308,7 +12787,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       { label: '批量抽帧(均匀5帧)', action: () => { handleVideoExtractFrames(selectedImageData, 'uniform', 5); } },
       { label: '批量抽帧(关键帧)', action: () => { handleVideoExtractFrames(selectedImageData, 'keyframes', 0); } },
       { label: 'AI配音合成', action: () => { setVideoDubTarget(selectedImageData); setShowVideoDubPanel(true); } },
-      { label: '提取帧', action: () => { const t = prompt('输入提取时间点（秒）', '0'); if (t !== null) handleVideoTool('extract-frame', selectedImageData, parseFloat(t)); } },
+      { label: '提取帧', action: () => { const t = prompt('输入提取时间点（秒）', '0'); if (t !== null) { const time = Number(t); if (t.trim() === '' || !Number.isFinite(time) || time < 0) { toast.error('请输入有效的非负时间（秒）'); return; } handleVideoTool('extract-frame', selectedImageData, time); } } },
       { label: '视频压缩', action: () => { handleVideoTool('compress', selectedImageData); } },
     ] : []),
     { label: '删除', shortcut: 'Delete', action: () => { void requestDeleteImages([...selectedIds]); } },
@@ -12319,10 +12798,23 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     { label: '人物精修大师', action: () => { const img = selectedImageData; if (!activateCanvasToolSession('human-refine', 'context-menu', img ? [img.id] : [])) return; setHumanRepairImageUrl(img?.url || ''); setShowHumanRepair(true); } },
     { label: 'Agent编排', action: () => { const img = selectedImageData; if (img && activateCanvasToolSession('agent', 'context-menu', [img.id])) { setAgentEditImage(img); setShowAgentEditor(true); } } },
     ...(selectedImageData?.mediaType !== 'video' ? [{ label: '生成720全景图', action: () => { handleGeneratePanorama(selectedImageData ?? undefined); } }] : []),
+    ...(selectedMediaType === 'image' && selectedImageData?.url && !selectedImageData.isProcessingPlaceholder
+      && Number.isFinite(selectedImageData.width) && Number.isFinite(selectedImageData.height)
+      && selectedImageData.height > 0 && Math.abs(selectedImageData.width / selectedImageData.height - 2) < 0.02
+      ? [{ label: '全景浏览', action: () => { const img = selectedImageData; if (img) handleViewPanorama(img); } }] : []),
     { label: '发送到聊天修改', action: () => { const img = selectedImageData; if (img && onSendToChat) onSendToChat(img); } },
     { label: '图片对比', action: () => { const img = selectedImageData; if (img) { setCompareImages({ left: img, right: null }); setCompareSelecting(true); } } },
     { label: '加入收藏夹', action: () => { const img = selectedImageData; if (img && onAddToFavorites) onAddToFavorites(img); } },
   ];
+
+  // 媒体专属菜单沿用原回调；普通图片和多选菜单保持原列表。
+  const applicableImageContextMenuItems = selectedIds.size > 1 || selectedMediaType === 'image'
+    ? imageContextMenuItems
+    : imageContextMenuItems.filter(item => {
+      if (['复制', '下载', '删除', '发送到聊天修改', '加入收藏夹'].includes(item.label)) return true;
+      if (selectedMediaType === '3d') return item.label === '3D 预览';
+      return item.label.startsWith('─') || ['播放视频', '视频编辑', '视频延长', '视频对比', '提取帧生成视频', '转 GIF', '提取封面', '批量抽帧(均匀5帧)', '批量抽帧(关键帧)', 'AI配音合成', '提取帧', '视频压缩'].includes(item.label);
+    });
 
   // Floating panel style helpers
   const panelBaseClass = `flex items-center gap-1.5 px-3 py-2 rounded-xl border shadow-xl ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1e1e1e] border-[#333]'}`;
@@ -12417,6 +12909,10 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     });
   }, [canvasRenderProjection, thumbnailVersion]);
 
+  const groupDragHasLockedMember = !!groupDragTarget && images.some(image => image.groupId === groupDragTarget && image.locked);
+  const activeDraggedGenGroup = genGroupDragTarget ? genGroups.find(group => group.id === genGroupDragTarget) : null;
+  const genGroupDragHasLockedMember = !!activeDraggedGenGroup && images.some(image => image.locked && (activeDraggedGenGroup.sourceImageIds.includes(image.id) || activeDraggedGenGroup.resultImageIds?.includes(image.id)));
+
   // Keep the selected-image toolbar inside the actual canvas viewport.
   const getToolbarPosition = () => {
     const img = selectedImageData;
@@ -12439,7 +12935,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         width: canvasSize.width || window.innerWidth,
         height: canvasSize.height || window.innerHeight,
       },
-      occupiedRight: isPanelCollapsed ? 20 : 480,
+      occupiedRight: isPanelCollapsed ? WORKSPACE_PANEL_RAIL_WIDTH : 480,
     });
   };
 
@@ -12456,6 +12952,8 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       id: 'upload', label: '上传图片', group: '基础', icon: <Upload className="h-4 w-4" />,
       onActivate: () => uploadFileInputRef.current?.click(),
     },
+    { id: 'undo', label: '撤销', group: '基础', icon: <RotateCcw className="h-4 w-4" />, disabled: !onUndo || mobileCanUndo === false, onActivate: () => onUndo?.() },
+    { id: 'redo', label: '重做', group: '基础', icon: <RotateCcw className="h-4 w-4 scale-x-[-1]" />, disabled: !onRedo || mobileCanRedo === false, onActivate: () => onRedo?.() },
     { id: 'zoom-out', label: '缩小', group: '视图', icon: <Minus className="h-4 w-4" />, onActivate: handleZoomOut },
     { id: 'zoom-in', label: '放大', group: '视图', icon: <ZoomIn className="h-4 w-4" />, onActivate: handleZoomIn },
     { id: 'reset-view', label: '重置视图', group: '视图', icon: <Maximize2 className="h-4 w-4" />, onActivate: resetViewToContent },
@@ -12488,6 +12986,8 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     { id: 'hex-cube', label: '六面体', group: '画布工具', icon: <Boxes className="h-4 w-4" />, onActivate: handleCreateHexCube },
     { id: 'annotation', label: 'ChatCanvas', group: '画布工具', icon: <MessageCircle className="h-4 w-4" />, active: annotationMode, onActivate: () => handleToggleCanvasAnnotation('bottom-toolbar') },
   ];
+  const referenceGroupAvailability = getGenerationGroupSourceAvailability('reference', selectedImageData?.id, genGroups);
+  const fusionGroupAvailability = getGenerationGroupSourceAvailability('fusion', selectedImageData?.id, genGroups);
   const mobileImageActions: MobileImageAction[] = selectedImageData ? [
     {
       id: 'preview',
@@ -12495,6 +12995,36 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       icon: <Maximize2 className="h-4 w-4" />,
       onActivate: () => onPreviewImage(selectedImageData),
     },
+    ...(selectedMediaType === 'image' ? [{
+      id: 'add-reference-group',
+      label: '加入参考图组',
+      icon: <ImagePlus className="h-4 w-4" />,
+      description: referenceGroupAvailability.description,
+      disabled: !referenceGroupAvailability.allowed,
+      onActivate: () => {
+        const current = getGenerationGroupSourceAvailability('reference', selectedImageData.id, genGroupsRef.current);
+        if (!current.allowed) { toast.error(current.description); return; }
+        handleAltClickAddToGroup(selectedImageData);
+      },
+    },
+    {
+      id: 'add-fusion-group',
+      label: '加入融图组',
+      icon: <GitMerge className="h-4 w-4" />,
+      description: fusionGroupAvailability.description,
+      disabled: !fusionGroupAvailability.allowed,
+      onActivate: () => {
+        const current = getGenerationGroupSourceAvailability('fusion', selectedImageData.id, genGroupsRef.current);
+        if (!current.allowed) { toast.error(current.description); return; }
+        handleCtrlClickAddToGroup(selectedImageData);
+      },
+    }] : []),
+    ...(selectedMediaType === '3d' ? applicableImageContextMenuItems.filter(item => item.label === '3D 预览').map(item => ({
+      id: 'preview-3d',
+      label: item.label,
+      icon: <BoxIcon className="h-4 w-4" />,
+      onActivate: item.action,
+    })) : []),
     ...visibleImageActions.map(action => ({
       id: action.label === '下载' ? 'download' : action.testId || `image-action-${action.label}`,
       label: action.label,
@@ -12518,10 +13048,51 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     >
       <CanvasToolHost
         session={canvasToolSession}
-        onRequestClose={closeCanvasToolPanels}
+        onRequestClose={agentSelectingImage ? () => setAgentSelectingImage(false) : closeCanvasToolPanels}
       >
         <span className="hidden" data-canvas-tool-session-boundary />
       </CanvasToolHost>
+      {isMobileGroupUi && editingGroupId && groups.some(group => group.id === editingGroupId) && (
+        <Dialog open onOpenChange={open => { if (!open) setEditingGroupId(null); }}>
+          <DialogContent
+            data-modal="image-group-editor"
+            showCloseButton={false}
+            onCloseAutoFocus={event => {
+              if (groupEditTriggerRef.current?.isConnected) {
+                event.preventDefault();
+                groupEditTriggerRef.current.focus();
+              }
+            }}
+            className={`max-h-[calc(100dvh-24px)] w-[calc(100vw-24px)] max-w-[360px] overflow-y-auto p-4 sm:max-w-[360px] ${isMonochrome ? 'border-gray-200 bg-white text-gray-900' : 'border-gold/30 bg-[#1e1e1e] text-white'}`}
+          >
+            <DialogHeader className="pr-12 text-left">
+              <DialogTitle>编辑图片组</DialogTitle>
+              <DialogDescription>修改名称和备注，保存后生效。</DialogDescription>
+            </DialogHeader>
+            <DialogClose asChild>
+              <button type="button" aria-label="关闭图片组编辑" className="absolute right-2 top-2 flex min-h-11 min-w-11 items-center justify-center rounded-lg hover:bg-black/10">
+                <X className="h-5 w-5" />
+              </button>
+            </DialogClose>
+            <form onSubmit={event => { event.preventDefault(); handleSaveGroupEdit(); }} className="grid min-w-0 gap-3">
+              <label className="grid min-w-0 gap-1 text-sm">
+                图片组名称
+                <input value={groupEditName} onChange={event => setGroupEditName(event.target.value)} className={`min-h-11 min-w-0 w-full rounded-lg border px-3 text-base ${isMonochrome ? 'border-gray-300 bg-gray-50' : 'border-white/20 bg-black/30'}`} />
+              </label>
+              <label className="grid min-w-0 gap-1 text-sm">
+                备注
+                <input value={groupEditNote} onChange={event => setGroupEditNote(event.target.value)} className={`min-h-11 min-w-0 w-full rounded-lg border px-3 text-base ${isMonochrome ? 'border-gray-300 bg-gray-50' : 'border-white/20 bg-black/30'}`} />
+              </label>
+              <DialogFooter className="flex-row justify-end gap-2">
+                <DialogClose asChild>
+                  <button type="button" className="min-h-11 min-w-11 rounded-lg border border-current/20 px-4 text-sm">取消</button>
+                </DialogClose>
+                <button type="submit" className={`min-h-11 min-w-11 rounded-lg px-4 text-sm font-medium ${isMonochrome ? 'bg-gray-900 text-white' : 'bg-gold text-black'}`}>保存</button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
       {/* Canvas Area */}
       <div
         ref={(el) => { canvasRef.current = el; canvasContainerRef.current = el; }}
@@ -12551,6 +13122,20 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
             ? 'cursor-grabbing'
             : 'cursor-default'
         }`}
+        onPointerDownCapture={() => { suppressContextMenuClickRef.current = false; suppressAgentTouchClickRef.current = false; }}
+        onClickCapture={event => {
+          if (suppressAgentTouchClickRef.current && event.detail !== 0) {
+            suppressAgentTouchClickRef.current = false;
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
+          // 长按松手后补发的点击可能命中新菜单；下一次指针操作仍照常处理。
+          if (!suppressContextMenuClickRef.current || (event.nativeEvent as PointerEvent).pointerType !== 'touch') return;
+          suppressContextMenuClickRef.current = false;
+          event.preventDefault();
+          event.stopPropagation();
+        }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -12600,7 +13185,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         <div ref={leftToolbarRef} data-toolbar="left-toolbar" onMouseDown={(e) => e.stopPropagation()}>
         {leftToolbarExpanded ? (
           /* Expanded: full toolbar */
-          <div className={`absolute top-4 left-4 z-50 flex flex-col gap-1 min-w-[160px] p-2 rounded-xl ${isMonochrome ? 'bg-white border border-gray-200 shadow-lg' : 'bg-[#1a1a1a] border border-white/[0.12] shadow-2xl'} transition-all duration-200`}>
+          <div className={`absolute top-4 left-4 z-50 flex max-h-[calc(100dvh-88px-env(safe-area-inset-bottom))] md:max-h-[calc(100dvh-var(--canvas-bottom-toolbar-offset,80px)-16px)] flex-col overflow-y-auto overscroll-contain [scrollbar-width:thin] [touch-action:pan-y] [&>*]:shrink-0 [&>button]:min-h-[44px] [&>button]:min-w-[44px] gap-1 min-w-[160px] p-2 rounded-xl ${isMonochrome ? 'bg-white border border-gray-200 shadow-lg' : 'bg-[#1a1a1a] border border-white/[0.12] shadow-2xl'} transition-all duration-200`}>
             {/* Logo header */}
             <div className="flex items-center gap-2 px-2 py-1.5">
               <NextImage unoptimized width={1} height={1} src="/logo.png" alt="无界AI" className="w-6 h-6 object-contain rounded" />
@@ -12773,7 +13358,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           </div>
         ) : (
           /* Collapsed: icon column */
-          <div className={`absolute top-4 left-4 z-50 flex flex-col items-center py-2 gap-1 rounded-full ${isMonochrome ? 'bg-white border border-gray-200 shadow-lg' : 'bg-[#1a1a1a] border border-white/[0.12] shadow-2xl'} transition-all duration-200`} style={{ width: 48 }}>
+          <div className={`absolute top-4 left-4 z-50 flex max-h-[calc(100dvh-88px-env(safe-area-inset-bottom))] md:max-h-[calc(100dvh-var(--canvas-bottom-toolbar-offset,80px)-16px)] flex-col overflow-y-auto overscroll-contain [scrollbar-width:thin] [touch-action:pan-y] [&>*]:shrink-0 [&>button]:min-h-[44px] [&>button]:min-w-[44px] items-center py-2 gap-1 rounded-full ${isMonochrome ? 'bg-white border border-gray-200 shadow-lg' : 'bg-[#1a1a1a] border border-white/[0.12] shadow-2xl'} transition-all duration-200`} style={{ width: 64 }}>
             {/* Workspace / Dashboard */}
             <button
               onClick={onSwitchToDashboard}
@@ -12844,11 +13429,13 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         </div>
 
         {/* Oh My Prompt Panel - floating window from toolbar */}
-        {ohMyPromptOpen && (
+        {ohMyPromptOpen && !renderOhMyPromptExternally && (
           <OhMyPrompt
             isOpen={true}
             onClose={() => onCloseOhMyPrompt?.()}
             onInsertPrompt={(prompt: string) => onInsertPrompt?.(prompt)}
+            onInsertVisionPrompt={onInsertVisionPrompt}
+            visionScopeKey={visionScopeKey}
             onVisionPrompt={(url: string) => onVisionPrompt?.(url)}
             isVisionAnalyzing={isVisionAnalyzing}
             visionResult={visionResult}
@@ -12881,11 +13468,11 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
 
         {/* Agent 选择图片提示 (top center) */}
         {agentSelectingImage && (
-          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
+          <div data-popup="agent-image-selection" className="absolute top-2 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
             <div className={`px-3 py-1 rounded-full text-xs font-medium shadow-lg flex items-center gap-1.5 ${isMonochrome ? 'bg-blue-500/90 text-white' : 'bg-gold/90 text-black'}`}>
               <Bot className="w-3 h-3" />
               <span>点击图片进行 Agent 编排</span>
-              <span className="opacity-70">· ESC 取消</span>
+              <button type="button" onClick={() => setAgentSelectingImage(false)} className="pointer-events-auto min-h-11 min-w-11 rounded px-2" aria-label="取消选择 Agent 图片">取消</button>
             </div>
           </div>
         )}
@@ -12905,6 +13492,8 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         {images.length === 0 && (
           <CanvasEmptyState
             isMonochrome={isMonochrome}
+            rightInset={isPanelCollapsed ? WORKSPACE_PANEL_RAIL_WIDTH : Math.min(480, canvasSize.width)}
+            isCovered={!isPanelCollapsed && canvasSize.width < 768}
             onUploadClick={() => uploadFileInputRef.current?.click()}
             onHelpClick={() => setShowHelpModal('instructions')}
           />
@@ -12917,38 +13506,24 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
             const groupImages = images.filter(img => img.groupId === group.id);
             if (groupImages.length === 0) return null;
             const padding = 12;
-            const titleBarH = 36;
+            const titleBarH = isMobileGroupUi ? 88 : 36;
             const minX = Math.min(...groupImages.map(i => i.x));
             const minY = Math.min(...groupImages.map(i => i.y));
             const maxX = Math.max(...groupImages.map(i => i.x + i.width));
             const maxY = Math.max(...groupImages.map(i => i.y + i.height));
-            const dragOff = (groupDragTarget === group.id && (groupDragReadyRef.current || groupDragOffset.x !== 0 || groupDragOffset.y !== 0)) ? groupDragOffset : { x: 0, y: 0 };
+            const dragOff = (groupDragTarget === group.id && !groupLockInvalidatedRef.current && !groupImages.some(image => image.locked) && (groupDragReadyRef.current || groupDragOffset.x !== 0 || groupDragOffset.y !== 0)) ? groupDragOffset : { x: 0, y: 0 };
             const groupX = minX - padding + dragOff.x;
             const groupY = minY - titleBarH - padding + dragOff.y;
             const groupW = maxX - minX + padding * 2;
             const groupH = maxY - minY + titleBarH + padding * 2;
             const isEditing = editingGroupId === group.id;
-            return (
-              <div
-                key={group.id}
-                data-toolbar="image-group"
-                className={`absolute rounded-xl border-2 ${isMonochrome ? 'border-blue-400/60 bg-blue-50/10' : 'border-gold/40 bg-gold/5'} pointer-events-auto`}
-                style={{
-                  left: groupX,
-                  top: groupY,
-                  width: groupW,
-                  height: group.collapsed ? titleBarH + padding * 2 : groupH,
-                  zIndex: 5,
-                  overflow: 'hidden',
-                  transition: 'height 0.3s ease',
-                }}
-              >
-                {/* Title bar */}
+            const groupTitleBar = (
                 <div
                   data-canvas-group-drag-handle
-                  className={`flex items-center gap-2 px-3 ${isMonochrome ? 'bg-blue-50/80' : 'bg-[#222]'} rounded-t-lg h-[36px] select-none ${groupDragTarget === group.id && groupDragReadyRef.current ? 'cursor-grabbing' : 'cursor-grab'}`}
+                  className={`flex flex-wrap items-center gap-x-2 px-3 ${isMonochrome ? (isMobileGroupUi ? 'bg-blue-50' : 'bg-blue-50/80') : 'bg-[#222]'} ${isMobileGroupUi ? 'rounded-t-xl' : 'rounded-t-lg'} h-[88px] select-none md:h-[36px] md:flex-nowrap ${groupDragTarget === group.id && groupDragReadyRef.current ? 'cursor-grabbing' : 'cursor-grab'}`}
                   onClick={(e) => { e.stopPropagation(); }}
-                  onDoubleClick={() => {
+                  onDoubleClick={(event) => {
+                    if ((event.target as Element).closest('button, input')) return;
                     if (editingGroupId === group.id) return; // already editing
                     setEditingGroupId(group.id);
                     setGroupEditName(group.name);
@@ -12961,6 +13536,8 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                     if (target.closest('button') || target.closest('input')) return;
                     e.stopPropagation();
                     if (editingGroupId === group.id) return; // don't drag while editing name
+                    if (imagesRef.current.some(image => image.groupId === group.id && image.locked)) return;
+                    groupLockInvalidatedRef.current = false;
                     e.currentTarget.setPointerCapture(e.pointerId);
                     // Start long press timer for group drag (hold 200ms before dragging)
                     groupDragReadyRef.current = false;
@@ -12968,13 +13545,12 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                     const canvasPos = screenToCanvas(e.clientX, e.clientY);
                     setGroupDragStart(canvasPos);
                     setGroupDragOffset({ x: 0, y: 0 });
-                    beginHistoryTransaction('group-drag', e.pointerId);
                     groupDragTimerRef.current = setTimeout(() => {
                       groupDragReadyRef.current = true;
                     }, 200);
                   }}
                 >
-                  {isEditing ? (
+                  {isEditing && !isMobileGroupUi ? (
                     <input
                       className={`flex-1 text-sm font-medium bg-transparent border-none outline-none focus-visible:ring-1 focus-visible:ring-current/40 rounded ${isMonochrome ? 'text-blue-700' : 'text-gold'}`}
                       value={groupEditName}
@@ -12984,39 +13560,91 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       autoFocus
                       onClick={(e) => e.stopPropagation()}
                     />
+                  ) : isMobileGroupUi ? (
+                    <span className={`flex h-11 min-w-0 basis-full flex-col justify-center overflow-hidden ${isMonochrome ? 'text-blue-700' : 'text-gold'}`}>
+                      <span className="w-full truncate text-sm font-medium">{group.name}</span>
+                      {group.note && <span className="w-full truncate text-xs opacity-80">{group.note}</span>}
+                    </span>
                   ) : (
                     <span className={`flex-1 text-sm font-medium truncate ${isMonochrome ? 'text-blue-700' : 'text-gold'}`}>
                       {group.name}
                     </span>
                   )}
-                  {group.note && !isEditing && (
+                  {isMobileGroupUi && (
+                    <button
+                      type="button"
+                      aria-label="编辑图片组"
+                      aria-haspopup="dialog"
+                      aria-expanded={isEditing}
+                      ref={element => { if (element && isEditing) groupEditTriggerRef.current = element; }}
+                      className={`flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded hover:bg-white/10 ${isMonochrome ? 'text-blue-700' : 'text-gold'}`}
+                      onClick={event => {
+                        event.stopPropagation();
+                        setEditingGroupId(group.id);
+                        setGroupEditName(group.name);
+                        setGroupEditNote(group.note);
+                      }}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                  )}
+                  {group.note && !isEditing && !isMobileGroupUi && (
                     <span className={`text-xs truncate max-w-[120px] ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/70'}`}>
                       {group.note}
                     </span>
                   )}
                   <button
-                    className={`p-0.5 rounded hover:bg-white/10 transition-colors ${isMonochrome ? 'text-gray-500' : 'text-gold-muted'}`}
+                    className={`min-h-11 min-w-11 shrink-0 p-0.5 rounded hover:bg-white/10 transition-colors md:min-h-0 md:min-w-0 ${isMonochrome ? 'text-gray-500' : 'text-gold-muted'}`}
                     onClick={(e) => { e.stopPropagation(); handleToggleGroupCollapse(group.id); }}
                     title={group.collapsed ? '展开' : '折叠'}
                   >
                     <ChevronDown className={`h-3.5 w-3.5 transition-transform ${group.collapsed ? '-rotate-90' : ''}`} />
                   </button>
                   <button
-                    className={`p-0.5 rounded hover:bg-red-500/20 transition-colors ${isMonochrome ? 'text-gray-500' : 'text-gold-muted'}`}
+                    className={`min-h-11 min-w-11 shrink-0 p-0.5 rounded hover:bg-red-500/20 transition-colors md:min-h-0 md:min-w-0 ${isMonochrome ? 'text-gray-500' : 'text-gold-muted'}`}
                     onClick={(e) => { e.stopPropagation(); handleDeleteGroup(group.id); }}
                     title="取消分组"
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
                 </div>
+            );
+            return (
+              <div
+                key={group.id}
+                data-toolbar={isMobileGroupUi ? 'image-group-background' : 'image-group'}
+                className={`absolute rounded-xl border-2 ${isMonochrome ? 'border-blue-400/60 bg-blue-50/10' : 'border-gold/40 bg-gold/5'} pointer-events-auto`}
+                style={{
+                  left: groupX,
+                  top: groupY,
+                  width: isMobileGroupUi ? Math.max(180, groupW) : groupW,
+                  height: group.collapsed ? titleBarH + padding * 2 + (isMobileGroupUi ? 4 : 0) : groupH,
+                  zIndex: 5,
+                  overflow: 'hidden',
+                  transition: 'height 0.3s ease',
+                }}
+              >
+                {isMobileGroupUi ? (
+                  <MobileGroupHeader
+                    data-toolbar="image-group"
+                    viewport={canvasRef.current}
+                    surface={canvasTransformRef.current}
+                    bounds={{ x: groupX, y: groupY, width: groupW, minX: minX + dragOff.x, minY: minY + dragOff.y, maxX: maxX + dragOff.x, maxY: maxY + dragOff.y }}
+                    collapsed={group.collapsed}
+                    imageCount={groupImages.length}
+                    isMonochrome={isMonochrome}
+                  >
+                    {groupTitleBar}
+                  </MobileGroupHeader>
+                ) : groupTitleBar}
                 {/* Collapsed indicator */}
-                {group.collapsed && groupImages.length > 0 && (
+                {group.collapsed && groupImages.length > 0 && !isMobileGroupUi && (
                   <div className={`px-3 py-1 text-xs ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/50'}`}>
                     {groupImages.length} 张图片
                   </div>
                 )}
                 {/* Note editing */}
-                {isEditing && (
+                {isEditing && !isMobileGroupUi && (
                   <div className="px-3 py-1">
                     <input
                       className={`w-full text-xs bg-transparent border-b outline-none focus-visible:ring-1 focus-visible:ring-current/30 ${isMonochrome ? 'text-gray-500 border-gray-200' : 'text-gold-muted border-white/[0.12]'}`}
@@ -13033,7 +13661,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           })}
           {renderItemsWithThumbnails.map(({ image, priority }: { image: CanvasImage; priority: CanvasRenderPriority }) => {
             const isSelected = selectedIds.has(image.id);
-            const isDragging = dragTarget && selectedIds.has(image.id);
+            const isDragging = dragTarget && selectedIds.has(image.id) && dragEligibleIdsRef.current.has(image.id) && !image.locked;
             // Hide images belonging to collapsed groups
             const isGroupCollapsed = image.groupId ? (groups.find(g => g.id === image.groupId)?.collapsed ?? false) : false;
             // Hide images belonging to collapsed gen groups (reference/fusion groups)
@@ -13042,10 +13670,10 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
             // Hide result images on canvas (they're shown in the result frame instead)
             const isGenGroupResultImage = genGroups.some(g => g.resultImageIds && g.resultImageIds.includes(image.id));
             // Apply group drag offset to images in the dragged group
-            const isGroupDragging = groupDragTarget && image.groupId === groupDragTarget;
+            const isGroupDragging = groupDragTarget && image.groupId === groupDragTarget && !groupLockInvalidatedRef.current && !groupDragHasLockedMember;
             // Apply genGroup drag offset to images belonging to the dragged gen group
             const draggedGenGroup = genGroupDragTarget ? genGroups.find(g => g.id === genGroupDragTarget) : null;
-            const isInDraggedGenGroup = !!draggedGenGroup && (draggedGenGroup.refImages.some(r => r.imageId === image.id) || (draggedGenGroup.resultImageIds && draggedGenGroup.resultImageIds.includes(image.id)));
+            const isInDraggedGenGroup = !!draggedGenGroup && !genGroupLockInvalidatedRef.current && !genGroupDragHasLockedMember && (draggedGenGroup.refImages.some(r => r.imageId === image.id) || (draggedGenGroup.resultImageIds && draggedGenGroup.resultImageIds.includes(image.id)));
             const useOriginalMedia = zoom > 0.5 || (image.width && image.width * zoom > THUMBNAIL_MAX) || !image.thumbnailUrl;
             const mediaSource = image.mediaType === 'video'
               ? image.videoThumbnailUrl || image.thumbnailUrl || (image.url !== image.videoUrl ? image.url : '')
@@ -13056,14 +13684,15 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
               <div
                 key={image.id}
                 data-canvas-image-id={image.id}
+                tabIndex={-1}
                 data-canvas-selected={isSelected ? 'true' : 'false'}
                 className={`absolute group z-10 ${isSelected ? 'z-[60]' : ''} ${editMode !== 'none' && editImageId !== image.id ? 'opacity-30' : ''}`}
                 style={{
-                  left: (resizingImage === image.id && resizePreview ? resizePreview.x : image.x) + (isDragging ? dragOffset.x : 0) + (isGroupDragging ? groupDragOffset.x : 0) + (isInDraggedGenGroup ? genGroupDragOffset.x : 0),
-                  top: (resizingImage === image.id && resizePreview ? resizePreview.y : image.y) + (isDragging ? dragOffset.y : 0) + (isGroupDragging ? groupDragOffset.y : 0) + (isInDraggedGenGroup ? genGroupDragOffset.y : 0),
-                  width: resizingImage === image.id && resizePreview ? resizePreview.width : image.width,
-                  height: resizingImage === image.id && resizePreview ? resizePreview.height : image.height,
-                  display: (isGroupCollapsed || isInCollapsedGenGroup || isGenGroupResultImage) ? 'none' : undefined,
+                  left: (resizingImage === image.id && resizePreview && !image.locked && !resizeLockInvalidatedRef.current ? resizePreview.x : image.x) + (isDragging ? dragOffset.x : 0) + (isGroupDragging ? groupDragOffset.x : 0) + (isInDraggedGenGroup ? genGroupDragOffset.x : 0),
+                  top: (resizingImage === image.id && resizePreview && !image.locked && !resizeLockInvalidatedRef.current ? resizePreview.y : image.y) + (isDragging ? dragOffset.y : 0) + (isGroupDragging ? groupDragOffset.y : 0) + (isInDraggedGenGroup ? genGroupDragOffset.y : 0),
+                  width: resizingImage === image.id && resizePreview && !image.locked && !resizeLockInvalidatedRef.current ? resizePreview.width : image.width,
+                  height: resizingImage === image.id && resizePreview && !image.locked && !resizeLockInvalidatedRef.current ? resizePreview.height : image.height,
+                  display: (image.visible === false || isGroupCollapsed || isInCollapsedGenGroup || isGenGroupResultImage) ? 'none' : undefined,
                   containIntrinsicSize: `${image.width}px ${image.height}px`,
                 }}
                 onMouseEnter={() => {
@@ -13110,24 +13739,29 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                     />
                     )}
                     <div className="absolute inset-0 bg-black/50 pointer-events-none" />
-                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 pointer-events-none">
+                    <div className={`absolute inset-0 flex flex-col items-center justify-center gap-2 pointer-events-none ${isTerminalProcessingFailure(image.processing) ? 'pb-8 md:pb-0' : ''}`}>
                       {isTerminalProcessingFailure(image.processing) ? (
                         <>
-                          <div className={`px-4 py-2 rounded-full bg-red-950/90 text-sm font-medium shadow-lg border ${isMonochrome ? 'text-red-700 border-red-300' : 'text-red-200 border-red-400/30'}`}>
+                          <div className={`px-4 py-2 shrink-0 rounded-full text-sm font-medium shadow-lg border ${isMonochrome ? 'bg-red-50 text-red-700 border-red-300' : 'bg-red-950/90 text-red-200 border-red-400/30'}`}>
                             {image.processing.label || '任务失败'}
                           </div>
-                          <p className="max-w-[80%] text-center text-xs leading-5 text-white/80">
+                          <p
+                            data-popup="task-error"
+                            tabIndex={0}
+                            style={{ touchAction: 'pan-y' }}
+                            onWheel={(event) => event.stopPropagation()}
+                            className="pointer-events-auto min-h-0 max-w-[80%] overflow-y-auto overscroll-contain break-all text-center text-xs leading-5 text-white/80">
                             {image.processing.error || '任务未能完成，请检查模型配置后重试'}
                           </p>
                           {image.processing.taskId && (
-                            <span className="max-w-[80%] truncate text-[10px] font-mono text-white/45">
+                            <span className="max-w-[80%] shrink-0 truncate text-[10px] font-mono text-white/45">
                               {image.processing.taskId}
                             </span>
                           )}
-                          <div className="pointer-events-auto flex items-center gap-2">
+                          <div data-popup="task-failure-actions" className="pointer-events-auto flex shrink-0 items-center gap-2">
                             {image.processing.retryable && onRetryProcessing && (
                               <button
-                                className={`px-3 py-1 text-xs font-medium transition-colors ${isMonochrome ? 'bg-gray-900 text-white hover:bg-gray-700' : 'bg-gold text-black hover:bg-gold-light'}`}
+                                className={`min-h-11 min-w-11 px-3 py-1 text-xs font-medium transition-colors md:min-h-0 md:min-w-0 ${isMonochrome ? 'bg-gray-900 text-white hover:bg-gray-700' : 'bg-gold text-black hover:bg-gold-light'}`}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   onRetryProcessing?.(image);
@@ -13137,7 +13771,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                               </button>
                             )}
                             <button
-                              className="px-3 py-1 bg-red-600 text-xs font-medium text-white transition-colors hover:bg-red-500"
+                              className="min-h-11 min-w-11 px-3 py-1 bg-red-600 text-xs font-medium text-white transition-colors hover:bg-red-500 md:min-h-0 md:min-w-0"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 removeProcessingFrame(image.id);
@@ -13194,7 +13828,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                           {/* ★ 取消按钮 */}
                           <button
                             type="button"
-                            className="pointer-events-auto mt-0.5 px-3 py-1 rounded-full bg-red-600 hover:bg-red-500 text-white text-xs font-medium transition-colors"
+                            className="pointer-events-auto mt-0.5 min-h-11 min-w-11 px-3 py-1 rounded-full bg-red-600 hover:bg-red-500 text-white text-xs font-medium transition-colors md:min-h-0 md:min-w-0"
                             onPointerDown={(e) => e.stopPropagation()}
                             onClick={(e) => {
                               e.stopPropagation();
@@ -13233,7 +13867,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                           {/* ★ 取消按钮 */}
                           <button
                             type="button"
-                            className="pointer-events-auto mt-0.5 px-3 py-1 rounded-full bg-red-600 hover:bg-red-500 text-white text-xs font-medium transition-colors"
+                            className="pointer-events-auto mt-0.5 min-h-11 min-w-11 px-3 py-1 rounded-full bg-red-600 hover:bg-red-500 text-white text-xs font-medium transition-colors md:min-h-0 md:min-w-0"
                             onPointerDown={(e) => e.stopPropagation()}
                             onClick={(e) => {
                               e.stopPropagation();
@@ -13259,7 +13893,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                     {image.mediaAvailability !== 'unrecoverable' && <div className="pointer-events-auto flex items-center gap-2">
                       <button
                         type="button"
-                        className={`px-3 py-1 text-xs font-medium transition-colors ${isMonochrome ? 'bg-red-700 text-white hover:bg-red-800' : 'bg-red-500 text-white hover:bg-red-400'}`}
+                        className={`min-h-11 min-w-11 px-3 py-1 text-xs font-medium transition-colors md:min-h-0 md:min-w-0 ${isMonochrome ? 'bg-red-700 text-white hover:bg-red-800' : 'bg-red-500 text-white hover:bg-red-400'}`}
                         onPointerDown={(e) => e.stopPropagation()}
                         onClick={(e) => {
                           e.stopPropagation();
@@ -13270,7 +13904,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       </button>
                       <button
                         type="button"
-                        className={`px-3 py-1 text-xs font-medium transition-colors ${isMonochrome ? 'bg-white text-red-800 ring-1 ring-red-200 hover:bg-red-100' : 'bg-white/10 text-red-100 hover:bg-white/20'}`}
+                        className={`min-h-11 min-w-11 px-3 py-1 text-xs font-medium transition-colors md:min-h-0 md:min-w-0 ${isMonochrome ? 'bg-white text-red-800 ring-1 ring-red-200 hover:bg-red-100' : 'bg-white/10 text-red-100 hover:bg-white/20'}`}
                         onPointerDown={(e) => e.stopPropagation()}
                         onClick={(e) => {
                           e.stopPropagation();
@@ -13284,6 +13918,9 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                 ) : (mediaRenderDecision === 'image' || mediaRenderDecision === 'video') && mediaSource ? (
                   <CanvasMediaNode key={`${image.id}:${image.mediaAvailability || 'ready'}`}
                     imageId={image.id}
+                    mediaIdentity={JSON.stringify([projectId || null, image.assetId || null, image.assetVersionId || null])}
+                    mediaOriginalIdentity={image.url}
+                    mediaThumbnailIdentity={image.thumbnailUrl}
                     source={mediaSource}
                     sourceKind={mediaSourceKind}
                     alt={image.prompt ? image.prompt.replace(/^\[画布上下文[：:][^\]]*\]\s*/, '').substring(0, 60) : 'canvas image'}
@@ -13309,7 +13946,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                         return;
                       }
                       if (action === 'ignore') return;
-                      if (action === 'fallback-original' || action === 'mark-missing') return;
+                      if (action === 'retry-thumbnail' || action === 'fallback-original' || action === 'mark-missing') return;
                       img.dataset.retried = '1';
                       const url = image.url;
                       // /uploads/xxx → /api/serve-upload/xxx (S3回退恢复)
@@ -13468,7 +14105,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                     /* ── Static thumbnail + play button ── */
                     <div
                       className="absolute inset-0 flex items-center justify-center z-20 cursor-pointer group/play bg-black/20"
-                      onPointerDown={(e) => e.stopPropagation()}
+                      onPointerDown={(e) => { if (!isMobileGroupUi && e.pointerType !== 'touch') e.stopPropagation(); }}
                       onClick={(e) => {
                         e.stopPropagation();
                         if (image.videoUrl) {
@@ -13516,7 +14153,9 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                         setViewer3DModelInfo(image.threeDModelInfo || {});
                         setShow3DViewer(true);
                       }}
-                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md font-bold shadow-lg transition-colors cursor-pointer ${isMonochrome ? 'bg-blue-500/90 text-white hover:bg-blue-500' : 'bg-gold/90 text-black hover:bg-gold'}`}
+                      aria-label="预览3D模型"
+                      style={isMobileGroupUi ? { minWidth: 44 / zoom, minHeight: 44 / zoom } : undefined}
+                      className={`inline-flex items-center justify-center gap-1 px-1.5 py-0.5 rounded-md font-bold shadow-lg transition-colors cursor-pointer ${isMonochrome ? 'bg-blue-500/90 text-white hover:bg-blue-500' : 'bg-gold/90 text-black hover:bg-gold'}`}
                     >
                       <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
                         <path d="M8 1L14.5 5V11L8 15L1.5 11V5L8 1Z M8 1V8 M1.5 5L8 8L14.5 5" stroke="currentColor" strokeWidth="1.2" fill="none" />
@@ -14071,14 +14710,15 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
 
             // Accent colors
             const isRef = group.type === 'reference';
-            const accentColor = isRef ? '#d4af37' : '#4ecdc4';
+            const groupReferenceIssue = getGenerationGroupReferenceIssue(group);
+            const accentColor = isMobileGroupUi && isMonochrome ? '#1d4ed8' : isRef ? '#d4af37' : '#4ecdc4';
             const accentBg = isRef ? 'rgba(212,175,55,0.06)' : 'rgba(78,205,196,0.06)';
             const accentBgStrong = isRef ? 'rgba(212,175,55,0.12)' : 'rgba(78,205,196,0.12)';
             const accentBorder = isRef ? 'rgba(212,175,55,0.35)' : 'rgba(78,205,196,0.35)';
             const accentBorderStrong = isRef ? 'rgba(212,175,55,0.6)' : 'rgba(78,205,196,0.6)';
 
             // Drag offset for this group
-            const isThisGroupDragging = genGroupDragTarget === group.id;
+            const isThisGroupDragging = genGroupDragTarget === group.id && !genGroupLockInvalidatedRef.current && !images.some(image => image.locked && (group.sourceImageIds.includes(image.id) || group.resultImageIds?.includes(image.id)));
             const isHoveredForDrop = hoveredGenGroupId === group.id;
             const dragDx = isThisGroupDragging ? genGroupDragOffset.x : 0;
             const dragDy = isThisGroupDragging ? genGroupDragOffset.y : 0;
@@ -14135,11 +14775,96 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
             const currentModelObj = canvasGenModels.find(m => m.id === group.toolbar.model && m.providerId === (group.toolbar.providerId || ''));
             const modelDisplayName = currentModelObj ? `${currentModelObj.apiDisplayName || getModelDisplayName(currentModelObj.id)} · 来自 ${currentModelObj.providerName}` : (group.toolbar.model ? getModelDisplayName(group.toolbar.model) : '选择模型');
 
+            const mobileHost = mobileGenerationGroupHosts[group.id] || null;
+            const renderResultPreview = (compact: boolean): React.ReactElement => (
+                  <div
+                    className={`w-full rounded-xl flex flex-col items-center justify-center gap-3 overflow-hidden relative ${group.resultPlaceholder.resultUrl ? '' : ''}`}
+                    style={{
+                      height: compact ? 160 : resultH,
+                      border: group.resultPlaceholder.resultUrl
+                        ? `2px solid ${accentColor}60`
+                        : `2px dashed ${accentBorderStrong}`,
+                      background: group.resultPlaceholder.resultUrl ? 'transparent' : accentBg,
+                    }}
+                  >
+                    {/* 'new' tag when result exists */}
+                    {group.resultPlaceholder.resultUrl && (
+                      <div
+                        className="absolute top-2 left-2 px-2 py-0.5 rounded-md text-xs font-bold z-10"
+                        style={{ background: accentColor, color: '#000' }}
+                      >
+                        NEW
+                      </div>
+                    )}
+                    {group.resultPlaceholder.isProcessing ? (
+                      <>
+                        <div className="w-8 h-8 border-3 border-t-transparent rounded-full animate-spin"
+                          style={{ borderColor: accentColor, borderTopColor: 'transparent', borderWidth: '3px' }} />
+                        <span className="text-sm font-semibold" style={{ color: accentColor }}>
+                          生成中 {group.resultPlaceholder.progress ? `${Math.round(group.resultPlaceholder.progress)}%` : '0%'}
+                        </span>
+                        {group.resultPlaceholder.startedAt && (
+                          <span className="text-xs" style={{ color: isMobileGroupUi ? (isMonochrome ? "#4b5563" : "#cbd5e1") : `${accentColor}88` }}>
+                            {(() => {
+                              void genGroupTick; // trigger re-render
+                              const elapsed = Math.floor((Date.now() - group.resultPlaceholder.startedAt!) / 1000);
+                              const min = Math.floor(elapsed / 60);
+                              const sec = elapsed % 60;
+                              return min > 0 ? `${min}分${sec}秒` : `${sec}秒`;
+                            })()}
+                          </span>
+                        )}
+                        {/* Progress bar */}
+                        <div className="w-3/4 h-1.5 rounded-full overflow-hidden" style={{ background: `${accentColor}22` }}>
+                          <div className="h-full rounded-full transition-all duration-300" style={{ width: `${group.resultPlaceholder.progress || 0}%`, background: accentColor }} />
+                        </div>
+                        {/* Cancel button */}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); if (group.resultPlaceholder.imageId) { removeProcessingFrame(group.resultPlaceholder.imageId); fetch('/api/cancel-task', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId: group.resultPlaceholder.imageId }) }).catch(() => {}); } }}
+                          className="mt-1 min-h-11 px-3 py-1 text-base rounded-md transition-colors hover:opacity-80 md:min-h-0 md:text-xs"
+                          style={{ background: `${accentColor}33`, color: accentColor }}
+                        >
+                          取消
+                        </button>
+                      </>
+                    ) : group.resultPlaceholder.errorMsg ? (
+                      <>
+                        <div className="w-6 h-6 flex items-center justify-center rounded-full" style={{ background: 'rgba(239,68,68,0.2)' }}>
+                          <span className="text-red-400 text-xs font-bold">!</span>
+                        </div>
+                        <span className="text-xs text-red-400 text-center px-2 max-w-full line-clamp-2">
+                          {group.resultPlaceholder.errorMsg}
+                        </span>
+                      </>
+                    ) : group.resultPlaceholder.resultUrl ? (
+                      <NextImage unoptimized width={1} height={1}                         src={group.resultPlaceholder.resultUrl}
+                        className="w-full h-full object-cover rounded-[10px]"
+                        alt="result"
+                        draggable={false}
+                      />
+                    ) : (
+                      <>
+                        <div className="w-6 h-6 rotate-45 rounded-sm"
+                          style={{ border: `2px solid ${accentBorderStrong}`, margin: '4px' }} />
+                        <span className="text-sm font-semibold" style={{ color: isMobileGroupUi ? (isMonochrome ? "#4b5563" : "#cbd5e1") : `${accentColor}99` }}>
+                          {isRef ? '参考图输出' : '融图输出'}
+                        </span>
+                        <span className="text-xs font-medium" style={{ color: isMobileGroupUi ? (isMonochrome ? "#4b5563" : "#cbd5e1") : `${accentColor}77` }}>
+                          {srcImages.map(r => `R${r.refNumber}`).join(' + ')} →
+                        </span>
+                        <span className="text-xs" style={{ color: isMobileGroupUi ? (isMonochrome ? "#4b5563" : "#cbd5e1") : `${accentColor}66` }}>
+                          {group.toolbar.aspectRatio}
+                        </span>
+                      </>
+                    )}
+                  </div>
+            );
+
             return (
               <div key={`gen-group-${group.id}`}>
                 {/* Container frame — visible border around the entire group */}
                 <div
-                  data-toolbar="generation-group"
+                  data-toolbar={isMobileGroupUi ? 'generation-group-world' : 'generation-group'}
                   className="absolute pointer-events-none rounded-2xl"
                   style={{
                     left: containerMinX,
@@ -14155,6 +14880,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                   }}
                 >
                   {/* Title bar — draggable + collapse/close */}
+                  <ResponsiveGenerationGroupSlot mobile={isMobileGroupUi} host={mobileHost} slot="title">
                   <div
                     data-canvas-group-drag-handle
                     className="flex items-center justify-between px-4 py-1.5 rounded-t-2xl pointer-events-auto select-none"
@@ -14163,12 +14889,13 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       if (e.button !== 0) return;
                       if ((e.target as HTMLElement).closest('button')) return;
                       e.stopPropagation();
+                      if (imagesRef.current.some(image => image.locked && (group.sourceImageIds.includes(image.id) || group.resultImageIds?.includes(image.id)))) return;
+                      genGroupLockInvalidatedRef.current = false;
                       e.currentTarget.setPointerCapture(e.pointerId);
                       setGenGroupDragTarget(group.id);
                       const canvasPos = screenToCanvas(e.clientX, e.clientY);
                       setGenGroupDragStart(canvasPos);
                       setGenGroupDragOffset({ x: 0, y: 0 });
-                      beginHistoryTransaction('group-drag', e.pointerId);
                       genGroupDragReadyRef.current = false;
                       genGroupDragTimerRef.current = setTimeout(() => {
                         genGroupDragReadyRef.current = true;
@@ -14181,13 +14908,13 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       <span className="text-sm font-semibold" style={{ color: accentColor }}>
                         {isRef ? '参考图组' : '融图组'}
                       </span>
-                      <span className="text-xs font-medium" style={{ color: `${accentColor}88` }}>
+                      <span className="text-xs font-medium" style={{ color: isMobileGroupUi ? (isMonochrome ? "#4b5563" : "#cbd5e1") : `${accentColor}88` }}>
                         {srcImages.length} 张参考图
                       </span>
                     </div>
                     <div className="flex items-center gap-1">
                       <button
-                        className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+                        className="w-11 h-11 flex items-center justify-center rounded-md hover:bg-black/10 dark:hover:bg-white/10 transition-colors md:w-6 md:h-6"
                         onClick={(e) => {
                           e.stopPropagation();
                           setGenGroups(prev => prev.map(g =>
@@ -14201,7 +14928,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                         </svg>
                       </button>
                       <button
-                        className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-red-500/20 transition-colors"
+                        className="w-11 h-11 flex items-center justify-center rounded-md hover:bg-red-500/20 transition-colors md:w-6 md:h-6"
                         onClick={(e) => { e.stopPropagation(); deleteGenGroup(group.id); }}
                         title="关闭组"
                       >
@@ -14211,6 +14938,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       </button>
                     </div>
                   </div>
+                  </ResponsiveGenerationGroupSlot>
 
                   {/* Content (hidden when collapsed) */}
                   {!group.isCollapsed && (
@@ -14256,17 +14984,22 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                 {srcImages.map(img => {
                   const imgCats = isRef ? (group.sourceCategories[img.id] || []) : [];
                   return (
+                  <React.Fragment key={`ref-label-${img.id}`}>
+                  {isMobileGroupUi && <div className="absolute rounded px-2 py-1 text-xs font-semibold pointer-events-none" style={{ left: img.x + dragDx - containerMinX, top: img.y + dragDy - containerMinY, color: "#000", background: isRef ? "#d4af37" : "#4ecdc4", zIndex: 26 }}>R{img.refNumber}</div>}
+                  <ResponsiveGenerationGroupSlot mobile={isMobileGroupUi} host={mobileHost} slot="sources">
                   <div
                     key={`ref-label-${img.id}`}
-                    className="absolute flex flex-col"
+                    data-generation-source={img.id}
+                    className={isMobileGroupUi ? 'relative flex min-w-0 w-full flex-col' : 'absolute flex flex-col'}
                     style={{
-                      left: img.x + dragDx - containerMinX,
-                      top: img.y + dragDy - containerMinY,
+                      left: isMobileGroupUi ? undefined : img.x + dragDx - containerMinX,
+                      top: isMobileGroupUi ? undefined : img.y + dragDy - containerMinY,
                       zIndex: 26,
                     }}
                   >
                     {/* Image area - label overlay */}
-                    <div className="relative" style={{ width: img.width, height: img.height }}>
+                    <div className="relative" style={{ width: isMobileGroupUi ? '100%' : img.width, height: isMobileGroupUi ? 96 : img.height }}>
+                      {isMobileGroupUi && <NextImage unoptimized width={1} height={1} src={img.url} alt={`参考图 R${img.refNumber}`} className="h-full w-full rounded-lg object-contain" />}
                       {/* Label badge at top-left of image */}
                       <div
                         className="absolute top-0 left-0 flex items-center gap-1.5 px-2 py-1 rounded-lg pointer-events-auto"
@@ -14279,11 +15012,12 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                           R{img.refNumber}
                         </span>
                         <button
-                          className="w-4 h-4 flex items-center justify-center rounded-full text-black/60 hover:text-black hover:bg-black/10 transition-colors text-xs font-bold"
+                          aria-label={`移除 R${img.refNumber} 参考图`}
+                          className="w-11 h-11 flex items-center justify-center rounded-full text-black/60 hover:text-black hover:bg-black/10 transition-colors text-xs font-bold md:w-4 md:h-4"
                           onClick={(e) => { e.stopPropagation(); removeRefFromGroup(group.id, img.id); }}
                           title="移除此参考图"
                         >
-                          x
+                          <X className="h-4 w-4" />
                         </button>
                       </div>
                     </div>
@@ -14307,18 +15041,21 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                               key={cat}
                               className="flex items-center gap-1.5 px-2"
                               style={{
-                                height: '22px',
+                                height: isMobileGroupUi ? '44px' : '22px',
                                 borderBottom: idx < REFERENCE_CATEGORIES.length - 1
                                   ? isMonochrome ? '1px solid rgba(0,0,0,0.06)' : '1px solid rgba(255,255,255,0.05)'
                                   : 'none',
                               }}
                             >
-                              <span
-                                className="flex-shrink-0 w-8 text-[11px] font-medium select-none cursor-pointer transition-colors"
+                              <button
+                                type="button"
+                                aria-label={`R${img.refNumber} ${REFERENCE_CATEGORY_LABELS[cat]}`}
+                                aria-pressed={isSelected}
+                                className="flex-shrink-0 min-h-11 min-w-11 text-sm font-medium select-none cursor-pointer transition-colors md:min-h-0 md:min-w-0 md:w-8 md:text-[11px]"
                                 style={{
                                   color: isSelected
                                     ? accentColor
-                                    : isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.35)',
+                                    : isMobileGroupUi ? (isMonochrome ? '#4b5563' : '#cbd5e1') : isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.35)',
                                 }}
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -14342,17 +15079,20 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                                 }}
                               >
                                 {REFERENCE_CATEGORY_LABELS[cat]}
-                              </span>
+                              </button>
                               <input
                                 type="range"
+                                aria-label={`R${img.refNumber} ${REFERENCE_CATEGORY_LABELS[cat]}强度`}
                                 min={0}
                                 max={100}
                                 value={strength}
-                                className="flex-1 h-[3px] appearance-none rounded-full cursor-pointer"
+                                className="min-w-0 flex-1 h-11 appearance-none rounded-full cursor-pointer py-5 [background-clip:content-box] [touch-action:pan-y] md:h-[3px] md:py-0"
                                 style={{
                                   accentColor,
-                                  background: `linear-gradient(to right, ${isSelected ? accentColor : isMonochrome ? '#ccc' : '#555'} ${strength}%, ${isMonochrome ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.1)'} ${strength}%)`,
-                                  opacity: isSelected ? 1 : 0.35,
+                                  backgroundImage: `linear-gradient(to right, ${isSelected ? accentColor : isMonochrome ? '#ccc' : '#555'} ${strength}%, ${isMonochrome ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.1)'} ${strength}%)`,
+                                  height: isMobileGroupUi ? 44 : undefined,
+                                  backgroundClip: isMobileGroupUi ? 'content-box' : undefined,
+                                  opacity: isMobileGroupUi ? 1 : isSelected ? 1 : 0.35,
                                   transition: 'opacity 0.15s',
                                 }}
                                 onChange={(e) => {
@@ -14371,11 +15111,11 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                                 onClick={(e) => e.stopPropagation()}
                               />
                               <span
-                                className="flex-shrink-0 w-6 text-right text-[11px] font-semibold tabular-nums"
+                                className="flex-shrink-0 w-10 text-right text-sm font-semibold tabular-nums md:w-6 md:text-[11px]"
                                 style={{
                                   color: isSelected
                                     ? accentColor
-                                    : isMonochrome ? 'rgba(0,0,0,0.22)' : 'rgba(255,255,255,0.2)',
+                                    : isMobileGroupUi ? (isMonochrome ? '#4b5563' : '#cbd5e1') : isMonochrome ? 'rgba(0,0,0,0.22)' : 'rgba(255,255,255,0.2)',
                                 }}
                               >
                                 {strength}%
@@ -14386,9 +15126,12 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       </div>
                     )}
                   </div>
+                  </ResponsiveGenerationGroupSlot>
+                  </React.Fragment>
                 );
               })}
 
+                {isMobileGroupUi && <ResponsiveGenerationGroupSlot mobile host={mobileHost} slot="preview">{renderResultPreview(true)}</ResponsiveGenerationGroupSlot>}
                 {/* Result placeholder frame + Toolbar */}
                 <div
                   className="absolute pointer-events-auto"
@@ -14399,91 +15142,11 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                     zIndex: 25,
                   }}
                 >
-                  {/* Image area */}
-                  <div
-                    className={`w-full rounded-xl flex flex-col items-center justify-center gap-3 overflow-hidden relative ${group.resultPlaceholder.resultUrl ? '' : ''}`}
-                    style={{
-                      height: resultH,
-                      border: group.resultPlaceholder.resultUrl
-                        ? `2px solid ${accentColor}60`
-                        : `2px dashed ${accentBorderStrong}`,
-                      background: group.resultPlaceholder.resultUrl ? 'transparent' : accentBg,
-                    }}
-                  >
-                    {/* 'new' tag when result exists */}
-                    {group.resultPlaceholder.resultUrl && (
-                      <div
-                        className="absolute top-2 left-2 px-2 py-0.5 rounded-md text-xs font-bold z-10"
-                        style={{ background: accentColor, color: '#000' }}
-                      >
-                        NEW
-                      </div>
-                    )}
-                    {group.resultPlaceholder.isProcessing ? (
-                      <>
-                        <div className="w-8 h-8 border-3 border-t-transparent rounded-full animate-spin"
-                          style={{ borderColor: accentColor, borderTopColor: 'transparent', borderWidth: '3px' }} />
-                        <span className="text-sm font-semibold" style={{ color: accentColor }}>
-                          生成中 {group.resultPlaceholder.progress ? `${Math.round(group.resultPlaceholder.progress)}%` : '0%'}
-                        </span>
-                        {group.resultPlaceholder.startedAt && (
-                          <span className="text-xs" style={{ color: `${accentColor}88` }}>
-                            {(() => {
-                              void genGroupTick; // trigger re-render
-                              const elapsed = Math.floor((Date.now() - group.resultPlaceholder.startedAt!) / 1000);
-                              const min = Math.floor(elapsed / 60);
-                              const sec = elapsed % 60;
-                              return min > 0 ? `${min}分${sec}秒` : `${sec}秒`;
-                            })()}
-                          </span>
-                        )}
-                        {/* Progress bar */}
-                        <div className="w-3/4 h-1.5 rounded-full overflow-hidden" style={{ background: `${accentColor}22` }}>
-                          <div className="h-full rounded-full transition-all duration-300" style={{ width: `${group.resultPlaceholder.progress || 0}%`, background: accentColor }} />
-                        </div>
-                        {/* Cancel button */}
-                        <button
-                          onClick={(e) => { e.stopPropagation(); if (group.resultPlaceholder.imageId) { removeProcessingFrame(group.resultPlaceholder.imageId); fetch('/api/cancel-task', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId: group.resultPlaceholder.imageId }) }).catch(() => {}); } }}
-                          className="mt-1 px-3 py-1 text-xs rounded-md transition-colors hover:opacity-80"
-                          style={{ background: `${accentColor}33`, color: accentColor }}
-                        >
-                          取消
-                        </button>
-                      </>
-                    ) : group.resultPlaceholder.errorMsg ? (
-                      <>
-                        <div className="w-6 h-6 flex items-center justify-center rounded-full" style={{ background: 'rgba(239,68,68,0.2)' }}>
-                          <span className="text-red-400 text-xs font-bold">!</span>
-                        </div>
-                        <span className="text-xs text-red-400 text-center px-2 max-w-full line-clamp-2">
-                          {group.resultPlaceholder.errorMsg}
-                        </span>
-                      </>
-                    ) : group.resultPlaceholder.resultUrl ? (
-                      <NextImage unoptimized width={1} height={1}                         src={group.resultPlaceholder.resultUrl}
-                        className="w-full h-full object-cover rounded-[10px]"
-                        alt="result"
-                        draggable={false}
-                      />
-                    ) : (
-                      <>
-                        <div className="w-6 h-6 rotate-45 rounded-sm"
-                          style={{ border: `2px solid ${accentBorderStrong}`, margin: '4px' }} />
-                        <span className="text-sm font-semibold" style={{ color: `${accentColor}99` }}>
-                          {isRef ? '参考图输出' : '融图输出'}
-                        </span>
-                        <span className="text-xs font-medium" style={{ color: `${accentColor}77` }}>
-                          {srcImages.map(r => `R${r.refNumber}`).join(' + ')} →
-                        </span>
-                        <span className="text-xs" style={{ color: `${accentColor}66` }}>
-                          {group.toolbar.aspectRatio}
-                        </span>
-                      </>
-                    )}
-                  </div>
+                  {renderResultPreview(false)}
 
                   {/* Toolbar — hidden when result exists, only show generating/idle toolbar */}
                   {!group.resultPlaceholder.resultUrl && (
+                  <ResponsiveGenerationGroupSlot mobile={isMobileGroupUi} host={mobileHost} slot="toolbar">
                   <div
                     className="flex flex-col gap-2 mt-2 px-3 py-3 rounded-xl"
                     style={{
@@ -14495,9 +15158,9 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                   >
                     {/* Row 1: Model selector — custom dropdown with highlight */}
                     <div className="relative">
-                      <span className="text-xs font-medium shrink-0 mb-1 block" style={{ color: `${accentColor}cc` }}>模型</span>
+                      <span className="text-xs font-medium shrink-0 mb-1 block" style={{ color: isMobileGroupUi ? (isMonochrome ? "#4b5563" : "#cbd5e1") : `${accentColor}cc` }}>模型</span>
                       <button
-                        className={`w-full text-left text-sm px-2.5 py-1.5 rounded-lg border flex items-center justify-between ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-white/5 border-white/[0.14] text-text-bright'}`}
+                        className={`w-full min-h-11 text-left text-base px-2.5 py-1.5 rounded-lg border flex items-center justify-between md:min-h-0 md:text-sm ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-white/5 border-white/[0.14] text-text-bright'}`}
                         onMouseDown={(e) => { e.stopPropagation(); }}
                         onClick={(e) => {
                           e.stopPropagation();
@@ -14505,23 +15168,26 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                           setOpenModelDropdownGroupId(prev => prev === group.id ? null : group.id);
                         }}
                       >
-                        <span className="truncate">{modelDisplayName}</span>
+                        <span className={isMobileGroupUi ? 'min-w-0 whitespace-normal break-words' : 'truncate'}>{modelDisplayName}</span>
                         <svg className="w-3.5 h-3.5 shrink-0 ml-1 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
                       </button>
                       {/* Custom dropdown */}
                       {openModelDropdownGroupId === group.id && (
                         <div
-                          className="absolute left-0 right-0 top-full mt-1 rounded-lg shadow-xl overflow-hidden z-50 max-h-64 overflow-y-auto"
+                          className={isMobileGroupUi ? 'relative mt-1 rounded-lg shadow-xl overflow-hidden z-50 max-h-64 overflow-y-auto' : 'absolute left-0 right-0 top-full mt-1 rounded-lg shadow-xl overflow-hidden z-50 max-h-64 overflow-y-auto'}
                           style={{ background: isMonochrome ? '#fff' : 'rgba(20,20,20,0.95)', border: isMonochrome ? '1px solid #ddd' : '1px solid #333' }}
                           onMouseDown={(e) => e.stopPropagation()}
                           onWheel={(e) => e.stopPropagation()}
                         >
                           {canvasGenModels.map((m, mi) => {
                             const isSelected = group.toolbar.model === m.id && group.toolbar.providerId === m.providerId;
+                            const availableDescriptor = taskModelCatalogIndex.get(taskModelKey(m.providerId, m.id));
+                            const mobileUnavailable = catalogStatus.loading || Boolean(catalogStatus.error) || !availableDescriptor?.supportsReferenceImages || !availableDescriptor.allowedRatios.length || (availableDescriptor.maxReferenceImages ?? Infinity) < srcImages.length;
                             return (
                               <button
                                 key={`${m.providerId}::${m.id}::${mi}`}
-                                className={`w-full text-left text-sm px-3 py-2 flex items-center gap-2 transition-colors ${isSelected ? (isMonochrome ? 'bg-blue-50 text-blue-800' : 'bg-gold/15 text-gold') : (isMonochrome ? 'hover:bg-gray-100 text-gray-700' : 'hover:bg-[#2a2a2a] text-text-bright')}`}
+                                disabled={isMobileGroupUi && mobileUnavailable}
+                                className={`w-full min-h-11 text-left text-base px-3 py-2 flex items-center gap-2 transition-colors md:min-h-0 md:text-sm ${isSelected ? (isMonochrome ? 'bg-blue-50 text-blue-800' : 'bg-gold/15 text-gold') : (isMonochrome ? 'hover:bg-gray-100 text-gray-700' : 'hover:bg-[#2a2a2a] text-text-bright')}`}
                                 onMouseDown={(e) => {
                                   e.stopPropagation();
                                 }}
@@ -14539,13 +15205,13 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                                     ? newResolution
                                     : calculateActualPixels(newAspectRatio, newResolution, m.id);
                                   setGenGroups(prev => prev.map(g =>
-                                    g.id === group.id ? { ...g, toolbar: { ...g.toolbar, model: m.id, providerId: m.providerId, providerName: m.providerName, aspectRatio: newAspectRatio, resolution: newResolution, quality: newQualityLevel, size: newSize } } : g
+                                    g.id === group.id ? { ...g, toolbar: { ...g.toolbar, model: m.id, providerId: m.providerId, providerName: m.providerName, aspectRatio: newAspectRatio, resolution: newResolution, quality: newQualityLevel, size: newSize, outputCount: Math.min(Math.max(1, g.toolbar.outputCount || g.toolbar.n || 1), Math.max(1, selectedDescriptor.maxOutputs)), n: Math.min(Math.max(1, g.toolbar.outputCount || g.toolbar.n || 1), Math.max(1, selectedDescriptor.maxOutputs)) } } : g
                                   ));
                                   setOpenModelDropdownGroupId(null);
                                 }}
                               >
                                 {isSelected && <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>}
-                                <span className="truncate">{m.apiDisplayName || getModelDisplayName(m.id)} · 来自 {m.providerName}</span>
+                                <span className={isMobileGroupUi ? 'min-w-0 whitespace-normal break-words' : 'truncate'}>{m.apiDisplayName || getModelDisplayName(m.id)} · 来自 {m.providerName}</span>
                               </button>
                             );
                           })}
@@ -14568,9 +15234,10 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       const currentQuality = group.toolbar.quality || supportedQualityLevels[0] || '';
                       const maxOutputs = groupDescriptor ? groupDescriptor.maxOutputs : 1;
                       return (
-                    <div className="flex items-center gap-2 flex-wrap">
+                    <div className={isMobileGroupUi ? 'grid min-w-0 grid-cols-2 gap-2' : 'flex items-center gap-2 flex-wrap'}>
                       {/* 图像比例 */}
                       <CanvasScaledMenuSelect
+                        touchLayout={isMobileGroupUi}
                         label="图像比例"
                         value={group.toolbar.aspectRatio}
                         options={supportedRatios.map(value => ({ value, label: value }))}
@@ -14592,6 +15259,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       {/* 分辨率档位 */}
                       {showResolution && (
                       <CanvasScaledMenuSelect
+                        touchLayout={isMobileGroupUi}
                         label="图片分辨率"
                         value={currentResolution}
                         options={supportedResolutions.map(value => ({
@@ -14617,6 +15285,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       {/* 图片质量 */}
                       {showQuality && (
                       <CanvasScaledMenuSelect
+                        touchLayout={isMobileGroupUi}
                         label="图片质量"
                         value={currentQuality}
                         options={supportedQualityLevels.map(value => ({
@@ -14638,6 +15307,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       )}
                       {/* 出图数量 */}
                       <CanvasScaledMenuSelect
+                        touchLayout={isMobileGroupUi}
                         label="出图数量"
                         value={String(group.toolbar.outputCount || group.toolbar.n || 1)}
                         options={Array.from({ length: maxOutputs }, (_, index) => index + 1).map(value => ({ value: String(value), label: `${value}张` }))}
@@ -14663,7 +15333,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                     {/* Row 3: Prompt textarea with resize handle */}
                     <div className="relative">
                       <textarea
-                        className={`w-full text-sm px-3 py-2 pr-10 rounded-lg border resize-y min-h-[60px] max-h-[160px] ${isMonochrome ? 'bg-white border-gray-200 text-gray-700 placeholder:text-gray-400 focus:ring-blue-400/30' : 'bg-white/5 border-white/[0.14] text-text-bright placeholder:text-gold-muted/70 focus:ring-gold/30'} focus:outline-none focus:ring-2 transition-all`}
+                        className={`w-full text-base px-3 py-2 pr-10 rounded-lg border resize-y min-h-[60px] md:text-sm max-h-[160px] ${isMonochrome ? 'bg-white border-gray-200 text-gray-700 placeholder:text-gray-400 focus:ring-blue-400/30' : 'bg-white/5 border-white/[0.14] text-text-bright placeholder:text-gold-muted/70 focus:ring-gold/30'} focus:outline-none focus:ring-2 transition-all`}
                         placeholder={isRef ? '描述你想要生成的图片，用自然语言说明如何参考以上图片...' : '描述你想要融合生成的图片效果...'}
                         value={group.toolbar.prompt}
                         rows={2}
@@ -14686,10 +15356,14 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       </div>
                     </div>
 
+                    {groupReferenceIssue && (
+                      <p role="status" className={`break-words text-sm leading-relaxed ${isMonochrome ? 'text-gray-700' : 'text-gray-200'}`}>{groupReferenceIssue}</p>
+                    )}
+
                     {/* Row 4: Optimize + Generate + Cancel */}
                     <div className="flex items-center gap-2">
                       <button
-                        className={`flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${isMonochrome ? 'bg-blue-50 hover:bg-blue-100 text-blue-600' : 'bg-[#252525] hover:bg-[#282828]/85 text-muted-foreground'}`}
+                        className={`flex min-h-11 items-center gap-1 px-3 py-2 rounded-lg text-base font-medium transition-all md:min-h-0 md:text-sm ${isMonochrome ? 'bg-blue-50 hover:bg-blue-100 text-blue-600' : 'bg-[#252525] hover:bg-[#282828]/85 text-muted-foreground'}`}
                         onClick={() => handleOptimizeGroupPrompt(group.id)}
                         disabled={optimizingGroupId === group.id || !group.toolbar.prompt.trim()}
                         title="调用AI优化提示词"
@@ -14702,15 +15376,15 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                         <span>{optimizingGroupId === group.id ? '优化中' : '优化'}</span>
                       </button>
                       <button
-                        className="flex-1 py-2.5 rounded-lg text-sm font-bold text-black transition-all hover:brightness-110 active:scale-[0.98]"
+                        className="min-h-11 flex-1 py-2.5 rounded-lg text-base font-bold text-black transition-all md:min-h-0 md:text-sm hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
                         style={{ background: isRef ? 'linear-gradient(135deg, #d4af37, #f0d060)' : 'linear-gradient(135deg, #4ecdc4, #45b7d1)' }}
                         onClick={() => handleGenGroupGenerate(group.id)}
-                        disabled={group.resultPlaceholder.isProcessing || !group.toolbar.model || !group.toolbar.providerId || catalogStatus.loading || Boolean(catalogStatus.error) || !taskModelCatalogIndex.has(taskModelKey(group.toolbar.providerId, group.toolbar.model))}
+                        disabled={group.resultPlaceholder.isProcessing || !group.toolbar.model || !group.toolbar.providerId || catalogStatus.loading || Boolean(catalogStatus.error) || !taskModelCatalogIndex.has(taskModelKey(group.toolbar.providerId, group.toolbar.model)) || Boolean(groupReferenceIssue)}
                       >
                         {group.resultPlaceholder.isProcessing ? '生成中...' : '生成'}
                       </button>
                       <button
-                        className={`px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${isMonochrome ? 'bg-blue-50 hover:bg-blue-100 text-blue-500' : 'bg-[#252525] hover:bg-[#282828]/85 text-gold-muted'}`}
+                        className={`min-h-11 px-3 py-2.5 rounded-lg text-base font-medium transition-all md:min-h-0 md:text-sm ${isMonochrome ? 'bg-blue-50 hover:bg-blue-100 text-blue-500' : 'bg-[#252525] hover:bg-[#282828]/85 text-gold-muted'}`}
                         onClick={() => deleteGenGroup(group.id)}
                         title="取消并删除组"
                       >
@@ -14718,6 +15392,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       </button>
                     </div>
                   </div>
+                  </ResponsiveGenerationGroupSlot>
                   )}
                 </div>
                 </div>
@@ -14727,6 +15402,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
             );
           })}
         </CanvasSurface>
+        {isMobileGroupUi && genGroups.length > 0 && <MobileGenerationGroupHost data-toolbar="generation-group" groupIds={genGroups.map(group => group.id)} isMonochrome={isMonochrome} register={registerMobileGenerationGroup} />}
 
 
         {/* HexCube 六面体浮动面板 - 移到 canvas transform group 外部 */}
@@ -15033,7 +15709,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                 id: model.providerId ? `${model.providerId}::${model.id}` : model.id,
                 label: `${model.apiDisplayName || model.id}${model.providerName ? ` · ${model.providerName}` : ''}`,
               }))}
-              rightInset={isPanelCollapsed ? 20 : 480}
+              rightInset={isPanelCollapsed ? WORKSPACE_PANEL_RAIL_WIDTH : 480}
               sourceLabel={(() => {
                 const selectedAnnotation = annotationV2State.annotations.find(
                   (annotation) => annotation.id === annotationV2State.selectedAnnotationId,
@@ -15690,13 +16366,18 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         {/* ====== MULTI-ANGLE FLOATING PANEL ====== */}
         {activeTool === 'multiAngle' && selectedImageData && editMode === 'none' && (() => {
           const pos = getToolbarPosition();
-          return (
+          const isMobileMultiAngle = typeof window !== 'undefined' && window.innerWidth < 768;
+          const multiAnglePanel = (
             <div
-              className="absolute z-50 pointer-events-auto"
-              style={{ left: pos.left, top: pos.top, transform: pos.transform }}
+              data-popup="multi-angle"
+              onPointerUp={(e) => { if (e.pointerType !== 'mouse') e.stopPropagation(); }}
+              onPointerCancel={(e) => { if (e.pointerType !== 'mouse') e.stopPropagation(); }}
+              onPointerLeave={(e) => { if (e.pointerType !== 'mouse') e.stopPropagation(); }}
+              className="z-50 pointer-events-auto"
+              style={isMobileMultiAngle ? { position: 'fixed', right: 'max(12px, env(safe-area-inset-right, 0px))', bottom: 'calc(96px + env(safe-area-inset-bottom, 0px))', width: 'min(360px, calc(100vw - max(12px, env(safe-area-inset-left, 0px)) - max(12px, env(safe-area-inset-right, 0px))))', maxHeight: 'calc(100dvh - 112px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))' } : { position: 'absolute', left: pos.left, top: pos.top, transform: pos.transform }}
               onMouseDown={(e) => e.stopPropagation()}
             >
-              <div className={`${panelBaseClass} flex-col !items-stretch !gap-3 !p-3 w-[300px]`} onMouseDown={(e) => e.stopPropagation()}>
+              <div className={`${panelBaseClass} flex-col !items-stretch !gap-3 !p-3 w-[300px] max-[768px]:w-full max-[768px]:max-h-[inherit] max-[768px]:overflow-y-auto max-[768px]:overscroll-contain max-[768px]:touch-pan-y max-[768px]:[&>div]:shrink-0 max-[768px]:[&_button]:min-h-11 max-[768px]:[&_button]:min-w-11 max-[768px]:[&_button]:whitespace-nowrap`} onMouseDown={(e) => e.stopPropagation()}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <RotateCcw size={14} className={isMonochrome ? 'text-blue-500' : 'text-gold'} />
@@ -15718,6 +16399,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                   ]).map(item => (
                     <button
                       key={item.mode}
+                      aria-pressed={multiAngleMode === item.mode}
                       onClick={() => setMultiAngleMode(item.mode)}
                       className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs transition-all ${
                         multiAngleMode === item.mode
@@ -15732,7 +16414,15 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                 </div>
 
                 <div
-                  className={`h-[200px] rounded-2xl overflow-hidden flex items-center justify-center select-none relative ${isMonochrome ? 'bg-gray-50' : 'bg-[#0d0d0d]'} ${isMultiAngleDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+                  ref={multiAnglePreviewElementRef}
+                  style={{ touchAction: 'none' }}
+                  onPointerDown={handleMultiAnglePreviewPointerDown}
+                  onPointerMove={handleMultiAnglePreviewPointerMove}
+                  onPointerUp={(e) => finishMultiAnglePreviewPointer(e, false)}
+                  onPointerCancel={(e) => finishMultiAnglePreviewPointer(e, true)}
+                  onLostPointerCapture={(e) => finishMultiAnglePreviewPointer(e, true)}
+                  onPointerLeave={(e) => { if (e.pointerType !== 'mouse') e.stopPropagation(); }}
+                  className={`h-[200px] max-[768px]:h-[clamp(96px,24dvh,180px)] rounded-2xl overflow-hidden flex items-center justify-center select-none relative ${isMonochrome ? 'bg-gray-50' : 'bg-[#0d0d0d]'} ${isMultiAngleDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
                   onMouseDown={handleMultiAnglePreviewMouseDown}
                   title="按住左键拖动：横向调整旋转，纵向调整倾斜"
                 >
@@ -15815,12 +16505,13 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                     </div>
                     <input
                       type="range"
+                      aria-label={item.label}
                       min={item.min}
                       max={item.max}
                       step={item.step}
                       value={item.value}
                       onChange={(e) => item.onChange(Number(e.target.value))}
-                      className="w-full accent-[#d4af37]"
+                      className="w-full accent-[#d4af37] max-[768px]:!h-11"
                     />
                   </div>
                 ))}
@@ -15834,6 +16525,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                     {(['特写', '标准', '广角'] as const).map((label, idx) => (
                       <button
                         key={label}
+                        aria-pressed={multiAngleZoom === idx}
                         onClick={() => setMultiAngleZoom(idx)}
                         className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${
                           multiAngleZoom === idx
@@ -15862,20 +16554,22 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
               </div>
             </div>
           );
+          return isMobileMultiAngle ? createPortal(multiAnglePanel, document.body) : multiAnglePanel;
         })()}
 
         {/* ====== DOWNLOAD FLOATING PANEL ====== */}
         {showDownloadPopup && selectedImageData && editMode === 'none' && (() => {
           const pos = getToolbarPosition();
-          return (
+          const isMobileDownload = typeof window !== 'undefined' && window.innerWidth < 768;
+          const downloadPanel = (
             <div
-              className="absolute z-50 pointer-events-auto"
+              className={isMobileDownload ? 'fixed z-[180] pointer-events-auto overflow-y-auto overscroll-contain' : 'absolute z-50 pointer-events-auto'}
               data-popup="download"
-              style={{ left: pos.left, top: pos.top, transform: pos.transform }}
+              style={isMobileDownload ? { right: 'max(12px, env(safe-area-inset-right))', bottom: 'max(112px, calc(env(safe-area-inset-bottom) + 96px))', width: 'min(360px, calc(100vw - max(12px, env(safe-area-inset-left)) - max(12px, env(safe-area-inset-right))))', maxHeight: 'calc(100dvh - max(12px, env(safe-area-inset-top)) - max(112px, calc(env(safe-area-inset-bottom) + 96px)))', touchAction: 'pan-y' } : { left: pos.left, top: pos.top, transform: pos.transform }}
               onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
             >
-              <div className={`${panelBaseClass} flex-col !items-stretch !gap-2 !p-3 min-w-[260px]`} onMouseDown={(e) => e.stopPropagation()}>
+              <div className={`${panelBaseClass} flex-col !items-stretch !gap-2 !p-3 ${isMobileDownload ? 'w-full min-w-0 [&_button]:min-h-11 [&_button]:min-w-11' : 'min-w-[260px]'}`}  onMouseDown={(e) => e.stopPropagation()}>
                 <div className="flex items-center gap-2">
                   <Download size={14} className={isMonochrome ? 'text-blue-500' : 'text-gold'} />
                   <span className={panelLabelClass}>下载</span>
@@ -15901,7 +16595,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                     >
                       <div>
                         <div className={`text-xs font-medium ${isMonochrome ? 'text-gray-800' : 'text-white'}`}>{item.label}</div>
-                        <div className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-gold-muted/70'}`}>{item.desc}</div>
+                        <div className={`text-xs ${isMonochrome ? 'text-gray-600' : 'text-gray-300'}`}>{item.desc}</div>
                       </div>
                       {downloadFormat === item.format && <Check size={12} className={isMonochrome ? 'text-blue-500' : 'text-gold'} />}
                     </button>
@@ -15987,6 +16681,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
               </div>
             </div>
           );
+          return isMobileDownload ? createPortal(downloadPanel, document.body) : downloadPanel;
         })()}
 
 
@@ -16006,26 +16701,27 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                 }
               }}
             >
-              <div className={`w-[560px] max-h-[90vh] overflow-hidden rounded-2xl border shadow-2xl ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#444]'}`}>
+              <div className={`flex min-h-0 w-[560px] max-w-[calc(100vw-2rem)] max-h-[90dvh] flex-col overflow-hidden rounded-2xl border shadow-2xl [&_button]:min-h-11 [&_button]:min-w-11 [&_select]:min-h-11 [&_input]:min-h-11 ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#444]'}`}>
                 {/* Header */}
-                <div className={`flex items-center justify-between px-4 py-3 border-b ${isMonochrome ? 'border-gray-100' : 'border-white/[0.14]'}`}>
-                  <div className="flex items-center gap-2">
-                    <BoxIcon size={16} className={isMonochrome ? 'text-blue-500' : 'text-gold'} />
-                    <div>
-                      <div className={`text-sm font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>图转3D工厂</div>
+                <div className={`flex shrink-0 items-center justify-between gap-2 px-4 py-3 border-b ${isMonochrome ? 'border-gray-100' : 'border-white/[0.14]'}`}>
+                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                    <BoxIcon size={16} className={`shrink-0 ${isMonochrome ? 'text-blue-500' : 'text-gold'}`} />
+                    <div className="min-w-0">
+                      <div className={`whitespace-nowrap text-sm font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>图转3D工厂</div>
                       <div className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-[#777]'}`}>支持单图/多图/文生3D，结果在当前图片右侧生成</div>
                     </div>
                   </div>
                   <button
+                    aria-label="关闭图转3D工厂"
                     onClick={() => { if (!threeDProgress) close3DModal(); }}
-                    className={`p-1.5 rounded-lg ${isMonochrome ? 'text-gray-400 hover:bg-gray-100' : 'text-[#777] hover:bg-[#252525]'}`}
+                    className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg ${isMonochrome ? 'text-gray-400 hover:bg-gray-100' : 'text-[#777] hover:bg-[#252525]'}`}
                     disabled={!!threeDProgress}
                   >
                     <X size={15} />
                   </button>
                 </div>
 
-                <div className="p-4 space-y-3 overflow-y-auto max-h-[75vh]">
+                <div className="min-h-0 flex-auto space-y-3 overflow-y-auto overscroll-contain p-4">
                   {/* Mode tabs */}
                   <div className={`grid grid-cols-3 gap-1.5 p-1 rounded-xl ${isMonochrome ? 'bg-gray-100' : 'bg-[#0a0a0a]/90'}`}>
                     {([
@@ -16035,15 +16731,16 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                     ]).map(item => (
                       <button
                         key={item.value}
+                        aria-pressed={threeDMode === item.value}
                         onClick={() => setThreeDMode(item.value)}
-                        className={`px-3 py-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1.5 ${
+                        className={`px-3 py-2 max-[480px]:px-1 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1.5 ${
                           threeDMode === item.value
                             ? isMonochrome ? 'bg-blue-500 text-white shadow-sm' : 'bg-gold text-black shadow-sm'
                             : isMonochrome ? 'text-blue-500 hover:text-blue-700' : 'text-[#777] hover:text-white'
                         }`}
                       >
-                        <span>{item.icon}</span>
-                        <span>{item.label}</span>
+                        <span className="max-[480px]:hidden">{item.icon}</span>
+                        <span className="whitespace-nowrap">{item.label}</span>
                       </button>
                     ))}
                   </div>
@@ -16053,10 +16750,11 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                     <div className="space-y-2">
                       {threeDSingleImageUrl ? (
                         <div className={`rounded-2xl overflow-hidden flex items-center justify-center p-3 relative group ${isMonochrome ? 'bg-gray-50' : 'bg-[#0a0a0a]/90'}`}>
-                          <NextImage unoptimized width={1} height={1} src={threeDSingleImageUrl} alt="3D source" className="max-w-full max-h-[160px] object-contain rounded-lg" />
+                          <NextImage unoptimized width={1} height={1} src={threeDSingleImageUrl} alt="3D source" className="h-40 w-auto max-w-full object-contain rounded-lg" />
                           <button
+                            aria-label="移除3D源图片"
                             onClick={() => setThreeDSingleImageUrl('')}
-                            className={`absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity ${isMonochrome ? 'bg-gray-200 text-gray-600 hover:bg-gray-300' : 'bg-black/60 text-white hover:bg-black/80'}`}
+                            className={`absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 max-[768px]:opacity-100 transition-opacity ${isMonochrome ? 'bg-gray-200 text-gray-600 hover:bg-gray-300' : 'bg-black/60 text-white hover:bg-black/80'}`}
                           >
                             <X size={12} />
                           </button>
@@ -16144,7 +16842,9 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                           const existing = threeDMultiImages.find(img => img.view === slot.view);
                           return (
                             <div key={slot.view} className="flex flex-col items-center gap-1">
-                              <div
+                              <button
+                                type="button"
+                                aria-label={existing ? `移除${slot.label}视角图片` : `上传${slot.label}视角图片`}
                                 className={`w-full aspect-square rounded-xl border-2 border-dashed flex flex-col items-center justify-center overflow-hidden relative cursor-pointer transition-colors ${
                                   existing
                                     ? isMonochrome ? 'border-blue-400 bg-blue-50' : 'border-gold/60 bg-gold/5'
@@ -16186,7 +16886,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                                 ) : (
                                   <Plus size={18} className={isMonochrome ? 'text-gray-400' : 'text-white/30'} />
                                 )}
-                              </div>
+                              </button>
                               <span className={`text-[10px] ${isMonochrome ? 'text-gray-500' : 'text-[#666]'}`}>{slot.label}</span>
                             </div>
                           );
@@ -16244,6 +16944,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                         用文字描述你想生成的3D模型，支持中英文
                       </div>
                       <textarea
+                        aria-label="3D模型描述"
                         value={threeDPrompt}
                         onChange={(e) => setThreeDPrompt(e.target.value)}
                         className={`w-full h-24 px-3 py-2 rounded-xl text-xs border resize-y ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900 placeholder:text-gray-400' : 'bg-[#0a0a0a]/90 border-white/[0.14] text-white placeholder:text-[#555]'}`}
@@ -16264,6 +16965,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                     ]).map(item => (
                       <button
                         key={item.value}
+                        aria-pressed={threeDBackend === item.value}
                         onClick={() => setThreeDBackend(item.value)}
                         className={`px-3 py-2 rounded-lg text-xs font-medium transition-all ${
                           threeDBackend === item.value
@@ -16284,6 +16986,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                         <span className={panelSmallLabelClass}>管理员配置 + 第三方 API</span>
                       </div>
                       <select
+                        aria-label="3D模型与供应商"
                         value={threeDProviderId}
                         onChange={(e) => setThreeDProviderId(e.target.value)}
                         className={`w-full px-3 py-2 rounded-xl text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-[#0a0a0a]/90 border-white/[0.14] text-white'}`}
@@ -16327,15 +17030,17 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      <label className={panelSmallLabelClass}>本地模型服务地址</label>
+                      <label htmlFor="three-d-local-endpoint" className={panelSmallLabelClass}>本地模型服务地址</label>
                       <input
+                        id="three-d-local-endpoint"
                         value={threeDLocalEndpoint}
                         onChange={(e) => setThreeDLocalEndpoint(e.target.value)}
                         className={`w-full px-3 py-2 rounded-xl text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-[#0a0a0a]/90 border-white/[0.14] text-white'}`}
                         placeholder="http://127.0.0.1:7860/api/image-to-3d"
                       />
-                      <label className={panelSmallLabelClass}>本地模型</label>
+                      <label htmlFor="three-d-local-model" className={panelSmallLabelClass}>本地模型</label>
                       <select
+                        id="three-d-local-model"
                         value={threeDLocalModel}
                         onChange={(e) => setThreeDLocalModel(e.target.value)}
                         className={`w-full px-3 py-2 rounded-xl text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-[#0a0a0a]/90 border-white/[0.14] text-white'}`}
@@ -16352,24 +17057,24 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                   {/* Quality / Texture / Format row */}
                   <div className="grid grid-cols-3 gap-2">
                     <div>
-                      <label className={panelSmallLabelClass}>质量</label>
-                      <select value={threeDQuality} onChange={(e) => setThreeDQuality(e.target.value)} className={`mt-1 w-full px-2 py-2 rounded-lg text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-[#0a0a0a]/90 border-white/[0.14] text-white'}`}>
+                      <label htmlFor="three-d-quality" className={panelSmallLabelClass}>质量</label>
+                      <select id="three-d-quality" value={threeDQuality} onChange={(e) => setThreeDQuality(e.target.value)} className={`mt-1 w-full px-2 py-2 rounded-lg text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-[#0a0a0a]/90 border-white/[0.14] text-white'}`}>
                         {threeDCapabilities.qualities.map((q: { value: string; label: string }) => (
                           <option key={q.value} value={q.value}>{q.label}</option>
                         ))}
                       </select>
                     </div>
                     <div>
-                      <label className={panelSmallLabelClass}>纹理</label>
-                      <select value={threeDTexture} onChange={(e) => setThreeDTexture(e.target.value)} className={`mt-1 w-full px-2 py-2 rounded-lg text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-[#0a0a0a]/90 border-white/[0.14] text-white'}`}>
+                      <label htmlFor="three-d-texture" className={panelSmallLabelClass}>纹理</label>
+                      <select id="three-d-texture" value={threeDTexture} onChange={(e) => setThreeDTexture(e.target.value)} className={`mt-1 w-full px-2 py-2 rounded-lg text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-[#0a0a0a]/90 border-white/[0.14] text-white'}`}>
                         {threeDCapabilities.textures.map((t: { value: string; label: string }) => (
                           <option key={t.value} value={t.value}>{t.label}</option>
                         ))}
                       </select>
                     </div>
                     <div>
-                      <label className={panelSmallLabelClass}>格式</label>
-                      <select value={threeDFormat} onChange={(e) => setThreeDFormat(e.target.value)} className={`mt-1 w-full px-2 py-2 rounded-lg text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-[#0a0a0a]/90 border-white/[0.14] text-white'}`}>
+                      <label htmlFor="three-d-format" className={panelSmallLabelClass}>格式</label>
+                      <select id="three-d-format" value={threeDFormat} onChange={(e) => setThreeDFormat(e.target.value)} className={`mt-1 w-full px-2 py-2 rounded-lg text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-[#0a0a0a]/90 border-white/[0.14] text-white'}`}>
                         {threeDCapabilities.formats.map((f: { value: string; label: string }) => (
                           <option key={f.value} value={f.value}>{f.label}</option>
                         ))}
@@ -16383,6 +17088,8 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       <label className={panelSmallLabelClass}>PBR 材质</label>
                       <button
                         type="button"
+                        aria-label="PBR 材质"
+                        aria-pressed={threeDEnablePBR}
                         onClick={() => setThreeDEnablePBR(!threeDEnablePBR)}
                         className={`mt-1 w-full px-2 py-2 rounded-lg text-xs border transition-colors ${
                           threeDEnablePBR
@@ -16394,9 +17101,9 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       </button>
                     </div>
                     <div>
-                      <label className={panelSmallLabelClass}>面数</label>
+                      <label htmlFor="three-d-faces" className={panelSmallLabelClass}>面数</label>
                       {supportsThreeDFaceCount ? (
-                        <select value={threeDFaceCount} onChange={(e) => setThreeDFaceCount(Number(e.target.value))} className={`mt-1 w-full px-2 py-2 rounded-lg text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-[#0a0a0a]/90 border-white/[0.14] text-white'}`}>
+                        <select id="three-d-faces" value={threeDFaceCount} onChange={(e) => setThreeDFaceCount(Number(e.target.value))} className={`mt-1 w-full px-2 py-2 rounded-lg text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-[#0a0a0a]/90 border-white/[0.14] text-white'}`}>
                           <option value={3000}>低 (3K)</option>
                           <option value={10000}>中 (10K)</option>
                           <option value={30000}>标准 (30K)</option>
@@ -16408,9 +17115,9 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       )}
                     </div>
                     <div>
-                      <label className={panelSmallLabelClass}>姿态</label>
+                      <label htmlFor="three-d-pose" className={panelSmallLabelClass}>姿态</label>
                       {supportsThreeDPose ? (
-                        <select value={threeDPose} onChange={(e) => setThreeDPose(e.target.value as '' | 'a-pose' | 't-pose')} className={`mt-1 w-full px-2 py-2 rounded-lg text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-[#0a0a0a]/90 border-white/[0.14] text-white'}`}>
+                        <select id="three-d-pose" value={threeDPose} onChange={(e) => setThreeDPose(e.target.value as '' | 'a-pose' | 't-pose')} className={`mt-1 w-full px-2 py-2 rounded-lg text-xs border ${isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-900' : 'bg-[#0a0a0a]/90 border-white/[0.14] text-white'}`}>
                           <option value="">无</option>
                           <option value="a-pose">A-Pose</option>
                           <option value="t-pose">T-Pose</option>
@@ -16431,7 +17138,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                 </div>
 
                 {/* Footer */}
-                <div className={`flex items-center justify-end gap-2 px-4 py-3 border-t ${isMonochrome ? 'border-gray-100' : 'border-white/[0.14]'}`}>
+                <div className={`flex shrink-0 items-center justify-end gap-2 px-4 py-3 border-t ${isMonochrome ? 'border-gray-100' : 'border-white/[0.14]'}`}>
                   <button
                     onClick={close3DModal}
                     className={panelCancelBtnClass}
@@ -16525,6 +17232,8 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           <VideoCompareDialog
             videoA={compareVideos.a}
             videoB={compareVideos.b}
+            videoBOptions={comparisonVideoBOptions}
+            onSelectVideoB={handleSelectCanvasComparisonVideoB}
             open={!!compareVideos}
             onClose={() => setCompareVideos(null)}
             isGold={!isMonochrome}
@@ -16532,67 +17241,12 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         )}
 
         {/* ====== 720° PANORAMA VIEWER ====== */}
-        {panoramaViewerUrl && (
-          <div className="fixed inset-0 z-[201] bg-black flex flex-col" onClick={(e) => { if (e.target === e.currentTarget) setPanoramaViewerUrl(null); }}>
-            <div className="flex items-center justify-between px-4 py-3 bg-[#111] border-b border-[#333]">
-              <div className="flex items-center gap-2">
-                <Globe size={18} className="text-[#d4af37]" />
-                <span className="text-sm font-medium">720° 全景浏览</span>
-                <span className="text-xs text-[#888] ml-2">拖拽旋转 · 滚轮缩放</span>
-              </div>
-              <button onClick={() => setPanoramaViewerUrl(null)} className="text-white/70 hover:text-white transition-colors">
-                <X size={20} />
-              </button>
-            </div>
-            <div
-              className="flex-1 overflow-hidden cursor-grab active:cursor-grabbing relative select-none"
-              onWheel={(e) => {
-                const el = e.currentTarget.querySelector('.panorama-img') as HTMLElement | null;
-                if (el) {
-                  const current = parseFloat(el.dataset.scale || '1');
-                  const next = Math.max(0.5, Math.min(3, current - e.deltaY * 0.001));
-                  el.dataset.scale = String(next);
-                  el.style.transform = `scale(${next})`;
-                }
-              }}
-              onMouseDown={(e) => {
-                const el = e.currentTarget;
-                const img = el.querySelector('.panorama-img') as HTMLElement | null;
-                if (!img) return;
-                const startX = e.clientX;
-                const startY = e.clientY;
-                const startOffX = parseFloat(img.dataset.offsetX || '0');
-                const startOffY = parseFloat(img.dataset.offsetY || '0');
-                const onMove = (ev: MouseEvent) => {
-                  const dx = ev.clientX - startX;
-                  const dy = ev.clientY - startY;
-                  img.dataset.offsetX = String(startOffX + dx);
-                  img.dataset.offsetY = String(Math.max(-200, Math.min(200, startOffY + dy)));
-                  const s = parseFloat(img.dataset.scale || '1');
-                  img.style.transform = `scale(${s}) translate(${(startOffX + dx) / s}px, ${Math.max(-200, Math.min(200, startOffY + dy)) / s}px)`;
-                };
-                const onUp = () => {
-                  window.removeEventListener('mousemove', onMove);
-                  window.removeEventListener('mouseup', onUp);
-                };
-                window.addEventListener('mousemove', onMove);
-                window.addEventListener('mouseup', onUp);
-              }}
-            >
-              <NextImage unoptimized width={1} height={1}
-                src={panoramaViewerUrl}
-                alt="全景图"
-                className="panorama-img absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 max-w-none h-full w-auto"
-                data-scale="1"
-                data-offset-x="0"
-                data-offset-y="0"
-                draggable={false}
-              />
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur text-white/80 text-xs px-4 py-2 rounded-full">
-                提示：左右拖拽水平环绕，上下拖拽垂直视角
-              </div>
-            </div>
-          </div>
+        {panoramaViewerUrl && images.some(image => image.url === panoramaViewerUrl) && (
+          <PanoramaViewer
+            key={panoramaViewerUrl}
+            imageUrl={panoramaViewerUrl}
+            onClose={() => setPanoramaViewerUrl(null)}
+          />
         )}
 
         {/* ====== VIDEO EXTRACT FRAMES PANEL ====== */}
@@ -16600,20 +17254,27 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           const img = images.find(i => i.id === editImageId);
           if (!img) return null;
           return (
-            <div className="fixed left-1/2 top-1/2 z-[65] w-80 max-w-[calc(100vw-2rem)] max-h-[calc(100dvh-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-[#333] bg-[#1a1a1a] shadow-2xl" data-popup="video-extract">
-              <div className="px-4 py-3 bg-[#111] border-b border-[#333] flex items-center justify-between">
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="视频抽帧"
+              className="fixed left-1/2 top-1/2 z-[85] w-80 max-w-[calc(100vw-2rem)] max-h-[calc(100dvh-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto overscroll-contain rounded-xl border border-[#333] bg-[#1a1a1a] shadow-2xl [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:whitespace-nowrap"
+              data-popup="video-extract"
+              onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setShowVideoExtractPanel(false); setEditMode('none'); setActiveTool('none'); } }}
+            >
+              <div className="sticky top-0 z-10 px-4 py-2 bg-[#111] border-b border-[#333] flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-white flex items-center gap-2">
                   <Film size={16} className="text-[#d4af37]" />
                   视频抽帧
                 </h3>
-                <button onClick={() => { setShowVideoExtractPanel(false); setEditMode('none'); setActiveTool('none'); }} className="text-white/60 hover:text-white">
+                <button onClick={() => { setShowVideoExtractPanel(false); setEditMode('none'); setActiveTool('none'); }} aria-label="关闭视频抽帧" className="flex items-center justify-center text-white/60 hover:text-white">
                   <X size={16} />
                 </button>
               </div>
               <div className="p-4 space-y-4">
                 <div className="aspect-video bg-black rounded-lg overflow-hidden">
                   {img.videoUrl ? (
-                    <video src={img.videoUrl} className="w-full h-full object-contain" controls muted />
+                    <video src={img.videoUrl} className="w-full h-full object-contain" controls muted playsInline />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-white/40 text-xs">请选择视频文件</div>
                   )}
@@ -16630,6 +17291,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       <button
                         key={mode.id}
                         onClick={() => setVideoExtractMode(mode.id)}
+                        aria-pressed={videoExtractMode === mode.id}
                         className={`px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
                           videoExtractMode === mode.id ? 'bg-[#d4af37] text-black' : 'bg-[#2a2a2a] text-white/70 hover:bg-[#333]'
                         }`}
@@ -16639,12 +17301,13 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                 </div>
                 {(videoExtractMode === 'uniform' || videoExtractMode === 'fps') && (
                   <div className="space-y-1">
-                    <label className="text-xs text-white/60 flex justify-between">
-                      帧数: {videoExtractFrameCount}
+                    <label className="block text-xs text-white/60">
+                      <span>帧数: {videoExtractFrameCount}</span>
+                      <input type="range" aria-label="抽帧数量" min="4" max="30" value={videoExtractFrameCount}
+                        onChange={e => setVideoExtractFrameCount(Number(e.target.value))}
+                        className="block w-full accent-[#d4af37]"
+                        style={{ height: 44, touchAction: 'pan-y', background: 'linear-gradient(#555,#555) center / 100% 4px no-repeat' }} />
                     </label>
-                    <input type="range" min="4" max="30" value={videoExtractFrameCount}
-                      onChange={e => setVideoExtractFrameCount(Number(e.target.value))}
-                      className="w-full accent-[#d4af37]" />
                   </div>
                 )}
                 <button
@@ -16698,6 +17361,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
             videoUrl={videoEditTarget.videoUrl || videoEditTarget.url}
             thumbnailUrl={videoEditTarget.videoThumbnailUrl || videoEditTarget.url}
             originalPrompt={videoEditTarget.prompt}
+            initialTab={videoEditTab}
             themeStyle={isMonochrome ? 'monochrome' : 'gold'}
             selectedVideoModel={videoEditTarget.modelName || ''}
             selectedVideoProviderId={videoEditTarget.apiProvider || ''}
@@ -16936,49 +17600,58 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
 
         {/* ====== AI 视频配音面板 ====== */}
         {showVideoDubPanel && videoDubTarget && (
-          <div className="fixed left-1/2 top-1/2 z-[85] w-[420px] max-w-[calc(100vw-2rem)] max-h-[calc(100dvh-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-border bg-card shadow-xl">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="AI配音合成"
+            data-modal="video-dub"
+            className="fixed left-1/2 top-1/2 z-[85] w-[420px] max-w-[calc(100vw-2rem)] max-h-[calc(100dvh-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card shadow-xl"
+            onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setShowVideoDubPanel(false); setVideoDubTarget(null); } }}
+          >
             <div className="bg-primary/10 px-4 py-3 flex items-center justify-between border-b border-border">
               <h3 className="font-semibold text-foreground flex items-center gap-2">
                 <Volume2 className="w-4 h-4 text-primary" />
                 AI 配音合成
               </h3>
-              <button onClick={() => { setShowVideoDubPanel(false); setVideoDubTarget(null); }} className="text-muted-foreground hover:text-foreground">
+              <button onClick={() => { setShowVideoDubPanel(false); setVideoDubTarget(null); }} aria-label="关闭AI配音" className="flex h-11 w-11 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground">
                 <X className="w-4 h-4" />
               </button>
             </div>
             <div className="p-4 space-y-4">
               <div className="aspect-video bg-black rounded-lg overflow-hidden relative">
                 {videoDubTarget.videoUrl ? (
-                  <video src={videoDubTarget.videoUrl} className="w-full h-full object-contain" controls muted />
+                  <video src={videoDubTarget.videoUrl} className="w-full h-full object-contain" controls muted playsInline />
                 ) : (
                   <NextImage unoptimized width={1} height={1} src={videoDubTarget.url} alt="视频配音目标图片" className="w-full h-full object-contain" />
                 )}
               </div>
-              <div className="space-y-2">
-                <label className="text-sm text-muted-foreground">配音文本</label>
+              <label className="block space-y-2">
+                <span className="text-sm text-muted-foreground">配音文本</span>
                 <textarea
+                  aria-label="配音文本"
                   value={dubText}
                   onChange={e => setDubText(e.target.value)}
                   placeholder="输入要配音的文字内容..."
                   className="w-full px-3 py-2 rounded-lg bg-muted border border-border text-sm resize-none h-24 focus:outline-none focus:ring-2 focus:ring-primary/30"
                 />
-              </div>
+              </label>
               <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-sm text-muted-foreground">音色</label>
-                  <select value={dubVoice} onChange={e => setDubVoice(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg bg-muted border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/30">
+                <label className="block min-w-0 space-y-1">
+                  <span className="text-sm text-muted-foreground">音色</span>
+                  <select aria-label="配音音色" value={dubVoice} onChange={e => setDubVoice(e.target.value)}
+                    className="w-full min-h-11 min-w-0 px-3 py-2 rounded-lg bg-muted border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/30">
                     <option value="female-calm">女声-沉稳</option>
                     <option value="female-sweet">女声-甜美</option>
                     <option value="male-professional">男声-专业</option>
                     <option value="male-energetic">男声-活力</option>
                   </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-sm text-muted-foreground">语速: {dubSpeed.toFixed(1)}x</label>
-                  <input type="range" min="0.5" max="2" step="0.1" value={dubSpeed}
-                    onChange={e => setDubSpeed(parseFloat(e.target.value))} className="w-full accent-primary" />
-                </div>
+                </label>
+                <label className="block min-w-0 space-y-1">
+                  <span className="text-sm text-muted-foreground">语速: {dubSpeed.toFixed(1)}x</span>
+                  <input type="range" aria-label="配音语速" min="0.5" max="2" step="0.1" value={dubSpeed}
+                    onChange={e => setDubSpeed(parseFloat(e.target.value))} className="block w-full accent-primary"
+                    style={{ height: 44, touchAction: 'pan-y', background: 'linear-gradient(var(--muted-foreground),var(--muted-foreground)) center / 100% 4px no-repeat' }} />
+                </label>
               </div>
               <button
                 onClick={handleVideoDub}
@@ -16994,6 +17667,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
 
         {/* ====== AGENT EDITOR ====== */}
         {showAgentEditor && (
+          <div hidden={agentSelectingImage}>
           <Suspense fallback={null}>
             <AgentEditor
               projectId={projectId || brandProject?.id}
@@ -17028,6 +17702,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
               }}
             />
           </Suspense>
+          </div>
         )}
 
         {/* ====== IMAGE COMPARE DIALOG ====== */}
@@ -17211,6 +17886,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           <Suspense fallback={null}>
             <Display3DPanel
               sourceImage={display3DSource}
+              captureCanvasInsertion={captureDisplay3dInsertion}
               onClose={() => {
                 setShowDisplay3D(false);
                 setDisplay3DSource(null);
@@ -17240,7 +17916,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           </div>
         )}
 
-        {showSketchToCode && sketchSession.current && <Suspense fallback={<div role="status">草图工具加载中…</div>}>
+        {showSketchToCode && sketchSession.current && <Suspense fallback={<div role="status" className={`fixed left-1/2 top-4 z-[201] -translate-x-1/2 rounded-md border px-4 py-2 text-sm shadow-lg ${isMonochrome ? 'border-gray-300 bg-white text-gray-900' : 'border-amber-400/40 bg-[#1a1a1a] text-gray-100'}`}>草图工具加载中…</div>}>
           <SketchToCodePanel recoverTasks={true} session={sketchSession.current} imageSession={sketchImageEnabled ? sketchImageSession.current : undefined} models={taskModelCatalog} modelOptions={taskModelOptions} catalogStatus={catalogStatus}
             insert={sketchContext?.insert} initialTrace={sketchTrace} isMonochrome={isMonochrome} onClose={closeCanvasToolPanels} />
         </Suspense>}
@@ -17272,6 +17948,9 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
 
         {/* ====== HEXCUBE FLOATING PANEL ====== */}
         {hexCubeGroups.map(hcg => {
+          const activeMobileGroupId = hexCubeGroups.some(group => group.id === mobileHexCubeGroupId)
+            ? mobileHexCubeGroupId : hexCubeGroups[hexCubeGroups.length - 1]?.id;
+          if (isMobileGroupUi && hcg.id !== activeMobileGroupId) return null;
           // 使用屏幕坐标，不受画布缩放/平移影响
           const screenX = hcg.position.x * zoom + viewOffset.x;
           const screenY = hcg.position.y * zoom + viewOffset.y;
@@ -17291,33 +17970,49 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           return (
             <div
               key={`hexcube-float-${hcg.id}`}
-              className="absolute z-50 pointer-events-auto"
+              data-hex-cube-panel={hcg.id}
+              role="region"
+              aria-label="六面体工具"
+              className="absolute z-50 pointer-events-auto max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11 max-md:[&_select]:min-h-11 max-md:[&_input]:min-h-11 max-md:[&_textarea]:min-h-11"
               style={{
-                left: screenX + dragDx,
-                top: screenY + dragDy,
+                position: isMobileGroupUi ? 'fixed' : undefined,
+                left: isMobileGroupUi ? 16 : screenX + dragDx,
+                top: isMobileGroupUi ? 16 : screenY + dragDy,
+                width: isMobileGroupUi ? 'calc(100vw - 32px)' : undefined,
+                maxHeight: isMobileGroupUi ? 'calc(100dvh - 32px)' : undefined,
+                zIndex: isMobileGroupUi ? 85 : undefined,
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                if (e.key !== 'Escape') return;
+                e.preventDefault();
+                e.stopPropagation();
+                deleteHexCubeGroup(hcg.id);
               }}
               onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
             >
               <div
-                className="rounded-2xl"
+                className="flex min-h-0 flex-col rounded-2xl max-md:overflow-hidden"
                 style={{
                   background: isMonochrome ? 'rgba(255,255,255,0.97)' : 'rgba(20,20,20,0.96)',
                   border: `2px solid ${isThisGroupDragging ? (isMonochrome ? '#3b82f6' : '#d4af37') : isMonochrome ? '#e5e7eb' : '#333'}`,
                   boxShadow: isThisGroupDragging ? (isMonochrome ? '0 0 24px rgba(59,130,246,0.3)' : '0 0 24px rgba(212,175,55,0.3)') : '0 8px 32px rgba(0,0,0,0.4)',
-                  minWidth: netW + previewSize + 80,
+                  minWidth: isMobileGroupUi ? 0 : netW + previewSize + 80,
+                  maxHeight: isMobileGroupUi ? 'calc(100dvh - 32px)' : undefined,
                 }}
                 onMouseDown={(e) => e.stopPropagation()}
                 onWheel={(e) => e.stopPropagation()}
               >
                 {/* Title bar (unified design) */}
                 <div
-                  className="flex items-center gap-2 px-3 py-2 select-none cursor-grab active:cursor-grabbing rounded-t-2xl"
+                  className="flex shrink-0 items-center gap-2 px-3 py-2 select-none cursor-grab active:cursor-grabbing rounded-t-2xl max-md:flex-wrap max-md:cursor-default"
                   style={{
                     background: isMonochrome ? '#f3f4f6' : '#1a1a1a',
                     borderBottom: `1px solid ${isMonochrome ? '#e5e7eb' : '#333'}`,
                   }}
                   onMouseDown={(e) => {
+                    if (isMobileGroupUi) return;
                     if (e.button !== 0) return;
                     if ((e.target as HTMLElement).closest('button')) return;
                     e.stopPropagation();
@@ -17346,6 +18041,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                         setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, isCollapsed: !g.isCollapsed } : g));
                       }}
                       title={hcg.isCollapsed ? '展开' : '折叠'}
+                      aria-expanded={!hcg.isCollapsed}
                     >
                       <svg className="w-4 h-4 transition-transform" style={{ color: isMonochrome ? '#6b6b6b' : '#d4af37', transform: hcg.isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <polyline points="6 9 12 15 18 9" />
@@ -17363,12 +18059,26 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       <X size={14} />
                     </button>
                   </div>
+                  {isMobileGroupUi && hexCubeGroups.length > 1 && (
+                    <select
+                      aria-label="切换六面体窗口"
+                      onMouseDown={(e) => e.stopPropagation()}
+                      value={hcg.id}
+                      onChange={(e) => setMobileHexCubeGroupId(e.target.value)}
+                      className="w-full basis-full rounded-lg border px-2 text-sm"
+                      style={{ background: isMonochrome ? '#fff' : '#252525', color: isMonochrome ? '#374151' : '#ddd', borderColor: isMonochrome ? '#d1d5db' : '#444' }}
+                    >
+                      {hexCubeGroups.map((group, index) => (
+                        <option key={group.id} value={group.id}>六面体 {index + 1}</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
 
                 {!hcg.isCollapsed && (
-                <div className="p-4">
+                <div className="min-h-0 overflow-y-auto p-3 md:p-4" data-hex-cube-body>
                   {/* 上排: 展开图 + 3D CSS 预览 */}
-                  <div className="flex items-start gap-6">
+                  <div className="flex min-w-0 flex-col items-start gap-6 md:flex-row">
                     {/* 展开图 */}
                     <div>
                       <div className="text-xs font-medium mb-2" style={{ color: isMonochrome ? '#6b7280' : '#888' }}>产品六面展开图</div>
@@ -17385,6 +18095,15 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                           return (
                             <div
                               key={face}
+                              role="button"
+                              tabIndex={0}
+                              aria-label={`上传${label}贴图`}
+                              onKeyDown={(e) => {
+                                if (e.key !== 'Enter' && e.key !== ' ') return;
+                                e.preventDefault();
+                                e.stopPropagation();
+                                e.currentTarget.click();
+                              }}
                               className="relative rounded-lg overflow-hidden flex items-center justify-center cursor-pointer transition-all hover:ring-2 hover:ring-blue-400/50"
                               style={{
                                 background: isMonochrome ? '#f9fafb' : '#252525',
@@ -17433,18 +18152,55 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                     </div>
 
                     {/* 3D CSS 立方体预览 */}
-                    <div>
+                    <div className="max-md:min-w-0 max-md:w-full">
                       <div className="text-xs font-medium mb-2" style={{ color: isMonochrome ? '#6b7280' : '#888' }}>3D 预览</div>
                       <div
-                        className={`rounded-xl flex items-center justify-center overflow-hidden select-none ${hexCube3dDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+                        className={`relative rounded-xl flex items-center justify-center overflow-hidden select-none ${hexCube3dDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
                         style={{
                           width: previewSize,
                           height: previewSize,
                           background: isMonochrome ? '#f3f4f6' : '#0d0d0d',
                           border: `1px solid ${isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.08)'}`,
                           perspective: '600px',
+                          touchAction: 'none',
+                        }}
+                        onPointerDown={(event: React.PointerEvent<HTMLDivElement>): void => {
+                          if (event.pointerType === 'mouse' || !event.isPrimary || hexCubeTouchDragRef.current || hexCube3dDragRef.current) return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          hexCubeTouchDragRef.current = { pointerId: event.pointerId, groupId: hcg.id, element: event.currentTarget,
+                            startX: event.clientX, startY: event.clientY, startRotY: hcg.toolbar.rotationY, startTiltX: hcg.toolbar.tiltX };
+                          event.currentTarget.setPointerCapture(event.pointerId);
+                          setHexCube3dDragging(true);
+                        }}
+                        onPointerMove={(event: React.PointerEvent<HTMLDivElement>): void => {
+                          const owner = hexCubeTouchDragRef.current;
+                          if (!owner || owner.pointerId !== event.pointerId || owner.groupId !== hcg.id || owner.element !== event.currentTarget) return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          const rotationY = Math.round(Math.max(0, Math.min(360, owner.startRotY + (event.clientX - owner.startX) * 0.5)));
+                          const tiltX = Math.round(Math.max(-60, Math.min(60, owner.startTiltX + (event.clientY - owner.startY) * 0.4)));
+                          setHexCubeGroups(previous => previous.map(group => group.id === owner.groupId ? { ...group, toolbar: { ...group.toolbar, rotationY, tiltX } } : group));
+                        }}
+                        onPointerUp={(event: React.PointerEvent<HTMLDivElement>): void => {
+                          if (event.pointerType === 'mouse') return;
+                          event.stopPropagation();
+                          const owner = hexCubeTouchDragRef.current;
+                          if (owner?.pointerId === event.pointerId && owner.groupId === hcg.id && owner.element === event.currentTarget) finishHexCubeTouchDrag();
+                        }}
+                        onPointerCancel={(event: React.PointerEvent<HTMLDivElement>): void => {
+                          if (event.pointerType === 'mouse') return;
+                          event.stopPropagation();
+                          const owner = hexCubeTouchDragRef.current;
+                          if (owner?.pointerId === event.pointerId && owner.groupId === hcg.id && owner.element === event.currentTarget) finishHexCubeTouchDrag();
+                        }}
+                        onPointerLeave={(event: React.PointerEvent<HTMLDivElement>): void => { if (event.pointerType !== 'mouse') event.stopPropagation(); }}
+                        onLostPointerCapture={(event: React.PointerEvent<HTMLDivElement>): void => {
+                          const owner = hexCubeTouchDragRef.current;
+                          if (event.pointerType !== 'mouse' && owner?.pointerId === event.pointerId && owner.groupId === hcg.id && owner.element === event.currentTarget) finishHexCubeTouchDrag();
                         }}
                         onMouseDown={(e) => {
+                          if (hexCubeTouchDragRef.current) return;
                           if (e.button !== 0) return;
                           e.stopPropagation();
                           e.preventDefault();
@@ -17557,25 +18313,29 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       </div>
 
                       {/* 旋转/倾斜滑块 */}
-                      <div className="flex items-center gap-3 mt-2">
-                        <div className="flex items-center gap-1 flex-1">
+                      <div className="flex max-md:min-w-0 flex-col items-stretch gap-3 mt-2 md:flex-row md:items-center">
+                        <div className="flex max-md:min-w-0 items-center gap-1 flex-1">
                           <span className="text-[10px]" style={{ color: isMonochrome ? '#3b82f6' : '#666' }}>旋转</span>
                           <input
                             type="range" min={0} max={360} step={5}
+                            aria-label="六面体旋转"
                             value={hcg.toolbar.rotationY}
-                            className="flex-1 h-1 accent-[#d4af37]"
+                            className="max-md:min-w-0 flex-1 h-1 accent-[#d4af37]"
+                            style={isMobileGroupUi ? { minHeight: 44, background: `linear-gradient(${isMonochrome ? '#3b82f6' : '#d4af37'}, ${isMonochrome ? '#3b82f6' : '#d4af37'}) center / 100% 4px no-repeat` } : undefined}
                             onChange={(e) => {
                               setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, rotationY: parseInt(e.target.value) } } : g));
                             }}
                           />
                           <span className="text-[10px] w-7 text-right" style={{ color: isMonochrome ? '#6b7280' : '#666' }}>{hcg.toolbar.rotationY}°</span>
                         </div>
-                        <div className="flex items-center gap-1 flex-1">
+                        <div className="flex max-md:min-w-0 items-center gap-1 flex-1">
                           <span className="text-[10px]" style={{ color: isMonochrome ? '#3b82f6' : '#666' }}>倾斜</span>
                           <input
                             type="range" min={-60} max={60} step={5}
+                            aria-label="六面体倾斜"
                             value={hcg.toolbar.tiltX}
-                            className="flex-1 h-1 accent-[#d4af37]"
+                            className="max-md:min-w-0 flex-1 h-1 accent-[#d4af37]"
+                            style={isMobileGroupUi ? { minHeight: 44, background: `linear-gradient(${isMonochrome ? '#3b82f6' : '#d4af37'}, ${isMonochrome ? '#3b82f6' : '#d4af37'}) center / 100% 4px no-repeat` } : undefined}
                             onChange={(e) => {
                               setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, tiltX: parseInt(e.target.value) } } : g));
                             }}
@@ -17590,6 +18350,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                           {(['close-up', 'standard', 'wide'] as ZoomLevel[]).map(z => (
                             <button
                               key={z}
+                              aria-pressed={hcg.toolbar.zoom === z}
                               className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all ${hcg.toolbar.zoom === z ? (isMonochrome ? 'bg-blue-500 text-white' : 'bg-gold text-black') : isMonochrome ? 'bg-gray-100 text-gray-500 hover:bg-gray-200' : 'bg-[#252525] text-gold-muted hover:bg-[#282828]/85'}`}
                               onClick={() => setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, zoom: z } } : g))}
                             >{ZOOM_LEVEL_LABELS[z]}</button>
@@ -17605,7 +18366,9 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       {/* 模型选择 */}
                       <div className="relative">
                         <button
-                          className="px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 transition-all"
+                          className="px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 transition-all max-md:max-w-full max-md:whitespace-normal max-md:break-words"
+                          aria-label="六面体生图模型"
+                          aria-expanded={openModelDropdownGroupId === `hex-${hcg.id}`}
                           style={{ background: isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.08)', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.10)'}` }}
                           onClick={(e) => {
                             e.stopPropagation();
@@ -17619,11 +18382,20 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                           <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
                         </button>
                         {openModelDropdownGroupId === `hex-${hcg.id}` && (
-                          <div className="absolute top-full left-0 mt-1 rounded-lg overflow-hidden z-50 max-h-64 overflow-y-auto" style={{ background: isMonochrome ? '#fff' : 'rgba(20,20,20,0.95)', border: `1px solid ${isMonochrome ? '#e5e7eb' : '#333'}`, minWidth: 200, boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
+                          <div data-popup="hex-cube-model" className="absolute top-full left-0 mt-1 rounded-lg overflow-hidden z-50 max-h-64 overflow-y-auto max-md:w-full max-md:min-w-0" style={{ background: isMonochrome ? '#fff' : 'rgba(20,20,20,0.95)', border: `1px solid ${isMonochrome ? '#e5e7eb' : '#333'}`, minWidth: isMobileGroupUi ? 0 : 200, boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
                             {models.map(m => (
                               <div
                                 key={`${m.providerId}-${m.id}`}
-                                className="px-3 py-2 text-xs cursor-pointer transition-colors flex items-center justify-between"
+                                role="button"
+                                tabIndex={0}
+                                aria-pressed={hcg.toolbar.model === m.id && hcg.toolbar.providerId === m.providerId}
+                                onKeyDown={(e) => {
+                                  if (e.key !== 'Enter' && e.key !== ' ') return;
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  e.currentTarget.click();
+                                }}
+                                className="px-3 py-2 text-xs cursor-pointer transition-colors flex items-center justify-between max-md:min-h-11 max-md:break-words"
                                 style={{
                                   background: hcg.toolbar.model === m.id && hcg.toolbar.providerId === m.providerId
                                     ? (isMonochrome ? '#dbeafe' : 'rgba(212,175,55,0.2)')
@@ -17644,7 +18416,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                                   const newSize = /^\d+x\d+$/i.test(newResolution)
                                     ? newResolution
                                     : calculateActualPixels(newAspectRatio, newResolution, m.id);
-                                  setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, model: m.id, providerId: m.providerId, providerName: m.providerName, aspectRatio: newAspectRatio, resolution: newResolution, quality: newQuality, size: newSize } } : g));
+                                  setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, model: m.id, providerId: m.providerId, providerName: m.providerName, aspectRatio: newAspectRatio, resolution: newResolution, quality: newQuality, size: newSize, outputCount: Math.min(g.toolbar.outputCount, selectedDescriptor.maxOutputs) } } : g));
                                   setOpenModelDropdownGroupId(null);
                                 }}
                               >
@@ -17673,6 +18445,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                           className="px-2 py-1.5 rounded-lg text-xs"
                           style={{ background: isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.08)', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.10)'}` }}
                           value={hcg.toolbar.aspectRatio}
+                          aria-label="六面体比例"
                           onChange={(e) => {
                             const newAr = e.target.value;
                             const newSize = /^\d+x\d+$/i.test(curResolution)
@@ -17691,6 +18464,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                             className="px-2 py-1.5 rounded-lg text-xs"
                             style={{ background: isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.08)', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.10)'}` }}
                             value={curResolution}
+                            aria-label="六面体分辨率"
                             onChange={(e) => {
                               const newRes = e.target.value;
                               const newSize = /^\d+x\d+$/i.test(newRes)
@@ -17710,6 +18484,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                             className="px-2 py-1.5 rounded-lg text-xs"
                             style={{ background: isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.08)', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.10)'}` }}
                             value={curQuality}
+                            aria-label="六面体质量"
                             onChange={(e) => {
                               const newQ = e.target.value;
                               setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, quality: newQ } } : g));
@@ -17726,6 +18501,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                         className="px-2 py-1.5 rounded-lg text-xs"
                         style={{ background: isMonochrome ? '#f3f4f6' : 'rgba(255,255,255,0.08)', color: isMonochrome ? '#374151' : '#ccc', border: `1px solid ${isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.10)'}` }}
                         value={hcg.toolbar.outputCount}
+                        aria-label="六面体生成数量"
                         onChange={(e) => setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, outputCount: parseInt(e.target.value) } } : g))}
                       >
                         {Array.from({ length: taskModelCatalogIndex.get(taskModelKey(hcg.toolbar.providerId, hcg.toolbar.model))?.maxOutputs || 1 }, (_, index) => index + 1).map(n => <option key={n} value={n}>{n}张</option>)}
@@ -17737,6 +18513,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                         className="w-full rounded-lg px-3 py-2.5 text-sm resize-y"
                         style={{ background: isMonochrome ? '#f9fafb' : 'rgba(255,255,255,0.06)', color: isMonochrome ? '#111' : '#eee', border: `1px solid ${isMonochrome ? '#d1d5db' : 'rgba(255,255,255,0.10)'}`, minHeight: 60, maxHeight: 160 }}
                         placeholder="描述你想要生成的产品效果..."
+                        aria-label="六面体提示词"
                         value={hcg.toolbar.prompt}
                         onChange={(e) => setHexCubeGroups(prev => prev.map(g => g.id === hcg.id ? { ...g, toolbar: { ...g.toolbar, prompt: e.target.value } } : g))}
                       />
@@ -17939,9 +18716,11 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         {showDisplayDecomposePanel && typeof document !== 'undefined' && createPortal(
           <div
             className="fixed inset-0 z-[200] flex items-center justify-center pointer-events-none"
+            style={typeof window !== 'undefined' && window.innerWidth < 768 ? { paddingLeft: 'max(12px, env(safe-area-inset-left))', paddingRight: 'max(12px, env(safe-area-inset-right))', paddingTop: 'max(12px, env(safe-area-inset-top))', paddingBottom: 'max(12px, env(safe-area-inset-bottom))' } : undefined}
           >
             <div
-              className={`pointer-events-auto w-72 p-3 rounded-xl border shadow-2xl ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#141418] border-white/[0.12]'}`}
+              className={`pointer-events-auto w-72 p-3 rounded-xl border shadow-2xl max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11 ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#141418] border-white/[0.12]'}`}
+              style={typeof window !== 'undefined' && window.innerWidth < 768 ? { width: 'min(360px, 100%)', maxHeight: 'calc(100dvh - max(12px, env(safe-area-inset-top)) - max(12px, env(safe-area-inset-bottom)))', overflowY: 'auto', overscrollBehavior: 'contain', touchAction: 'pan-y' } : undefined}
               onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
               data-popup="display-decompose"
@@ -17952,6 +18731,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                   <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>元素拆解</span>
                 </div>
                 <button
+                  aria-label="关闭元素拆解"
                   onClick={() => setShowDisplayDecomposePanel(false)}
                   className={`p-1 rounded-lg ${isMonochrome ? 'text-gray-400 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted/70 hover:text-white hover:bg-white/10'}`}
                 >
@@ -17961,6 +18741,11 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
               <div className={`text-[11px] leading-relaxed mb-3 ${isMonochrome ? 'text-gray-500' : 'text-gold-muted/80'}`}>
                 识别画面中的视觉元素与设计构件，提取关键材质、色彩与样式，生成可复用的元素拆解板。开启自动去背景后输出透明 PNG。
               </div>
+              {elementDecomposeRecoveryFailed && (
+                <div role="alert" className={`mb-3 rounded-lg px-2.5 py-2 text-xs leading-relaxed break-words ${isMonochrome ? 'bg-red-50 text-red-700' : 'bg-red-500/10 text-red-300'}`}>
+                  读取历史任务失败，请关闭面板后重新打开重试。
+                </div>
+              )}
               <div className="grid grid-cols-3 gap-1.5 mb-3" aria-label="元素拆解输出方式">
                 {([
                   ['board', '拆解板'],
@@ -17970,6 +18755,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                   <button
                     key={mode}
                     type="button"
+                    aria-pressed={elementDecomposeOutputMode === mode}
                     onClick={() => setElementDecomposeOutputMode(mode)}
                     className={`px-2 py-1.5 rounded-lg text-[11px] font-medium border transition-all ${
                       elementDecomposeOutputMode === mode
@@ -17983,6 +18769,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
               </div>
               {/* 自动去背景开关 */}
               <button
+                aria-pressed={displayDecomposeAutoRemoveBg}
                 onClick={() => setDisplayDecomposeAutoRemoveBg(v => !v)}
                 className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg border mb-3 transition-all ${
                   displayDecomposeAutoRemoveBg
@@ -18005,6 +18792,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                 {DISPLAY_DECOMPOSE_SUPPORTED_RATIOS.map((ratio) => (
                   <button
                     key={ratio}
+                    aria-pressed={displayDecomposeRatio === ratio}
                     onClick={() => setDisplayDecomposeRatio(ratio)}
                     className={`px-2 py-1.5 rounded-lg text-xs font-medium border transition-all ${
                       displayDecomposeRatio === ratio
@@ -18042,7 +18830,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
               {elementDecomposeTask && (
                 <div className="mt-3 space-y-2" data-element-status={elementDecomposeTask.overallStatus}>
                   {elementDecomposeTask.overallStatus === 'partial' && (
-                    <div className="text-[11px] text-amber-500">部分完成：已保留成功结果，可单独重试失败分支。</div>
+                    <div className={`text-[11px] ${isMonochrome ? 'text-amber-700' : 'text-amber-500'}`}>部分完成：已保留成功结果，可单独重试失败分支。</div>
                   )}
                   {(['board', 'layers'] as const).map((branch) => {
                     const state = elementDecomposeTask.branches[branch];
@@ -18076,7 +18864,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                           <div
                             data-layer-fallback="refunded-local"
                             title={state.providerError?.message || state.fallbackReason}
-                            className="mt-1.5 text-[10px] leading-4 text-amber-500"
+                            className={`mt-1.5 text-[10px] leading-4 ${isMonochrome ? 'text-amber-700' : 'text-amber-500'}`}
                           >
                             {layerFallbackMessage}
                           </div>
@@ -18099,7 +18887,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                           <button
                             type="button"
                             onClick={() => void handleRetryElementBranch(branch)}
-                            className="mt-2 text-[11px] text-amber-500 hover:underline"
+                            className={`mt-2 text-[11px] hover:underline ${isMonochrome ? 'text-amber-700' : 'text-amber-500'}`}
                           >
                             仅重试此分支
                           </button>
@@ -18138,11 +18926,11 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         {showContextMenu && (
           <CanvasContextMenu anchor={contextMenuPos} minWidth={160} isMonochrome={isMonochrome}
             onDismiss={() => setShowContextMenu(false)}>
-            {imageContextMenuItems.map((item, idx) => (
+            {applicableImageContextMenuItems.map((item, idx) => (
               <button
                 key={idx}
                 onClick={() => { item.action(); setShowContextMenu(false); }}
-                className={`w-full flex items-center justify-between px-3 py-2 text-xs transition-colors ${
+                className={`w-full min-h-11 md:min-h-0 flex items-center justify-between px-3 py-2 text-xs transition-colors ${
                   isMonochrome ? 'text-gray-700 hover:bg-gray-100' : 'text-text-bright hover:bg-[#252525]'
                 }`}
               >
@@ -18161,7 +18949,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
               <button
                 key={idx}
                 onClick={() => { item.action(); setShowCanvasMenu(false); }}
-                className={`w-full flex items-center justify-between px-3 py-2 text-xs transition-colors ${
+                className={`w-full min-h-11 md:min-h-0 flex items-center justify-between px-3 py-2 text-xs transition-colors ${
                   isMonochrome ? 'text-gray-700 hover:bg-gray-100' : 'text-text-bright hover:bg-[#252525]'
                 }`}
               >
@@ -18225,7 +19013,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
               <button
                 onClick={() => setCanvasGenMinimized(!canvasGenMinimized)}
                 className="p-2 min-h-[44px] min-w-[44px] rounded-md transition-colors"
-                aria-label="最小化"
+                aria-label={canvasGenMinimized ? '恢复' : '最小化'}
                 style={{ color: isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)' }}
                 onMouseEnter={e => (e.currentTarget.style.color = isMonochrome ? '#000' : '#fff')}
                 onMouseLeave={e => (e.currentTarget.style.color = isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)')}
@@ -18408,21 +19196,22 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       if (canvasGenCount > selectedDescriptor.maxOutputs) {
                         setCanvasGenCount(selectedDescriptor.maxOutputs);
                       }
-                      if (canvasGenRefImages.length > (selectedDescriptor.maxReferenceImages || 0)) {
-                        setCanvasGenRefImages(previous => previous.slice(0, selectedDescriptor.maxReferenceImages || 0));
-                      }
                     }
                   }}
-                  className={`flex-1 text-xs rounded-lg px-3 py-2 border outline-none focus-visible:ring-2 focus-visible:ring-primary/30 transition-colors ${
+                  className={`flex-1 text-xs [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:text-base rounded-lg px-3 py-2 border outline-none focus-visible:ring-2 focus-visible:ring-primary/30 transition-colors ${
                     isMonochrome
                       ? 'bg-white border-gray-200 text-gray-900 focus:border-gray-400'
                       : 'bg-[#0d0d0d] border-white/[0.12] text-text-bright focus:border-gold/40'
                   }`}
                 >
-                  {canvasGenModels.length === 0 && <option value="">暂无可用模型</option>}
+                  {!canvasGenModel && canvasGenModels.length === 0 && <option value="">暂无可用模型</option>}
+                  {canvasGenModel && !canvasGenModelAvailable && (
+                    <option value={canvasGenModel} disabled>原模型不可用：{canvasGenModel}，请选择可用模型</option>
+                  )}
                   {canvasGenModels.map(m => {
                     const compositeKey = `${m.providerId}::${m.id}`;
-                    return <option key={compositeKey} value={compositeKey}>{m.apiDisplayName || getModelDisplayName(m.id)}{m.providerName ? ` (${m.providerName})` : ''}</option>;
+                    if (compositeKey === canvasGenModel && !canvasGenModelAvailable) return null;
+                    return <option key={compositeKey} value={compositeKey} disabled={!taskModelCatalogIndex.has(taskModelKey(m.providerId, m.id))}>{m.apiDisplayName || getModelDisplayName(m.id)}{m.providerName ? ` (${m.providerName})` : ''}</option>;
                   })}
                 </select>
               </div>
@@ -18445,7 +19234,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       const newAr = e.target.value;
                       setCanvasGenAspectRatio(newAr);
                     }}
-                    className={`text-xs rounded-lg px-3 py-2 border outline-none focus-visible:ring-2 focus-visible:ring-primary/30 transition-colors w-[110px] ${
+                    className={`text-xs [@media(pointer:coarse)]:min-h-11 rounded-lg px-3 py-2 border outline-none focus-visible:ring-2 focus-visible:ring-primary/30 transition-colors w-[110px] ${
                       isMonochrome
                         ? 'bg-white border-gray-200 text-gray-900 focus:border-gray-400'
                         : 'bg-[#0d0d0d] border-white/[0.12] text-text-bright focus:border-gold/40'
@@ -18464,7 +19253,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       <select
                         value={canvasGenResolution}
                         onChange={(e) => setCanvasGenResolution(e.target.value)}
-                        className={`text-xs rounded-lg px-3 py-2 border outline-none focus-visible:ring-2 focus-visible:ring-primary/30 transition-colors w-[90px] ${
+                        className={`text-xs [@media(pointer:coarse)]:min-h-11 rounded-lg px-3 py-2 border outline-none focus-visible:ring-2 focus-visible:ring-primary/30 transition-colors w-[90px] ${
                           isMonochrome
                             ? 'bg-white border-gray-200 text-gray-900 focus:border-gray-400'
                             : 'bg-[#0d0d0d] border-white/[0.12] text-text-bright focus:border-gold/40'
@@ -18480,7 +19269,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       <select
                         value={canvasGenQuality}
                         onChange={(e) => setCanvasGenQuality(e.target.value)}
-                        className={`text-xs rounded-lg px-3 py-2 border outline-none focus-visible:ring-2 focus-visible:ring-primary/30 transition-colors w-[90px] ${
+                        className={`text-xs [@media(pointer:coarse)]:min-h-11 rounded-lg px-3 py-2 border outline-none focus-visible:ring-2 focus-visible:ring-primary/30 transition-colors w-[90px] ${
                           isMonochrome
                             ? 'bg-white border-gray-200 text-gray-900 focus:border-gray-400'
                             : 'bg-[#0d0d0d] border-white/[0.12] text-text-bright focus:border-gold/40'
@@ -18494,14 +19283,14 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
               })()}
 
               {/* Count + Reference */}
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2.5 [@media(pointer:coarse)]:flex-wrap">
                 <label className={`text-xs font-medium min-w-[42px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>数量</label>
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 [@media(pointer:coarse)]:flex-wrap">
                   {Array.from({ length: taskModelCatalogIndex.get(taskModelKey(canvasGenModel.split('::')[0] || '', canvasGenModel.split('::')[1] || ''))?.maxOutputs || 1 }, (_, index) => index + 1).map(n => (
                     <button
                       key={n}
                       onClick={() => setCanvasGenCount(n)}
-                      className={`w-8 h-7 text-xs rounded-lg transition-all font-medium ${
+                      className={`w-8 h-7 [@media(pointer:coarse)]:min-w-11 [@media(pointer:coarse)]:min-h-11 text-xs rounded-lg transition-all font-medium ${
                         canvasGenCount === n
                           ? isMonochrome
                             ? 'bg-blue-500 text-white shadow-md shadow-blue-500/20'
@@ -18518,22 +19307,23 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                 <div className="flex-1" />
                 <button
                   onClick={() => {
+                    const uploadGeneration = canvasGenProjectScope.current.generation;
                     const input = document.createElement('input');
                     input.type = 'file';
                     input.accept = 'image/*';
                     input.onchange = async (e: Event) => {
                       const file = (e.target as HTMLInputElement).files?.[0];
-                      if (!file) return;
+                      if (!file || canvasGenProjectScope.current.generation !== uploadGeneration) return;
                       try {
                         const formData = new FormData();
                         formData.append('file', file);
                         const upRes = await fetch('/api/upload', { method: 'POST', body: formData });
-                        if (upRes.ok) { const upData = await upRes.json(); setCanvasGenRefImages(prev => [...prev, upData.url]); }
+                        if (upRes.ok) { const upData = await upRes.json(); if (canvasGenProjectScope.current.generation === uploadGeneration) setCanvasGenRefImages(prev => [...prev, upData.url]); }
                       } catch { /* silent */ }
                     };
                     input.click();
                   }}
-                  className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors border ${
+                  className={`flex items-center gap-1.5 text-xs [@media(pointer:coarse)]:min-h-11 px-3 py-1.5 rounded-lg transition-colors border ${
                     isMonochrome
                       ? 'text-gray-500 hover:bg-gray-100 border-gray-200'
                       : 'text-gold-muted hover:bg-[#333] hover:text-[#bbb] border-[#444]'
@@ -18553,13 +19343,21 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       <NextImage unoptimized width={1} height={1} src={refUrl} alt="" className={`w-9 h-9 rounded-lg object-cover border ${isMonochrome ? 'border-gray-200' : 'border-white/[0.12]'}`} />
                       <button
                         onClick={() => setCanvasGenRefImages(prev => prev.filter((_, i) => i !== idx))}
-                        className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
+                        aria-label={`移除参考图 ${idx + 1}`}
+                        className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity shadow-md [@media(pointer:coarse)]:static [@media(pointer:coarse)]:w-11 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:opacity-100"
                       >
                         <X size={8} />
                       </button>
                     </div>
                   ))}
                 </div>
+              )}
+              {canvasGenModelAvailable && canvasGenSelectedDescriptor && canvasGenRefImages.length > 0 && (!canvasGenSelectedDescriptor.supportsReferenceImages || canvasGenRefImages.length > (canvasGenSelectedDescriptor.maxReferenceImages || 0)) && (
+                <p role="status" className={`text-xs ${isMonochrome ? 'text-gray-600' : 'text-gold-muted'}`}>
+                  {!canvasGenSelectedDescriptor.supportsReferenceImages
+                    ? '当前模型不支持参考图，请移除参考图或选择其他模型。'
+                    : `当前模型最多支持 ${canvasGenSelectedDescriptor.maxReferenceImages || 0} 张参考图，请移除多余参考图或选择其他模型。`}
+                </p>
               )}
 
               {/* Prompt input */}
@@ -18580,11 +19378,23 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                 }}
               />
 
+              <textarea
+                value={canvasGenNegativePrompt}
+                onChange={(e) => setCanvasGenNegativePrompt(e.target.value)}
+                placeholder="负向提示词"
+                aria-label="负向提示词"
+                className={`w-full min-h-11 text-sm rounded-xl px-3.5 py-2.5 border outline-none focus-visible:ring-2 resize-y leading-relaxed transition-colors ${
+                  isMonochrome
+                    ? 'bg-white border-gray-200 text-gray-900 placeholder:text-gray-300 focus:border-gray-400'
+                    : 'bg-[#0d0d0d] border-white/[0.12] text-text-bright placeholder:text-gold-muted/50 focus:border-gold/40'
+                }`}
+              />
+
               {/* Generate button */}
               <button
                 onClick={handleCanvasGenerate}
-                disabled={canvasGenGenerating || !canvasGenPrompt.trim() || catalogStatus.loading || Boolean(catalogStatus.error) || !taskModelCatalogIndex.has(taskModelKey(canvasGenModel.split('::')[0] || '', canvasGenModel.split('::')[1] || ''))}
-                className={`w-full py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
+                disabled={canvasGenGenerating || !canvasGenPrompt.trim() || catalogStatus.loading || Boolean(catalogStatus.error) || !canvasGenModelAvailable}
+                className={`w-full py-2.5 [@media(pointer:coarse)]:min-h-11 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
                   canvasGenGenerating || !canvasGenPrompt.trim()
                     ? isMonochrome
                       ? 'bg-blue-200 text-blue-400 cursor-not-allowed'
@@ -18625,15 +19435,31 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
             selectedIds={Array.from(selectedIds)}
             isMonochrome={isMonochrome}
             onSelect={(ids) => setSelectedIds(new Set(ids))}
+            onCreateGroup={() => { handleCreateGroup(); setShowLayerPanel(false); }}
             onReorder={(newImages) => onImagesChange(applyCanvasCommand(images, {
               type: 'reorder',
               order: newImages.map((image) => image.id),
               zIndexes: Object.fromEntries(newImages.map((image) => [image.id, image.zIndex])),
             }))}
+            onSetAllVisibility={(visible: boolean) => {
+              onImagesChange(images.map(image => ({ ...image, visible })));
+              if (!visible) {
+                setSelectedIds(new Set());
+                onSelectImage(null);
+              }
+            }}
+            onSetAllLocked={(locked: boolean) => {
+              onImagesChange(images.map(image => ({ ...image, locked })));
+            }}
             onToggleVisibility={(id) => {
+              const target = images.find(img => img.id === id);
               onImagesChange(images.map(img =>
-                img.id === id ? { ...img, visible: !img.visible } : img
+                img.id === id ? { ...img, visible: img.visible === false } : img
               ));
+              if (target && target.visible !== false) {
+                setSelectedIds(current => new Set([...current].filter(selectedId => selectedId !== id)));
+                if (selectedImage?.id === id) onSelectImage(null);
+              }
             }}
             onToggleLock={(id) => {
               onImagesChange(images.map(img =>
@@ -18660,6 +19486,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
             floating={false}
             position="bottom"
             rightInset={isPanelCollapsed ? 0 : 480}
+            suspended={versionHistorySuspended}
             width={360}
             manager={versionHistoryManager}
             isMonochrome={isMonochrome}
@@ -18695,10 +19522,15 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         onWheel={(event) => event.stopPropagation()}
         onMouseEnter={() => setBottomBarHovered(true)}
         onMouseLeave={() => setBottomBarHovered(false)}
-        style={{ bottom: (showLayerPanel || showVersionHistory) ? 'calc(min(30dvh, 260px) + 28px)' : undefined }}
-        className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-50 hidden max-w-[calc(100%-2rem)] items-center overflow-visible rounded-full px-2.5 py-1.5 transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] md:flex ${isMonochrome ? 'bg-white/95 border border-gray-200 shadow-lg' : 'bg-[#1a1a1a]/95 border border-white/[0.08] shadow-2xl backdrop-blur-md'} ${bottomBarHovered ? (isMonochrome ? 'shadow-xl' : 'shadow-2xl ring-1 ring-white/[0.06]') : ''}`}
+        style={{
+          bottom: 'var(--canvas-dock-toolbar-bottom, 20px)',
+          left: `calc((100% - ${canvasOccupiedRight}px) / 2)`,
+          maxWidth: `calc(100% - ${canvasOccupiedRight}px - 32px)`,
+        }}
+        className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-50 hidden w-max max-w-[calc(100%-2rem)] flex-wrap items-center justify-center gap-y-1 overflow-visible rounded-2xl px-2.5 py-1.5 [&>button]:min-h-11 [&>button]:min-w-11 transition-[background-color,border-color,box-shadow,opacity,transform] duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] md:flex ${isMonochrome ? 'bg-white/95 border border-gray-200 shadow-lg' : 'bg-[#1a1a1a]/95 border border-white/[0.08] shadow-2xl backdrop-blur-md'} ${bottomBarHovered ? (isMonochrome ? 'shadow-xl' : 'shadow-2xl ring-1 ring-white/[0.06]') : ''}`}
       >
         {/* ── Center: Main function buttons (always visible) ── */}
+        <div data-canvas-toolbar-primary className="contents">
         <button
           aria-label="选择工具"
           onClick={activateSelectPointerTool}
@@ -18775,6 +19607,15 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         >
           <Menu className="h-4 w-4" />
         </button>
+        <span
+          data-canvas-toolbar-fixed-zoom
+          role="status"
+          aria-label={`当前缩放 ${Math.round(zoom * 100)}%`}
+          className={`text-xs font-mono text-center select-none ${isMonochrome ? 'text-gray-500' : 'text-gold'}`}
+        >
+          {Math.round(zoom * 100)}%
+        </span>
+        </div>
         {typeof document !== 'undefined' && createPortal(
           (
         <div
@@ -18808,7 +19649,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
               type="button"
               aria-label="关闭工具抽屉"
               onClick={() => setBottomToolbarDrawerOpen(false)}
-              className={`h-7 w-7 flex items-center justify-center rounded-full transition-colors ${isMonochrome ? 'text-gray-500 hover:bg-gray-100 hover:text-gray-800' : 'text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
+              className={`h-11 w-11 min-h-11 min-w-11 shrink-0 flex items-center justify-center rounded-full transition-colors ${isMonochrome ? 'text-gray-500 hover:bg-gray-100 hover:text-gray-800' : 'text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
             >
               <X className="h-4 w-4" />
             </button>
@@ -19061,6 +19902,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           document.body,
         )}
 
+        <div data-canvas-toolbar-auxiliary className="contents">
         <CanvasZoomCluster
           zoom={zoom}
           isMonochrome={isMonochrome}
@@ -19085,6 +19927,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           onToggleVersionHistory={() => toggleVersionHistory('bottom-toolbar')}
           onOpenEngineDialog={() => setEngineDialog('upscale')}
         />
+        </div>
       </div>
 
       {/* AI 引擎选择对话框 */}
@@ -19099,7 +19942,15 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         subtitle="设置当前工具使用的处理引擎"
         toolType={(engineDialog || 'upscale') as 'upscale' | 'removebg' | 'svg' | 'segment'}
         onSelect={(eng: EditEngine) => {
-          if (engineDialog === 'upscale') setUpscaleEnginePref(eng);
+          if (engineDialog === 'upscale') {
+            if (isUpscaleSubmissionUnknown || isUpscaleSubmitting || isUpscaleQuoteLoading || upscaleQuote || upscaleActionPendingRef.current) {
+              toast.error('放大任务或报价尚未结束，请先完成或核对后再切换引擎。');
+              return;
+            }
+            try { localStorage.setItem('wujie_engine_upscale', eng); }
+            catch { toast.error('无法保存放大引擎偏好，未更改当前引擎。'); return; }
+            setUpscaleMode(resolveUpscaleProductMode(eng, false));
+          }
           else if (engineDialog === 'removebg') { setRemoveBgQuote(null); setRemoveBgEngine(eng); }
           else if (engineDialog === 'svg') setSvgTraceEngine(eng === 'local' ? 'vtracer' : eng === 'ai' ? 'vlm' : 'auto');
           else if (engineDialog === 'segment') setSegmentEnginePref(eng);
@@ -19112,7 +19963,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       {minimapOpen && minimapAvailable && (
         <div
           data-canvas-minimap-host
-          style={{ '--canvas-minimap-bottom': minimapBottomOffset } as React.CSSProperties}
+          ref={minimapHostRef}
         >
           <CanvasMinimap
             items={minimapItems}

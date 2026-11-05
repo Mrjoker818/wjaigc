@@ -1,4 +1,5 @@
 import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
+import { expectedActorHeaders } from '@/lib/expected-actor-header';
 import { parseWorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
 import type { SkillDefinition } from './types';
 import { parseDurableSkillOutputs } from './structured-output';
@@ -216,6 +217,7 @@ export function canvasSkillProjectionIdentity(runId: string, assetVersionId: str
 export async function transferCanvasSkillAsset(input: {
   reference: WorkspaceAssetReference;
   projectId: string;
+  expectedActorId?: string;
   runId: string;
   sourceVersionIds: readonly string[];
   restoreDeletedPlacement?: boolean;
@@ -223,11 +225,14 @@ export async function transferCanvasSkillAsset(input: {
   signal?: AbortSignal;
 }): Promise<WorkspaceAssetReference & { projectRevision?: number }> {
   if (!input.reference.assetVersionId) throw new Error('Skill 资产版本无效');
+  if (input.expectedActorId !== undefined && !input.expectedActorId) throw new Error('缺少当前账号');
   const identity = canvasSkillProjectionIdentity(input.runId, input.reference.assetVersionId);
-  const response = await (input.fetcher ?? fetch)('/api/assets/transfer', {
+  const response = await (input.fetcher ?? fetch)(input.expectedActorId ? '/api/assets/actor-v2/transfer' : '/api/assets/transfer', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json',
+      ...(input.expectedActorId ? expectedActorHeaders(input.expectedActorId) : {}) },
     body: JSON.stringify({
+      ...(input.expectedActorId ? { expectedActorId: input.expectedActorId } : {}),
       sourceVersion: input.reference.assetVersionId,
       targetProject: input.projectId,
       targetWorkspace: `canvas:${input.projectId}`,
@@ -253,11 +258,12 @@ export async function transferCanvasSkillAsset(input: {
       throw new Error('Skill 结果恢复缺少删除版本，请刷新后重试');
     }
     const restoreResponse = await (input.fetcher ?? fetch)(
-      `/api/assets/${encodeURIComponent(transferred.assetId)}/restore`,
+      input.expectedActorId ? `/api/assets/actor-v2/${encodeURIComponent(transferred.assetId)}/restore` : `/api/assets/${encodeURIComponent(transferred.assetId)}/restore`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: input.projectId, placementId: transferred.placementId,
+        headers: { 'Content-Type': 'application/json',
+          ...(input.expectedActorId ? expectedActorHeaders(input.expectedActorId) : {}) },
+        body: JSON.stringify({ ...(input.expectedActorId ? { expectedActorId: input.expectedActorId } : {}), projectId: input.projectId, placementId: transferred.placementId,
           expectedPlacementRevision: transferred.placementRevision }),
         signal: input.signal,
       },
@@ -288,6 +294,7 @@ export async function transferCanvasSkillAsset(input: {
 export async function transferCanvasSkillAssets(input: {
   references: readonly WorkspaceAssetReference[];
   projectId: string;
+  expectedActorId?: string;
   runId: string;
   sourceVersionIds: readonly string[];
   restoreDeletedPlacement?: boolean;
@@ -298,10 +305,13 @@ export async function transferCanvasSkillAssets(input: {
     || input.references.some(reference => !reference.assetVersionId)) {
     throw new Error('Skill 资产批次无效');
   }
-  const response = await (input.fetcher ?? fetch)('/api/assets/batch-transfer', {
+  if (input.expectedActorId !== undefined && !input.expectedActorId) throw new Error('缺少当前账号');
+  const response = await (input.fetcher ?? fetch)(input.expectedActorId ? '/api/assets/actor-v2/batch-transfer' : '/api/assets/batch-transfer', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json',
+      ...(input.expectedActorId ? expectedActorHeaders(input.expectedActorId) : {}) },
     body: JSON.stringify({
+      ...(input.expectedActorId ? { expectedActorId: input.expectedActorId } : {}),
       restoreDeletedPlacements: input.restoreDeletedPlacement === true,
       transfers: input.references.map(reference => {
         const identity = canvasSkillProjectionIdentity(input.runId, reference.assetVersionId!);

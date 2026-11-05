@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef } from 'react';
 import {
   GitBranch, History, ChevronRight, ChevronDown, Circle, CircleDot,
   Undo2, Redo2, RotateCcw, BookmarkPlus, Trash2, X, Clock,
@@ -29,6 +29,7 @@ export interface VersionHistoryPanelProps {
   floating?: boolean;
   /** 底部抽屉时右侧面板占用的宽度（px），0 表示全页铺满 */
   rightInset?: number;
+  suspended?: boolean;
 }
 
 /** 时间格式化 */
@@ -55,7 +56,9 @@ export function VersionHistoryPanel({
   width = 280,
   floating = false,
   rightInset = 0,
+  suspended = false,
 }: VersionHistoryPanelProps) {
+  const gesture = useRef({ active: new Set<number>(), invalid: false, x: 0, y: 0 });
   const [showBranchDialog, setShowBranchDialog] = useState(false);
   const [branchFromNode, setBranchFromNode] = useState<string | null>(null);
   const [branchName, setBranchName] = useState('');
@@ -112,16 +115,16 @@ export function VersionHistoryPanel({
               <CircleDot className={`w-3 h-3 ${isMonochrome ? 'text-blue-500' : 'text-gold'}`} />
             </div>
           )}
-          {/* hover 分支按钮 */}
-          <div className="absolute bottom-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button
-              onClick={(e) => { e.stopPropagation(); setBranchFromNode(node.id); setBranchName(''); setShowBranchDialog(true); }}
-              className={`p-1 rounded ${isMonochrome ? 'bg-gray-700/70 hover:bg-gray-600' : 'bg-black/50 hover:bg-black/70'}`}
-              title="从此节点创建分支"
-            >
-              <GitBranch className="w-3 h-3 text-white" />
-            </button>
-          </div>
+        </div>
+        {/* 分支入口在触屏上保持可见，独立于缩略图裁切区域 */}
+        <div className="absolute top-0 left-0 opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
+          <button
+            onClick={(e) => { e.stopPropagation(); setBranchFromNode(node.id); setBranchName(''); setShowBranchDialog(true); }}
+            className={`inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded ${isMonochrome ? 'bg-gray-700/70 hover:bg-gray-600' : 'bg-black/50 hover:bg-black/70'}`}
+            title="从此节点创建分支"
+          >
+            <GitBranch className="w-4 h-4 text-white" />
+          </button>
         </div>
         {/* 信息区 */}
         <div className={`px-1.5 py-1 rounded-b-lg ${isCurrent ? (isMonochrome ? 'bg-blue-50' : 'bg-gold/10') : ''}`}>
@@ -138,7 +141,7 @@ export function VersionHistoryPanel({
 
   const isBottom = position === 'bottom';
   const placementClass = isBottom
-    ? 'fixed bottom-0 left-0 h-[min(30dvh,260px)] rounded-t-xl shadow-2xl'
+    ? 'fixed bottom-0 left-0 h-[min(30dvh,260px)] max-h-[calc(100dvh-16px)] rounded-t-xl shadow-2xl'
     : floating
       ? 'fixed left-1/2 top-1/2 h-[min(70dvh,620px)] max-h-[calc(100dvh-2rem)] -translate-x-1/2 -translate-y-1/2 rounded-lg shadow-2xl'
       : `absolute ${position === 'left' ? 'left-0' : 'right-0'} top-12 bottom-14`;
@@ -151,10 +154,14 @@ export function VersionHistoryPanel({
     <div
       role="dialog"
       aria-label="版本历史"
-      className={`${placementClass} z-[80] flex flex-col ${themeClass}`}
-      style={{ width: isBottom ? (rightInset ? `calc(100% - ${rightInset}px)` : '100%') : width, maxWidth: isBottom ? undefined : (floating ? 'calc(100dvw - 2rem)' : 'min(100%, calc(100dvw - 1rem))') }}
+      aria-hidden={suspended || undefined}
+      inert={suspended}
+      className={`${placementClass} version-history-panel ${isBottom ? 'version-history-bottom' : ''} z-[80] flex flex-col ${themeClass}`}
+      style={{ display: suspended ? 'none' : undefined, minHeight: isBottom ? (showBranchDialog ? 'min(280px, calc(100dvh - var(--canvas-bottom-toolbar-height, 106px) - 44px))' : 'min(180px, calc(100dvh - 16px))') : undefined, width: isBottom ? (rightInset ? `calc(100% - ${rightInset}px)` : '100%') : width, maxWidth: isBottom ? undefined : (floating ? 'calc(100dvw - 2rem)' : 'min(100%, calc(100dvw - 1rem))') }}
       data-popup={floating || isBottom ? 'version-history' : undefined}
+      data-canvas-dock-editing={showBranchDialog ? 'true' : undefined}
     >
+      <style>{`@media(max-height:480px){.version-history-bottom{height:min(200px,calc(100dvh - var(--canvas-bottom-toolbar-height, 56px) - 44px))!important;min-height:0!important}.version-history-bottom .version-original,.version-history-bottom .version-branch-info{display:none!important}.version-history-bottom .version-compact{display:block!important}.version-history-bottom .version-compact-branch-count{display:inline!important}}@media(max-width:767px){.version-history-bottom{width:100%!important;bottom:calc(72px + env(safe-area-inset-bottom))!important;height:min(260px,calc(100dvh - 88px - env(safe-area-inset-bottom)))!important;min-height:0!important}.version-history-bottom .version-original,.version-history-bottom .version-branch-info{display:none!important}.version-history-bottom .version-compact{display:block!important}.version-history-bottom .version-compact-branch-count{display:inline!important}}@media(max-height:480px) and (max-width:767px){.version-history-bottom{height:min(200px,calc(100dvh - 88px - env(safe-area-inset-bottom)))!important}}`}</style>
       {/* 标题栏 */}
       <div className={`flex items-center justify-between px-3 py-2 border-b ${isMonochrome ? 'border-gray-200' : 'border-gold/10'}`}>
         <div className="flex items-center gap-2">
@@ -162,11 +169,12 @@ export function VersionHistoryPanel({
           <span className={`text-sm font-medium ${isMonochrome ? 'text-gray-700' : 'text-foreground'}`}>
             版本历史
           </span>
+          {branches.length > 1 && <span className={`version-compact-branch-count hidden text-xs ${isMonochrome ? 'text-gray-600' : 'text-muted-foreground'}`}>{branches.length} 个分支</span>}
         </div>
         <button
           aria-label="关闭版本历史"
           onClick={onClose}
-          className={`p-1 rounded ${isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-white/5'}`}
+          className={`flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center p-1 rounded ${isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-white/5'}`}
         >
           <X className={`w-4 h-4 ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground'}`} />
         </button>
@@ -174,7 +182,7 @@ export function VersionHistoryPanel({
 
       {/* 分支信息 */}
       {branches.length > 1 && (
-        <div className={`px-3 py-2 border-b ${isMonochrome ? 'border-gray-200' : 'border-gold/10'}`}>
+        <div className={`version-branch-info px-3 py-2 border-b ${isMonochrome ? 'border-gray-200' : 'border-gold/10'}`}>
           <div className="flex items-center gap-1">
             <GitBranch className={`w-3 h-3 ${isMonochrome ? 'text-gray-500' : 'text-muted-foreground'}`} />
             <span className={`text-xs ${isMonochrome ? 'text-gray-600' : 'text-muted-foreground'}`}>
@@ -191,7 +199,7 @@ export function VersionHistoryPanel({
           <span className="text-xs">暂无历史记录</span>
         </div>
       ) : (
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="version-original flex-1 flex flex-col overflow-hidden">
           {/* 主路径时间线 */}
           <div className={`px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground/60'}`}>
             当前分支
@@ -217,25 +225,46 @@ export function VersionHistoryPanel({
         </div>
       )}
 
+      {nodes.length > 0 && <div className="version-compact" style={{display:'none',flex:'1 1 0',minHeight:0,overflowY:'auto',overscrollBehavior:'contain'}}
+        onPointerDownCapture={e=>{const g=gesture.current;if(e.pointerType==='mouse'){if(g.active.size===0)g.invalid=false;return;}if(g.active.size===0){g.invalid=false;g.x=e.clientX;g.y=e.clientY;}g.active.add(e.pointerId);if(g.active.size>1)g.invalid=true;}}
+        onPointerMoveCapture={e=>{const g=gesture.current;if(g.active.has(e.pointerId)&&Math.hypot(e.clientX-g.x,e.clientY-g.y)>6)g.invalid=true;}}
+        onPointerCancelCapture={e=>{gesture.current.invalid=true;gesture.current.active.delete(e.pointerId);}}
+        onPointerUpCapture={e=>{gesture.current.active.delete(e.pointerId);}}
+        onTouchStartCapture={e=>{if(e.touches.length>1)gesture.current.invalid=true;}}
+        onClickCapture={e=>{if(e.detail!==0&&gesture.current.invalid){e.preventDefault();e.stopPropagation();}}}>
+        {[{name:'当前分支',items:pathNodes},{name:'其他分支',items:branchNodes}].filter(group=>group.items.length>0).map(group=><section key={group.name}>
+          <div className="px-3 py-1 text-xs">{group.name}</div>
+          {group.items.map(node=><div key={node.id} className="flex items-stretch border-b border-current/10">
+            <button type="button" className="min-h-11 flex flex-1 items-center gap-2 px-3 py-1 text-left break-all" onClick={()=>onRestore(node.id)} aria-label={`恢复 ${node.userMark || node.label}`} aria-current={node.isHead ? "true" : undefined}>
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded bg-black/20">
+                {node.snapshot?.[node.snapshot.length - 1]?.url ? <img src={node.snapshot[node.snapshot.length - 1].url} alt={node.userMark || node.label} className="h-full w-full object-cover" /> : <History className={`h-4 w-4 ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground/40'}`} />}
+              </span>
+              <span>{node.userMark || node.label} {node.isHead && <span className={`ml-1 rounded px-1 text-xs font-medium ${isMonochrome ? "bg-blue-100 text-blue-800" : "bg-gold/20 text-gold"}`}>当前历史节点</span>} <span className="text-xs opacity-60">{formatTime(node.timestamp)}</span></span>
+            </button>
+            <button type="button" className="min-h-11 min-w-11 shrink-0" aria-label={`从 ${node.userMark || node.label} 创建分支`} onClick={()=>{setBranchFromNode(node.id);setBranchName('');setShowBranchDialog(true);}}><GitBranch className="mx-auto h-4 w-4"/></button>
+          </div>)}
+        </section>)}
+      </div>}
+
       {/* 底部状态栏 */}
       <div className={`flex items-center justify-between px-3 py-2 border-t ${isMonochrome ? 'border-gray-200' : 'border-gold/10'}`}>
         <div className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground'}`}>
           {manager.getNodeCount()} 个版本
         </div>
         <div className={`text-xs ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground'}`}>
-          可撤销 {manager.getUndoCount()} 步
+          可撤销 {Math.max(0, manager.getUndoCount())} 步
         </div>
       </div>
 
       {/* 创建分支对话框 */}
       {showBranchDialog && (
-        <div className={`absolute inset-0 z-50 flex items-center justify-center ${isMonochrome ? 'bg-white/80' : 'bg-black/80'}`}>
-          <div className={`w-[90%] max-w-xs p-4 rounded-lg shadow-lg ${isMonochrome ? 'bg-white border border-gray-200' : 'bg-[#1a1a1a] border border-gold/20'}`}>
+        <div className={`absolute inset-0 z-50 flex items-center justify-center p-3 ${isMonochrome ? 'bg-white/80' : 'bg-black/80'}`}>
+          <div className={`w-[90%] max-w-xs max-h-full overflow-y-auto overscroll-contain p-4 rounded-lg shadow-lg ${isMonochrome ? 'bg-white border border-gray-200' : 'bg-[#1a1a1a] border border-gold/20'}`}>
             <div className="flex items-center justify-between mb-3">
               <h3 className={`text-sm font-medium ${isMonochrome ? 'text-gray-800' : 'text-gold'}`}>
                 创建新分支
               </h3>
-              <button onClick={() => setShowBranchDialog(false)} className="p-1">
+              <button aria-label="关闭创建分支" onClick={() => setShowBranchDialog(false)} className="inline-flex min-h-11 min-w-11 items-center justify-center p-1">
                 <X className={`w-4 h-4 ${isMonochrome ? 'text-gray-400' : 'text-muted-foreground'}`} />
               </button>
             </div>
@@ -244,12 +273,12 @@ export function VersionHistoryPanel({
               placeholder="分支名称（可选）"
               value={branchName}
               onChange={(e) => setBranchName(e.target.value)}
-              className={`w-full px-3 py-2 rounded-lg text-sm ${isMonochrome ? 'bg-gray-50 border border-gray-200 text-gray-700' : 'bg-white/5 border border-gold/20 text-foreground'}`}
+              className={`w-full min-h-11 px-3 py-2 rounded-lg text-base ${isMonochrome ? 'bg-gray-50 border border-gray-200 text-gray-700' : 'bg-white/5 border border-gold/20 text-foreground'}`}
             />
             <div className="flex gap-2 mt-3">
               <button
                 onClick={() => setShowBranchDialog(false)}
-                className={`flex-1 px-3 py-1.5 rounded-lg text-sm ${isMonochrome ? 'bg-gray-100 text-gray-600' : 'bg-white/5 text-muted-foreground'}`}
+                className={`flex-1 min-h-11 px-3 py-1.5 rounded-lg text-sm ${isMonochrome ? 'bg-gray-100 text-gray-600' : 'bg-white/5 text-muted-foreground'}`}
               >
                 取消
               </button>
@@ -260,7 +289,7 @@ export function VersionHistoryPanel({
                   }
                   setShowBranchDialog(false);
                 }}
-                className={`flex-1 px-3 py-1.5 rounded-lg text-sm ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-gold text-black'}`}
+                className={`flex-1 min-h-11 px-3 py-1.5 rounded-lg text-sm ${isMonochrome ? 'bg-blue-500 text-white' : 'bg-gold text-black'}`}
               >
                 创建
               </button>

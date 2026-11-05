@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
+import { getFloatingPanelViewport, subscribeFloatingPanelViewport } from '@/lib/floating-panel-position';
 import { Lightbulb, X, Upload, Wand2, Eye, Sparkles, Loader2, Copy, Check, Send, Image as ImageIcon, RotateCcw, ChevronDown, ChevronUp, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -134,21 +135,42 @@ function buildVisionCategories(result: VisionApiResultData): VisionKeywordCatego
   return categories;
 }
 
+interface VisionScopedState {
+  imagePreview: string;
+  internalAnalyzing: boolean;
+  internalResult: VisionApiResultData | null;
+  deferredError: string;
+  version: number;
+}
+type VisionStateUpdate = (update: (state: VisionScopedState) => VisionScopedState, epoch?: number) => void;
 interface VisionTabProps {
+  state: VisionScopedState;
+  updateState: VisionStateUpdate;
+  nextOperation: () => { id: number; epoch: number };
   initialImageUrl?: string;
   onInsertPrompt: (prompt: string, negative?: string) => void;
   onOptimizePrompt: (prompt: string, mode: string) => void;
   externalResult?: VisionApiResultData | null;
   externalAnalyzing?: boolean;
   floating?: boolean;
+  negativeNotApplied?: boolean;
+  active?: boolean;
 }
 
-function VisionTab({ initialImageUrl, onInsertPrompt, onOptimizePrompt, externalResult, externalAnalyzing, floating }: VisionTabProps) {
-  const [imagePreview, setImagePreview] = useState<string>(initialImageUrl || '');
-  const [internalAnalyzing, setInternalAnalyzing] = useState(false);
-  const [internalResult, setInternalResult] = useState<VisionApiResultData | null>(null);
+function VisionTab({ state, updateState, nextOperation, initialImageUrl, onInsertPrompt, onOptimizePrompt, externalResult, externalAnalyzing, floating, negativeNotApplied, active = true }: VisionTabProps) {
+  const { imagePreview, internalAnalyzing, internalResult, deferredError } = state;
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [sentKey, setSentKey] = useState<string | null>(null);
+  const [negativeCopyError, setNegativeCopyError] = useState(false);
+  const displayedErrorRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!deferredError) { displayedErrorRef.current = null; return; }
+    if (active && displayedErrorRef.current !== deferredError) {
+      displayedErrorRef.current = deferredError;
+      alert(deferredError);
+      updateState(previous => previous.deferredError === deferredError ? { ...previous, deferredError: '' } : previous);
+    }
+  }, [active, deferredError, updateState]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Prefer external result/state (from canvas right-click flow) if present, else internal
@@ -157,34 +179,36 @@ function VisionTab({ initialImageUrl, onInsertPrompt, onOptimizePrompt, external
 
   useEffect(() => {
     if (initialImageUrl && !imagePreview) {
-      setImagePreview(initialImageUrl);
+      updateState(previous => previous.imagePreview ? previous : { ...previous, imagePreview: initialImageUrl });
     }
   }, [initialImageUrl]);
 
   const handleFileUpload = useCallback((file: File) => {
     if (!file.type.startsWith('image/')) return;
+    const operation = nextOperation();
+    updateState(previous => ({ ...previous, version: operation.id, internalAnalyzing: false, internalResult: null, deferredError: '' }), operation.epoch);
     const reader = new FileReader();
-    reader.onload = (e) => {
-      setImagePreview(e.target?.result as string);
-      setInternalResult(null);
+    reader.onload = (event) => {
+      const image = event.target?.result;
+      if (typeof image === 'string') updateState(previous => previous.version === operation.id ? { ...previous, imagePreview: image } : previous, operation.epoch);
     };
     reader.readAsDataURL(file);
-  }, []);
+  }, [nextOperation, updateState]);
 
   const handleAnalyze = useCallback(async () => {
     if (!imagePreview || isAnalyzing) return;
-    setInternalAnalyzing(true);
-    setInternalResult(null);
+    const operation = nextOperation();
+    updateState(previous => ({ ...previous, version: operation.id, internalAnalyzing: true, internalResult: null, deferredError: '' }), operation.epoch);
     try {
       const data = await analyzeVisionPromptInternal(imagePreview);
-      setInternalResult(data);
+      updateState(previous => previous.version === operation.id ? { ...previous, internalResult: data } : previous, operation.epoch);
     } catch (error) {
-      console.error('Vision analysis error:', error);
-      alert(error instanceof Error ? error.message : '图片识词失败，请重试');
+      const message = error instanceof Error ? error.message : '图片识词失败，请重试';
+      updateState(previous => previous.version === operation.id ? { ...previous, deferredError: message } : previous, operation.epoch);
     } finally {
-      setInternalAnalyzing(false);
+      updateState(previous => previous.version === operation.id ? { ...previous, internalAnalyzing: false } : previous, operation.epoch);
     }
-  }, [imagePreview, isAnalyzing]);
+  }, [imagePreview, isAnalyzing, nextOperation, updateState]);
 
   const categories = result ? buildVisionCategories(result) : [];
 
@@ -214,16 +238,24 @@ function VisionTab({ initialImageUrl, onInsertPrompt, onOptimizePrompt, external
     setTimeout(() => setSentKey(null), 2000);
   }, [onInsertPrompt, result?.negative_prompt]);
 
+  const copyNegative = async (): Promise<void> => {
+    try {
+      if (!navigator.clipboard?.writeText || !result?.negative_prompt) throw new Error('clipboard unavailable');
+      await navigator.clipboard.writeText(result.negative_prompt);
+      setNegativeCopyError(false);
+    } catch { setNegativeCopyError(true); }
+  };
+
   const resetTab = useCallback(() => {
-    setImagePreview('');
-    setInternalResult(null);
-  }, []);
+    const operation = nextOperation();
+    updateState(previous => ({ ...previous, imagePreview: '', internalResult: null, internalAnalyzing: false, deferredError: '', version: operation.id }), operation.epoch);
+  }, [nextOperation, updateState]);
 
   const accent = floating ? '#d4af37' : undefined;
 
   return (
-    <div className="h-full flex flex-col p-4 gap-3 overflow-hidden">
-      <div className="flex-1 overflow-y-auto space-y-3">
+    <div className="min-h-0 h-full flex flex-col p-4 gap-3 overflow-hidden max-md:h-auto max-md:min-h-full max-md:overflow-visible">
+      <div className="min-h-0 flex-1 overflow-y-auto space-y-3 max-md:overflow-visible">
         {/* Image Upload Area */}
         <div 
           className={`relative border-2 border-dashed rounded-xl transition-all cursor-pointer overflow-hidden
@@ -274,6 +306,7 @@ function VisionTab({ initialImageUrl, onInsertPrompt, onOptimizePrompt, external
           <div className="space-y-3">
             <div className={`flex items-center justify-between text-xs ${floating ? 'text-gray-400' : 'text-muted-foreground'}`}>
               <span>识别到 {categories.length} 类关键词，选择需要的发送或复制</span>
+              {negativeNotApplied && sentKey && <span role="status">已记录，打开专业创作查看结果。</span>}
               {typeof result.confidence === 'number' && result.confidence > 0 && (
                 <span className={floating ? 'text-[#d4af37]' : 'text-primary'}>置信度 {Math.round(result.confidence * 100)}%</span>
               )}
@@ -318,7 +351,7 @@ function VisionTab({ initialImageUrl, onInsertPrompt, onOptimizePrompt, external
                       onClick={() => handleSendCategory(cat)}
                     >
                       {isSent ? <Check className="w-3.5 h-3.5" /> : <Send className="w-3.5 h-3.5" />}
-                      {isSent ? '已发送' : '发送关键词'}
+                      {isSent ? (negativeNotApplied ? '已记录' : '已发送') : '发送关键词'}
                     </Button>
                   </div>
                   <button
@@ -334,8 +367,10 @@ function VisionTab({ initialImageUrl, onInsertPrompt, onOptimizePrompt, external
             {/* Negative Prompt */}
             {result.negative_prompt && (
               <div className={`rounded-lg p-3 ${floating ? 'bg-[#2a1a1a] border border-red-900/40' : 'bg-destructive/5'}`}>
-                <div className="text-xs font-medium text-destructive mb-1">反向提示词（随发送一并附带）</div>
-                <p className={`text-xs ${floating ? 'text-gray-300' : 'text-muted-foreground'}`}>{result.negative_prompt}</p>
+                <div className="text-xs font-medium text-destructive mb-1">{negativeNotApplied ? '反向提示词不会自动发送到专业创作，请复制后另行使用。' : '反向提示词（随发送一并附带）'}</div>
+                <textarea aria-label="反向提示词" readOnly value={result.negative_prompt} onFocus={event => event.currentTarget.select()} className="w-full min-h-11 resize-y bg-transparent text-xs" />
+                <Button type="button" variant="outline" className="min-h-11" onClick={() => void copyNegative()}>复制反向提示词</Button>
+                {negativeCopyError && <p role="status" className="text-xs">复制失败，请手动选择上方反向提示词。</p>}
               </div>
             )}
 
@@ -385,6 +420,7 @@ function AgentEnhanceTab({ initialPrompt, onInsertPrompt, onClose, floating }: A
   }, [initialPrompt]);
 
   useEffect(() => {
+    if (messages.length === 0 && !streamingText) return;
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamingText]);
 
@@ -423,16 +459,18 @@ function AgentEnhanceTab({ initialPrompt, onInsertPrompt, onClose, floating }: A
   }, [messages, onInsertPrompt]);
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div className="min-h-0 h-full flex flex-col overflow-hidden max-md:h-auto max-md:min-h-full max-md:overflow-visible">
       {/* Quick modes */}
-      <div className="px-4 pt-3">
+      <div className="shrink-0 px-4 pt-3">
         <div className="text-xs text-muted-foreground mb-2">快捷优化模式</div>
         <div className="flex flex-wrap gap-1.5">
           {quickModes.map(m => {
             const IconComponent = m.icon;
             return (
             <button key={m.id} onClick={() => handleSubmit(m.id)} disabled={isStreaming || !input.trim()}
-              className="flex items-center gap-1 px-2.5 py-1 text-xs rounded-full border border-border bg-background hover:bg-primary/10 hover:text-primary hover:border-primary/30 transition-colors disabled:opacity-50">
+              className={`flex items-center gap-1 px-2.5 py-1 text-xs rounded-full border transition-colors ${floating
+                ? 'border-[#444] bg-[#252525] text-[#f3f4f6] hover:bg-[#333] hover:text-white hover:border-[#777] disabled:border-[#454545] disabled:bg-[#202020] disabled:text-[#aeb4bf] disabled:opacity-100'
+                : 'border-border bg-background hover:bg-primary/10 hover:text-primary hover:border-primary/30 disabled:opacity-50'}`}>
               <IconComponent className="w-3 h-3" />{m.label}
             </button>
           );})}
@@ -440,7 +478,7 @@ function AgentEnhanceTab({ initialPrompt, onInsertPrompt, onClose, floating }: A
       </div>
 
       {/* Chat area */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 space-y-3 max-md:min-h-32">
         {messages.length === 0 && !isStreaming && (
           <div className="text-center py-8 text-muted-foreground">
             <Sparkles className="w-10 h-10 mx-auto mb-2 opacity-30" />
@@ -479,7 +517,7 @@ function AgentEnhanceTab({ initialPrompt, onInsertPrompt, onClose, floating }: A
       </div>
 
       {/* Input area */}
-      <div className={`p-3 border-t ${floating ? 'border-[#333]' : 'border-border'}`}>
+      <div className={`shrink-0 p-3 border-t ${floating ? 'border-[#333]' : 'border-border'}`}>
         <div className="flex gap-2">
           <Textarea 
             value={input}
@@ -493,7 +531,7 @@ function AgentEnhanceTab({ initialPrompt, onInsertPrompt, onClose, floating }: A
               }
             }}
           />
-          <Button size="sm" className="shrink-0" disabled={isStreaming || !input.trim()} onClick={() => handleSubmit()}>
+          <Button aria-label="发送优化请求" size="sm" className="shrink-0" disabled={isStreaming || !input.trim()} onClick={() => handleSubmit()}>
             {isStreaming ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
           </Button>
         </div>
@@ -541,6 +579,8 @@ interface OhMyPromptProps {
   onInsertPrompt: (prompt: string, negativePrompt?: string) => void;
   onOptimizePrompt?: (prompt: string, mode: string) => void;
   onVisionPrompt?: (url: string) => void;
+  onInsertVisionPrompt?: (prompt: string) => void;
+  visionScopeKey?: string;
   initialImageUrl?: string;
   initialPrompt?: string;
   initialTab?: OmpActiveTab;
@@ -558,7 +598,8 @@ export default function OhMyPrompt({
   onClose,
   onInsertPrompt,
   onOptimizePrompt,
-  onVisionPrompt,
+  onInsertVisionPrompt,
+  visionScopeKey,
   initialImageUrl,
   initialPrompt,
   initialTab = 'agent',
@@ -570,6 +611,25 @@ export default function OhMyPrompt({
   visionResult: externalVisionResult,
 }: OhMyPromptProps) {
   const [activeTab, setActiveTab] = useState<OmpActiveTab>(defaultActiveTab || initialTab);
+  const activeVisionScope = visionScopeKey ?? 'default';
+  const [visionStates, setVisionStates] = useState<Record<string, VisionScopedState>>({});
+  const visionLifecycle = useRef({ active: false, epoch: 0, operation: 0 });
+  useLayoutEffect(() => {
+    visionLifecycle.current.active = isOpen;
+    visionLifecycle.current.epoch += 1;
+    if (!isOpen) setVisionStates({});
+    return () => { visionLifecycle.current.active = false; visionLifecycle.current.epoch += 1; };
+  }, [isOpen]);
+  const nextVisionOperation = useCallback(() => ({ id: ++visionLifecycle.current.operation, epoch: visionLifecycle.current.epoch }), []);
+  const updateVisionState = useCallback<VisionStateUpdate>((update, epoch) => {
+    if (!visionLifecycle.current.active || (epoch !== undefined && epoch !== visionLifecycle.current.epoch)) return;
+    setVisionStates(previous => {
+      const current = previous[activeVisionScope] ?? { imagePreview: '', internalAnalyzing: false, internalResult: null, deferredError: '', version: 0 };
+      const next = update(current);
+      return next === current ? previous : { ...previous, [activeVisionScope]: next };
+    });
+  }, [activeVisionScope]);
+  const currentVisionState = visionStates[activeVisionScope] ?? { imagePreview: '', internalAnalyzing: false, internalResult: null, deferredError: '', version: 0 };
   const settings = loadSettings();
 
   useEffect(() => {
@@ -588,46 +648,60 @@ export default function OhMyPrompt({
   }, [onOptimizePrompt]);
 
   const handleVisionInsert = useCallback((prompt: string, negative?: string) => {
-    if (onVisionPrompt) {
-      onVisionPrompt(prompt);
-    } else {
-      onInsertPrompt(prompt, negative);
-    }
-  }, [onVisionPrompt, onInsertPrompt]);
+    if (onInsertVisionPrompt) onInsertVisionPrompt(prompt);
+    else onInsertPrompt(prompt, negative);
+  }, [onInsertVisionPrompt, onInsertPrompt]);
+
+  const [viewport, setViewport] = useState(getFloatingPanelViewport);
+  useLayoutEffect(() => {
+    if (!isOpen || !floating) return;
+    const updateViewport = () => setViewport(getFloatingPanelViewport());
+    updateViewport();
+    return subscribeFloatingPanelViewport(updateViewport);
+  }, [isOpen, floating]);
+
+  const bottomGap = viewport.height < 480 ? 8 : 64;
+  const panelWidth = Math.min(320, Math.max(0, viewport.width - 16));
+  const panelHeight = Math.min(520, Math.max(0, viewport.height - bottomGap - 8));
 
   if (!isOpen) return null;
 
   const isGold = themeStyle === 'gold';
   const panelClass = floating 
-    ? 'fixed right-2 bottom-16 w-80 bg-[#1a1a1a] text-white rounded-xl shadow-2xl border border-[#333] overflow-hidden flex flex-col z-[200]'
+    ? 'fixed min-h-0 bg-[#1a1a1a] text-white rounded-xl shadow-2xl border border-[#333] overflow-hidden flex flex-col z-[200] max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11 max-md:[&_textarea]:text-base'
     : 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm';
   const innerClass = floating
-    ? 'w-full flex flex-col bg-[#1a1a1a]'
+    ? 'min-h-0 h-full w-full flex flex-col bg-[#1a1a1a]'
     : 'w-full max-w-xl bg-background rounded-2xl shadow-2xl border border-border overflow-hidden flex flex-col';
 
   return (
-    <div className={panelClass}>
-      <div className={innerClass} style={floating ? { height: '520px' } : { height: '720px', maxHeight: '90vh' }}>
+    <div className={panelClass} data-floating-panel="oh-my-prompt" style={floating ? {
+      width: panelWidth,
+      height: panelHeight,
+      left: viewport.left + Math.max(8, viewport.width - panelWidth - 8),
+      top: viewport.top + Math.max(8, viewport.height - panelHeight - bottomGap),
+    } : undefined}>
+      <div className={innerClass} style={floating ? undefined : { height: '720px', maxHeight: '90vh' }}>
         {/* Header */}
-        <div className={`flex items-center justify-between px-4 py-3 border-b ${floating ? 'border-[#333]' : 'border-border bg-gradient-to-r from-primary/5 to-transparent'}`}>
+        <div className={`shrink-0 flex items-center justify-between px-4 py-2 border-b ${floating ? 'border-[#333]' : 'border-border bg-gradient-to-r from-primary/5 to-transparent'}`}>
           <div className="flex items-center gap-2">
             <Lightbulb className={`w-5 h-5 ${floating ? 'text-[#d4af37]' : 'text-primary'}`} />
             <h2 className={`text-base font-semibold ${floating ? 'text-white' : 'text-foreground'}`}>灵感工坊</h2>
           </div>
-          <button onClick={onClose} className={floating ? 'text-gray-400 hover:text-white' : 'text-muted-foreground hover:text-foreground'}>
+          <button aria-label="关闭灵感工坊" onClick={onClose} className={`min-h-11 min-w-11 flex shrink-0 items-center justify-center ${floating ? 'text-gray-400 hover:text-white' : 'text-muted-foreground hover:text-foreground'}`}>
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Tabs */}
-        <div className={`flex px-4 py-2 gap-1 border-b ${floating ? 'border-[#333]' : 'border-border'}`}>
+        <div className={`shrink-0 flex px-4 py-2 gap-1 border-b ${floating ? 'border-[#333]' : 'border-border'}`}>
           {(['vision', 'agent'] as const).map(tab => {
             const label = tab === 'vision' ? '识词' : 'AI增强';
             const Icon = tab === 'vision' ? Eye : Wand2;
             const isActive = activeTab === tab;
             return (
-              <button key={tab} onClick={() => setActiveTab(tab)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors
+              <button key={tab} aria-pressed={isActive} onClick={() => setActiveTab(tab)}
+                className={`min-h-11 min-w-11 whitespace-nowrap flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors
                   ${isActive 
                     ? (floating ? 'bg-[#d4af37] text-black' : 'bg-primary/10 text-primary')
                     : (floating ? 'text-gray-400 hover:text-white hover:bg-[#333]' : 'text-muted-foreground hover:text-foreground hover:bg-muted')}`}>
@@ -638,17 +712,23 @@ export default function OhMyPrompt({
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-hidden">
-          {activeTab === 'vision' ? (
-            <VisionTab 
-              initialImageUrl={autoAnalyzeImageUrl || initialImageUrl}
-              onInsertPrompt={handleVisionInsert}
-              onOptimizePrompt={handleOptimize}
-              externalResult={externalVisionResult}
-              externalAnalyzing={externalIsAnalyzing}
-              floating={floating}
-            />
-          ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div hidden={activeTab !== 'vision'} inert={activeTab !== 'vision'} className="h-full min-h-0">
+              <VisionTab
+                key={activeVisionScope}
+                state={currentVisionState}
+                updateState={updateVisionState}
+                nextOperation={nextVisionOperation}
+                initialImageUrl={autoAnalyzeImageUrl || initialImageUrl}
+                onInsertPrompt={handleVisionInsert}
+                onOptimizePrompt={handleOptimize}
+                externalResult={externalVisionResult}
+                externalAnalyzing={externalIsAnalyzing}
+                negativeNotApplied={Boolean(onInsertVisionPrompt)}
+                floating={floating}
+              />
+          </div>
+          {activeTab === 'agent' && (
             <AgentEnhanceTab 
               initialPrompt={initialPrompt}
               onInsertPrompt={onInsertPrompt}
