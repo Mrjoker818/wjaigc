@@ -665,14 +665,15 @@ describe('workflow execution route scoped dispatch', () => {
     loop.loopCount = 2;
     const body = createWorkflowNode('ai-upscale', 0, 0);
     body.config.imageUrl = '/test-input.png';
-    const done = createWorkflowNode('input-text', 0, 0);
+    // out-done must land on a port the node declares; input-text has none.
+    const done = createWorkflowNode('output-image', 0, 0);
     const upstream = vi.fn(async () => new Response(JSON.stringify({ imageUrl: '/test-result.png' })));
     vi.stubGlobal('fetch', upstream);
     const response = await post({
       action: 'start', nodes: [loop, body, done], startNodeId: done.id, tailNodeId: done.id,
       connections: [
         { id: 'body', fromNodeId: loop.id, toNodeId: body.id, fromPortId: 'out-loop', toPortId: 'in-image', type: 'image' },
-        { id: 'done', fromNodeId: loop.id, toNodeId: done.id, fromPortId: 'out-done', toPortId: 'in-prompt', type: 'prompt' },
+        { id: 'done', fromNodeId: loop.id, toNodeId: done.id, fromPortId: 'out-done', toPortId: 'in-image', type: 'image' },
       ],
     });
     expect(response.status).toBe(200);
