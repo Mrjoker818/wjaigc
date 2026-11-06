@@ -21,7 +21,6 @@ await vi.hoisted(async (): Promise<void> => {
   if (!process.env.WUJIE_DATA_DIR) throw new Error('Explicit isolated media root required');
   process.env.WUJIE_DATA_DIR = fs.mkdtempSync(path.join(process.env.WUJIE_DATA_DIR, 'task-8cb3j4d-'));
   process.env.COZE_PROJECT_ENV = 'PROD'; // No development copy into public/uploads.
-  process.env.LOCAL_AI_ENABLED = 'false';
   process.env.WUJIE_TASK_CORE_MODE = 'core-v2';
   vi.stubGlobal('fetch', async (): Promise<never> => { throw new Error('Undeclared network'); });
 });

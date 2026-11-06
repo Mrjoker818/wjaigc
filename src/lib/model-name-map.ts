@@ -280,9 +280,6 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   { pattern: 'inpainting', entry: { name: '图像修复', type: 'imageEdit' } },
   { pattern: 'outpainting', entry: { name: '图像扩展', type: 'imageEdit' } },
   { pattern: 'upscale', entry: { name: '图像放大', type: 'imageEdit' } },
-  { pattern: 'rembg', entry: { name: '背景移除', type: 'imageEdit' } },
-  { pattern: 'iopaint', entry: { name: 'IOPaint', type: 'imageEdit' } },
-  { pattern: 'lama', entry: { name: 'LaMa', type: 'imageEdit' } },
 
   // ===== Vectorize Models =====
   { pattern: 'vtracer', entry: { name: 'VTracer', type: 'vectorize' } },

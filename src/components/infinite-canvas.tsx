@@ -2186,9 +2186,6 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
 
   // Upscale state
   const [, setUpscaleMultiplier] = useState(2);
-  const [, setUpscaylAvailable] = useState(false);
-  const [upscaylSelectedModel] = useState('realesrgan-x4plus');
-  const [, setUpscaylChecking] = useState(true);
   const [upscalePreset, setUpscalePreset] = useState<UpscaleTargetPreset>('2x');
   const [showUpscalePresetMenu, setShowUpscalePresetMenu] = useState(false);
   const [upscaleMode, setUpscaleMode] = useState<UpscaleProductMode>(() => {
@@ -2254,7 +2251,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     try { const v = localStorage.getItem(`wujie_engine_${key}`); if (v === 'ai' || v === 'local' || v === 'auto') return v; } catch {}
     return 'auto';
   };
-  const [removeBgEngine, setRemoveBgEngine] = useState<'auto' | 'ai' | 'local'>(() => getEnginePref('removebg'));
+  const [removeBgEngine] = useState<'auto' | 'ai' | 'local'>(() => getEnginePref('removebg'));
   const [removeBgQuote, setRemoveBgQuote] = useState<CanvasRemoveBgQuote | null>(null);
   const [isRemoveBgQuoteLoading, setIsRemoveBgQuoteLoading] = useState(false);
   const [isRemoveBgSubmitting, setIsRemoveBgSubmitting] = useState(false);
@@ -2286,21 +2283,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   const [svgTraceBwTurdSize, ] = useState(2);
   const [svgTraceBwInvert, ] = useState(false);
 
-  // Check ONNX upscale availability on mount
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch('/api/upscayl');
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        setUpscaylAvailable(data.available ?? false);
-      } catch {
-        setUpscaylAvailable(false);
-      } finally {
-        setUpscaylChecking(false);
-      }
-    })();
-  }, []);
+  // 本地 ONNX 放大已随本地模型移除，不再探测 /api/upscayl。
 
   useEffect(() => {
     let cancelled = false;
@@ -2910,10 +2893,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   const [isSvgTraceProcessing, setIsSvgTraceProcessing] = useState(false);
   // Floating window brush tool mode: 'brush' or 'eraser'
   const [editBrushMode, setEditBrushMode] = useState<'brush' | 'eraser'>('brush');
-  // Erase model selection (LaMa / ZITS / Anime-Lama)
-  const [eraseModelId, setEraseModelId] = useState<string>('lama');
-  // RemoveBG model selection
-  const [removeBgModelId, setRemoveBgModelId] = useState<string>('birefnet-general-lite');
+  // 本地擦除/去背景模型选择已随本地模型移除
   const [addRemoveBgMaskToCanvas, setAddRemoveBgMaskToCanvas] = useState(false);
   // Cache the target image when opening the remove-bg picker so the correct image is used even if selection changes
   const [removeBgTargetImage, setRemoveBgTargetImage] = useState<CanvasImage | null>(null);
@@ -9546,7 +9526,6 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       upscaleMode,
       upscaleModel: upscaleMode === 'ai-only' ? selectedUpscaleModel?.modelId : undefined,
       engine: upscaleMode,
-      localModel: upscaylSelectedModel,
     };
     const needsQuote = upscaleMode === 'ai-only'
       && Boolean(selectedUpscaleModel && resolve302UpscaleModelId(selectedUpscaleModel.modelId));
@@ -9689,9 +9668,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     try {
       const initialStatus = upscaleMode === 'ai-only'
         ? '正在提交到专用 AI 超分模型...'
-        : upscaleMode === 'fidelity'
-          ? '正在进行保真放大...'
-          : '正在自动选择最优放大引擎...';
+        : '正在自动选择最优放大引擎...';
       updateProcessingFrame(placeholderId, { progress: 8, status: initialStatus });
       // ★ 放大操作可能耗时较长（如108s），设置5分钟超时与后端直接模式600s对齐
       const upscaleController = new AbortController();
@@ -9830,9 +9807,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       const executionEngine = String(data.engine || data.strategy || upscaleMode);
       const executionLabel = isTiled && tileCount > 0
         ? `正在分块超分（共 ${tileCount} 块）...`
-        : upscaleMode === 'fidelity'
-          ? '正在进行保真放大...'
-          : '正在进行 AI 超分与画质归一...';
+        : '正在进行 AI 超分与画质归一...';
       updateProcessingFrame(placeholderId, { progress: 22, status: executionLabel });
 
       let usedModelName = String(data.usedModel || data.model || selectedUpscaleModel?.label || modelInfo.apiDisplayName || modelInfo.model);
@@ -9864,7 +9839,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         completeProcessingFrame(placeholderId, stableUrl, displayW, displayH, {
           originalWidth: actualOutW,
           originalHeight: actualOutH,
-          modifyPrompt: `${selectedPreset?.label || upscalePreset.toUpperCase()} ${upscaleMode === 'fidelity' ? '保真超分' : 'AI超分'}${isTiled ? ` · ${tileCount}块分块融合` : ''}`,
+          modifyPrompt: `${selectedPreset?.label || upscalePreset.toUpperCase()} AI超分${isTiled ? ` · ${tileCount}块分块融合` : ''}`,
           modelName: `${usedModelName} · ${executionEngine}`,
           apiProvider: providerName,
         }, 'upscale');
@@ -9890,7 +9865,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       upscaleActionPendingRef.current = false;
     }
     setActiveTool('none');
-  }, [getActiveImageData, projectId, documentMetadataMode, upscaleActualW, upscaleActualH, upscalePreset, createProcessingFrameRightOf, getCurrentModel, updateProcessingFrame, upscaleMode, selectedUpscaleModel, upscaylSelectedModel, getCurrentProviderId, pollForResult, completeProcessingFrame, upscaleQuote, isUpscaleSubmissionUnknown, removeProcessingFrame]);
+  }, [getActiveImageData, projectId, documentMetadataMode, upscaleActualW, upscaleActualH, upscalePreset, createProcessingFrameRightOf, getCurrentModel, updateProcessingFrame, upscaleMode, selectedUpscaleModel, getCurrentProviderId, pollForResult, completeProcessingFrame, upscaleQuote, isUpscaleSubmissionUnknown, removeProcessingFrame]);
 
   // Engine selection helper: if pref saved, run directly; else open dialog
   const triggerWithEngine = useCallback((tool: 'upscale'|'removebg'|'svg'|'segment', doExecute: (engine: 'auto'|'ai'|'local') => void) => {
@@ -9983,9 +9958,9 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         : '此图片尚无协作文档资产版本；需先完成受权导入。');
       return;
     }
-    if (documentRemoveBg && removeBgEngine !== 'local') {
-      toast.error('协作文档去背景目前仅支持本地引擎报价，请切换为本地算法。');
-      return;
+    if (documentRemoveBg) {
+      // 本地引擎已随本地模型移除；协作文档去背景统一走云端 AI，
+      // 主体图与黑白蒙版在任务完成后一起发布到文档。
     }
     const requestBody: Record<string, unknown> = {
       action: 'remove_background',
@@ -9993,8 +9968,6 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       aspectRatio: findClosestStandardRatio(img.originalWidth || img.width, img.originalHeight || img.height),
       model: modelInfo.model,
       providerId: modelInfo.providerId || getCurrentProviderId(),
-      removeBgModel: removeBgModelId,
-      engine: removeBgEngine,
       ...(documentRemoveBg ? { projectId, assetParentVersionIds: [img.assetVersionId],
         assetProjectionMode: 'derived', assetSelectedEntityIds: [img.id] } : {}),
     };
@@ -10368,7 +10341,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       removeBgActionPendingRef.current = false;
     }
   }, [removeBgTargetImage, getActiveImageData, createProcessingFrameRightOf, getCurrentModel,
-    updateProcessingFrame, getCurrentProviderId, removeBgModelId, removeBgEngine,
+    updateProcessingFrame, getCurrentProviderId, removeBgEngine,
     addRemoveBgMaskToCanvas, completeProcessingFrame, removeProcessingFrame, onImagesChange,
     documentMetadataMode, projectId, removeBgQuote]);
 
@@ -12050,7 +12023,6 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           aspectRatio: currentEditImg.aspectRatio && (STANDARD_RATIOS as readonly string[]).includes(currentEditImg.aspectRatio) ? currentEditImg.aspectRatio as StandardRatio : findClosestStandardRatio(currentEditImg.originalWidth || currentEditImg.width || 1, currentEditImg.originalHeight || currentEditImg.height || 1),
           model: modelInfo.model,
           providerId: modelInfo.providerId || getCurrentProviderId(),
-          ...(currentEditMode === 'erase' ? { eraseModel: eraseModelId } : {}),
         };
 
         const bodyStr = JSON.stringify(requestBody);
@@ -12251,7 +12223,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     }
 
     exitEditMode();
-  }, [images, getCurrentModel, editMode, exitEditMode, editImageId, cropRect, createProcessingFrameRightOf, onCaptureCropHistory, zoom, viewOffset.x, viewOffset.y, updateProcessingFrame, completeProcessingFrame, renderMaskFromStrokes, editStrokes.length, maskKeyword, editPrompt, getCurrentProviderId, eraseModelId, removeProcessingFrame, pollForResult, expandPadding]);
+  }, [images, getCurrentModel, editMode, exitEditMode, editImageId, cropRect, createProcessingFrameRightOf, onCaptureCropHistory, zoom, viewOffset.x, viewOffset.y, updateProcessingFrame, completeProcessingFrame, renderMaskFromStrokes, editStrokes.length, maskKeyword, editPrompt, getCurrentProviderId, removeProcessingFrame, pollForResult, expandPadding]);
 
   // Mask keyword confirm
   // Download handlers
@@ -15587,8 +15559,6 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           setEditBrushMode={setEditBrushMode}
           maskKeyword={maskKeyword}
           setMaskKeyword={setMaskKeyword}
-          eraseModelId={eraseModelId}
-          setEraseModelId={setEraseModelId}
           editStrokes={editStrokes}
           setEditStrokes={setEditStrokes}
           currentStroke={currentStroke}
@@ -15629,9 +15599,6 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           setColorTemperature={setColorTemperature}
           showRemoveBgPicker={showRemoveBgPicker}
           setShowRemoveBgPicker={setShowRemoveBgPicker}
-          removeBgModelId={removeBgModelId}
-          setRemoveBgModelId={(modelId) => { setRemoveBgQuote(null); setRemoveBgModelId(modelId); }}
-          removeBgEngine={removeBgEngine}
           documentMetadataMode={documentMetadataMode}
           removeBgQuote={removeBgQuote}
           isRemoveBgQuoteLoading={isRemoveBgQuoteLoading}
@@ -15640,7 +15607,6 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           removeBgDedicatedName={removeBgDedicatedName}
           addRemoveBgMaskToCanvas={addRemoveBgMaskToCanvas}
           setAddRemoveBgMaskToCanvas={setAddRemoveBgMaskToCanvas}
-          setEngineDialog={setEngineDialog}
           handleRemoveBackground={handleRemoveBackground}
         />
         {/* ====== EXPAND/CROP PRESENTATION LEAF ====== */}
@@ -19951,7 +19917,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
             catch { toast.error('无法保存放大引擎偏好，未更改当前引擎。'); return; }
             setUpscaleMode(resolveUpscaleProductMode(eng, false));
           }
-          else if (engineDialog === 'removebg') { setRemoveBgQuote(null); setRemoveBgEngine(eng); }
+          else if (engineDialog === 'removebg') { setRemoveBgQuote(null); }
           else if (engineDialog === 'svg') setSvgTraceEngine(eng === 'local' ? 'vtracer' : eng === 'ai' ? 'vlm' : 'auto');
           else if (engineDialog === 'segment') setSegmentEnginePref(eng);
           setEngineDialog(null);

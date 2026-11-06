@@ -12,7 +12,7 @@ const supported: Record<string, unknown> = {
   expandPadding: { top: 1, right: 2, bottom: 3, left: 4 }, targetWidth: 64, targetHeight: 48,
   targetPreset: 'custom', aspectRatio: '4:3', angleMode: 'camera', rotation: 30, tilt: 10, zoom: 2,
   originalWidth: 32, originalHeight: 24, scale: 2, model: 'esrgan', providerId: 'native',
-  eraseModel: 'lama', removeBgModel: 'u2net', originalPrompt: 'source', upscaleMode: 'ai-only',
+  originalPrompt: 'source', upscaleMode: 'ai-only',
   upscaleModel: '302-esrgan', outputFormat: 'png', compression: 80, engine: 'ai-only', displayBackground: 'transparent',
 };
 function digest(body: Record<string, unknown>): string {
@@ -53,10 +53,13 @@ describe('immutable image-edit request identity', (): void => {
   it('excludes unknown credentials, role, audit and prepaid flags, including non-side padding keys', (): void => {
     const extra = { ...supported, apiKey: 'secret', authorization: 'secret', role: 'admin', prepaid: true,
       taskEntryAudit: { role: 'admin' }, custom: { token: 'secret' },
+      eraseModel: 'lama', removeBgModel: 'u2net',
       expandPadding: { top: 1, right: 2, bottom: 3, left: 4, apiKey: 'secret', role: 'admin' } };
     expect(captureImageEditRequestIdentity(extra)).toEqual(captureImageEditRequestIdentity(supported));
     expect(digest(extra)).toBe(digest(supported));
     expect(JSON.stringify(captureImageEditRequestIdentity(extra))).not.toContain('secret');
+    expect(JSON.stringify(captureImageEditRequestIdentity(extra))).not.toContain('lama');
+    expect(JSON.stringify(captureImageEditRequestIdentity(extra))).not.toContain('u2net');
   });
   it('preserves explicit values instead of normalizing absent fields into execution defaults', (): void => {
     expect(digest({ action: 'extend' })).not.toBe(digest({ action: 'outpaint' }));

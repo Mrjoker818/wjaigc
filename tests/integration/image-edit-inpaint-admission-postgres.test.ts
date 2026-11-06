@@ -12,7 +12,6 @@ const testEnvironment = await vi.hoisted(async (): Promise<{
   mediaRoot: string;
   previousDataDir: string | undefined;
   previousProjectEnv: string | undefined;
-  previousLocalAiEnabled: string | undefined;
   previousTaskCoreMode: string | undefined;
 }> => {
   const { requireOfflineBridgeTestDatabaseUrl } = await import('../helpers/offline-bridge-database-guard');
@@ -25,15 +24,13 @@ const testEnvironment = await vi.hoisted(async (): Promise<{
   requireOfflineBridgeTestMediaRoot(mediaRoot);
   const previousDataDir = process.env.WUJIE_DATA_DIR;
   const previousProjectEnv = process.env.COZE_PROJECT_ENV;
-  const previousLocalAiEnabled = process.env.LOCAL_AI_ENABLED;
   const previousTaskCoreMode = process.env.WUJIE_TASK_CORE_MODE;
   process.env.WUJIE_DATA_DIR = mediaRoot;
   process.env.COZE_PROJECT_ENV = 'PROD';
-  process.env.LOCAL_AI_ENABLED = 'false';
   process.env.WUJIE_TASK_CORE_MODE = 'core-v2';
   vi.stubGlobal('fetch', async (): Promise<never> => { throw new Error('Undeclared network'); });
   return { mediaRoot, previousDataDir, previousProjectEnv,
-    previousLocalAiEnabled, previousTaskCoreMode };
+    previousTaskCoreMode };
 });
 
 afterAll(async (): Promise<void> => {
@@ -49,7 +46,6 @@ afterAll(async (): Promise<void> => {
   for (const [key, previous] of [
     ['WUJIE_DATA_DIR', testEnvironment.previousDataDir],
     ['COZE_PROJECT_ENV', testEnvironment.previousProjectEnv],
-    ['LOCAL_AI_ENABLED', testEnvironment.previousLocalAiEnabled],
     ['WUJIE_TASK_CORE_MODE', testEnvironment.previousTaskCoreMode],
   ] as const) {
     if (previous === undefined) delete process.env[key];

@@ -16,18 +16,21 @@ describe('CanvasEditColorRemoveBgPanel', () => {
     expect(source).toContain("editMode === 'colorAdjust'");
     expect(source).toContain('参数调色');
     expect(source).toContain('showRemoveBgPicker');
-    expect(source).toContain('选择去背景模型');
+    expect(source).toContain('去背景');
+    expect(source).not.toContain('removeBgModelId');
+    expect(source).not.toContain('removeBgEngine');
+    expect(source).not.toContain('setEngineDialog');
     expect(source).not.toContain('fetch(');
   });
 
-  it('保留五项调色参数、引擎、模型和透明蒙版输出控制', () => {
+  it('保留五项调色参数、专用模型展示和透明蒙版输出控制', () => {
     const source = readComponent();
 
     for (const name of ['colorBrightness', 'colorContrast', 'colorSaturation', 'colorHue', 'colorTemperature']) {
       expect(source).toContain(name);
     }
-    expect(source).toContain("setEngineDialog('removebg')");
-    expect(source).toContain('removeBgModelId');
+    expect(source).toContain('removeBgDedicatedName');
+    expect(source).toContain('removeBgDedicatedLoaded');
     expect(source).toContain('addRemoveBgMaskToCanvas');
   });
 

@@ -40,6 +40,7 @@
     ".playwright-cli/**/*",
     ".worktrees/**/*",
     "worktrees/**/*",
+    "output/**/*",
     "_refs-*/**/*",
     "OWN/mobile-switch-candidate-20261028/**/*",
     "OWN/mobile-switch-component-diagnostic-20261028/**/*",

@@ -75,8 +75,6 @@ export async function GET(req: NextRequest) {
         GEMINI_API_KEY: !!process.env.GEMINI_API_KEY,
         APIMART_API_KEY: !!process.env.APIMART_API_KEY,
         COZE_API_KEY: !!process.env.COZE_API_KEY,
-        LOCAL_AI_ENABLED: process.env.LOCAL_AI_ENABLED,
-        IOPAINT_BASE_URL: process.env.IOPAINT_BASE_URL ? '(set)' : '(not set)',
         PY_VECTORIZE_ENDPOINT: process.env.PY_VECTORIZE_ENDPOINT ? '(set)' : '(not set)',
       },
     };

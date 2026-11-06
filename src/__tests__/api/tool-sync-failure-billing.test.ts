@@ -2,14 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
-  charge: vi.fn(), refund: vi.fn(), engine: vi.fn(), upstream: vi.fn(),
+  charge: vi.fn(), refund: vi.fn(), upstream: vi.fn(),
   providers: vi.fn(), findProvider: vi.fn(), log: vi.fn(), session: vi.fn(), imageEdit: vi.fn(),
 }));
 vi.mock('server-only', () => ({}));
 vi.mock('@/app/api/image-edit/route', () => ({ POST: mocks.imageEdit }));
 vi.mock('@/lib/server-auth', () => ({ getSessionUser: mocks.session }));
 vi.mock('@/lib/credits', () => ({ consumeCredits: mocks.charge, refundCredits: mocks.refund }));
-vi.mock('@/lib/image-tools/upscayl', () => ({ performOnnxUpscale: mocks.engine }));
 vi.mock('@/lib/server-api-config', () => ({ getApiProviders: mocks.providers, findProviderForModel: mocks.findProvider }));
 vi.mock('@/lib/server-user-storage', () => ({ appendUserJsonl: mocks.log }));
 vi.mock('@/lib/api-helpers', () => ({ fetchWithV1Retry: mocks.upstream }));
@@ -40,59 +39,54 @@ beforeEach(() => {
   mocks.refund.mockResolvedValue({ success: true, balance: 1000 });
   mocks.providers.mockResolvedValue([provider]);
   mocks.findProvider.mockResolvedValue(provider);
-  mocks.engine.mockResolvedValue({ success: true, url: '/api/serve-upload/upscaled.png', width: 64, height: 64 });
+  mocks.imageEdit.mockResolvedValue(NextResponse.json({ success: true, url: '/api/serve-upload/upscaled.png' }));
   mocks.upstream.mockImplementation(async () => Response.json({ choices: [{ message: { content: 'Optimized cup' } }] }));
   vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('Unexpected external request'); }));
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-describe('upscale preflight and synchronous compensation', () => {
+describe('upscale preflight and AI delegation', () => {
   it.each([undefined, '2', '4'])('accepts the real workflow request for scale %s', async scale => {
     const node: WorkflowNode = { id: 'upscale-node', type: 'ai-upscale', label: 'Upscale', x: 0, y: 0, width: 200, height: 100, ports: [], config: { ...(scale ? { scale } : {}) } };
     const execution = buildNodeExecutionRequest(node, { imageUrl: image });
     expect(execution?.endpoint).toBe('/api/image/upscale');
     const response = await upscale(request(execution!.body));
     expect(response.status).toBe(200);
-    expect(mocks.engine).toHaveBeenCalledWith(expect.objectContaining({ scale: scale === '4' ? 4 : 2 }));
-    expect(mocks.charge).toHaveBeenCalledTimes(1);
-    expect(mocks.refund).not.toHaveBeenCalled();
+    const delegated = mocks.imageEdit.mock.calls[0][0] as NextRequest;
+    expect(await delegated.json()).toMatchObject({ action: 'upscale', upscaleMode: 'ai', scale: scale === '4' ? 4 : 2 });
   });
-  it.each([undefined, 2, 4, '2', '4'])('normalizes valid scale %s and preserves successful charge', async scale => {
+  it.each([undefined, 2, 4, '2', '4'])('normalizes valid scale %s and delegates to image-edit', async scale => {
     const response = await upscale(request({ imageUrl: image, scale }));
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ success: true, url: '/api/serve-upload/upscaled.png' });
-    expect(mocks.engine).toHaveBeenCalledWith(expect.objectContaining({ scale: scale === undefined ? 2 : Number(scale), outputFormat: 'png' }));
-    expect(mocks.charge).toHaveBeenCalledExactlyOnceWith('billing-test-user', 'image_upscale');
-    expect(mocks.refund).not.toHaveBeenCalled();
+    const delegated = mocks.imageEdit.mock.calls[0][0] as NextRequest;
+    expect(await delegated.json()).toMatchObject({
+      action: 'upscale', upscaleMode: 'ai', engine: 'ai',
+      scale: scale === undefined ? 2 : Number(scale), outputFormat: 'png', compression: 90,
+    });
   });
-  it.each([0, 3, -2, '02', '2x', ' 2 ', '', true, [], {}])('rejects invalid scale %j before charging', async scale => {
+  it.each([0, 3, -2, '02', '2x', ' 2 ', '', true, [], {}])('rejects invalid scale %j before delegating', async scale => {
     const response = await upscale(request({ imageUrl: image, scale }));
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ success: false, error: expect.any(String) });
-    expect(mocks.engine).not.toHaveBeenCalled();
+    expect(mocks.imageEdit).not.toHaveBeenCalled();
     noCharge();
   });
-  it.each(['cpu', 'ai'])('checks invalid output format before charging in %s mode', async upscaleMode => {
+  it.each(['cpu', 'ai'])('checks invalid output format before delegating in %s mode', async upscaleMode => {
     const response = await upscale(request({ imageUrl: image, outputFormat: 'gif', upscaleMode }));
     expect(response.status).toBe(400);
     noCharge();
     expect(fetch).not.toHaveBeenCalled();
   });
-  it('does not charge a missing image', async () => {
+  it('does not delegate a missing image', async () => {
     expect((await upscale(request({ scale: 2 }))).status).toBe(400);
+    expect(mocks.imageEdit).not.toHaveBeenCalled();
     noCharge();
   });
-  it('refunds an engine business failure', async () => {
-    mocks.engine.mockResolvedValue({ success: false, error: 'Engine unavailable' });
-    const response = await upscale(request({ imageUrl: image, scale: 2 }));
-    expect(response.status).toBe(500);
-    expect(await response.json()).toEqual({ success: false, error: 'Engine unavailable' });
-    refundedOnce();
-  });
-  it('refunds an engine exception once', async () => {
-    mocks.engine.mockRejectedValue(new Error('Engine exception'));
+  it('surfaces image-edit delegation failure as 500 without an outer charge', async () => {
+    mocks.imageEdit.mockRejectedValue(new Error('Delegation exception'));
     expect((await upscale(request({ imageUrl: image }))).status).toBe(500);
-    refundedOnce();
+    noCharge();
   });
   it('returns AI admission rejection without an outer charge or refund', async () => {
     mocks.imageEdit.mockResolvedValue(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }));
@@ -119,12 +113,6 @@ describe('upscale preflight and synchronous compensation', () => {
       assetParentVersionIds: ['version-1'] });
     noCharge();
     expect(fetch).not.toHaveBeenCalled();
-  });
-  it('does not run the engine or refund an unsuccessful debit', async () => {
-    mocks.charge.mockResolvedValue({ success: false, cost: 8, message: 'Insufficient credits' });
-    expect((await upscale(request({ imageUrl: image }))).status).toBe(402);
-    expect(mocks.engine).not.toHaveBeenCalled();
-    expect(mocks.refund).not.toHaveBeenCalled();
   });
 });
 
@@ -182,11 +170,9 @@ describe('prompt optimization preflight and synchronous compensation', () => {
 });
 
 describe.each([
-  ['upscale', upscale, { imageUrl: image }],
   ['optimize', optimize, optimizeBody],
 ] as const)('%s refund failure observability', (_name, handler, body) => {
   it('does not refund twice when constructing the failure response throws after refund', async () => {
-    mocks.engine.mockResolvedValue({ success: false, error: 'Engine unavailable' });
     mocks.upstream.mockResolvedValue(new Response('Busy', { status: 429 }));
     vi.spyOn(NextResponse, 'json').mockImplementationOnce(() => { throw new Error('Response serialization failed'); });
     const response = await handler(request(body));
@@ -196,7 +182,6 @@ describe.each([
   });
   it.each(['returns-false', 'throws'])('logs %s compensation failure without retrying an uncertain refund', async failure => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
-    mocks.engine.mockResolvedValue({ success: false, error: 'Engine unavailable' });
     mocks.upstream.mockResolvedValue(new Response('Busy', { status: 429 }));
     if (failure === 'throws') mocks.refund.mockRejectedValue(new Error('Refund database unavailable'));
     else mocks.refund.mockResolvedValue({ success: false, balance: 992 });

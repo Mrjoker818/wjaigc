@@ -22,7 +22,6 @@ import { authorizeGenerationProject, GenerationProjectAccessError } from '@/lib/
 import { authorizeDocumentImageEditSource, authorizeDocumentImageEditSourceLocked, authorizeDocumentImageEditSourceNow, completeDocumentImageEditTask, completeDocumentInpaintTask, documentImageEditProviderUrl, ImageEditCompletionUnknownError, ImageEditSourceAdmissionError, resolveDocumentImageEditSourceLocked } from '@/lib/collaboration/image-edit-source-admission';
 import { CanvasTaskPublicationError, type CanvasTaskPublicationInput } from '@/lib/collaboration/task-publication';
 import { assertCanvasImageEditSourceSelection, CanvasPublicationIntentError, parseCanvasPublicationIntentProposal } from '@/lib/collaboration/task-publication-intent';
-import { isCoherentPublishedCpuRemoveBgResult } from '@/lib/collaboration/image-edit-publication-output';
 import { getPool } from '@/lib/db-client';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { buildPollUrl, resolveProfileForModel } from '@/lib/api-compatibility';
@@ -37,10 +36,7 @@ import { persistAssetBytes } from '@/lib/asset-core/binary-persistence';
 import { readServeUploadExportLocal, readServeUploadMediaLocal } from '@/lib/serve-upload-local-storage';
 import { isS3Available, uploadImageToS3 } from '@/lib/s3-storage';
 import { registerTask, updateTaskProgress, isTaskCancelled } from '@/lib/task-registry';
-import { eraseWithLama, VALID_ERASE_MODELS } from '@/lib/image-tools/local-erase-client';
-import { LOCAL_AI_ENABLED } from '@/lib/image-tools/config';
 import { postProcessAIRemoveBG, postProcessLocalRemoveBG } from '@/lib/remove-bg-postprocess';
-import { DEFAULT_REMBG_MODEL, generateRembgMask, isRembgCpuModel } from '@/lib/image-tools/rembg-client';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { fetchImageBuffer, ImageEditInputTooLargeError } from '@/lib/fetch-image-buffer';
 import { calculateConfiguredCreditCost, consumeCredits, refundCredits, InsufficientCreditsError } from '@/lib/credits';
@@ -493,10 +489,8 @@ interface EditRequest {
   scale?: number; // 放大倍率 2/4/8
   model?: string;
   providerId?: string;
-  eraseModel?: string; // IOPaint erase model: lama/zits/anime-lama
-  removeBgModel?: string; // IOPaint RemoveBG model: isnet-general-use / u2net / u2netp / silueta
   originalPrompt?: string; // 原图的生成提示词, 用于多角度场景上下文
-  upscaleMode?: 'auto' | 'ai' | 'cpu' | 'ai-only' | 'fidelity'; // 新产品模式兼容旧值
+  upscaleMode?: 'auto' | 'ai' | 'ai-only'; // 本地 cpu/fidelity 档已随本地模型移除
   upscaleModel?: string; // 302.AI 原生放大模型
   enableQualityEnhance?: boolean;
   enhanceModel?: string;
@@ -505,7 +499,7 @@ interface EditRequest {
   quoteToken?: string;
   outputFormat?: 'png' | 'jpg' | 'webp'; // 输出格式
   compression?: number; // 压缩质量 (0-100)
-  engine?: 'auto' | 'ai' | 'local' | 'cpu' | 'ai-only' | 'fidelity'; // 智能推荐/仅AI/保真放大，兼容旧值
+  engine?: 'auto' | 'ai' | 'ai-only'; // 智能推荐/仅AI；本地 local/cpu/fidelity 档已移除
   displayBackground?: 'light-gray' | 'transparent';
 }
 
@@ -665,56 +659,6 @@ export async function POST(request: NextRequest) {
       throw error;
     }
     const replayKey = request.headers.get('idempotency-key')?.trim();
-    const respondPublishedCpuResult = async (taskId: string, reused: boolean): Promise<NextResponse> => {
-      try {
-        const current = await getCloudTaskForUser(taskId, authResult.userId);
-        if (current && ['failed', 'cancelled', 'timeout'].includes(current.status)) {
-          return NextResponse.json({ success: false, taskId, status: current.status,
-            error: current.error, reused }, { status: 409 });
-        }
-        if (current?.status !== 'completed') {
-          return NextResponse.json({ success: true, taskId, status: current?.status || 'processing',
-            reused }, { status: 202 });
-        }
-        await projectPersistedCompletedTask(taskId, authResult.userId);
-        const published = await getCloudTaskForUser(taskId, authResult.userId);
-        const currentResult = published?.result;
-        const projection = currentResult?.assetProjection as
-          { status?: unknown; references?: unknown[] } | undefined;
-        if (published?.status === 'completed' && currentResult
-          && isCoherentPublishedCpuRemoveBgResult(published)
-          && projection?.status === 'completed' && Array.isArray(projection.references)) {
-          return NextResponse.json({ success: true, taskId, action,
-            imageUrl: currentResult.imageUrl, maskUrl: currentResult.maskUrl,
-            quality: currentResult.quality, engine: 'rembg-cpu',
-            usedModel: currentResult.model, reused,
-            quote: confirmedImageEditQuoteForResponse(currentResult),
-            assetProjection: { status: 'completed', references: projection.references } });
-        }
-      } catch (error) {
-        // A charged completed task cannot be reclassified as an execution
-        // failure simply because its publication read or projection failed.
-        console.error('[remove_background] completed task publication pending:', error);
-      }
-      return NextResponse.json({ success: true, taskId,
-        status: 'publication-pending', retryAfterMs: 1500, reused }, { status: 202 });
-    };
-    if (!body.quoteOnly && replayKey && projectAccess.kind === 'document'
-      && isRemoveBackgroundAction && (enginePref === 'cpu' || enginePref === 'local')
-      && body.assetSelectedEntityIds !== undefined) {
-      const existing = await getCloudTaskForUserByIdempotencyKey(authResult.userId, replayKey);
-      if (existing) {
-        const admission = existing.result?.imageEditAdmission as { kind?: unknown } | undefined;
-        if (existing.type !== 'image-edit' || existing.providerId !== 'local-rembg'
-          || admission?.kind !== 'document-cpu-removebg'
-          || existing.requestDigest !== inputIdentityDigest) {
-          throw new IdempotencyConflictError({ userId: authResult.userId,
-            idempotencyKey: replayKey, requestDigest: inputIdentityDigest,
-            existingDigest: existing.requestDigest || 'legacy-unknown' });
-        }
-        return respondPublishedCpuResult(existing.id, true);
-      }
-    }
     if (action === 'upscale' && replayKey && !body.quoteOnly) {
       const existing = await getCloudTaskForUserByIdempotencyKey(authResult.userId, replayKey);
       if (existing) {
@@ -867,8 +811,7 @@ export async function POST(request: NextRequest) {
         }
       }
     }
-    if (action !== 'upscale' && action !== 'inpaint' && replayKey && !body.quoteOnly
-      && !(isRemoveBackgroundAction && (enginePref === 'cpu' || enginePref === 'local'))) {
+    if (action !== 'upscale' && action !== 'inpaint' && replayKey && !body.quoteOnly) {
       const existing = await getCloudTaskForUserByIdempotencyKey(authResult.userId, replayKey);
       if (existing) {
         const entryAudit = existing.result?.taskEntryAudit as { entry?: unknown } | undefined;
@@ -905,39 +848,18 @@ export async function POST(request: NextRequest) {
     const requested302UpscaleModel = requestedUpscaleModel ? resolve302UpscaleModelId(requestedUpscaleModel) : null;
     const engineMode = (
       enginePref === 'ai'
-      || enginePref === 'local'
-      || enginePref === 'cpu'
       || enginePref === 'ai-only'
-      || enginePref === 'fidelity'
     ) ? enginePref : 'auto';
     const requestedUpscaleMode = engineMode !== 'auto' ? engineMode : body.upscaleMode;
     const upscaleProductMode = resolveUpscaleProductMode(requestedUpscaleMode, Boolean(requestedUpscaleModel));
-    const maySelect302Upscale = action === 'upscale' && upscaleProductMode !== 'fidelity'
+    const maySelect302Upscale = action === 'upscale'
       && modelPlan.candidates.some(candidate => is302AiUpscaleBaseUrl(candidate.apiBaseUrl)
         && Boolean(resolve302UpscaleModelId(candidate.model)));
-    // Document 302 dispatch cannot use legacy consume-then-insert: an insert
-    // failure would leave a charge with no recoverable task identity.
-    const documentCpuRemoveBg = projectAccess.kind === 'document' && isRemoveBackgroundAction
-      && (engineMode === 'cpu' || engineMode === 'local');
-    let cpuRemoveBgPublication: CanvasTaskPublicationInput | undefined;
-    if (documentCpuRemoveBg && projectAccess.kind === 'document' && body.assetSelectedEntityIds !== undefined) {
-      try {
-        const intent = parseCanvasPublicationIntentProposal({ parentVersionIds: body.assetParentVersionIds,
-          projectionMode: body.assetProjectionMode ?? 'derived',
-          placement: { action: 'append', selectedEntityIds: body.assetSelectedEntityIds } });
-        if (intent.parentVersionIds.length !== 1 || intent.placement.action !== 'append'
-          || intent.placement.selectedEntityIds.length !== 1) throw new CanvasPublicationIntentError();
-        cpuRemoveBgPublication = { access: projectAccess, workspace: 'canvas', workspaceId: projectAccess.projectId,
-          singleAdmission: 'image-edit', imageEditOutputs: { version: 1, includeMask: true }, intent };
-      } catch {
-        return NextResponse.json({ success: false, code: 'IMAGE_EDIT_PUBLICATION_INVALID' }, { status: 400 });
-      }
-    }
     if ((body.quoteOnly || body.quoteToken)
-      && !cpuRemoveBgPublication && (!requested302UpscaleModel || !maySelect302Upscale)) {
+      && (!requested302UpscaleModel || !maySelect302Upscale)) {
       return NextResponse.json({ success: false, code: 'IMAGE_EDIT_QUOTE_UNAVAILABLE' }, { status: 422 });
     }
-    let taskCoreMode: TaskCoreMode = (documentCpuRemoveBg || action === 'outpaint' || action === 'inpaint') ? 'core-v2'
+    let taskCoreMode: TaskCoreMode = (action === 'outpaint' || action === 'inpaint') ? 'core-v2'
       : (projectAccess.kind === 'document' || body.enableQualityEnhance
       || body.quoteOnly || body.quoteToken) && maySelect302Upscale
       ? 'core-v2'
@@ -948,7 +870,6 @@ export async function POST(request: NextRequest) {
     usesAtomicBilling = taskCoreMode === 'core-v2';
     let documentProviderImageUrl: string | undefined;
     if (projectAccess.kind === 'document' && action === 'upscale'
-      && upscaleProductMode !== 'fidelity'
       && modelPlan.candidates.some(candidate => is302AiUpscaleBaseUrl(candidate.apiBaseUrl)
         && Boolean(resolve302UpscaleModelId(candidate.model)))) {
       try {
@@ -1137,86 +1058,16 @@ export async function POST(request: NextRequest) {
     const upscalePricingSnapshot = usesAtomicBilling && action === 'upscale'
       && (qualityEnhanceCandidate || body.quoteOnly || body.quoteToken)
       ? structuredClone(await loadCreditPricingConfig()) : undefined;
-    const cpuRemoveBgPricingSnapshot = cpuRemoveBgPublication
-      ? structuredClone(await loadCreditPricingConfig()) : undefined;
     if (usesAtomicBilling) {
       deductedCredits = await calculateConfiguredCreditCost(
         creditOp,
         modelStr,
         { providerId: effectiveProviderId || undefined,
-          pricingConfig: upscalePricingSnapshot || cpuRemoveBgPricingSnapshot },
+          pricingConfig: upscalePricingSnapshot },
       );
     } else if (sessionUser && (projectAccess.kind !== 'document' || action !== 'upscale')) {
       const rejected = await chargeLegacyCredits();
       if (rejected) return rejected;
-    }
-    let confirmedCpuRemoveBgQuote: ImageEditQuoteIdentity | null = null;
-    if (cpuRemoveBgPublication && cpuRemoveBgPricingSnapshot) {
-      if (!replayKey) {
-        return NextResponse.json({ success: false, code: 'IMAGE_EDIT_IDEMPOTENCY_KEY_REQUIRED',
-          error: '去背景报价需要固定的请求身份' }, { status: 400 });
-      }
-      const cpuModel = isRembgCpuModel(body.removeBgModel || '')
-        ? body.removeBgModel! : DEFAULT_REMBG_MODEL;
-      const components = { removebg: deductedCredits };
-      const targets = [{ phase: 'removebg', providerId: 'local-rembg', modelId: cpuModel }];
-      const quoteIdentity: ImageEditQuoteIdentity = {
-        actorUserId: authResult.userId,
-        requestDigest: createHash('sha256').update(JSON.stringify({
-          requestDigest: inputIdentityDigest, idempotencyKey: replayKey,
-        })).digest('hex'),
-        creditOp, total: deductedCredits, components, targets,
-        pricingDigest: createHash('sha256').update(JSON.stringify(cpuRemoveBgPricingSnapshot)).digest('hex'),
-        catalogDigest: createHash('sha256').update(JSON.stringify({ version: 1,
-          cpuModel, pricedProviderId: effectiveProviderId, pricedModelId: modelStr })).digest('hex'),
-      };
-      const secret = await getAuthSecretForInternalRequests();
-      const now = Date.now();
-      if (body.quoteOnly) {
-        let client: PoolClient | undefined;
-        let discard = false;
-        try {
-          client = await getPool().connect();
-          await client.query('BEGIN');
-          await assertCanvasImageEditSourceSelection(client, cpuRemoveBgPublication.access.ownerId,
-            cpuRemoveBgPublication.access.projectId, cpuRemoveBgPublication.intent!);
-          await client.query('ROLLBACK');
-        } catch (error) {
-          if (client) {
-            try { await client.query('ROLLBACK'); } catch { discard = true; }
-          }
-          if (error instanceof CanvasPublicationIntentError && !discard) {
-            return NextResponse.json({ success: false, code: 'IMAGE_EDIT_PUBLICATION_INVALID' }, { status: 400 });
-          }
-          return NextResponse.json({ success: false, code: 'IMAGE_EDIT_PUBLICATION_UNAVAILABLE' }, { status: 503 });
-        } finally { client?.release(discard); }
-        return NextResponse.json({ success: true, quote: {
-          total: deductedCredits, components, targets,
-          token: issueImageEditQuoteToken(quoteIdentity, secret, now),
-          expiresAt: now + IMAGE_EDIT_QUOTE_LIFETIME_MS,
-          service: 'remove-background',
-        } });
-      }
-      const existing = replayKey
-        ? await getCloudTaskForUserByIdempotencyKey(authResult.userId, replayKey) : null;
-      if (existing) {
-        const admission = existing.result?.imageEditAdmission as { kind?: unknown } | undefined;
-        if (existing.type !== 'image-edit' || existing.providerId !== 'local-rembg'
-          || admission?.kind !== 'document-cpu-removebg'
-          || existing.requestDigest !== inputIdentityDigest) {
-          throw new IdempotencyConflictError({ userId: authResult.userId,
-            idempotencyKey: replayKey!, requestDigest: inputIdentityDigest,
-            existingDigest: existing.requestDigest || 'legacy-unknown' });
-        }
-      } else if (!body.quoteToken) {
-        return NextResponse.json({ success: false, code: 'IMAGE_EDIT_QUOTE_REQUIRED',
-          error: '请先预览并确认本次去背景报价' }, { status: 428 });
-      } else if (!verifyImageEditQuoteToken(body.quoteToken, quoteIdentity, secret, now)) {
-        return NextResponse.json({ success: false, code: 'IMAGE_EDIT_QUOTE_CHANGED',
-          error: '报价已过期或配置已变化，请重新报价' }, { status: 409 });
-      } else {
-        confirmedCpuRemoveBgQuote = quoteIdentity;
-      }
     }
 
     const buildTaskEntryAudit = (
@@ -1677,12 +1528,10 @@ export async function POST(request: NextRequest) {
       }
 
       const productMode = upscaleProductMode;
-      const upscaleMode: 'auto' | 'ai' | 'cpu' = productMode === 'ai-only'
-        ? 'ai'
-        : productMode === 'fidelity'
-          ? 'cpu'
-          : 'auto';
+      // 本地 cpu/fidelity 引擎已移除，productMode 只剩 auto/ai-only，全部走云端 AI。
+      const upscaleMode: 'auto' | 'ai' = productMode === 'ai-only' ? 'ai' : 'auto';
 
+      // PearAPI 云端 Real-ESRGAN 是云 API 模型，保留；仅本地同名 ONNX 引擎已移除。
       if (requestedUpscaleModel && !requested302UpscaleModel && requestedUpscaleModel !== 'Real-ESRGAN') {
         return NextResponse.json({
           success: false,
@@ -1723,82 +1572,8 @@ export async function POST(request: NextRequest) {
         }, { status: 422 });
       }
 
-      // 本地保真放大的内部实现。fallbackReason 仅在 Auto 从 AI 降级时传入，
-      // 确保成功响应仍可审计实际执行引擎与降级原因。
-      const runLocalCpuUpscale = async (fallbackReason?: string) => {
-        try {
-          const { performUpscaleAuto } = await import('@/lib/image-tools/upscayl');
-          const result = await performUpscaleAuto({
-            imageUrl,
-            scale: scaleVal,
-            outputFormat: body.outputFormat || 'png',
-            compression: body.compression || 90,
-          });
-
-          if (result.success && result.imageUrl) {
-            const cpuOutputW = result.outputSize?.width || targetW;
-            const cpuOutputH = result.outputSize?.height || targetH;
-
-            if (cpuOutputW !== targetW || cpuOutputH !== targetH) {
-              const { fetchImageBuffer: fetchBuf } = await import('@/lib/fetch-image-buffer');
-              const cpuBuf = await fetchBuf(result.imageUrl);
-              const resizedBuf = await sharp(cpuBuf)
-                .resize(targetW, targetH, { kernel: 'lanczos3' })
-                .png({ quality: 95 })
-                .toBuffer();
-
-              const timestamp = Date.now();
-              const randomSuffix = Math.random().toString(36).substring(2, 8);
-              const filename = `upscale_cpu_${timestamp}_${randomSuffix}.png`;
-              const savedPath = await saveBufferToPublic(resizedBuf, filename);
-              const domain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
-              const domainBase = domain.startsWith('http') ? domain.replace(/\/+$/, '') : `https://${domain.replace(/\/+$/, '')}`;
-              const normalizedPath = savedPath.startsWith('data:') || savedPath.startsWith('http') ? savedPath : (savedPath.startsWith('/') ? savedPath : `/${savedPath}`);
-              const finalUrl = normalizedPath.startsWith('data:') || normalizedPath.startsWith('http') ? normalizedPath : `${domainBase}${normalizedPath}`;
-
-              return NextResponse.json({
-                success: true,
-                imageUrl: finalUrl,
-                action,
-                engine: 'fidelity',
-                providerId: null,
-                usedModel: result.model || 'realesrgan',
-                tiled: false,
-                tileCount: 1,
-                fallbackAllowed: executionPlan.fallbackAllowed,
-                fallbackReason: fallbackReason ?? executionPlan.fallbackReason,
-                scale: scaleVal,
-                originalSize: result.originalSize || { width: origW, height: origH },
-                outputSize: { width: targetW, height: targetH },
-                outputWidth: targetW,
-                outputHeight: targetH,
-              });
-            }
-
-            return NextResponse.json({
-              success: true,
-              imageUrl: result.imageUrl,
-              action,
-              engine: 'fidelity',
-              providerId: null,
-              usedModel: result.model || 'realesrgan',
-              tiled: false,
-              tileCount: 1,
-              fallbackAllowed: executionPlan.fallbackAllowed,
-              fallbackReason: fallbackReason ?? executionPlan.fallbackReason,
-              scale: scaleVal,
-              originalSize: result.originalSize || { width: origW, height: origH },
-              outputSize: result.outputSize || { width: targetW, height: targetH },
-              outputWidth: result.outputSize?.width || targetW,
-              outputHeight: result.outputSize?.height || targetH,
-            });
-          }
-          return null;
-        } catch (cpuError) {
-          console.debug(`[image-edit] upscale: CPU error:`, cpuError instanceof Error ? cpuError.message : cpuError);
-          return null;
-        }
-      };
+      // 本地保真放大引擎（ONNX Real-ESRGAN / UpScayl）已随本地模型移除；
+      // AI 模型全部失败时直接返回错误，不再降级到本地 CPU。
 
       const toPublicUrl = (savedPath: string): string => {
         if (savedPath.startsWith('data:') || savedPath.startsWith('http')) return savedPath;
@@ -2258,31 +2033,6 @@ export async function POST(request: NextRequest) {
           `upscale_enhanced_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.png`);
         return { url: toPublicUrl(normalizedPath), enhanced: true };
       };
-      const completeRequested302FidelityFallback = async (fallback: NextResponse): Promise<NextResponse> => {
-        try {
-          const result = await fallback.clone().json() as Record<string, unknown>;
-          if (typeof result.imageUrl !== 'string' || !result.imageUrl) {
-            throw new Error('保真降级结果缺少图片地址');
-          }
-          const baseBuffer = qualityEnhanceCandidate
-            ? await fetchImageBuffer(result.imageUrl) : Buffer.alloc(0);
-          const enhancement = await finishQualityEnhanced302Image(result.imageUrl, baseBuffer);
-          if (enhancement instanceof NextResponse) return enhancement;
-          const terminalConflict = await completeRequested302CreditTask(enhancement.url, enhancement.enhanced);
-          if (terminalConflict) return terminalConflict;
-          return NextResponse.json({ ...result, imageUrl: enhancement.url,
-            enhanced: enhancement.enhanced, taskId: upscaleCreditTaskId });
-        } catch (error) {
-          const safety = await inspect302TaskSafety();
-          if (safety.conflict) return safety.conflict;
-          if (upscaleCreditTaskId && (safety.started || error instanceof ImageEditProviderBoundaryError
-            || error instanceof ImageEditProviderSubmissionPending)) {
-            return pending302Response(upscaleCreditTaskId);
-          }
-          const failure = await settleRequested302Failure(error);
-          return NextResponse.json(failure, { status: failure.providerStatus });
-        }
-      };
       const submitTracked302Upscale = async (
         selectedProvider: NonNullable<typeof selectedUpscaleCandidate>,
         selectedModel: NonNullable<ReturnType<typeof resolve302UpscaleModelId>>,
@@ -2430,22 +2180,9 @@ export async function POST(request: NextRequest) {
               return pending302Response(upscaleCreditTaskId);
             }
             const errorMessage = error instanceof Error ? error.message : String(error);
-            if (upscaleCreditTaskId && !(error instanceof ImageEditSourceAdmissionError)
-              && !requested302UpscaleModel && executionPlan.fallbackAllowed) {
-              console.warn(`[image-edit] dedicated AI upscale failed, falling back to fidelity: ${errorMessage}`);
-              const fidelityResult = await runLocalCpuUpscale(`专用 AI 超分失败，已降级到保真模式：${errorMessage}`);
-              if (fidelityResult) {
-                return await completeRequested302FidelityFallback(fidelityResult);
-              }
-            }
             if (upscaleCreditTaskId || requested302UpscaleModel) {
               const failure = await settleRequested302Failure(error);
               return NextResponse.json(failure, { status: failure.providerStatus });
-            }
-            if (executionPlan.fallbackAllowed) {
-              console.warn(`[image-edit] dedicated AI upscale failed, falling back to fidelity: ${errorMessage}`);
-              const fidelityResult = await runLocalCpuUpscale(`专用 AI 超分失败，已降级到保真模式：${errorMessage}`);
-              if (fidelityResult) return fidelityResult;
             }
             return NextResponse.json({
               success: false,
@@ -2453,10 +2190,8 @@ export async function POST(request: NextRequest) {
               engine: executionPlan.engine,
               providerId: selectedProvider.providerId,
               tiled: false,
-              fallbackAllowed: executionPlan.fallbackAllowed,
-              fallbackReason: executionPlan.fallbackAllowed
-                ? `专用 AI 超分失败且保真降级不可用：${errorMessage}`
-                : null,
+              fallbackAllowed: false,
+              fallbackReason: null,
             }, { status: 502 });
           } finally {
             await release302ProviderLease();
@@ -2603,30 +2338,6 @@ export async function POST(request: NextRequest) {
             updateTaskProgress(taskId, { status: 'processing', label: '302.AI 提交状态待核对' });
             return pending302Response(upscaleCreditTaskId);
           }
-          if (upscaleCreditTaskId && !(effectiveError instanceof ImageEditSourceAdmissionError)
-            && !requested302UpscaleModel && executionPlan.fallbackAllowed) {
-            updateTaskProgress(taskId, {
-              status: 'processing', progress: 90, label: 'AI 分块失败，正在切换保真模式',
-            });
-            const fidelityResult = await runLocalCpuUpscale(`AI 分块超分失败，已降级到保真模式：${errorMessage}`);
-            if (fidelityResult) {
-              const completedFallback = await completeRequested302FidelityFallback(fidelityResult);
-              // The fallback may have started an enhancement phase that is still
-              // submission-unknown, or it may have settled a failure. Mirror the
-              // durable task state instead of declaring success from CPU output.
-              const durableTask = upscaleCreditTaskId
-                ? await getCloudTaskForUser(upscaleCreditTaskId, authResult.userId) : null;
-              if (durableTask?.status === 'completed') {
-                updateTaskProgress(taskId, { status: 'completed', progress: 100, label: '保真降级完成' });
-              } else if (durableTask?.status === 'failed' || durableTask?.status === 'cancelled'
-                || durableTask?.status === 'timeout') {
-                updateTaskProgress(taskId, { status: durableTask.status, error: durableTask.error || undefined });
-              } else if (durableTask) {
-                updateTaskProgress(taskId, { status: 'processing', label: '增强提交状态待核对' });
-              }
-              return completedFallback;
-            }
-          }
           if (upscaleCreditTaskId || requested302UpscaleModel || effectiveError instanceof ImageEditSourceAdmissionError) {
             updateTaskProgress(taskId, { status: 'failed', error: errorMessage });
             const failure = await settleRequested302Failure(effectiveError);
@@ -2647,26 +2358,9 @@ export async function POST(request: NextRequest) {
               engine: executionPlan.engine,
               providerId: selectedProvider.providerId,
               tiled: executionPlan.tiled,
-              fallbackAllowed: executionPlan.fallbackAllowed,
-              fallbackReason: executionPlan.fallbackReason,
+              fallbackAllowed: false,
+              fallbackReason: null,
             }, { status: 409 });
-          }
-
-          if (executionPlan.fallbackAllowed) {
-            updateTaskProgress(taskId, {
-              status: 'processing',
-              progress: 90,
-              label: 'AI 分块失败，正在切换保真模式',
-            });
-            const fidelityResult = await runLocalCpuUpscale(`AI 分块超分失败，已降级到保真模式：${errorMessage}`);
-            if (fidelityResult) {
-              updateTaskProgress(taskId, {
-                status: 'completed',
-                progress: 100,
-                label: '保真降级完成',
-              });
-              return fidelityResult;
-            }
           }
 
           updateTaskProgress(taskId, { status: 'failed', error: errorMessage });
@@ -2687,21 +2381,8 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // ---- 保真执行计划: 仅本地 Real-ESRGAN / UpScayl ----
-      // 以统一编排器的结果为准，覆盖用户显式保真模式和 Auto 无可用 AI 时的可解释降级。
-      if (executionPlan.engine === 'fidelity') {
-        const cpuRes = await runLocalCpuUpscale();
-        if (cpuRes) return cpuRes;
-        return NextResponse.json({
-          success: false,
-          error: '保真放大失败，请检查本地超分模型是否可用',
-          engine: executionPlan.engine,
-          fallbackAllowed: executionPlan.fallbackAllowed,
-          fallbackReason: executionPlan.fallbackReason,
-        }, { status: 500 });
-      }
-
       // ---- AI放大路径 (auto/ai模式) ----
+      // 本地保真执行计划（Real-ESRGAN/UpScayl）已随本地模型移除，编排器只产出 AI 计划。
       // candidateModels已在上方重排序：upscaler专用模型优先 → 通用image模型
       // 专用upscaler模型走/images/edits端点(参考图编辑)，通用image模型走/images/generations
       console.debug(`[image-edit] upscale: AI-first mode, target: ${targetW}x${targetH}, candidates: ${candidateModels.slice(0,3).map(c=>c.model).join(', ')}...`);
@@ -3150,267 +2831,18 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // AI放大全部失败时，auto模式下自动降级到本地CPU放大
-    if (upscaleMode === 'auto' && !aiResult && aiError) {
-      console.log('[image-edit] upscale: All AI models failed, falling back to local CPU upscayl');
-      const cpuRes = await runLocalCpuUpscale();
-      if (cpuRes) return cpuRes;
-    }
-
-    // ai模式强制AI失败或auto模式CPU也失败 → 返回错误
+    // 本地 CPU 放大兜底已随本地模型移除；AI 放大全部失败时直接报错。
     return NextResponse.json({
       success: false,
-      error: upscaleMode === 'ai'
-        ? `AI放大失败: ${aiError?.message || '所有AI模型均不可用，请检查API配置或切换到本地CPU模式'}`
-        : '所有放大方式均失败，请检查API配置和本地upscayl模型',
+      error: `AI放大失败: ${aiError?.message || '所有AI模型均不可用，请检查API配置'}`,
     }, { status: 500 });
     }
 
     if (isRemoveBackgroundAction) {
-      if (engineMode === 'local' || engineMode === 'cpu') {
-        const rembgModel = isRembgCpuModel(body.removeBgModel || '')
-          ? body.removeBgModel!
-          : DEFAULT_REMBG_MODEL;
-
-        if (documentCpuRemoveBg && projectAccess.kind === 'document') {
-          const now = Date.now();
-          let created: Awaited<ReturnType<typeof createBillableTask>>;
-          try {
-            created = await createBillableTask({
-            userId: authResult.userId,
-            idempotencyKey: request.headers.get('idempotency-key')?.trim() || requestId,
-            requestDigest: inputIdentityDigest,
-            creditCost: deductedCredits,
-            ...(cpuRemoveBgPublication ? { canvasPublication: cpuRemoveBgPublication } : {}),
-            beforeCharge: async client => {
-              if (confirmedCpuRemoveBgQuote) {
-                let locked = await client.query(
-                  'SELECT value FROM wujie_system_settings WHERE key=$1 FOR SHARE',
-                  [CREDIT_PRICING_CONFIG_KEY],
-                );
-                if (locked.rowCount === 0) {
-                  // With no row there is nothing to row-lock. Block an admin
-                  // insertion until this admission transaction has committed.
-                  await client.query('LOCK TABLE wujie_system_settings IN SHARE MODE');
-                  locked = await client.query(
-                    'SELECT value FROM wujie_system_settings WHERE key=$1 FOR SHARE',
-                    [CREDIT_PRICING_CONFIG_KEY],
-                  );
-                }
-                const currentPricing = parseCreditPricingConfig(locked.rows[0]?.value);
-                const currentDigest = createHash('sha256')
-                  .update(JSON.stringify(currentPricing)).digest('hex');
-                if (currentDigest !== confirmedCpuRemoveBgQuote.pricingDigest) {
-                  throw new ImageEditQuoteChangedError();
-                }
-              }
-              await authorizeDocumentImageEditSourceLocked(client, {
-                access: projectAccess, parentVersionIds: body.assetParentVersionIds,
-                imageUrl, origin: request.nextUrl.origin, expectedCanonicalUrl: imageUrl,
-              });
-              if (cpuRemoveBgPublication) {
-                try {
-                  await assertCanvasImageEditSourceSelection(client, projectAccess.ownerId,
-                    projectAccess.projectId, cpuRemoveBgPublication.intent!);
-                } catch (error) {
-                  if (error instanceof CanvasPublicationIntentError) {
-                    throw new CanvasTaskPublicationError('CANVAS_TASK_PUBLICATION_CONFLICT');
-                  }
-                  throw error;
-                }
-              }
-            },
-            task: {
-              id: cpuRemoveBgPublication ? `image_edit_removebg_cpu_${randomUUID()}` : `removebg-cpu-${randomUUID()}`,
-              projectId: projectAccess.projectId,
-              sessionId: body.sessionId,
-              messageId: body.messageId,
-              type: 'image-edit',
-              status: 'processing',
-              providerId: 'local-rembg',
-              model: rembgModel,
-              progress: 0,
-              label: 'CPU remove background',
-              result: {
-                imageEditAdmission: { version: 1, kind: 'document-cpu-removebg',
-                  requestDigest: inputIdentityDigest, sourceUrl: imageUrl,
-                  parentVersionIds: body.assetParentVersionIds },
-                imageEditQuote: { version: 1, total: deductedCredits,
-                  providerId: 'local-rembg', model: rembgModel,
-                  ...(confirmedCpuRemoveBgQuote ? { confirmed: true,
-                    components: confirmedCpuRemoveBgQuote.components,
-                    pricingDigest: confirmedCpuRemoveBgQuote.pricingDigest,
-                    catalogDigest: confirmedCpuRemoveBgQuote.catalogDigest } : {}) },
-                taskEntryAudit: buildTaskEntryAudit('local-rembg', rembgModel),
-              },
-              createdAt: now,
-              updatedAt: now,
-            },
-            });
-          } catch (error) {
-            if (error instanceof ImageEditQuoteChangedError) {
-              return NextResponse.json({ success: false, code: 'IMAGE_EDIT_QUOTE_CHANGED',
-                error: error.message }, { status: 409 });
-            }
-            if (error instanceof ImageEditSourceAdmissionError) {
-              return NextResponse.json({ success: false, code: error.code, error: error.message },
-              { status: error.status });
-            }
-            if (error instanceof CanvasTaskPublicationError) {
-              return NextResponse.json({ success: false, code: error.code, error: error.message },
-                { status: error.status });
-            }
-            throw error;
-          }
-          // A replay does not own the prior charge; an outer error must never
-          // settle someone else's still-running attempt.
-          atomicBillingTaskId = created.reused ? null : created.task.id;
-          const replay = created.task;
-          if (replay.status === 'completed' && typeof replay.result?.imageUrl === 'string') {
-            if (cpuRemoveBgPublication) return respondPublishedCpuResult(replay.id, true);
-            return NextResponse.json({ success: true, taskId: replay.id, action,
-              imageUrl: replay.result.imageUrl, maskUrl: replay.result.maskUrl,
-              quality: replay.result.quality, engine: 'rembg-cpu',
-              usedModel: replay.result.model, reused: true });
-          }
-          if (['failed', 'cancelled', 'timeout'].includes(replay.status)) {
-            return NextResponse.json({ success: false, taskId: replay.id,
-              status: replay.status, error: replay.error, reused: true }, { status: 409 });
-          }
-          const owner = `removebg-cpu:${randomUUID()}`;
-          const lease = await claimCloudTaskLease(replay.id, owner, 30 * 60_000);
-          if (!lease) {
-            return NextResponse.json({ success: true, taskId: replay.id,
-              status: replay.status, reused: true }, { status: 202 });
-          }
-          try {
-            const sourceBuffer = await fetchImageBuffer(imageUrl);
-            await authorizeDocumentImageEditSource({ access: projectAccess, action,
-              parentVersionIds: body.assetParentVersionIds, imageUrl,
-              origin: request.nextUrl.origin });
-            const rembgResult = await generateRembgMask(sourceBuffer, rembgModel);
-            if (!rembgResult.success || !rembgResult.rgbaBase64) {
-              throw new Error(rembgResult.error || 'rembg CPU 去背景失败');
-            }
-            const processed = await postProcessLocalRemoveBG(rembgResult.rgbaBase64,
-              rembgResult.maskBase64, sourceBuffer, replay.id.replaceAll('_', '-'));
-            if (!processed || !processed.imageUrl.startsWith('/api/serve-upload/')
-              || !processed.maskUrl.startsWith('/api/serve-upload/')) {
-              throw new Error('rembg CPU output could not be durably stored');
-            }
-            const dataRoot = getServerDataRoot();
-            const imageBytes = await readServeUploadMediaLocal(dataRoot, process.cwd(),
-              processed.imageUrl.slice('/api/serve-upload/'.length));
-            const maskBytes = await readServeUploadMediaLocal(dataRoot, process.cwd(),
-              processed.maskUrl.slice('/api/serve-upload/'.length));
-            if (!imageBytes || !maskBytes) throw new Error('rembg CPU output bytes are missing');
-            const imageFile = await persistAssetBytes({ bytes: imageBytes,
-              filename: 'removebg-subject.png', mimeType: 'image/png', signal: request.signal });
-            const maskFile = await persistAssetBytes({ bytes: maskBytes,
-              filename: 'removebg-mask.png', mimeType: 'image/png', signal: request.signal });
-            if ((!imageFile.storageKey || !maskFile.storageKey) && !isServerDataRootDurable(dataRoot)) {
-              throw new Error('rembg CPU outputs require durable storage');
-            }
-            for (const [file, bytes] of [[imageFile, imageBytes], [maskFile, maskBytes]] as const) {
-              const stored = await readServeUploadExportLocal(dataRoot,
-                file.url.slice('/api/serve-upload/exports/'.length), 32 * 1024 * 1024);
-              if (!stored || !stored.equals(bytes)) throw new Error('rembg CPU output verification failed');
-            }
-            const result = { imageUrl: imageFile.url, maskUrl: maskFile.url,
-              quality: processed.quality, action, engine: 'rembg-cpu',
-              providerId: 'local-rembg', model: rembgResult.model || rembgModel,
-              ...(cpuRemoveBgPublication ? { imageEditPublicationCheckpoint: {
-                version: 1, taskId: replay.id, requestDigest: inputIdentityDigest, status: 'persisted',
-                providerId: 'local-rembg', modelId: rembgResult.model || rembgModel, outputs: [
-                  { outputIndex: 0, role: 'primary', url: imageFile.url },
-                  { outputIndex: 1, role: 'mask', url: maskFile.url },
-                ],
-              } } : {}) };
-            const completed = await completeDocumentImageEditTask({ taskId: replay.id,
-              result, access: projectAccess, parentVersionIds: body.assetParentVersionIds,
-              imageUrl, origin: request.nextUrl.origin, expectedCanonicalUrl: imageUrl,
-              leaseOwner: owner, leaseExpiresAt: lease.expiresAt,
-              leaseAttemptCount: lease.attemptCount });
-            if (!completed) {
-              return NextResponse.json({ success: false, taskId: replay.id,
-                code: 'IMAGE_EDIT_TASK_NOT_ACTIVE' }, { status: 409 });
-            }
-            if (cpuRemoveBgPublication) return respondPublishedCpuResult(replay.id, false);
-            await projectPersistedCompletedTask(replay.id, authResult.userId);
-            return NextResponse.json({ success: true, taskId: replay.id, ...result,
-              usedModel: result.model });
-          } catch (error) {
-            if (error instanceof ImageEditCompletionUnknownError) {
-              return NextResponse.json({ success: true, taskId: replay.id,
-                status: 'completion-unknown' }, { status: 202 });
-            }
-            const sourceError = error instanceof ImageEditSourceAdmissionError ? error : null;
-            const message = error instanceof Error ? error.message : 'rembg CPU 去背景失败';
-            atomicSettlementAttempted = true;
-            try {
-              const settlement = await settleFailedTask({ taskId: replay.id, status: 'failed', leaseOwner: owner,
-                error: { code: sourceError?.code || 'IMAGE_EDIT_CPU_REMOVEBG_FAILED',
-                  message, source: 'wujie', retryable: false, requestId } });
-              if (!settlement.transitioned) {
-                const current = await getCloudTaskForUser(replay.id, authResult.userId);
-                if (current && ['completed', 'failed', 'cancelled', 'timeout'].includes(current.status)) {
-                  return NextResponse.json({ success: false, taskId: replay.id,
-                    status: current.status, error: current.error }, { status: 409 });
-                }
-                return NextResponse.json({ success: true, taskId: replay.id,
-                  status: current?.status || 'processing' }, { status: 202 });
-              }
-            } catch (settleError) {
-              console.error('[remove_background] durable settlement failed:', settleError);
-              return NextResponse.json({ success: false, taskId: replay.id,
-                code: 'IMAGE_EDIT_SETTLEMENT_UNKNOWN' }, { status: 503 });
-            }
-            return NextResponse.json({ success: false, taskId: replay.id,
-              ...(sourceError ? { code: sourceError.code } : {}), error: message },
-            { status: sourceError?.status || 502 });
-          } finally {
-            await releaseCloudTaskLease(replay.id, owner);
-          }
-        }
-
-        try {
-          const sourceBuffer = await fetchImageBuffer(imageUrl);
-          const rembgResult = await generateRembgMask(sourceBuffer, rembgModel);
-          if (rembgResult.success && rembgResult.rgbaBase64) {
-            const result = await postProcessLocalRemoveBG(
-              rembgResult.rgbaBase64,
-              rembgResult.maskBase64,
-              sourceBuffer,
-            );
-            if (result) {
-              return NextResponse.json({
-                success: true,
-                imageUrl: result.imageUrl,
-                maskUrl: result.maskUrl,
-                quality: result.quality,
-                action,
-                engine: 'rembg-cpu',
-                usedModel: rembgResult.model || rembgModel,
-              });
-            }
-            console.warn('[remove_background] rembg CPU output failed quality validation; trying configured fallback');
-          }
-          if (engineMode === 'cpu' || engineMode === 'local') {
-            return NextResponse.json({ success: false, error: rembgResult.error || 'rembg CPU 去背景失败' }, { status: 502 });
-          }
-          console.warn('[remove_background] rembg CPU failed, trying explicitly configured AI fallback:', rembgResult.error);
-        } catch (error) {
-          if (engineMode === 'cpu' || engineMode === 'local') {
-            return NextResponse.json({ success: false, error: error instanceof Error ? error.message : 'rembg CPU 去背景失败' }, { status: 502 });
-          }
-          console.warn('[remove_background] rembg CPU error, trying explicitly configured AI fallback:', error);
-        }
-      }
-
+      // 本地 rembg CPU 去背景已随本地模型移除，统一走云端 AI 模型。
       const bgSize = aspectRatio ? findClosestAspectRatio(aspectRatio) : '1:1';
       const imageBase64ForBg = await resolveImageToBase64(imageUrl).catch(() => null);
 
-      // rembg CPU 不可用时，自动模式才使用云端模型作为备用路径。
       // 支持background:'transparent'参数的AI模型（GPT-Image/Flux等），直接返回透明PNG
       // candidateModels已经在上方被重新排序：专用模型优先，通用模型在后
       const removeBgPrompt = [
@@ -3811,36 +3243,10 @@ export async function POST(request: NextRequest) {
           .threshold(10)
           .png()
           .toBuffer();
-        // eraseBinaryMaskBuffer 同时用于 IOPaint 和 AI 模型（已含柔化处理）
+        // eraseBinaryMaskBuffer 已含柔化处理，供 AI 模型与本地 BFS 兜底使用
         const eraseMaskForAI = eraseBinaryMaskBuffer;
 
-        // ─── 优先路径：IOPaint LaMa 本地擦除 ───
-        // LaMa 是专业修复模型，效果优于 AI 生成式擦除和 BFS 边界扩散
-        // 仅在 LOCAL_AI_ENABLED 且模型可用时尝试
-        if (LOCAL_AI_ENABLED) {
-          try {
-            // 支持 lama / zits / anime-lama 模型选择
-            const eraseModel: string = VALID_ERASE_MODELS.includes(body.eraseModel || '') ? body.eraseModel! : 'lama';
-            console.log(`[inpaint] Attempting IOPaint erase (${eraseModel}): ${origW}x${origH}, mask pixels ${maskPixelCount}`);
-            const lamaResult = await eraseWithLama(
-              imageBuffer,
-              eraseBinaryMaskBuffer,
-              origW,
-              origH,
-              eraseModel,
-            );
-            if (lamaResult.success && lamaResult.imageUrl) {
-              console.log(`[inpaint] IOPaint ${lamaResult.engine || 'iopaint'} erase succeeded: ${lamaResult.imageUrl}`);
-              return await completeInpaint(await fetchImageBuffer(lamaResult.imageUrl),
-                lamaResult.engine || 'iopaint-lama');
-            }
-            console.log(`[inpaint] IOPaint erase failed: ${lamaResult.error}, falling back to AI API`);
-          } catch (lamaErr) {
-            console.warn(`[inpaint] IOPaint LaMa error:`, lamaErr instanceof Error ? lamaErr.message : lamaErr);
-          }
-        }
-
-        // ─── 降级路径：AI 模型智能擦除 ───
+        // ─── AI 模型智能擦除（本地 IOPaint LaMa 已随本地模型移除）───
         // 不裁剪！裁剪会导致 AI 看不到完整画面上下文，重新理解构图导致变形
         // 如果图片过大，等比缩放到 2048 以内，保证 AI 模型能处理
         const AI_MAX_DIM = 2048;

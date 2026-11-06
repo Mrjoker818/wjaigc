@@ -531,79 +531,12 @@ export async function postProcessAIRemoveBG(
       }
     }
 
-    // 策略4: 用本地 rembg 生成蒙版（使用高质量模型，最后兜底）
-    // 关键改进：用原图 RGB + rembg 蒙版，而不是 rembg 的 RGBA 输出
-    console.log('[postProcessAIRemoveBG] Using rembg to generate mask from original image');
-    const { generateRembgMask } = await import('./image-tools/rembg-client');
-    const maskResult = await generateRembgMask(origBuffer, 'birefnet-general');
-    
-    if (!maskResult || !maskResult.success || !maskResult.maskBase64) {
-      console.log('[postProcessAIRemoveBG] Failed to generate mask with rembg');
-      return null;
-    }
-
-    // 用原图 RGB + rembg 蒙版合成，保留原始主体像素质量
-    try {
-      const sharp = (await import('sharp')).default;
-      const origResized = await sharp(origBuffer)
-        .ensureAlpha()
-        .raw()
-        .toBuffer({ resolveWithObject: true });
-      const origW = origResized.info.width;
-      const origH = origResized.info.height;
-      const origRaw = origResized.data;
-      const origPixels = origW * origH;
-
-      const maskBuffer = Buffer.from(maskResult.maskBase64, 'base64');
-      await sharp(maskBuffer).metadata();
-      const maskResized = await sharp(maskBuffer)
-        .resize(origW, origH, { fit: 'fill' })
-        .raw()
-        .toBuffer();
-      
-      const resultRaw = Buffer.alloc(origPixels * 4);
-      for (let i = 0; i < origPixels; i++) {
-        const idx = i * 4;
-        resultRaw[idx] = origRaw[idx];
-        resultRaw[idx + 1] = origRaw[idx + 1];
-        resultRaw[idx + 2] = origRaw[idx + 2];
-        resultRaw[idx + 3] = maskResized[i];
-      }
-
-      const resultPng = await sharp(resultRaw, { raw: { width: origW, height: origH, channels: 4 } })
-        .png()
-        .toBuffer();
-
-      return await postProcessLocalRemoveBG(
-        resultPng.toString('base64'),
-        maskResult.maskBase64
-      );
-    } catch (composeErr) {
-      console.warn('[postProcessAIRemoveBG] Original+mask compose failed, falling back to rembg RGBA:', composeErr);
-      if (maskResult.rgbaBase64) {
-        return await postProcessLocalRemoveBG(maskResult.rgbaBase64, maskResult.maskBase64);
-      }
-      return null;
-    }
+    // 本地 rembg 蒙版兜底已随本地模型移除；AI 后处理仅保留 alpha 提取、
+    // 原图对比与边缘背景检测三种策略，全部失败时由调用方走纯算法兜底。
+    console.log('[postProcessAIRemoveBG] All AI post-process strategies failed');
+    return null;
   } catch (err) {
     console.error('[postProcessAIRemoveBG] Error:', err);
-    return null;
-  }
-}
-
-/**
- * 生成 rembg 蒙版（供外部调用）
- */
-export async function generateRembgMask(
-  imageBuffer: Buffer,
-  model: string = 'birefnet-general'
-): Promise<string | null> {
-  try {
-    const { generateRembgMask: clientGenMask } = await import('./image-tools/rembg-client');
-    const result = await clientGenMask(imageBuffer, model);
-    return result?.maskBase64 || null;
-  } catch (err) {
-    console.error('[generateRembgMask] Error:', err);
     return null;
   }
 }

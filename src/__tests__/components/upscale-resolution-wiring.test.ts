@@ -15,7 +15,7 @@ const source = `${canvasSource}\n${upscalePanelSource}`;
 describe('4K and 8K upscale toolbar wiring', () => {
   it('uses the shared target-resolution presets instead of K-labelled multipliers', () => {
     expect(source).toContain('UPSCALE_TARGET_PRESETS');
-    expect(source).toContain("useState<UpscaleTargetPreset>('2x')");
+    expect(source).toContain('useState<UpscaleProductMode>');
     expect(source).toContain('calculateUpscaleTargetDimensions(origW, origH, upscalePreset)');
     expect(source).toContain('UPSCALE_TARGET_PRESETS.map(preset =>');
     expect(source).not.toContain("useState<'2k' | '4k' | '8k'>");
@@ -31,13 +31,14 @@ describe('4K and 8K upscale toolbar wiring', () => {
     expect(source).not.toContain("fetch('/api/image/upscale'");
   });
 
-  it('exposes auto, AI-only, and fidelity product modes without legacy aliases', () => {
-    expect(source).toContain("useState<UpscaleProductMode>('auto')");
+  it('exposes auto and AI-only product modes without legacy aliases', () => {
     expect(source).toContain("{ id: 'auto', label: '自动'");
     expect(source).toContain("{ id: 'ai-only', label: '仅 AI'");
-    expect(source).toContain("{ id: 'fidelity', label: '保真'");
     expect(source).toContain('setUpscaleMode(mode.id)');
     expect(source).toContain('upscaleMode,');
+    expect(source).not.toContain("{ id: 'fidelity'");
+    expect(source).not.toContain("{ id: 'cpu'");
+    expect(source).not.toContain("{ id: 'local'");
     expect(source).not.toContain("useState<'lossless' | 'ai'>");
     expect(source).not.toContain("upscaleMode: actualEngine === 'ai'");
   });

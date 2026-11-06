@@ -17,7 +17,7 @@ const boundary = vi.hoisted(() => {
     s3Available: vi.fn(), uploadS3: vi.fn(), assetPersist: vi.fn(),
     getTask: vi.fn(), getByKey: vi.fn(), claim: vi.fn(), release: vi.fn(), phaseOpen: vi.fn(), phaseAccepted: vi.fn(),
     localRoot: '/offline',
-    pricing: vi.fn(), localUpscale: vi.fn(), billable: vi.fn<typeof import('@/lib/task-core/billing-service').createBillableTask>() };
+    pricing: vi.fn(), billable: vi.fn<typeof import('@/lib/task-core/billing-service').createBillableTask>() };
 });
 vi.mock('server-only', () => ({}));
 vi.mock('@/lib/server-auth', () => ({ getSessionUser: boundary.session, listManagedUsers: boundary.users,
@@ -71,8 +71,6 @@ vi.mock('@/lib/server-data-root', () => ({ saveImageFile: boundary.save, getServ
   getServerSystemDir: (): string => '/offline/system' }));
 vi.mock('@/lib/s3-storage', () => ({ isS3Available: boundary.s3Available,
   uploadImageToS3: boundary.uploadS3, persistRemoteImage: boundary.unsafePersist }));
-vi.mock('@/lib/image-tools/config', () => ({ LOCAL_AI_ENABLED: false }));
-vi.mock('@/lib/image-tools/upscayl', () => ({ performUpscaleAuto: boundary.localUpscale }));
 vi.mock('@/lib/op-log', () => ({ logError: boundary.log, logOperation: boundary.log,
   OP_ACTIONS: { IMAGE_EDIT: 'image_edit' }, startTimer: (): { end: () => number } => ({ end: (): number => 0 }) }));
 
@@ -122,8 +120,6 @@ beforeEach(async (): Promise<void> => {
   boundary.s3Available.mockReturnValue(false);
   boundary.uploadS3.mockResolvedValue('/images/multi_angle.png');
   boundary.assetPersist.mockResolvedValue({ url: '/api/serve-upload/uploads/enhanced.png' });
-  boundary.localUpscale.mockResolvedValue({ success: true, imageUrl: '/api/serve-upload/local-upscale.png',
-    model: 'local-realesrgan', outputSize: { width: 64, height: 64 } });
   boundary.getTask.mockResolvedValue({ status: 'processing', result: {} });
   boundary.getByKey.mockResolvedValue(null);
   boundary.claim.mockResolvedValue(true);
@@ -138,7 +134,7 @@ beforeEach(async (): Promise<void> => {
 afterEach((): void => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe('real image-edit model admission and execution', (): void => {
-  it('uses the explicitly selected non-302 upscaler instead of local fidelity', async (): Promise<void> => {
+  it('uses the explicitly selected non-302 upscaler through the AI path', async (): Promise<void> => {
     boundary.consume.mockResolvedValue({ success: true, cost: 1 });
     boundary.config.mockResolvedValue([{ ...provider('up'), type: 'upscaler', modelType: 'upscaler',
       selectedModels: ['Real-ESRGAN'] }]);
@@ -154,10 +150,9 @@ describe('real image-edit model admission and execution', (): void => {
     });
 
     const response = await POST(editRequest({ action: 'upscale', upscaleModel: 'Real-ESRGAN',
-      engine: 'fidelity', scale: 2 }));
+      engine: 'auto', scale: 2 }));
     expect(await response.json()).toMatchObject({ success: true, usedModel: 'Real-ESRGAN' });
     expect(providerCalls).toEqual(['https://up.invalid/v1/images/edits']);
-    expect(boundary.localUpscale).not.toHaveBeenCalled();
   });
   it('rejects unverified SeedVR2 before charging or dispatching an upscaler', async (): Promise<void> => {
     boundary.config.mockResolvedValue([{ ...provider('up'), type: 'upscaler', modelType: 'upscaler',
@@ -171,7 +166,6 @@ describe('real image-edit model admission and execution', (): void => {
     expect(boundary.consume).not.toHaveBeenCalled();
     expect(boundary.billable).not.toHaveBeenCalled();
     expect(boundary.network).not.toHaveBeenCalled();
-    expect(boundary.localUpscale).not.toHaveBeenCalled();
   });
   it('blocks both named and default filesystem write paths with the offline boundary', (): void => {
     for (const write of [fs.writeFile, fs.copyFile, fs.mkdir, writeFile, copyFile, mkdir]) {

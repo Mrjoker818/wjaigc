@@ -294,12 +294,11 @@ export function CanvasEditUpscaleSvgPanel(props: CanvasEditUpscaleSvgPanelProps)
                   </div>
                 )}
                 <div className={panelDividerClass} />
-                {/* Upscale product mode selector */}
+                {/* Upscale product mode selector（本地保真档已随本地模型移除） */}
                 <div className="flex items-center gap-0.5">
                   {([
-                    { id: 'auto', label: '自动', title: '自动选择专用 AI 或保真引擎；发生降级时会明确说明原因' },
-                    { id: 'ai-only', label: '仅 AI', title: '仅使用专用 AI 超分；失败时不会静默回退到 CPU 放大' },
-                    { id: 'fidelity', label: '保真', title: '优先保持原始构图与像素特征，不使用生成式重绘' },
+                    { id: 'auto', label: '自动', title: '自动选择专用 AI 或通用 AI 放大' },
+                    { id: 'ai-only', label: '仅 AI', title: '仅使用专用 AI 超分' },
                   ] as const).map((mode, index, modes) => (
                     <button
                       key={mode.id}

@@ -41,8 +41,6 @@ export interface CanvasEditEraseMaskPanelProps {
   setEditBrushMode: React.Dispatch<React.SetStateAction<'brush' | 'eraser'>>;
   maskKeyword: string;
   setMaskKeyword: React.Dispatch<React.SetStateAction<string>>;
-  eraseModelId: string;
-  setEraseModelId: React.Dispatch<React.SetStateAction<string>>;
   editStrokes: StrokePoint[][];
   setEditStrokes: React.Dispatch<React.SetStateAction<StrokePoint[][]>>;
   currentStroke: StrokePoint[];
@@ -77,8 +75,6 @@ export function CanvasEditEraseMaskPanel(props: CanvasEditEraseMaskPanelProps) {
     setEditBrushMode,
     maskKeyword,
     setMaskKeyword,
-    eraseModelId,
-    setEraseModelId,
     editStrokes,
     setEditStrokes,
     currentStroke,
@@ -512,43 +508,7 @@ export function CanvasEditEraseMaskPanel(props: CanvasEditEraseMaskPanelProps) {
                       />
                     </div>
 
-                    {/* Erase model selector (only for erase mode) */}
-                    {isErase && (
-                      <div className="px-3 py-2">
-                        <span className={`text-xs mb-1.5 block ${isMonochrome ? 'text-gray-500' : 'text-gold-muted'}`}>擦除引擎</span>
-                        <div className="flex flex-col gap-1.5">
-                          {[
-                            { id: 'lama', label: 'LaMa', desc: '通用擦除', recommended: true },
-                            { id: 'zits', label: 'ZITS', desc: '结构保持', recommended: false },
-                            { id: 'anime-lama', label: 'Anime', desc: '动漫专用', recommended: false },
-                          ].map(m => (
-                            <button
-                              key={m.id}
-                              onClick={() => setEraseModelId(m.id)}
-                              className={`flex items-center gap-2 px-3 py-2 text-xs rounded-lg transition-all text-left ${
-                                eraseModelId === m.id
-                                  ? isMonochrome ? 'bg-blue-500 text-white font-medium' : 'bg-gold text-black font-medium'
-                                  : isMonochrome
-                                    ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                    : 'bg-[#252525] text-[#999] hover:bg-[#282828]/85'
-                              }`}
-                            >
-                              <span className="font-medium">{m.label}</span>
-                              <span className={`text-[10px] ${eraseModelId === m.id ? 'text-black/60' : isMonochrome ? 'text-gray-400' : 'text-gold-muted/70'}`}>{m.desc}</span>
-                              {m.recommended && (
-                                <span className={`ml-auto text-[9px] px-1.5 py-0.5 rounded-full ${
-                                  eraseModelId === m.id
-                                    ? 'bg-black/20 text-black/70'
-                                    : isMonochrome
-                                      ? 'bg-gray-200 text-gray-500'
-                                      : 'bg-[#333] text-gold-muted'
-                                }`}>推荐</span>
-                              )}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                    {/* 本地擦除引擎选择器已随本地模型移除；AI 云端擦除统一处理 */}
 
                     {/* Undo/Clear buttons */}
                     <div className="px-3 py-2 flex gap-2">

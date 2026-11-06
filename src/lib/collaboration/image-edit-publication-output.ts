@@ -36,37 +36,3 @@ const publishedReferenceSchema = z.object({
   url: z.string().startsWith('/api/serve-upload/exports/'),
   assetVersionId: text,
 }).passthrough();
-const completedProjectionSchema = z.object({
-  status: z.literal('completed'),
-  references: z.tuple([publishedReferenceSchema, publishedReferenceSchema]),
-}).passthrough();
-
-/** Adopted asset URLs may differ from task output URLs; the persisted checkpoint must not. */
-export function isCoherentPublishedCpuRemoveBgResult(task: {
-  id: string; requestDigest?: string | null; result?: Record<string, unknown> | null;
-}): boolean {
-  const result = task.result;
-  if (!result || typeof result.imageUrl !== 'string' || typeof result.maskUrl !== 'string'
-    || !result.imageUrl.startsWith('/api/serve-upload/exports/')
-    || !result.maskUrl.startsWith('/api/serve-upload/exports/')
-    || result.imageUrl === result.maskUrl) return false;
-  const checkpoint = checkpointSchema.safeParse(result.imageEditPublicationCheckpoint);
-  const projection = completedProjectionSchema.safeParse(result.assetProjection);
-  const admission = result.imageEditAdmission as Record<string, unknown> | undefined;
-  if (!checkpoint.success || !projection.success || !admission
-    || admission.kind !== 'document-cpu-removebg'
-    || !/^[a-f0-9]{64}$/.test(task.requestDigest || '')
-    || admission.requestDigest !== task.requestDigest
-    || checkpoint.data.taskId !== task.id
-    || checkpoint.data.requestDigest !== task.requestDigest
-    || checkpoint.data.providerId !== 'local-rembg'
-    || checkpoint.data.outputs.length !== 2
-    || checkpoint.data.outputs[0].outputIndex !== 0
-    || checkpoint.data.outputs[0].role !== 'primary'
-    || checkpoint.data.outputs[0].url !== result.imageUrl
-    || checkpoint.data.outputs[1].outputIndex !== 1
-    || checkpoint.data.outputs[1].role !== 'mask'
-    || checkpoint.data.outputs[1].url !== result.maskUrl) return false;
-  const [primary, mask] = projection.data.references;
-  return primary.url !== mask.url && primary.assetVersionId !== mask.assetVersionId;
-}

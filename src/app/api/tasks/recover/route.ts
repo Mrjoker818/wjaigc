@@ -6,7 +6,6 @@ import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { getTaskRecoveryBackoff } from '@/lib/task-core/task-abort';
 import { projectPersistedCompletedTask } from '@/lib/cloud-task-persistence';
 import { hasPersistedCanvasPublicationIntent } from '@/lib/collaboration/task-result-publication';
-import { isCoherentPublishedCpuRemoveBgResult } from '@/lib/collaboration/image-edit-publication-output';
 import { authorizeGenerationProject, GenerationProjectAccessError,
   type GenerationProjectAccess } from '@/lib/collaboration/generation-project-access';
 
@@ -108,30 +107,13 @@ export async function GET(request: NextRequest) {
       && (quote.total as number) >= 0 && (quote.upscale as number) >= 0
       && (quote.enhance as number) >= 0
       && (quote.upscale as number) + (quote.enhance as number) === quote.total;
-    const removeBgComponents = quote?.components as Record<string, unknown> | undefined;
-    const sourceVersionId = request.nextUrl.searchParams.get('sourceVersionId')?.trim();
-    const removeBgFound = (task?.projectId || '') === (projectId || '')
-      && task?.type === 'image-edit' && task.providerId === 'local-rembg'
-      && admission?.kind === 'document-cpu-removebg' && quote?.confirmed === true
-      && Boolean(sourceVersionId) && Array.isArray(admission.parentVersionIds)
-      && admission.parentVersionIds.length === 1
-      && admission.parentVersionIds[0] === sourceVersionId
-      && Number.isSafeInteger(quote.total) && (quote.total as number) >= 0
-      && Number.isSafeInteger(removeBgComponents?.removebg)
-      && removeBgComponents?.removebg === quote.total;
     const assetProjection = task?.result?.assetProjection as Record<string, unknown> | undefined;
-    const references = assetProjection?.references;
-    const publication = task && removeBgFound && isCoherentPublishedCpuRemoveBgResult(task)
-      && Array.isArray(references)
-      ? { imageUrl: references[0].url, maskUrl: references[1].url, references } : null;
+    // 本地 rembg CPU 去背景已随本地模型移除；历史 removebg 报价恢复按未找到处理。
+    const removeBgFound = false;
+    const publication = null;
     return NextResponse.json(upscaleFound
       ? { success: true, found: true, taskId: task!.id, status: task!.status,
         quote: { total: quote!.total, components: { upscale: quote!.upscale, enhance: quote!.enhance } } }
-      : removeBgFound
-        ? { success: true, found: true, taskId: task!.id, status: task!.status,
-          quote: { total: quote!.total, components: { removebg: removeBgComponents!.removebg } },
-          assetProjectionStatus: typeof assetProjection?.status === 'string'
-            ? assetProjection.status : 'pending', ...(publication ? { publication } : {}) }
       : { success: true, found: false }, { headers: { 'Cache-Control': 'no-store' } });
   }
   if (!projectId) {

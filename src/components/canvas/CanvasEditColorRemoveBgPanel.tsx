@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { createPortal } from 'react-dom';
-import { Check, Eraser, Loader2, Palette, X } from 'lucide-react';
+import { Eraser, Loader2, Palette, X } from 'lucide-react';
 import NextImage from 'next/image';
 import type { CanvasImage, EditMode } from '@/components/infinite-canvas';
 import { getCanvasEditImageSource } from '@/lib/canvas-edit-image-source';
@@ -38,9 +38,6 @@ interface CanvasEditColorRemoveBgPanelProps {
   setColorTemperature: React.Dispatch<React.SetStateAction<number>>;
   showRemoveBgPicker: boolean;
   setShowRemoveBgPicker: React.Dispatch<React.SetStateAction<boolean>>;
-  removeBgModelId: string;
-  setRemoveBgModelId: React.Dispatch<React.SetStateAction<string>>;
-  removeBgEngine: string;
   documentMetadataMode: boolean;
   removeBgQuote: { total: number } | null;
   isRemoveBgQuoteLoading: boolean;
@@ -49,7 +46,6 @@ interface CanvasEditColorRemoveBgPanelProps {
   removeBgDedicatedName: string;
   addRemoveBgMaskToCanvas: boolean;
   setAddRemoveBgMaskToCanvas: React.Dispatch<React.SetStateAction<boolean>>;
-  setEngineDialog: React.Dispatch<React.SetStateAction<'upscale' | 'removebg' | 'segment' | 'svg' | null>>;
   handleRemoveBackground: () => void | Promise<void>;
 }
 
@@ -73,9 +69,6 @@ export function CanvasEditColorRemoveBgPanel({
   setColorTemperature,
   showRemoveBgPicker,
   setShowRemoveBgPicker,
-  removeBgModelId,
-  setRemoveBgModelId,
-  removeBgEngine,
   documentMetadataMode,
   removeBgQuote,
   isRemoveBgQuoteLoading,
@@ -84,7 +77,6 @@ export function CanvasEditColorRemoveBgPanel({
   removeBgDedicatedName,
   addRemoveBgMaskToCanvas,
   setAddRemoveBgMaskToCanvas,
-  setEngineDialog,
   handleRemoveBackground,
 }: CanvasEditColorRemoveBgPanelProps): React.ReactElement | null {
   const viewportWidth = React.useSyncExternalStore(
@@ -215,14 +207,8 @@ export function CanvasEditColorRemoveBgPanel({
           );
         })()}
 
-        {/* ====== REMOVE BACKGROUND MODEL PICKER ====== */}
+        {/* ====== REMOVE BACKGROUND PICKER（本地模型已移除，云端引擎直连）====== */}
         {showRemoveBgPicker && (() => {
-          const removeBgModels: Array<{ id: string; label: string; description: string; size: string; recommended?: boolean }> = [
-            { id: 'birefnet-general-lite', label: 'BiRefNet 通用 Lite', description: '轻量快速版，默认首选', size: '约 224MB', recommended: true },
-            { id: 'birefnet-general', label: 'BiRefNet 通用', description: '完整通用模型，优先保留主体和细节', size: '约 1GB' },
-            { id: 'birefnet-portrait', label: 'BiRefNet 人像', description: '针对头发和人物边缘优化', size: '约 1GB' },
-            { id: 'birefnet-massive', label: 'BiRefNet Massive', description: '复杂主体优先，CPU 处理时间更长', size: '约 1GB+' },
-          ];
           return (
             <div data-floating-panel="remove-bg" className="fixed inset-0 z-[200] flex items-center justify-center" onMouseDown={(e) => e.stopPropagation()}>
               <div className="absolute inset-0 bg-black/40" onClick={() => setShowRemoveBgPicker(false)} />
@@ -231,36 +217,17 @@ export function CanvasEditColorRemoveBgPanel({
                 <div className={`flex shrink-0 items-center justify-between px-4 py-3 border-b ${isMonochrome ? 'border-gray-200 bg-white' : 'border-[#444] bg-[#222]'}`}>
                   <div className="flex items-center gap-2">
                     <Eraser size={14} className={isMonochrome ? 'text-blue-500' : 'text-gold'} />
-                    <span className={`text-sm font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>选择去背景模型</span>
+                    <span className={`text-sm font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>去背景</span>
                   </div>
-                  <button onClick={() => setShowRemoveBgPicker(false)} aria-label="关闭去背景模型选择" style={isMobilePanel ? { minWidth: 44, minHeight: 44 } : undefined} className={`p-1 rounded-lg transition-colors ${isMonochrome ? 'text-blue-500 hover:text-blue-700 hover:bg-blue-50' : 'text-gold-muted/70 hover:text-white hover:bg-[#282828]/85'}`}>
+                  <button onClick={() => setShowRemoveBgPicker(false)} aria-label="关闭去背景" style={isMobilePanel ? { minWidth: 44, minHeight: 44 } : undefined} className={`p-1 rounded-lg transition-colors ${isMonochrome ? 'text-blue-500 hover:text-blue-700 hover:bg-blue-50' : 'text-gold-muted/70 hover:text-white hover:bg-[#282828]/85'}`}>
                     <X size={16} />
                   </button>
                 </div>
                 <div style={isMobilePanel ? { minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', touchAction: 'pan-y' } : undefined}>
-                {/* 引擎状态区（含 remove.bg 专用引擎体现） */}
+                {/* 引擎状态区（云端专用引擎） */}
                 <div className={`px-3 py-2.5 border-b ${isMonochrome ? 'border-gray-200 bg-gray-50' : 'border-[#444] bg-[#1f1f1f]'}`}>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className={`text-[11px] font-medium ${isMonochrome ? 'text-gray-500' : 'text-gold-muted/80'}`}>处理引擎</span>
-                    <button
-                      onClick={() => setEngineDialog('removebg')}
-                      style={isMobilePanel ? { minHeight: 44 } : undefined}
-                      className={`flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md transition-colors ${
-                        isMonochrome
-                          ? 'bg-white border border-gray-300 text-blue-600 hover:bg-blue-50'
-                          : 'bg-[#282828] border border-[#555] text-gold hover:bg-[#333]'
-                      }`}
-                    >
-                      <span>引擎:</span>
-                      <span className="font-semibold">
-                        {removeBgEngine === 'auto' ? '智能自动' : removeBgEngine === 'ai' ? '云端 AI' : '本地算法'}
-                      </span>
-                    </button>
-                  </div>
                   <div className={`flex items-start gap-1.5 text-[11px] leading-snug ${isMonochrome ? 'text-gray-600' : 'text-gray-300'}`}>
-                    {documentMetadataMode && removeBgEngine === 'local' ? (
-                      <span>当前使用本地 CPU 去背景模型；确认报价后发布主体图与蒙版。</span>
-                    ) : removeBgDedicatedName ? (
+                    {removeBgDedicatedName ? (
                       <>
                         <span className={`mt-0.5 w-1.5 h-1.5 rounded-full shrink-0 ${isMonochrome ? 'bg-green-600' : 'bg-green-400'}`} />
                         <span>专用 <span className={isMonochrome ? 'text-green-700 font-medium' : 'text-green-400 font-medium'}>{removeBgDedicatedName}</span> 已启用，将优先调用云端抠图 API</span>
@@ -268,60 +235,17 @@ export function CanvasEditColorRemoveBgPanel({
                     ) : removeBgDedicatedLoaded ? (
                       <>
                         <span className={`mt-0.5 w-1.5 h-1.5 rounded-full shrink-0 ${isMonochrome ? 'bg-amber-500' : 'bg-amber-400/80'}`} />
-                        <span>remove.bg 专用引擎未配置，可在管理员面板添加「抠图」类型提供商启用（当前走本地模型 / 通用 AI）</span>
+                        <span>专用抠图引擎未配置，可在管理员面板添加「抠图」类型提供商启用（当前走通用 AI）</span>
                       </>
                     ) : (
                       <span>正在检测专用引擎…</span>
                     )}
                   </div>
                 </div>
-                {/* Model list */}
-                <div className="p-3 space-y-2">
-                  {removeBgModels.map(m => (
-                    <button
-                      key={m.id}
-                      onClick={() => setRemoveBgModelId(m.id)}
-                      className={`relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-left ${
-                        removeBgModelId === m.id
-                          ? isMonochrome ? 'bg-blue-500 text-white' : 'bg-gold text-black'
-                          : isMonochrome
-                            ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                            : 'bg-[#252525] text-[#999] hover:bg-[#282828]/85'
-                      }`}
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium">{m.label}</span>
-                          {'recommended' in m && m.recommended && (
-                            <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${
-                              removeBgModelId === m.id
-                                ? 'bg-black/20 text-black/70'
-                                : isMonochrome
-                                  ? 'bg-gray-200 text-gray-500'
-                                  : 'bg-[#333] text-gold-muted'
-                            }`}>推荐</span>
-                          )}
-                        </div>
-                        <div className={`text-[11px] mt-0.5 ${removeBgModelId === m.id ? 'text-black/60' : isMonochrome ? 'text-gray-400' : 'text-gold-muted/70'}`}>
-                          {m.description} · {m.size}
-                        </div>
-                      </div>
-                      {removeBgModelId === m.id && (
-                        <Check size={16} className="flex-shrink-0" />
-                      )}
-                    </button>
-                  ))}
-                </div>
                 {/* Footer with confirm */}
                 <div className={`px-4 py-3 border-t ${isMonochrome ? 'border-gray-200 bg-white' : 'border-[#444] bg-[#222]'}`}>
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className={`text-xs ${isMonochrome ? 'text-gray-500' : 'text-gold-muted'}`}>当前选择:</span>
-                    <span className={`text-xs font-medium ${isMonochrome ? 'text-blue-600' : 'text-gold'}`}>
-                      {removeBgModels.find(m => m.id === removeBgModelId)?.label || removeBgModelId}
-                    </span>
-                  </div>
                   {documentMetadataMode && <p className={`mb-2 text-xs ${isMonochrome ? 'text-gray-600' : 'text-[#bbb]'}`}>
-                    协作文档仅支持本地引擎；主体图与黑白蒙版将一起发布到文档。
+                    协作文档去背景完成后，主体图与黑白蒙版将一起发布到文档。
                   </p>}
                   {removeBgQuote && documentMetadataMode && <p className={`mb-2 text-sm font-semibold ${isMonochrome ? 'text-blue-700' : 'text-gold'}`}>
                     本次报价：{removeBgQuote.total} 积分
