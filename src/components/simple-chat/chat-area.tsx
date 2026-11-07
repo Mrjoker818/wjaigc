@@ -69,6 +69,7 @@ import { buildSimpleChatCanvasTransferIdentity } from '@/lib/simple-chat-workspa
 import { MultiPlatformExportCard } from './multi-platform-export-card';
 import { resolveSimpleChatExportRequestContext } from '@/lib/multi-platform-export/simple-chat-intent';
 import { BriefToVideoCard } from './brief-to-video-card';
+import { SIMPLE_CHAT_SKILL_REQUEST_INPUT_KEY } from '@/lib/skill-runtime/simple-chat-presets';
 import {
   isSimpleChatBriefVideoClarification,
   resolveSimpleChatBriefVideoRequestContext,
@@ -113,8 +114,47 @@ function readSimpleChatStreamPayload(value: unknown): SimpleChatStreamPayload | 
   return value as SimpleChatStreamPayload;
 }
 
-function AgentRunMessageProgress({ runId }: { runId: string }) {
+type SimpleChatSkill = (typeof PRESET_SKILLS)[number];
+
+export const SIMPLE_CHAT_SKILL_RUN_PENDING_SUFFIX = ' · 后台任务进行中…';
+const SIMPLE_CHAT_SKILL_RUN_UNFINISHED_SUFFIX = ' · 后台任务未完成，详情见下方进度';
+const SIMPLE_CHAT_SKILL_RUN_EMPTY_RESULT = '技能任务已完成，但没有返回文本内容。';
+
+export function readSkillRunOutputText(result: unknown): string {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return '';
+  const outputs = (result as { outputs?: unknown }).outputs;
+  if (!Array.isArray(outputs)) return '';
+  return outputs
+    .filter((output): output is { kind: 'text'; content: string } => (
+      Boolean(output) && typeof output === 'object'
+      && (output as { kind?: unknown }).kind === 'text'
+      && typeof (output as { content?: unknown }).content === 'string'
+    ))
+    .map(output => output.content.trim())
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function isPendingSkillRunMessage(message: SimpleChatMessage): boolean {
+  return message.role === 'assistant'
+    && Boolean(message.agentRunId)
+    && message.content.endsWith(SIMPLE_CHAT_SKILL_RUN_PENDING_SUFFIX);
+}
+
+function AgentRunMessageProgress({ runId, onSettled }: {
+  runId: string;
+  onSettled?: (outcome: { completed: boolean; text: string }) => void;
+}) {
   const run = useAgentRunEvents(runId);
+  const status = run.projection?.status;
+  const result = run.projection?.result;
+  useEffect(() => {
+    if (!onSettled || !status) return;
+    if (status === 'completed') onSettled({ completed: true, text: readSkillRunOutputText(result) });
+    else if (status === 'failed' || status === 'cancelled' || status === 'timeout') {
+      onSettled({ completed: false, text: '' });
+    }
+  }, [onSettled, result, status]);
   return (
     <AgentProgressTimeline
       projection={run.projection}
@@ -500,6 +540,8 @@ export default function ChatArea({
   const chatModelSelection = readSimpleChatModelSelection(task);
   const selectedModel = chatModelSelection.modelId;
   const selectedProviderId = chatModelSelection.providerId;
+  const [skillRunPending, setSkillRunPending] = useState(false);
+  const [selectedSkill, setSelectedSkill] = useState<SimpleChatSkill | null>(null);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(task?.reasoningEffort || 'medium');
   const [responseSpeed, setResponseSpeed] = useState<ResponseSpeed>(task?.responseSpeed || 'balanced');
   const [appliedChatControls, setAppliedChatControls] = useState<SimpleChatTask['appliedChatControls']>(task?.appliedChatControls);
@@ -1469,6 +1511,86 @@ export default function ChatArea({
 
   const handleSendRef = useRef<(() => void) | null>(null);
 
+  const startSelectedSkillRun = useCallback(async (): Promise<void> => {
+    const skill = selectedSkill;
+    const request = input.trim();
+    if (!project || !task || !skill || !request || skillRunPending || isStreaming) return;
+    const selection = readSimpleChatModelSelection(task);
+    if (!selection.modelId || !selection.providerId) {
+      setSearchStatus('请先选择可用的对话模型。');
+      return;
+    }
+    const requestProjectId = project.id;
+    const requestTaskId = task.id;
+    const idempotencyKey = `simple-chat-skill:${requestTaskId}:${skill.id}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`;
+    setSkillRunPending(true);
+    setSearchStatus(null);
+    try {
+      const response = await fetch('/api/skill-runs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          skillId: skill.id,
+          skillVersion: skill.version,
+          surface: 'simple-chat',
+          projectId: requestProjectId,
+          workspaceId: `standalone-chat:${requestProjectId}`,
+          inputValues: { [SIMPLE_CHAT_SKILL_REQUEST_INPUT_KEY]: request },
+          sourceVersionIds: [],
+          modelBindings: {
+            orchestrator: { providerId: selection.providerId, modelId: selection.modelId },
+          },
+          idempotencyKey,
+        }),
+      });
+      const payload = await response.json().catch(() => null) as { runId?: unknown } | null;
+      if (!response.ok || typeof payload?.runId !== 'string' || !payload.runId) {
+        throw new Error('后台任务没有启动，请检查对话模型和积分后重试。');
+      }
+      if (projectIdRef.current !== requestProjectId || taskIdRef.current !== requestTaskId) return;
+      const currentTask = latestTaskRef.current;
+      if (!currentTask || currentTask.id !== requestTaskId) return;
+      const now = Date.now();
+      const nextMessages: SimpleChatMessage[] = [
+        ...messagesRef.current,
+        { id: Math.random().toString(36).slice(2, 10), role: 'user', content: request, createdAt: now },
+        {
+          id: Math.random().toString(36).slice(2, 10),
+          role: 'assistant',
+          content: `${skill.icon} ${skill.name}${SIMPLE_CHAT_SKILL_RUN_PENDING_SUFFIX}`,
+          agentRunId: payload.runId,
+          createdAt: now,
+        },
+      ];
+      setMessages(nextMessages);
+      setInput(previous => (previous.trim() === request ? '' : previous));
+      void onPersistTask({ ...currentTask, messages: nextMessages, updatedAt: now });
+    } catch (error) {
+      setSearchStatus(error instanceof Error ? error.message : '后台任务没有启动，请重试。');
+    } finally {
+      setSkillRunPending(false);
+    }
+  }, [input, isStreaming, onPersistTask, project, selectedSkill, skillRunPending, task]);
+
+  const settleSkillRunMessage = useCallback((messageId: string, outcome: { completed: boolean; text: string }) => {
+    setMessages(previous => previous.map(message => {
+      if (message.id !== messageId || !isPendingSkillRunMessage(message)) return message;
+      const title = message.content.slice(0, -SIMPLE_CHAT_SKILL_RUN_PENDING_SUFFIX.length);
+      return {
+        ...message,
+        content: outcome.completed
+          ? (outcome.text || SIMPLE_CHAT_SKILL_RUN_EMPTY_RESULT)
+          : `${title}${SIMPLE_CHAT_SKILL_RUN_UNFINISHED_SUFFIX}`,
+      };
+    }));
+  }, []);
+
+  const selectSkill = useCallback((skill: SimpleChatSkill) => {
+    setSelectedSkill(skill);
+    setShowSkillPanel(false);
+    textareaRef.current?.focus();
+  }, []);
+
   const registerChatAttachment = useCallback(async (
     attachment: ChatAttachment,
     messageId: string,
@@ -1870,6 +1992,7 @@ export default function ChatArea({
       const agent = project.agents.find(candidate => candidate.id === requestActiveAgentId);
       if (agent) systemMessages.push({ role: 'system', content: agent.systemPrompt });
     }
+    if (selectedSkill) systemMessages.push({ role: 'system', content: selectedSkill.systemPrompt });
     if (webSearch) {
       systemMessages.push({
         role: 'system',
@@ -1943,7 +2066,7 @@ export default function ChatArea({
         if (requestScopeEpochRef.current.epoch === requestEpoch) setIsStreaming(false);
       }
     }
-  }, [input, isStreaming, messages, project, task, uploadedImages, webSearch, memories, selectedImageModel, selectedImageProviderId, brandActive, selectedCanvasProjectId, registerChatAttachment, executeChatRequest, knowledgeItems, reasoningEffort, responseSpeed]);
+  }, [input, isStreaming, messages, project, task, uploadedImages, webSearch, memories, selectedImageModel, selectedImageProviderId, brandActive, selectedCanvasProjectId, registerChatAttachment, executeChatRequest, knowledgeItems, reasoningEffort, responseSpeed, selectedSkill]);
 
   // 供消息编辑后重新生成调用
   handleSendRef.current = handleSend;
@@ -2827,7 +2950,7 @@ export default function ChatArea({
               <p className="text-muted-foreground">开始一段新的对话吧</p>
               <div className={`flex flex-wrap justify-center gap-2 mt-4 ${chatAvailableHeight <= 320 ? 'w-full' : ''}`}>
                 {PRESET_SKILLS.slice(0, 6).map(skill => (
-                  <button key={skill.id} onClick={() => onSkillToAgent(skill)}
+                  <button key={skill.id} onClick={() => selectSkill(skill)}
                     className="min-h-11 min-w-11 px-3 py-1.5 rounded-full border border-border hover:bg-muted text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1">
                     <span>{skill.icon}</span> {skill.name}
                   </button>
@@ -2894,7 +3017,10 @@ export default function ChatArea({
                   )}
                   {msg.agentRunId && msg.content !== '视频成片任务已提交。' && (
                     <div className="mt-3">
-                      <AgentRunMessageProgress runId={msg.agentRunId} />
+                      <AgentRunMessageProgress
+                        runId={msg.agentRunId}
+                        onSettled={isPendingSkillRunMessage(msg) ? outcome => settleSkillRunMessage(msg.id, outcome) : undefined}
+                      />
                     </div>
                   )}
                   {msg.agentRunId
@@ -3131,13 +3257,35 @@ export default function ChatArea({
                 ))}
               </div>
             )}
+            {selectedSkill && (
+              <div data-simple-chat-selected-skill={selectedSkill.id} className="flex min-w-0 flex-wrap items-center gap-2 px-4 pt-3">
+                <span className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-full bg-primary/10 pl-2 text-xs font-medium text-primary">
+                  <span aria-hidden="true">{selectedSkill.icon}</span>
+                  <span className="min-w-0 truncate" title={selectedSkill.name}>{selectedSkill.name}</span>
+                  <button type="button" aria-label={`移除技能：${selectedSkill.name}`} onClick={() => setSelectedSkill(null)}
+                    className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-full hover:text-red-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+                <button type="button" aria-label="转为后台任务" onClick={() => { void startSelectedSkillRun(); }}
+                  disabled={!input.trim() || skillRunPending || isStreaming}
+                  title="作为后台任务运行；刷新或离开页面后，结果仍会写回这段对话"
+                  className="inline-flex min-h-11 shrink-0 items-center rounded-lg border border-border px-2 text-xs text-muted-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary motion-reduce:transition-none">
+                  {skillRunPending ? '正在提交…' : '转为后台任务'}
+                </button>
+                <button type="button" onClick={() => onSkillToAgent(selectedSkill)}
+                  className="inline-flex min-h-11 shrink-0 items-center rounded-lg px-2 text-xs text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary motion-reduce:transition-none">
+                  存为 Agent
+                </button>
+              </div>
+            )}
             <textarea
               ref={textareaRef}
               value={input}
               onChange={e => { inputEditEpochRef.current += 1; setInput(e.target.value); }}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
-              placeholder={activeAgent ? `与 ${activeAgent.name} 对话...` : "输入消息，Enter 发送，支持 Ctrl+V 粘贴图片"}
+              placeholder={selectedSkill ? `使用 ${selectedSkill.name}：描述你的任务需求，Enter 发送` : activeAgent ? `与 ${activeAgent.name} 对话...` : "输入消息，Enter 发送，支持 Ctrl+V 粘贴图片"}
               rows={1}
               className="block w-full min-w-0 bg-transparent px-4 py-3 text-base sm:text-sm leading-relaxed resize-none outline-none placeholder:text-muted-foreground min-h-[80px] sm:min-h-[60px] max-h-[min(200px,30dvh)]"
               style={{ scrollbarWidth: 'thin', ...(compactHeader ? {
@@ -3244,7 +3392,7 @@ export default function ChatArea({
       </div>
 
       {/* Skill Panel */}
-      {showSkillPanel && <SkillPanel skills={PRESET_SKILLS} onSelect={skill => { onSkillToAgent(skill); setShowSkillPanel(false); }} onClose={() => setShowSkillPanel(false)} />}
+      {showSkillPanel && <SkillPanel skills={PRESET_SKILLS} onSelect={selectSkill} onClose={() => setShowSkillPanel(false)} />}
 
       {/* Agent Panel */}
       {showAgentPanel && (
@@ -3726,8 +3874,8 @@ function ProjectToolDialog({ title, onClose, children, className = "", fallbackF
 }
 
 function SkillPanel({ skills, onSelect, onClose }: {
-  skills: PresetSkill[];
-  onSelect: (skill: PresetSkill) => void;
+  skills: SimpleChatSkill[];
+  onSelect: (skill: SimpleChatSkill) => void;
   onClose: () => void;
 }): React.ReactElement {
   return (
