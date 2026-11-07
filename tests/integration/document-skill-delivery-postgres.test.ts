@@ -440,7 +440,7 @@ describe('1397 real scope / atomic delivery / restore controls',()=>{
       const env:NodeJS.ProcessEnv={NODE_ENV:'test'};
       for(const key of ['SystemRoot','WINDIR','SystemDrive','COMSPEC','PATHEXT','NUMBER_OF_PROCESSORS','OS','PATH','TEMP','TMP',
         'NODE_OPTIONS','WUJIE_DATA_DIR','MEDIA_ROOT','WUJIE_SUITE_COPY_ROOT','WUJIE_SUITE_MEDIA_ROOT'])if(process.env[key])env[key]=process.env[key];
-      Object.assign(env,{DATABASE_URL:databaseUrl,PGDATABASE_URL:databaseUrl,NODE_ENV:'test',LOCAL_AI_ENABLED:'false',WUJIE_YJS_ENABLED:'true',WUJIE_PRESENCE_ENABLED:'false'});
+      Object.assign(env,{DATABASE_URL:databaseUrl,PGDATABASE_URL:databaseUrl,NODE_ENV:'test',WUJIE_YJS_ENABLED:'true',WUJIE_PRESENCE_ENABLED:'false'});
       const code=`const m=await import('./src/lib/collaboration/document-media-batch.ts');const db=await import('./src/lib/db-client.ts');
         try{console.log(JSON.stringify(await (m.importDocumentMediaBatch??m.default.importDocumentMediaBatch)('editor',${JSON.stringify(input)})))}
         finally{await (db.closePool??db.default.closePool)()}`;

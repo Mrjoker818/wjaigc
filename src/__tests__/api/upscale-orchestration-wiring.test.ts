@@ -12,21 +12,24 @@ const pollRouteSource = readFileSync(
 );
 
 describe('image-edit upscale orchestration wiring', () => {
-  it('uses the shared execution planner for the three product modes', () => {
+  it('uses the shared execution planner for the remaining AI product modes', () => {
     expect(routeSource).toContain("from '@/lib/upscale-orchestrator'");
+    expect(routeSource).toContain('resolveUpscaleProductMode(');
     expect(routeSource).toContain('createUpscaleExecutionPlan({');
     expect(routeSource).toContain("'ai-only'");
-    expect(routeSource).toContain("'fidelity'");
+    expect(routeSource).not.toContain("'fidelity'");
   });
 
-  it('executes fidelity plans according to the planner result', () => {
-    expect(routeSource).toContain("if (executionPlan.engine === 'fidelity')");
+  it('maps the legacy local engine request fields onto the AI contract', () => {
+    expect(routeSource).toContain("upscaleMode?: 'auto' | 'ai' | 'ai-only'");
+    expect(routeSource).toContain('本地 cpu/fidelity 档已随本地模型移除');
+    expect(routeSource).toContain("productMode === 'ai-only' ? 'ai' : 'auto'");
   });
 
   it('executes non-tiled dedicated AI plans at the planner target scale', () => {
     expect(routeSource).toContain('if (!executionPlan.tiled && executionPlan.providerId)');
     expect(routeSource).toContain('Math.ceil(executionPlan.targetScale)');
-    expect(routeSource).toContain("throw new Error(`AI 超分输出尺寸不足");
+    expect(routeSource).toContain('throw new Error(`AI 超分输出尺寸不足');
   });
 
   it('routes tiled AI plans through overlap tile execution', () => {
@@ -36,7 +39,7 @@ describe('image-edit upscale orchestration wiring', () => {
     expect(routeSource).toContain('updateTaskProgress(taskId,');
   });
 
-  it('returns auditable execution and real output metadata', () => {
+  it('returns auditable execution and real output metadata without a local fallback', () => {
     expect(routeSource).toContain('fallbackReason: executionPlan.fallbackReason');
     expect(routeSource).toContain('fallbackAllowed: executionPlan.fallbackAllowed');
     expect(routeSource).toContain('engine: executionPlan.engine');
@@ -45,11 +48,11 @@ describe('image-edit upscale orchestration wiring', () => {
     expect(routeSource).toContain('const outputMetadata = await sharp(finalBuffer).metadata()');
   });
 
-  it('audits successful fidelity fallbacks and applies them to tiled AI failures', () => {
-    expect(routeSource).toContain('const runLocalCpuUpscale = async (fallbackReason?: string) =>');
-    expect(routeSource).toContain("engine: 'fidelity'");
-    expect(routeSource).toContain('fallbackReason: fallbackReason ?? executionPlan.fallbackReason');
-    expect(routeSource).toContain('const fidelityResult = await runLocalCpuUpscale(`AI 分块超分失败，已降级到保真模式：${errorMessage}`)');
+  it('never degrades to the removed local upscale engine', () => {
+    expect(routeSource).not.toContain('runLocalCpuUpscale');
+    expect(routeSource).not.toContain('performUpscaleAuto');
+    expect(routeSource).not.toContain('performOnnxUpscale');
+    expect(routeSource).not.toContain("@/lib/image-tools/upscayl");
   });
 
   it('keeps async AI upscale target metadata aligned and never upscales with Sharp', () => {

@@ -8,7 +8,7 @@ const REQUEST_FIELDS = [
   'action', 'imageUrl', 'maskImage', 'prompt', 'editMode', 'expandRatio', 'expandScale',
   'expandPadding', 'targetWidth', 'targetHeight', 'targetPreset', 'aspectRatio',
   'angleMode', 'rotation', 'tilt', 'zoom', 'originalWidth', 'originalHeight', 'scale',
-  'model', 'providerId', 'eraseModel', 'removeBgModel', 'originalPrompt', 'upscaleMode',
+  'model', 'providerId', 'originalPrompt', 'upscaleMode',
   'upscaleModel', 'outputFormat', 'compression', 'engine', 'displayBackground',
   'enableQualityEnhance', 'enhanceModel', 'enhanceProviderId',
 ].sort();

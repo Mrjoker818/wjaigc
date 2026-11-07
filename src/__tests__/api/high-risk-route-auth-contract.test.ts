@@ -33,7 +33,6 @@ const highRiskRouteFiles = [
   'src/app/api/simple-chat/upload-file/route.ts',
   'src/app/api/story-assets/plan/route.ts',
   'src/app/api/svg-convert/route.ts',
-  'src/app/api/upscayl/route.ts',
   'src/app/api/video/extract-frame/route.ts',
   'src/app/api/video/extract-frames/route.ts',
   'src/app/api/video/director/prompt/route.ts',

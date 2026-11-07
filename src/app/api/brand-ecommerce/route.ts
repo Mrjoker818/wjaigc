@@ -77,27 +77,11 @@ interface ProductMaskResult {
 }
 
 /**
- * Generate a product mask from the product image using RemoveBG.
- * Falls back to a simple alpha-based mask if RemoveBG is unavailable.
+ * Generate a product mask from the product image.
+ * Local rembg model removed — uses the simple alpha/luminance mask directly.
  */
 async function generateProductMask(productImageUrl: string): Promise<ProductMaskResult | null> {
-  try {
-    const { fetchImageBuffer } = await import('@/lib/fetch-image-buffer');
-    const { generateRembgMask } = await import('@/lib/image-tools/rembg-client');
-    const sourceBuffer = await fetchImageBuffer(productImageUrl);
-    const result = await generateRembgMask(sourceBuffer, 'birefnet-general');
-    if (result.success && result.maskBase64) {
-      const maskBuffer = Buffer.from(result.maskBase64, 'base64');
-      const meta = await sharp(maskBuffer).metadata();
-      return { maskBuffer, width: meta.width || 512, height: meta.height || 512 };
-    }
-
-    // Fallback: generate mask from image alpha or luminance
-    return await generateSimpleMask(productImageUrl);
-  } catch (err) {
-    console.warn('[brand-ecommerce] Mask generation failed, falling back to simple mask:', err);
-    return await generateSimpleMask(productImageUrl);
-  }
+  return await generateSimpleMask(productImageUrl);
 }
 
 /**

@@ -19,13 +19,13 @@ describe('CanvasEditEraseMaskPanel', () => {
     expect(source).not.toContain('fetch(');
   });
 
-  it('保留画笔、橡皮擦、引擎和提示词参数', () => {
+  it('保留画笔、橡皮擦和提示词参数', () => {
     const source = readComponent();
 
     expect(source).toContain('brushSize');
     expect(source).toContain('setEditBrushMode');
-    expect(source).toContain('eraseModelId');
-    expect(source).toContain('setEraseModelId');
+    expect(source).not.toContain('eraseModelId');
+    expect(source).not.toContain('setEraseModelId');
     expect(source).toContain('maskKeyword');
     expect(source).toContain('setMaskKeyword');
   });

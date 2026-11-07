@@ -112,19 +112,12 @@ describe.runIf(process.env.WUJIE_VERIFY_CURRENT_BUILD_TRACE === '1')('current pr
     expect(report.rootDocumentRoutes).toEqual([]);
   });
 
-  it('keeps project-root documents out of the three upscale execution routes', async () => {
+  it('keeps project-root documents out of the upscale execution routes', async () => {
     const { auditBuildTraces } = await import('../../../scripts/audit-build-traces.mjs');
     const report = await auditBuildTraces(process.cwd());
-    for (const route of ['/api/image-edit', '/api/image/upscale', '/api/upscayl']) {
+    for (const route of ['/api/image-edit', '/api/image/upscale']) {
       expect(report.rootDocumentRoutes).not.toContain(route);
     }
-  });
-
-  it('keeps project-root configuration and documents out of the image health route', async () => {
-    const { auditBuildTraces } = await import('../../../scripts/audit-build-traces.mjs');
-    const report = await auditBuildTraces(process.cwd());
-    expect(report.nextConfigRoutes).not.toContain('/api/image/health');
-    expect(report.rootDocumentRoutes).not.toContain('/api/image/health');
   });
 
   it('keeps user data record writes out of project-root documents', async () => {

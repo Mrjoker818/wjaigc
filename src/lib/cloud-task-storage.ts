@@ -1376,7 +1376,6 @@ export async function terminateCloudTaskAndRefund(
   reason: string,
   leaseOwner?: string,
   options: { requireUnsubmittedPrepaid?: boolean; requireActive?: boolean;
-    expectedCpuRemoveBg?: { userId: string; requestDigest: string; createdBefore: number };
     expectedSketchExecution?: SketchTaskSettlementFence;
     client?: PoolClient } = {},
 ): Promise<CloudTaskTerminationResult> {
@@ -1396,18 +1395,7 @@ export async function terminateCloudTaskAndRefund(
   const transactionId = `ctx_${now}_${Math.random().toString(36).slice(2, 10)}`;
   const agentFence = getAgentExecutionFence();
   const executionFence = buildAgentSqlFence('task.id', 7, agentFence);
-  const expectedCpuRemoveBg = options.expectedCpuRemoveBg;
-  const cpuIdentityIndex = executionFence.nextIndex;
-  const cpuIdentityCondition = expectedCpuRemoveBg ? `
-        AND task.user_id = $${cpuIdentityIndex}
-        AND task.type = 'image-edit' AND task.status = 'processing'
-        AND task.provider_id = 'local-rembg'
-        AND (starts_with(task.id, 'removebg-cpu-') OR starts_with(task.id, 'image_edit_removebg_cpu_'))
-        AND task.request_digest <> '' AND task.request_digest = $${cpuIdentityIndex + 1}
-        AND task.result #>> '{imageEditAdmission,kind}' = 'document-cpu-removebg'
-        AND task.result #>> '{imageEditAdmission,requestDigest}' = task.request_digest
-        AND task.created_at <= $${cpuIdentityIndex + 2}` : '';
-  const sketchIndex = executionFence.nextIndex + (expectedCpuRemoveBg ? 3 : 0);
+  const sketchIndex = executionFence.nextIndex;
   const sketchIdentityCondition = sketchFence ? `
         AND task.type = 'sketch-to-code' AND task.status IN ('pending', 'processing')
         AND task.user_id = $${sketchIndex} AND task.project_id = $${sketchIndex + 1}
@@ -1432,7 +1420,6 @@ export async function terminateCloudTaskAndRefund(
       FROM cloud_tasks task
       WHERE task.id = $1
         ${executionFence.condition}
-        ${cpuIdentityCondition}
         ${sketchIdentityCondition}
         AND ($6::text IS NULL OR task.lease_owner = $6)
         ${options.requireUnsubmittedPrepaid ? `AND (
@@ -1574,8 +1561,6 @@ export async function terminateCloudTaskAndRefund(
   const settlementParams = [
     taskId, status, reason, now, transactionId, leaseOwner || null,
     ...executionFence.params,
-    ...(expectedCpuRemoveBg ? [expectedCpuRemoveBg.userId,
-      expectedCpuRemoveBg.requestDigest, expectedCpuRemoveBg.createdBefore] : []),
     ...(sketchFence ? [sketchFence.actorUserId, sketchFence.projectId, sketchFence.providerId, sketchFence.modelId,
       sketchFence.requestDigest, sketchFence.idempotencyKey, JSON.stringify(sketchFence.access), sketchFence.attemptCount,
       sketchFence.leaseExpiresAt, sketchFence.settleBefore] : []),

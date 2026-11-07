@@ -47,14 +47,14 @@ const ENGINE_OPTIONS: Record<EditEngine, Omit<EngineOption, 'id'>> = {
 
 const TOOL_SPECIFIC_HINTS: Record<string, Record<EditEngine, string>> = {
   upscale: {
-    auto: 'AI专用放大模型 → 通用AI放大 → 本地 Real-ESRGAN',
+    auto: 'AI专用放大模型 → 通用AI放大（本地引擎已移除）',
     ai: 'SeedVR2 / Real-ESRGAN 等云端AI超分模型',
-    local: '本地保真放大，模型不可用时使用插值，无需API',
+    local: '本地保真放大已随本地模型移除，不再可用',
   },
   removebg: {
-    auto: 'RemoveBG专用模型 → 通用AI透明背景 → 本地 IOPaint',
+    auto: 'RemoveBG专用模型 → 通用AI透明背景（本地引擎已移除）',
     ai: 'BRIA-RMBG / BiRefNet 等AI抠图模型',
-    local: '本地 IOPaint RemoveBG，无需API',
+    local: '本地 IOPaint RemoveBG 已随本地模型移除，不再可用',
   },
   svg: {
     auto: 'SVG专用模型 → LLM视觉描摹 → 本地 vtracer',
@@ -67,6 +67,9 @@ const TOOL_SPECIFIC_HINTS: Record<string, Record<EditEngine, string>> = {
     local: '本地连通域分割算法',
   },
 };
+
+/** 本地模型已移除的工具：不再提供「本地算法」引擎选项。 */
+const LOCAL_ENGINE_REMOVED_TOOLS = new Set(['upscale', 'removebg']);
 
 export function EngineSelectDialog({
   open,
@@ -91,7 +94,9 @@ export function EngineSelectDialog({
 
   if (!open) return null;
 
-  const engines: EditEngine[] = ['auto', 'ai', 'local'];
+  const engines: EditEngine[] = LOCAL_ENGINE_REMOVED_TOOLS.has(toolType)
+    ? ['auto', 'ai']
+    : ['auto', 'ai', 'local'];
 
   return (
     <div

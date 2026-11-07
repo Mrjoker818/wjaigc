@@ -346,7 +346,8 @@ export const VIDEO_MODEL_REGISTRY: Record<string, VideoModelInfo> = {
   },
   'doubao-seedance-2-0-mini-260615': {
     profile: 'pearapi-video', name: 'Seedance 2.0 Mini (PearAPI)', short: 'SD2.0M', provider: 'ByteDance/PearAPI',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 15, durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p'], region: 'global' },
+    // PearAPI 文档（api-533519667）：时长 4-15 整数秒，比例 16:9/9:16/1:1/4:3/3:4，清晰度 720P。
+    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 15, durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['720p'], region: 'global' },
   },
   'happyhorse-1.0': {
     profile: 'ai-link', name: 'HappyHorse 1.0 (AI Link)', short: 'HH1.0', provider: 'HappyHorse/AI-Link',
@@ -737,7 +738,7 @@ export function buildVideoPollRequest(
       };
     case 'pearapi-video':
       return {
-        url: `${cleanBaseUrl}/v1/video/generations/${taskId}`,
+        url: `${cleanBaseUrl}/v1/videos/tasks/${taskId}`,
         headers: { 'Authorization': `Bearer ${apiKey}` },
         method: 'GET',
       };
@@ -1160,9 +1161,10 @@ function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
     imageWithRoles.push(...referenceImages.map(url => ({ url, role: 'reference_image' as const })));
   }
 
-  // APImart video API uses `aspect_ratio` (not `size`).
-  // `resolution` is not a documented field — only forward it when the user
-  // explicitly sets it via advancedParams.
+  // APIMart Seedance 2.0 names the ratio field `size` (16:9/9:16/1:1/4:3/3:4/21:9/adaptive);
+  // `aspect_ratio` is the older Seedance 1.5 Pro name. Other APIMart video models keep it.
+  const ratioField = /seedance-2[.-]0/i.test(params.model) ? 'size' : 'aspect_ratio';
+  // `resolution` is only forwarded when the user explicitly sets it via advancedParams.
   const advResolution = getApiString(params.advancedParams, 'resolution');
 
   const body: Record<string, unknown> = {
@@ -1173,7 +1175,7 @@ function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
     ...(imageWithRoles.length > 0
       ? { image_with_roles: imageWithRoles }
       : referenceImages.length > 0 ? { image_urls: referenceImages } : {}),
-    ...(params.aspectRatio ? { aspect_ratio: params.aspectRatio } : {}),
+    ...(params.aspectRatio ? { [ratioField]: params.aspectRatio } : {}),
     ...(params.duration ? { duration: params.duration } : {}),
     ...(advResolution ? { resolution: advResolution } : {}),
     ...(params.generateAudio !== undefined ? { generate_audio: params.generateAudio } : {}),
@@ -1249,33 +1251,49 @@ function buildPearApiVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
   if (params.lastFrameImageUrl) refImages.push(params.lastFrameImageUrl);
   if (params.referenceImages?.length) refImages.push(...params.referenceImages);
 
-  // Determine mode based on inputs
-  let mode = 'text2video';
-  if (refImages.length > 0) {
-    mode = params.lastFrameImageUrl ? 'image2video' : 'image2video';
+  // PearAPI 官方文档（pearapi.apifox.cn）：generation_mode 省略时按素材自动判断，
+  // 多素材时建议明确填写：仅文字 text2video；单图 image2video；多参考素材 reference2video；
+  // 视频编辑 video2video。
+  let generationMode = 'text2video';
+  if (params.videoUrl) {
+    generationMode = 'video2video';
+  } else if (refImages.length > 1) {
+    generationMode = 'reference2video';
+  } else if (refImages.length === 1) {
+    generationMode = 'image2video';
   }
+
+  // duration 与 seconds 等效，4–15 整数秒
+  const pearDuration = params.duration != null
+    ? Math.min(15, Math.max(4, Math.floor(params.duration)))
+    : undefined;
+  // 清晰度仅接受文档枚举（720P/480P）
+  const rawResolution = getApiString(params.advancedParams, 'resolution');
+  const pearResolution = rawResolution
+    ? ({ '720p': '720P', '480p': '480P' } as Record<string, string>)[rawResolution.toLowerCase()]
+    : undefined;
 
   const body: Record<string, unknown> = {
     model: params.model,
     prompt: params.prompt,
-    mode,
+    generation_mode: generationMode,
     ...(params.aspectRatio ? { aspect_ratio: params.aspectRatio } : { aspect_ratio: '16:9' }),
-    ...(params.duration ? { duration: params.duration } : {}),
+    ...(pearDuration ? { duration: pearDuration } : {}),
+    ...(pearResolution ? { resolution: pearResolution } : {}),
     ...(params.negativePrompt ? { negative_prompt: params.negativePrompt } : {}),
     ...(params.seed !== undefined ? { seed: params.seed } : {}),
   };
 
-  // PearAPI recommends reference_contents array: [{type, media_url, name}]
+  // PearAPI 统一参考素材写法 reference_contents: [{type, media_url, name?}]，最多 10 个
   if (refImages.length > 0) {
-    body.reference_contents = refImages.map((url, idx) => ({
+    body.reference_contents = refImages.slice(0, 10).map((url) => ({
       type: 'image',
       media_url: url,
-      name: idx === 0 ? 'first_frame' : `ref_${idx + 1}`,
     }));
   }
 
   return {
-    url: `${cleanBase}/v1/video/generations`,
+    url: `${cleanBase}/v1/videos/generations`,
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`,
@@ -1286,9 +1304,8 @@ function buildPearApiVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
 }
 
 /** Parse PearAPI video poll response.
- * GET /v1/video/generations/{task_id}
- * Completed response: {task_id, status:'completed', url:'https://...', format:'mp4', progress:100, metadata:{}, error:null}
- * In-progress: {task_id, status:'in_progress', progress:45}
+ * GET /v1/videos/tasks/{task_id}
+ * 官方文档：queued → running → completed/failed；完成后读 output.video_url，失败原因在 error.message。
  */
 function parsePearApiVideoPoll(data: unknown): VideoTaskPollResult {
   // PearAPI 轮询响应格式（官方文档）：
@@ -1299,10 +1316,12 @@ function parsePearApiVideoPoll(data: unknown): VideoTaskPollResult {
   const status = (getApiString(item, 'status') || getApiString(data, 'status') || '').toLowerCase();
 
   if (status === 'succeeded' || status === 'completed' || status === 'success' || status === 'done') {
-    // PearAPI 文档：completed 时 url 在顶层
-    let videoUrl = getApiString(item, 'url') || getApiString(data, 'url');
-    const result = getApiValue(item, 'result') || getApiValue(item, 'results') || getApiValue(item, 'output')
-      || getApiValue(data, 'output') || getApiValue(data, 'result');
+    // PearAPI 官方文档：完成后结果位于 output.video_url（顶层 url 仅作兼容回退）
+    const pearOutput = getApiValue(item, 'output') || getApiValue(data, 'output');
+    let videoUrl = getApiString(pearOutput, 'video_url')
+      || getApiString(item, 'url') || getApiString(data, 'url');
+    const result = getApiValue(item, 'result') || getApiValue(item, 'results')
+      || pearOutput || getApiValue(data, 'result');
 
     // Fallback: 尝试嵌套格式（兼容旧版/其他代理）
     if (!videoUrl) {

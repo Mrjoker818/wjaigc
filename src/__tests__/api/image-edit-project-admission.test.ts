@@ -59,12 +59,6 @@ vi.mock('@/lib/server-data-root', () => ({ saveImageFile: boundary.mediaWrite, g
 vi.mock('@/lib/s3-storage', () => ({
   isS3Available: boundary.s3, uploadImageToS3: boundary.s3, persistRemoteImage: boundary.s3,
 }));
-vi.mock('@/lib/image-tools/config', () => ({ LOCAL_AI_ENABLED: false }));
-vi.mock('@/lib/image-tools/local-erase-client', () => ({ eraseWithLama: boundary.localModel, VALID_ERASE_MODELS: ['lama'] }));
-vi.mock('@/lib/image-tools/rembg-client', () => ({
-  DEFAULT_REMBG_MODEL: 'birefnet-general-lite', generateRembgMask: boundary.localModel, isRembgCpuModel: boundary.localModel,
-}));
-vi.mock('@/lib/image-tools/upscayl', () => ({ performUpscaleAuto: boundary.localModel }));
 vi.mock('@/lib/remove-bg-postprocess', () => ({
   postProcessAIRemoveBG: boundary.localModel, postProcessLocalRemoveBG: boundary.localModel,
 }));

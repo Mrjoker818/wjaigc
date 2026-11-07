@@ -7,8 +7,6 @@ import { persistInpaintAcceptedResult } from '@/lib/task-core/inpaint-task';
 import { completeDocumentInpaintTask, ImageEditSourceAdmissionError } from '@/lib/collaboration/image-edit-source-admission';
 import { authorizeGenerationProject, GenerationProjectAccessError } from '@/lib/collaboration/generation-project-access';
 import { deleteTerminalPrivateInpaintInputs } from '@/lib/task-core/inpaint-private-inputs';
-import { isCoherentPublishedCpuRemoveBgResult } from '@/lib/collaboration/image-edit-publication-output';
-import { getCpuRemoveBgStaleAt, recoverAbandonedCpuRemoveBgTask } from '@/lib/collaboration/cpu-removebg-timeout-recovery';
 
 export const maxDuration = 1800; // 30分钟 - 支持长时间轮询慢速API（apimart等需要260s+任务）
 
@@ -593,73 +591,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
       }
     }
 
-    // This CPU edit has no upstream provider task. Never let the generic
-    // generation recovery path reinterpret it as a provider submission.
-    if (taskId.startsWith('removebg-cpu-') || taskId.startsWith('image_edit_removebg_cpu_')) {
-      if (!sessionUser) return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
-      let cpuTask = await getCloudTaskForUser(taskId, userId);
-      const admission = cpuTask?.result?.imageEditAdmission as Record<string, unknown> | undefined;
-      if (!cpuTask || cpuTask.type !== 'image-edit' || cpuTask.providerId !== 'local-rembg'
-        || admission?.kind !== 'document-cpu-removebg'
-        || typeof cpuTask.requestDigest !== 'string' || cpuTask.requestDigest.length === 0
-        || admission.requestDigest !== cpuTask.requestDigest) {
-        return NextResponse.json({ success: false, error: '任务不存在' }, { status: 404 });
-      }
-      if (cpuTask.status === 'pending' || cpuTask.status === 'queued') {
-        return NextResponse.json({ success: true, taskId, status: 'processing',
-          progress: cpuTask.progress, recoveryPending: true, retryAfterMs: 3000 });
-      }
-      if (cpuTask.status === 'processing') {
-        const staleAt = getCpuRemoveBgStaleAt(cpuTask);
-        if (Date.now() < staleAt) {
-          return NextResponse.json({ success: true, taskId, status: 'processing',
-            progress: cpuTask.progress, recoveryPending: true,
-            retryAfterMs: Math.max(1000, Math.min(staleAt - Date.now(), 30_000)) });
-        }
-        await recoverAbandonedCpuRemoveBgTask(taskId, userId);
-        cpuTask = await getCloudTaskForUser(taskId, userId);
-        if (!cpuTask) return NextResponse.json({ success: false, error: '任务不存在' }, { status: 404 });
-        if (['processing', 'pending', 'queued'].includes(cpuTask.status)) {
-          return NextResponse.json({ success: true, taskId, status: 'processing',
-            progress: cpuTask.progress, recoveryPending: true, retryAfterMs: 3000 });
-        }
-      }
-      if (cpuTask.status === 'completed') {
-        const requiresDocumentPublication = taskId.startsWith('image_edit_removebg_cpu_');
-        let completedProjectionReferences: unknown[] | undefined;
-        if (requiresDocumentPublication) {
-          await projectPersistedCompletedTask(taskId, userId);
-          cpuTask = await getCloudTaskForUser(taskId, userId);
-          const projection = cpuTask?.result?.assetProjection as {
-            status?: unknown;
-            references?: unknown[];
-          } | undefined;
-          if (!cpuTask || !isCoherentPublishedCpuRemoveBgResult(cpuTask)
-            || !Array.isArray(projection?.references)) {
-            return NextResponse.json({ success: true, taskId, status: 'publication-pending',
-              retryAfterMs: 1500 }, { status: 202 });
-          }
-          completedProjectionReferences = projection.references;
-        }
-        const completed = await getAuthoritativeCompletedImageResult(taskId, userId, cpuTask?.result || {});
-        if (!completed?.imageUrl || !completed.maskUrl) {
-          return NextResponse.json({ success: false, taskId, status: 'error',
-            code: 'IMAGE_EDIT_RESULT_MISSING', retryable: false });
-        }
-        return NextResponse.json({ success: true, taskId, status: 'completed', progress: 100,
-          imageUrl: completed.imageUrl, maskUrl: completed.maskUrl,
-          ...(requiresDocumentPublication ? { quote: confirmedImageEditQuoteForResponse(cpuTask?.result) } : {}),
-          result: sanitizeCompletedTaskResult(completed),
-          ...(requiresDocumentPublication ? {
-            assetProjection: {
-              status: 'completed',
-              references: completedProjectionReferences,
-            },
-          } : {}) });
-      }
-      return NextResponse.json({ success: false, taskId, status: cpuTask.status,
-        error: cpuTask.error || '任务未完成', retryable: false });
-    }
+    // 本地 rembg CPU 去背景已随本地模型移除；removebg-cpu-* 历史任务按不存在处理。
 
     // Checkpointed 302 image-edit tasks are not ordinary submitOnly generation
     // wrappers. Polling must never turn a lost 302 response into a second POST

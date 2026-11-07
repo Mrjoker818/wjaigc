@@ -11,16 +11,6 @@ export async function register() {
       }).catch(() => {
         console.warn({ code: 'ASSET_CLEANUP_WORKER_START_FAILED' });
       });
-      import('@/lib/collaboration/cpu-removebg-publication-worker').then(({ startCpuRemoveBgPublicationWorker }) => {
-        startCpuRemoveBgPublicationWorker();
-      }).catch(() => {
-        console.warn({ code: 'CPU_REMOVEBG_PUBLICATION_WORKER_START_FAILED' });
-      });
-      import('@/lib/collaboration/cpu-removebg-timeout-recovery').then(({ startCpuRemoveBgTimeoutWorker }) => {
-        startCpuRemoveBgTimeoutWorker();
-      }).catch(() => {
-        console.warn({ code: 'CPU_REMOVEBG_TIMEOUT_WORKER_START_FAILED' });
-      });
     }
 
     // 数据库迁移和表初始化改为非阻塞，避免生产环境启动超时
@@ -56,12 +46,6 @@ export async function register() {
     };
     // 不 await，让服务器先启动，数据库初始化在后台完成
     dbInit().catch(() => {});
-
-    // 异步检查本地 AI 模型文件状态和 Python 环境（不阻塞启动）
-    // 使用动态 import 确保此模块不会被 Edge Runtime 静态分析
-    import('@/lib/check-local-models').then(({ checkLocalModels }) => {
-      checkLocalModels().catch(() => {});
-    }).catch(() => {});
 
     // SVG 转换 Python 依赖安装改为后台异步非阻塞
     // 使用 exec (异步) 代替 execSync (同步阻塞)，避免 pip install 阻塞事件循环导致启动超时

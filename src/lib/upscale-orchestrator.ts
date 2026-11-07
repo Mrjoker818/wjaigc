@@ -1,6 +1,6 @@
-export type UpscaleProductMode = 'auto' | 'ai-only' | 'fidelity';
-export type UpscaleProviderKind = 'dedicated-ai' | 'local-ai';
-export type UpscaleExecutionEngine = UpscaleProviderKind | 'fidelity';
+export type UpscaleProductMode = 'auto' | 'ai-only';
+export type UpscaleProviderKind = 'dedicated-ai';
+export type UpscaleExecutionEngine = UpscaleProviderKind;
 
 export interface UpscaleProviderCapability {
   id: string;
@@ -35,7 +35,8 @@ export interface UpscaleExecutionPlan {
 
 /**
  * A user-selected upscaler model is an explicit provider choice, not a preference.
- * It must never silently fall back to the local fidelity path after charging.
+ * Legacy local engine modes (cpu/local/fidelity) normalize to auto: the local
+ * Real-ESRGAN engine has been removed and requests route through cloud AI.
  */
 export function resolveUpscaleProductMode(
   requestedMode: string | undefined,
@@ -43,13 +44,6 @@ export function resolveUpscaleProductMode(
 ): UpscaleProductMode {
   if (hasExplicitUpscaleSelection) return 'ai-only';
   if (requestedMode === 'ai' || requestedMode === 'ai-only') return 'ai-only';
-  if (
-    requestedMode === 'cpu'
-    || requestedMode === 'local'
-    || requestedMode === 'fidelity'
-  ) {
-    return 'fidelity';
-  }
   return 'auto';
 }
 
@@ -75,37 +69,12 @@ export function createUpscaleExecutionPlan(
     input.targetHeight / input.sourceHeight,
   );
 
-  if (input.mode === 'fidelity') {
-    return {
-      engine: 'fidelity',
-      providerId: null,
-      tiled: false,
-      tileSize,
-      overlap,
-      fallbackAllowed: false,
-      fallbackReason: '用户选择保真放大',
-      targetScale,
-    };
-  }
-
   const availableProviders = input.providers.filter(provider => provider.available !== false);
-  const provider = availableProviders.find(item => item.kind === 'dedicated-ai')
-    ?? availableProviders.find(item => item.kind === 'local-ai');
+  const provider = availableProviders.find(item => item.kind === 'dedicated-ai');
 
   if (!provider) {
-    if (input.mode === 'ai-only') {
-      throw new Error('AI 超分模型不可用，AI 超分模式不会静默降级为 CPU 插值');
-    }
-    return {
-      engine: 'fidelity',
-      providerId: null,
-      tiled: false,
-      tileSize,
-      overlap,
-      fallbackAllowed: true,
-      fallbackReason: '未配置可用的 AI 超分模型，已降级为保真放大',
-      targetScale,
-    };
+    // 本地保真引擎已移除：无论 auto 还是 ai-only，无可用 AI 模型时直接报错，不静默降级。
+    throw new Error('AI 超分模型不可用，请检查 API 配置');
   }
 
   const sourceLongEdge = Math.max(input.sourceWidth, input.sourceHeight);
@@ -122,7 +91,8 @@ export function createUpscaleExecutionPlan(
     tiled: requiresTiling,
     tileSize,
     overlap,
-    fallbackAllowed: input.mode === 'auto',
+    // 本地保真引擎已移除，AI 失败后没有降级目标。
+    fallbackAllowed: false,
     fallbackReason: null,
     targetScale,
   };

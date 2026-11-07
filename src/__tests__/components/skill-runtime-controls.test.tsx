@@ -431,6 +431,33 @@ describe('SkillRunProgress', () => {
     fireEvent.click(screen.getByRole('button', { name: '重新检查' }));
     expect(onRefreshRetryability).toHaveBeenCalledOnce();
   });
+
+  it('shows the durable text outputs of a completed run as the skill result', () => {
+    const outputs = [
+      { stepId: 'orchestrator', kind: 'text', content: '第一段结果' },
+      { stepId: 'orchestrator', kind: 'html', content: '<p>不显示</p>' },
+      { stepId: 'render', kind: 'text', content: '第二段结果' },
+    ];
+    const { rerender } = render(<SkillRunProgress
+      projection={projection({ status: 'executing', result: { outputs } })}
+    />);
+    expect(screen.queryByRole('region', { name: '技能结果' })).toBeNull();
+
+    rerender(<SkillRunProgress
+      projection={projection({ status: 'completed', currentStepId: undefined, result: { outputs } })}
+    />);
+    const result = screen.getByRole('region', { name: '技能结果' });
+    expect(result.textContent).toContain('第一段结果');
+    expect(result.textContent).toContain('第二段结果');
+    expect(result.textContent).not.toContain('不显示');
+  });
+
+  it('shows no result region when a completed run has no text output', () => {
+    render(<SkillRunProgress
+      projection={projection({ status: 'completed', result: { outputs: 'broken' } })}
+    />);
+    expect(screen.queryByRole('region', { name: '技能结果' })).toBeNull();
+  });
 });
 
 describe('useSkillRun', () => {

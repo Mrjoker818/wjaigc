@@ -99,8 +99,9 @@ describe('document canvas remove-background quote entry', () => {
     expect(requests[0]).toMatchObject({
       body: { action: 'remove_background', projectId: 'source-shared', imageUrl: '/original.png',
         assetParentVersionIds: ['source-version'], assetProjectionMode: 'derived',
-        assetSelectedEntityIds: ['source-image'], engine: 'local', quoteOnly: true },
+        assetSelectedEntityIds: ['source-image'], quoteOnly: true },
     });
+    expect(requests[0].body).not.toHaveProperty('engine');
     expect(requests[0].key).toBeTruthy();
     expect(container.textContent).toContain('5 积分');
     expect(onImagesChange).not.toHaveBeenCalled();
@@ -160,14 +161,13 @@ describe('document canvas remove-background quote entry', () => {
     expect(requests).toHaveLength(1);
   });
 
-  it('hides the stale amount immediately when the local remove-background model changes', async () => {
+  it('no longer offers local remove-background model switching in the quote entry', async () => {
     const { container, requests } = renderCanvas();
     fireEvent.click(await openRemoveBackground(container));
     await waitFor(() => expect(container.textContent).toContain('本次报价：5 积分'));
-    fireEvent.click(Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
-      .find(button => button.textContent?.includes('BiRefNet 人像'))!);
-    await waitFor(() => expect(container.textContent).not.toContain('本次报价：5 积分'));
-    expect(container.textContent).toContain('查看去背景报价');
+    expect(Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
+      .some(button => /BiRefNet|birefnet/i.test(button.textContent || ''))).toBe(false);
+    expect(container.textContent).toContain('确认报价并开始去背景');
     expect(requests).toHaveLength(1);
   });
 
@@ -351,7 +351,8 @@ describe('document canvas remove-background quote entry', () => {
       .find(button => button.textContent?.trim() === '开始去背景')!);
     fireEvent.click(begin);
     await waitFor(() => expect(requests).toHaveLength(1));
-    expect(requests[0].body).toMatchObject({ action: 'remove_background', imageUrl: '/original.png', engine: 'local' });
+    expect(requests[0].body).toMatchObject({ action: 'remove_background', imageUrl: '/original.png' });
+    expect(requests[0].body).not.toHaveProperty('engine');
     expect(requests[0].body).not.toHaveProperty('quoteOnly');
     expect(requests[0].body).not.toHaveProperty('assetSelectedEntityIds');
     expect(requests[0].key).toBeNull();

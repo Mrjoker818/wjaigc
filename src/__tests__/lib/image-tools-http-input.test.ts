@@ -9,7 +9,6 @@ vi.mock('@/lib/image-tools/config', async importOriginal => ({
 }));
 
 import { readImageToBuffer } from '@/lib/image-tools/image-input';
-import { withLocalInferenceLock } from '@/lib/image-tools/concurrency-gate';
 
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
@@ -44,8 +43,8 @@ describe('HTTP image input resource bounds', () => {
     return `http://127.0.0.1:${address.port}/image`;
   }
 
-  function read(url: string, lock = false): Promise<Outcome> {
-    const task = lock ? withLocalInferenceLock(() => readImageToBuffer(url)) : readImageToBuffer(url);
+  function read(url: string): Promise<Outcome> {
+    const task = readImageToBuffer(url);
     const observed = task.then(value => ({ value }), (error: unknown) => ({
       error: error instanceof Error ? error.message : String(error),
     }));
@@ -65,31 +64,8 @@ describe('HTTP image input resource bounds', () => {
     expect(await bounded(Promise.all(pending.splice(0)))).not.toBe('OBSERVATION_STUCK');
   });
 
-  it.each(['headers', 'body'] as const)('times out stalled %s and releases the actual inference permit', async phase => {
-    let ready!: () => void;
-    const received = new Promise<void>(resolve => { ready = resolve; });
-    let peerClosed!: () => void;
-    const closed = new Promise<void>(resolve => { peerClosed = resolve; });
-    const url = await serve(response => {
-      response.once('close', peerClosed);
-      if (phase === 'body') {
-        response.writeHead(200, { 'Content-Type': 'image/png' });
-        response.write(PNG.subarray(0, 8));
-      }
-      ready();
-    });
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    const result = read(url, true);
-    expect(await bounded(received)).not.toBe('OBSERVATION_STUCK');
-    let nextRan = false;
-    const next = withLocalInferenceLock(async () => { nextRan = true; return 'next'; });
-    pending.push(next);
-    expect(nextRan).toBe(false);
-    await vi.advanceTimersByTimeAsync(30_001);
-    expect(await bounded(result)).toEqual({ error: expect.stringMatching(/超时/) });
-    expect(await bounded(next)).toBe('next');
-    expect(await bounded(closed)).not.toBe('OBSERVATION_STUCK');
-  });
+  // 本地推理并发闸（withLocalInferenceLock）已随本地模型移除；
+  // 原 stall+permit 释放测试随之删除。
 
   it.each(['declared', 'chunked'] as const)('rejects oversized %s input before the server finishes and closes its connection', async mode => {
     let peerClosed!: () => void;

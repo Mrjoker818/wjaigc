@@ -500,12 +500,24 @@ const RAW_SIMPLE_CHAT_PRESET_SKILLS: LegacySimpleChatPresetSkill[] = [
 - 应用场景展示真实自然` },
 ];
 
+// 后台运行时用户需求作为不可信数据进入执行上下文（executionContextVersion 1），
+// 不会被拼进技能系统提示词。
+export const SIMPLE_CHAT_SKILL_REQUEST_INPUT_KEY = 'request';
+
 export const SIMPLE_CHAT_PRESET_SKILLS: SimpleChatPresetSkill[] =
   RAW_SIMPLE_CHAT_PRESET_SKILLS.map(skill => ({
     ...skill,
+    executionContextVersion: 1 as const,
     version: 1,
     allowedSurfaces: simpleChatSurfaces,
-    inputs: [],
+    inputs: [{
+      key: SIMPLE_CHAT_SKILL_REQUEST_INPUT_KEY,
+      label: '任务需求',
+      kind: 'text' as const,
+      // 选填以兼容已落库的空输入运行；前端后台任务入口要求非空。
+      required: false,
+      maximumLength: 8_000,
+    }],
     steps: [],
     enabled: true,
     builtIn: true,

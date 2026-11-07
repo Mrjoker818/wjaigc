@@ -924,30 +924,6 @@ describe('cloud-task-storage', () => {
     expect(statement?.[0]).not.toContain("task.status IN ('failed', 'timeout', 'cancelled')");
   });
 
-  it('places CPU identity parameters after the Agent execution fence in terminal settlement', async () => {
-    execSql.mockResolvedValue({ rows: [], rowCount: 0 });
-    const { withAgentExecutionFence } = await import('@/lib/agent-runtime/execution-fence');
-
-    await withAgentExecutionFence({ runId: 'agent-run', leaseOwner: 'agent-worker', generation: 4 },
-      async () => terminateCloudTaskAndRefund('removebg-cpu-fenced', 'timeout', 'CPU expired',
-        'cpu-worker', { requireActive: true, expectedCpuRemoveBg: {
-          userId: 'image-owner', requestDigest: 'a'.repeat(64), createdBefore: 123_456,
-        } }));
-
-    const settlement = execSql.mock.calls.find(([sql]) => String(sql).includes('recorded_refund'));
-    const statement = String(settlement?.[0]);
-    const params = settlement?.[1] as unknown[];
-    expect(statement).toContain('agent_lease.task_id = $7');
-    expect(statement).toContain('agent_lease.lease_owner = $8');
-    expect(statement).toContain('agent_lease.generation = $9');
-    expect(statement).toContain('task.user_id = $10');
-    expect(statement).toContain('task.request_digest = $11');
-    expect(statement).toContain('task.created_at <= $12');
-    expect(params.slice(6)).toEqual([
-      'agent-run', 'agent-worker', 4, 'image-owner', 'a'.repeat(64), 123_456,
-    ]);
-  });
-
   it('charges credits and marks the idempotent task in one atomic statement', async () => {
     execSql.mockResolvedValueOnce({
       rows: [{ user_id: 'user-a', credit_cost: 6, balance: 88 }],

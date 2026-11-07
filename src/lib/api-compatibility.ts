@@ -227,6 +227,9 @@ export const PROFILE_PEARAPI: ApiCompatProfile = {
   pollMode: 'pearapi-task',
   pollPathTemplate: '/images/tasks/{taskId}',
   pollMethod: 'GET',
+  // PearAPI 官方文档只定义 size（比例或像素）+ resolution（1K/2K/4K），
+  // 不接受 width/height/size_px 派生像素提示字段。
+  includeDerivedPixelHints: false,
   extraBodyParams: { task_type: 'sync', response_format: 'url' },
 };
 

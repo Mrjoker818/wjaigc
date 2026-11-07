@@ -19,12 +19,8 @@ vi.mock('@/lib/server-auth', () => ({
     : null,
   getAuthSecretForInternalRequests: (): string => 'offline-upscale-bridge-secret-at-least-32',
 }));
-vi.mock('@/lib/image-tools/upscayl', () => ({
-  performOnnxUpscale: async (): Promise<never> => { throw new Error('Unexpected local upscale'); },
-}));
 
 import { POST as upscalePost } from '@/app/api/image/upscale/route';
-import { POST as legacyUpscaylPost } from '@/app/api/upscayl/route';
 import { ensureCoreTables } from '@/lib/db-storage';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { createCloudTask, refundCloudTaskCredits, terminateCloudTaskAndRefund } from '@/lib/cloud-task-storage';
@@ -387,28 +383,6 @@ describe('AI upscale compatibility billing bridge', () => {
         expect(credits.rows).toEqual([{ balance: 100, total_used: 0 }]);
         const transactions = await query('SELECT type,amount FROM wujie_credit_transactions ORDER BY created_at,id');
         expect(transactions.rows).toEqual([]);
-      } finally {
-        vi.unstubAllGlobals();
-      }
-    });
-  }, 60_000);
-
-  it('does not lose the authenticated actor when the legacy upscayl alias delegates AI mode', async () => {
-    await withIsolatedPostgres('task-image-upscale-bridge-legacy-alias', async ({ query, databaseUrl, schemaName }): Promise<void> => {
-      await seed(query, databaseUrl, schemaName);
-      vi.stubGlobal('fetch', async (): Promise<never> => { throw new Error('Undeclared network'); });
-      try {
-        const response = await legacyUpscaylPost(new NextRequest('http://localhost/api/upscayl', {
-          method: 'POST', headers: { 'content-type': 'application/json', 'x-test-actor': 'bridge-owner' },
-          body: JSON.stringify({ imageUrl: 'https://media.invalid/source.png', upscaleMode: 'ai', scale: 2 }),
-        }));
-        const credits = await query("SELECT balance,total_used FROM wujie_credits WHERE user_id='bridge-owner'");
-        expect(credits.rows).toEqual([{ balance: 100, total_used: 0 }]);
-        const transactions = await query('SELECT type,amount FROM wujie_credit_transactions');
-        expect(transactions.rows).toEqual([]);
-        expect(response.status).not.toBe(401);
-        expect(response.status).not.toBe(500);
-        expect(await response.json()).toMatchObject({ code: 'IMAGE_EDIT_MODEL_UNAVAILABLE' });
       } finally {
         vi.unstubAllGlobals();
       }

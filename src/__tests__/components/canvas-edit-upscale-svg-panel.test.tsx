@@ -27,7 +27,8 @@ describe('CanvasEditUpscaleSvgPanel', () => {
     expect(source).toContain('aria-label="AI 放大模型"');
     expect(source).toContain("{ id: 'auto', label: '自动'");
     expect(source).toContain("{ id: 'ai-only', label: '仅 AI'");
-    expect(source).toContain("{ id: 'fidelity', label: '保真'");
+    expect(source).not.toContain("{ id: 'fidelity'");
+    expect(source).not.toContain("{ id: 'cpu'");
     expect(source).toContain('UPSCALE_TARGET_PRESETS.map');
     expect(source).toContain('setSvgTraceMode');
     expect(source).toContain('setSvgTraceEngine');

@@ -229,7 +229,9 @@ function canvasSkillRequest(
 
 function simpleChatSkillRequest(): ModelAgentRunRequest {
   const definition = requireSkillForSurface('ppt-master', 'simple-chat');
-  const inputValues = resolveSkillInputs(definition, {});
+  // Mirror buildSkillAgentRunRequest: omitted optional inputs are not persisted.
+  const inputValues = Object.fromEntries(Object.entries(resolveSkillInputs(definition, {}))
+    .filter(([, value]) => value !== undefined));
   return request({
     workspace: 'chat',
     workspaceId: 'chat-1',
