@@ -52,6 +52,21 @@ function phaseLabel(projection: AgentRunProjection, stale: boolean): string {
   return labels[projection.status];
 }
 
+function completedTextOutput(projection: AgentRunProjection | undefined): string {
+  if (projection?.status !== 'completed') return '';
+  const outputs = projection.result?.outputs;
+  if (!Array.isArray(outputs)) return '';
+  return outputs
+    .filter((output): output is { kind: 'text'; content: string } => (
+      Boolean(output) && typeof output === 'object'
+      && (output as { kind?: unknown }).kind === 'text'
+      && typeof (output as { content?: unknown }).content === 'string'
+    ))
+    .map(output => output.content.trim())
+    .filter(Boolean)
+    .join('\n\n');
+}
+
 function estimateLabel(estimate: SkillRunCostEstimate): string {
   return estimate.minimum === estimate.maximum
     ? `预计 ${estimate.maximum} 积分`
@@ -102,6 +117,7 @@ export function SkillRunProgress({
     && projection.resumeFromStepId === retryableStepId
     ? retryableStepId
     : undefined;
+  const resultText = completedTextOutput(projection);
 
   return (
     <div className="space-y-2 text-sm" aria-live="polite">
@@ -131,6 +147,12 @@ export function SkillRunProgress({
               <div>{projection.error.code}</div>
               <div>{projection.error.message}</div>
             </div>
+          )}
+          {resultText && (
+            <section aria-label="技能结果" className="rounded-md border border-border p-2">
+              <div className="mb-1 text-xs text-muted-foreground">技能结果</div>
+              <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{resultText}</div>
+            </section>
           )}
           {projection.status === 'paused' && retryabilityError && (
             <div role="alert" className="text-destructive">{retryabilityError}</div>
