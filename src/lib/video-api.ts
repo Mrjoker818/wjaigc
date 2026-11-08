@@ -1143,11 +1143,12 @@ function buildRestGenericSubmit(baseUrl: string, apiKey: string, params: VideoGe
   };
 }
 
-/** APImart videos/generations submit.
+/** APImart videos/generations submit (verified 2026-11-08 against api.apib.ai).
  * POST /v1/videos/generations
- * Sources: docs.apimart.ai/cn quickstart (sora-2: aspect_ratio), Kling v3 Omni page
- * (image_urls + aspect_ratio), verified aggregator README + Nomi handoff for Seedance 2.x
- * (size 16:9/9:16/1:1/4:3/3:4/21:9/adaptive, duration 4-15, image_urls XOR image_with_roles).
+ * Sources: docs.apimart.ai quickstart (sora-2: aspect_ratio), Kling v3 Omni page
+ * (image_urls + aspect_ratio + mode std/pro/4k), verified aggregator README and
+ * Nomi handoff for Seedance 2.x (size, duration 4-15, image_urls XOR image_with_roles),
+ * plus live gateway probes (resolution 480p/720p/1080p/4k, lowercase only).
  * Response: {code:200, data:[{status:"submitted", task_id}]}
  */
 function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
@@ -1178,7 +1179,15 @@ function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
   // `aspect_ratio` is the older Seedance 1.5 Pro name. Other APIMart video models keep it.
   const ratioField = /seedance-2[.-]0/i.test(params.model) ? 'size' : 'aspect_ratio';
   // `resolution` is only forwarded when the user explicitly sets it via advancedParams.
-  const advResolution = getApiString(params.advancedParams, 'resolution');
+  // The gateway rejects uppercase tier suffixes ("1K" → invalid_resolution, only
+  // 480p/720p/1080p/4k pass), so normalize the trailing K.
+  const advResolutionRaw = getApiString(params.advancedParams, 'resolution');
+  const advResolution = advResolutionRaw ? advResolutionRaw.replace(/K$/, 'k') : undefined;
+  // kling-v3-omni validates `mode` (std/pro/4k) and ignores `resolution`.
+  // Map the UI tier onto mode; other APIMart models keep the resolution field.
+  const omniMode = /kling-v3-omni/i.test(params.model) && advResolution
+    ? ({ '720p': 'std', '1080p': 'pro', '1k': 'std', '2k': 'pro', '4k': '4k' } as Record<string, string>)[advResolution.toLowerCase()]
+    : undefined;
 
   const body: Record<string, unknown> = {
     model: params.model,
@@ -1189,7 +1198,7 @@ function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
       : flatImageUrls.length > 0 ? { image_urls: flatImageUrls } : {}),
     ...(params.aspectRatio ? { [ratioField]: params.aspectRatio } : {}),
     ...(params.duration ? { duration: params.duration } : {}),
-    ...(advResolution ? { resolution: advResolution } : {}),
+    ...(omniMode ? { mode: omniMode } : advResolution ? { resolution: advResolution } : {}),
     ...(params.generateAudio !== undefined ? { generate_audio: params.generateAudio } : {}),
     ...(params.negativePrompt ? { negative_prompt: params.negativePrompt } : {}),
     ...(params.seed !== undefined ? { seed: params.seed } : {}),
