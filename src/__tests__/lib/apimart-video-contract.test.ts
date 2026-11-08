@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildVideoSubmitRequest } from '@/lib/video-api';
+import { VIDEO_MODEL_REGISTRY, buildVideoSubmitRequest } from '@/lib/video-api';
 
 // APIMart Seedance 2.0 视频契约来源（docs.apimart.ai 本机不可达，取两份独立转述）：
 // - github.com/apimart-api-ai-Aggregator/seedance-2.0-api README「Request parameters」：
@@ -45,5 +45,34 @@ describe('APIMart Seedance video submit contract', () => {
     const submitted = body('veo3.1-fast', { aspectRatio: '16:9' });
     expect(submitted.aspect_ratio).toBe('16:9');
     expect(submitted).not.toHaveProperty('size');
+  });
+
+  it('does not send the undocumented generation_type field (official docs derive the mode from parameter combinations)', () => {
+    const submitted = body('doubao-seedance-2.0-face');
+    expect(submitted).not.toHaveProperty('generation_type');
+  });
+
+  it('sends flat image_urls for non-Seedance APIMart models (official Kling v3 Omni page documents image_urls)', () => {
+    const submitted = body('kling-v3-omni', { imageUrl: 'https://example.com/a.png' });
+    expect(submitted.image_urls).toEqual(['https://example.com/a.png']);
+    expect(submitted).not.toHaveProperty('image_with_roles');
+  });
+
+  it('keeps flat image_urls for sora-2 first/last frames', () => {
+    const submitted = body('sora-2', {
+      imageUrl: 'https://example.com/a.png',
+      lastFrameImageUrl: 'https://example.com/b.png',
+    });
+    expect(submitted.image_urls).toEqual(['https://example.com/a.png', 'https://example.com/b.png']);
+    expect(submitted).not.toHaveProperty('image_with_roles');
+  });
+
+  it('exposes the documented 4-15s duration range for APImart Seedance models', () => {
+    for (const model of ['doubao-seedance-2.0-face', 'doubao-seedance-2.0-fast-face', 'doubao-seedance-2.0-mini']) {
+      const durations = VIDEO_MODEL_REGISTRY[model]?.features.durations;
+      expect(durations, model).toBeDefined();
+      expect(durations?.[0], model).toBe(4);
+      expect(durations?.[durations.length - 1], model).toBe(15);
+    }
   });
 });
