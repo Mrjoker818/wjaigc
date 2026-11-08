@@ -1206,6 +1206,41 @@ function skillRequestInputKey(skill: SkillDefinition): string | undefined {
   return required?.key ?? skill.inputs.find(input => TEXT_INPUT_KINDS.has(input.kind))?.key;
 }
 
+const SKILL_CATALOG_DESCRIPTION_LIMIT = 60;
+
+/**
+ * 对话工具的补充说明：技能目录和 build_workflow 用法。
+ * 只列出能用一段文字需求启动的技能，需要素材输入的技能留给技能面板。
+ */
+export function buildChatToolGuide(availableToolNames: readonly string[]): string {
+  const sections: string[] = [];
+  if (availableToolNames.includes('run_skill')) {
+    const lines = listSkillsForSurface('canvas')
+      .filter(skill => skillRequestInputKey(skill))
+      .map(skill => {
+        const description = skill.description.length > SKILL_CATALOG_DESCRIPTION_LIMIT
+          ? `${skill.description.slice(0, SKILL_CATALOG_DESCRIPTION_LIMIT)}…`
+          : skill.description;
+        return `- ${skill.id}：${skill.name}，${description}`;
+      });
+    if (lines.length > 0) {
+      sections.push([
+        '## 技能目录（run_skill）',
+        '用户的需求明确对应下列某个多步骤技能时，调用 run_skill，skill_id 必须取自本目录，request 写清用户的完整需求。单张出图、修图、放大不要用技能。',
+        ...lines,
+      ].join('\n'));
+    }
+  }
+  if (availableToolNames.includes('build_workflow')) {
+    sections.push([
+      '## 节点工作流（build_workflow）',
+      '用户要求搭建、创建或设计一个可重复使用的处理流程（例如“先生成再去背景再放大”）时，调用 build_workflow，description 写清每一步要做什么。',
+      '工作流会写入节点模式，不会立即执行，也不消耗积分。只想要一张成品图时直接调用对应的单一工具。',
+    ].join('\n'));
+  }
+  return sections.join('\n\n');
+}
+
 function skillModelBindings(skill: SkillDefinition, context: ToolContext): FrozenBindings | string {
   const bindings: FrozenBindings = {};
   for (const role of requiredSkillModelRoles(skill)) {

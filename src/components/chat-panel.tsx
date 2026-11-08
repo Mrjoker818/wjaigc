@@ -1360,11 +1360,12 @@ export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAutho
   const [isThinkingMode, setIsThinkingMode] = useState(false);
   const [isAgentMode, setIsAgentMode] = useState(false);
   // Agent 模式关闭时，消耗积分的工具会暂停在这里，等用户确认后再执行。
-  const [pendingToolConfirmation, setPendingToolConfirmation] = useState<{
+  const [pendingToolConfirmations, setPendingToolConfirmations] = useState<Array<{
     toolName: string;
     toolArgs: Record<string, unknown>;
     label: string;
-  } | null>(null);
+  }>>([]);
+  const pendingToolConfirmation = pendingToolConfirmations[0] ?? null;
   const [agentSteps, setAgentSteps] = useState<Array<{id: string; tool: string; status: 'pending'|'running'|'done'|'error'; result?: string; startTime?: number}>>([]);
   const [isLoading, setIsLoading] = useState(false);
   const thinkingStartTimeRef = useRef<number>(0);
@@ -2784,14 +2785,14 @@ export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAutho
   // 用户确认了暂停的付费工具：用同一请求上下文只执行这一个调用。
   const handleSendRef = useRef<((text?: string, options?: { confirmedToolCall?: { name: string; arguments: Record<string, unknown> } }) => void) | null>(null);
   const confirmPendingTool = useCallback(() => {
-    const pending = pendingToolConfirmation;
+    const [pending, ...rest] = pendingToolConfirmations;
     if (!pending) return;
-    setPendingToolConfirmation(null);
+    setPendingToolConfirmations(rest);
     void handleSendRef.current?.('', { confirmedToolCall: { name: pending.toolName, arguments: pending.toolArgs } });
-  }, [pendingToolConfirmation]);
+  }, [pendingToolConfirmations]);
 
   const cancelPendingTool = useCallback(() => {
-    setPendingToolConfirmation(null);
+    setPendingToolConfirmations(current => current.slice(1));
     toast.info('已取消这次操作');
   }, []);
 
@@ -2818,8 +2819,9 @@ export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAutho
     const assistantMessageId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     // P0-2: 增强意图分类 - 使用新版意图分类器
+    // 确认请求不带新的用户文本，不能按空输入判定为极度模糊，否则会禁用工具。
     const intentResult = classifyIntent(trimmedInput, { hasImages: pendingImages.length > 0 || activeMentions.some(m => m.type === 'canvas-image') });
-    const intentLevel = intentResult.clarity;
+    const intentLevel = options?.confirmedToolCall ? 'clear' : intentResult.clarity;
 
     // 收集图片锚点（来自pendingImages、@图片引用）
     const imageAnchors: Array<{
@@ -2864,9 +2866,12 @@ export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAutho
       imageAnchors: imageAnchors.length > 0 ? imageAnchors : undefined,
     };
 
-    const newMessages = [...messages, userMessage];
-    setMessages(newMessages);
-    setInput('');
+    // 确认请求只是继续上一次暂停的工具，不新增用户消息，也不清空输入框里正在写的内容。
+    const newMessages = options?.confirmedToolCall ? messages : [...messages, userMessage];
+    if (!options?.confirmedToolCall) {
+      setMessages(newMessages);
+      setInput('');
+    }
     // Capture pending images before clearing
     const capturedPendingImages = [...pendingImages];
     setPendingImages([]);
@@ -3196,7 +3201,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
         imageRefText = '\n\n[图片引用]\n' + allRefImageList.map((img, i) => `图片#${i + 1}: ${img.name}`).join('\n');
       }
       
-      if (allImageUrls.length > 0) {
+      if (!options?.confirmedToolCall && allImageUrls.length > 0) {
         // Send as multimodal content with images
         const imageContents = allImageUrls.map(url => ({
           type: 'image_url' as const,
@@ -3209,7 +3214,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             ...imageContents
           ]
         });
-      } else {
+      } else if (!options?.confirmedToolCall) {
         requestMessages.push({
           role: 'user',
           content: trimmedInput + mentionContext
@@ -3383,11 +3388,11 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 // ====== 处理Agent工具调用事件（兼容两种事件名格式） ======
                 // Agent 模式关闭时，消耗积分的工具先暂停，等用户在确认卡上点执行。
                 if (eventType === 'tool_confirmation_required' && toolName) {
-                  setPendingToolConfirmation({
+                  setPendingToolConfirmations(current => [...current, {
                     toolName,
                     toolArgs: parsed.toolArgs && typeof parsed.toolArgs === 'object' ? parsed.toolArgs : {},
                     label: parsed.label || toolName,
-                  });
+                  }]);
                   continue;
                 }
 
@@ -5675,6 +5680,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               <p className="mb-2 font-medium">执行前确认</p>
               <p className="mb-3 text-muted-foreground">
                 {pendingToolConfirmation.label}会消耗积分，确认后才会执行。
+                {pendingToolConfirmations.length > 1 ? `（还有 ${pendingToolConfirmations.length - 1} 项等待确认）` : ''}
               </p>
               <div className="flex gap-2">
                 <Button size="sm" onClick={confirmPendingTool} disabled={isLoading}>确认执行</Button>
