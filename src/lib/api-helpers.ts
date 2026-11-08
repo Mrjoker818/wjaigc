@@ -5,6 +5,8 @@
  * because they import 'server-only' which cannot be bundled for client components.
  */
 
+import { assertSafeProviderUrl } from './poisoned-api-host';
+
 /**
  * Build an internal API URL for server-side fetch (calling self).
  * Uses DEPLOY_RUN_PORT (default 5000) to ensure correct resolution
@@ -101,6 +103,7 @@ export async function fetchWithV1Retry(
   retryWithV1 = true,
   defaultTimeoutMs = 300_000 // 5min default timeout for all external API calls (some models take >2min)
 ): Promise<Response> {
+  assertSafeProviderUrl(baseUrl);
   const cleanBase = baseUrl.replace(/\/+$/, '');
   const url = `${cleanBase}${path}`;
   const { skipV1Retry, transport = fetch, propagateErrors, ...fetchOptions } = options;
@@ -191,6 +194,7 @@ export async function fetchWithTimeout(
   timeoutMs: number | ApiTimeoutCategory = API_TIMEOUTS.default
 ): Promise<Response> {
   const ms = typeof timeoutMs === 'string' ? API_TIMEOUTS[timeoutMs] : timeoutMs;
+  assertSafeProviderUrl(String(url));
 
   // Combine with existing signal if present
   const existingSignal = options.signal;

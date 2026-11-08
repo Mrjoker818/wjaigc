@@ -11,6 +11,7 @@ import { getTransparentOutputWarning } from '@/lib/image-generation-output';
 import { loadBrowserImageBlob } from '@/lib/browser-image-blob';
 import { getVideoDownloadLabel, resolveVideoDownloadFormat } from '@/lib/video-download-format';
 import { toast } from 'sonner';
+import { CHAT_CANVAS_ACTION_EVENT, isChatCanvasActionRequest, type ChatCanvasActionRequest } from '@/lib/chat-canvas-action';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { } from '@/lib/canvas-mode-handlers';
@@ -11847,6 +11848,44 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     setCropWidth(img.originalWidth || Math.round(img.width));
     setCropHeight(img.originalHeight || Math.round(img.height));
   }, [activateCanvasToolSession, getActiveImageData]);
+
+  // 对话里的 [CANVAS_ACTION]：先选中目标图片，选中生效后再打开对应工具，参数和费用仍由用户在工具里确认。
+  const [pendingChatCanvasAction, setPendingChatCanvasAction] = useState<ChatCanvasActionRequest | null>(null);
+  useEffect(() => {
+    const onChatCanvasAction = (event: Event) => {
+      const detail = (event as CustomEvent<unknown>).detail;
+      if (!isChatCanvasActionRequest(detail)) return;
+      const target = images.find(image => image.id === detail.imageId);
+      if (!target) {
+        toast.error('目标图片已不在画布上');
+        return;
+      }
+      setSelectedIds(new Set([target.id]));
+      onSelectImage(target);
+      setPendingChatCanvasAction(detail);
+    };
+    window.addEventListener(CHAT_CANVAS_ACTION_EVENT, onChatCanvasAction);
+    return () => window.removeEventListener(CHAT_CANVAS_ACTION_EVENT, onChatCanvasAction);
+  }, [images, onSelectImage, setSelectedIds]);
+  useEffect(() => {
+    if (!pendingChatCanvasAction || selectedImageData?.id !== pendingChatCanvasAction.imageId) return;
+    const target = selectedImageData;
+    setPendingChatCanvasAction(null);
+    switch (pendingChatCanvasAction.type) {
+      case 'upscale': handleOpenUpscale(); break;
+      case 'remove_bg':
+        if (!activateCanvasToolSession('remove-bg', 'image-toolbar', [target.id])) return;
+        setRemoveBgTargetImage(target);
+        setRemoveBgQuote(null);
+        setShowRemoveBgPicker(true);
+        break;
+      case 'erase': handleOpenErase(); break;
+      case 'extend': handleOpenExpand(); break;
+      case 'crop': handleOpenCrop(); break;
+      case 'color_adjust': handleOpenColorAdjust(); break;
+      case 'img2img': onEditImage?.(target); break;
+    }
+  }, [pendingChatCanvasAction, selectedImageData, handleOpenUpscale, activateCanvasToolSession, handleOpenErase, handleOpenExpand, handleOpenCrop, handleOpenColorAdjust, onEditImage]);
 
   // 8. DOWNLOAD - popup with PNG/SVG/PSD
   const handleOpenDownload = useCallback((targetImage?: CanvasImage) => {

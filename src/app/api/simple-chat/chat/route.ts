@@ -6,6 +6,7 @@ import type { ApiKind } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { SearchClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
 import { fetchWithTimeout, getInternalApiUrl } from '@/lib/api-helpers';
+import { assertSafeProviderUrl, PoisonedApiHostError } from '@/lib/poisoned-api-host';
 import { resolveChatControls } from '@/lib/chat-generation-controls';
 import { getInternalRequestHeaders } from '@/lib/api-auth';
 import { AssetServiceError, createAssetService } from '@/lib/asset-core/service';
@@ -758,6 +759,17 @@ export async function POST(request: NextRequest) {
 
   const apiKey = provider.apiKey;
   const baseUrl = provider.baseUrl?.replace(/\/+$/, '') || '';
+  if (!apiKey || !baseUrl) {
+    return Response.json({ error: '请先在管理员后台配置可用模型' }, { status: 400 });
+  }
+  try {
+    assertSafeProviderUrl(baseUrl);
+  } catch (error) {
+    if (error instanceof PoisonedApiHostError) {
+      return Response.json({ error: '所选模型网关地址不可用，请在管理后台改用可用网关' }, { status: 400 });
+    }
+    return Response.json({ error: '所选模型网关地址不可用，请在管理后台改用可用网关' }, { status: 400 });
+  }
   const chatControls = resolveChatControls(model, provider, body.reasoningEffort, body.responseSpeed);
 
   // 构建增强的 system prompt（指令 + 知识库 + 联网搜索结果）

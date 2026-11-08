@@ -25,6 +25,7 @@ import { ThirdPartyModelDialog } from '@/components/third-party-model-dialog';
 import { UniversalApiManager } from '@/lib/universal-api-manager';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import type { CanvasImage } from '@/components/infinite-canvas';
+import type { Workflow } from '@/lib/workflow-engine';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { readPersistedImageModelSelection, selectInitialModel } from '@/lib/model-defaults';
 import { getPromptTemplates, searchTemplates, type PromptTemplate } from '@/lib/prompt-templates';
@@ -32,6 +33,7 @@ import { classifyIntent, ClassifiedIntent, IntentCategory } from '@/lib/intent-c
 import { generateClarificationMessage, detectVagueScenarios, type ClarificationTemplate, type VagueScenario } from '@/lib/clarification-templates';
 import { generateSuggestions, type Suggestion, type SuggestionContext, type ContentCategory } from '@/lib/suggestion-engine';
 import { parseCanvasOperationIntent, extractCanvasActionFromAIResponse, type CanvasAction, type CanvasActionResult, type CanvasActionType } from '@/lib/canvas-action-executor';
+import { chatCanvasToolLabel, requestChatCanvasAction, resolveChatCanvasAction, type ChatCanvasActionRequest } from '@/lib/chat-canvas-action';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
@@ -113,6 +115,8 @@ interface Message {
   suggestions?: NextSuggestion[]; // 建议下一步操作
   isClarifying?: boolean; // 是否为追问消息
   toolExecutions?: ToolExecution[]; // Agent工具执行记录
+  workflow?: Workflow; // build_workflow 产出的工作流，渲染为预览卡
+  canvasAction?: ChatCanvasActionRequest; // 模型给出的 [CANVAS_ACTION]，由用户点击后在画布打开对应工具
 }
 
 interface ToolExecution {
@@ -574,6 +578,8 @@ interface ChatPanelProps {
   onSuggestionAction?: (action: string, data?: Record<string, string>) => void;
   /** Called when user clicks "generate image" suggestion - triggers image generation directly */
   onGenerateImage?: (prompt: string, outputCount?: number, aspectRatio?: string, quality?: string) => void;
+  /** 模型通过 build_workflow 创建了工作流：写入节点模式并切过去 */
+  onApplyWorkflow?: (workflow: Workflow) => void;
   brandDna?: Record<string, unknown> | null;
   onInjectBrandDna?: (dna: Record<string, unknown>) => void;
   /** Image sent from canvas right-click menu "发送到聊天修改" */
@@ -1307,7 +1313,7 @@ function extractPromptForGeneration(content: string): string {
 /* ========== 智能体搭建弹窗 ========== */
 /* AgentBuilderDialog 已提取至 src/components/chat/AgentBuilderDialog.tsx */
 
-export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAuthority = 'legacy', onAddToPrompt, onAddImages, onAddGeneratedImage, onAddGeneratedImages, canvasImages = [], selectedCanvasImage, onResolveCanvasImageForChat, onChatModelChange, onSuggestionAction, onGenerateImage, brandDna, onInjectBrandDna, chatInitialImage, chatInitialImageResolved = false, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage, externalPrompt, onExternalPromptConsumed }: ChatPanelProps) {
+export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAuthority = 'legacy', onAddToPrompt, onAddImages, onAddGeneratedImage, onAddGeneratedImages, canvasImages = [], selectedCanvasImage, onResolveCanvasImageForChat, onChatModelChange, onSuggestionAction, onGenerateImage, onApplyWorkflow, brandDna, onInjectBrandDna, chatInitialImage, chatInitialImageResolved = false, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage, externalPrompt, onExternalPromptConsumed }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [showFullHistory, setShowFullHistory] = useState(false);
   const visibleMessages = useMemo(() => (showFullHistory ? messages : messages.slice(-CHAT_RENDER_WINDOW)).filter(Boolean), [messages, showFullHistory]);
@@ -1356,6 +1362,13 @@ export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAutho
   const [systemPrompt, setSystemPrompt] = useState('');
   const [isThinkingMode, setIsThinkingMode] = useState(false);
   const [isAgentMode, setIsAgentMode] = useState(false);
+  // Agent 模式关闭时，消耗积分的工具会暂停在这里，等用户确认后再执行。
+  const [pendingToolConfirmations, setPendingToolConfirmations] = useState<Array<{
+    toolName: string;
+    toolArgs: Record<string, unknown>;
+    label: string;
+  }>>([]);
+  const pendingToolConfirmation = pendingToolConfirmations[0] ?? null;
   const [agentSteps, setAgentSteps] = useState<Array<{id: string; tool: string; status: 'pending'|'running'|'done'|'error'; result?: string; startTime?: number}>>([]);
   const [isLoading, setIsLoading] = useState(false);
   const thinkingStartTimeRef = useRef<number>(0);
@@ -2772,9 +2785,23 @@ export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAutho
     }
   };
 
-  const handleSend = useCallback(async (overrideText?: string, options?: { systemPromptOverride?: string }) => {
+  // 用户确认了暂停的付费工具：用同一请求上下文只执行这一个调用。
+  const handleSendRef = useRef<((text?: string, options?: { confirmedToolCall?: { name: string; arguments: Record<string, unknown> } }) => void) | null>(null);
+  const confirmPendingTool = useCallback(() => {
+    const [pending, ...rest] = pendingToolConfirmations;
+    if (!pending) return;
+    setPendingToolConfirmations(rest);
+    void handleSendRef.current?.('', { confirmedToolCall: { name: pending.toolName, arguments: pending.toolArgs } });
+  }, [pendingToolConfirmations]);
+
+  const cancelPendingTool = useCallback(() => {
+    setPendingToolConfirmations(current => current.slice(1));
+    toast.info('已取消这次操作');
+  }, []);
+
+  const handleSend = useCallback(async (overrideText?: string, options?: { systemPromptOverride?: string; confirmedToolCall?: { name: string; arguments: Record<string, unknown> } }) => {
     const textToSend = overrideText ?? input;
-    if (textToSend.trim() || isLoading) {
+    if (textToSend.trim() || isLoading || options?.confirmedToolCall) {
       // continue
     } else {
       return;
@@ -2795,8 +2822,9 @@ export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAutho
     const assistantMessageId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     // P0-2: 增强意图分类 - 使用新版意图分类器
+    // 确认请求不带新的用户文本，不能按空输入判定为极度模糊，否则会禁用工具。
     const intentResult = classifyIntent(trimmedInput, { hasImages: pendingImages.length > 0 || activeMentions.some(m => m.type === 'canvas-image') });
-    const intentLevel = intentResult.clarity;
+    const intentLevel = options?.confirmedToolCall ? 'clear' : intentResult.clarity;
 
     // 收集图片锚点（来自pendingImages、@图片引用）
     const imageAnchors: Array<{
@@ -2841,9 +2869,12 @@ export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAutho
       imageAnchors: imageAnchors.length > 0 ? imageAnchors : undefined,
     };
 
-    const newMessages = [...messages, userMessage];
-    setMessages(newMessages);
-    setInput('');
+    // 确认请求只是继续上一次暂停的工具，不新增用户消息，也不清空输入框里正在写的内容。
+    const newMessages = options?.confirmedToolCall ? messages : [...messages, userMessage];
+    if (!options?.confirmedToolCall) {
+      setMessages(newMessages);
+      setInput('');
+    }
     // Capture pending images before clearing
     const capturedPendingImages = [...pendingImages];
     setPendingImages([]);
@@ -3173,7 +3204,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
         imageRefText = '\n\n[图片引用]\n' + allRefImageList.map((img, i) => `图片#${i + 1}: ${img.name}`).join('\n');
       }
       
-      if (allImageUrls.length > 0) {
+      if (!options?.confirmedToolCall && allImageUrls.length > 0) {
         // Send as multimodal content with images
         const imageContents = allImageUrls.map(url => ({
           type: 'image_url' as const,
@@ -3186,7 +3217,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             ...imageContents
           ]
         });
-      } else {
+      } else if (!options?.confirmedToolCall) {
         requestMessages.push({
           role: 'user',
           content: trimmedInput + mentionContext
@@ -3242,6 +3273,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
           messageId: assistantMessageId,
           sourceVersionIds: chatSourceVersionIds,
           selectedEntityIds: chatSelectedEntityIds,
+          ...(options?.confirmedToolCall ? { confirmedToolCall: options.confirmedToolCall } : {}),
         }),
       });
 
@@ -3269,6 +3301,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       const addedImageUrls = new Set<string>(); // 已添加到画布的图片URL去重
       const toolPendingTaskIds: Array<{ taskId: string; model: string; providerId: string; type: 'image' | 'video'; runId?: string }> = []; // 工具返回的异步任务，需轮询
       let toolGeneratedVideo: string | undefined; // 工具生成的视频URL
+      let toolSkillRunId: string | undefined; // 模型通过 run_skill 启动的技能运行
+      let toolWorkflow: Workflow | undefined; // 模型通过 build_workflow 创建的工作流
       let currentSSEEvent = ''; // 当前SSE事件类型
       let sseBuffer = ''; // SSE buffer拼接，防止跨chunk JSON破裂
 
@@ -3355,6 +3389,16 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 }
 
                 // ====== 处理Agent工具调用事件（兼容两种事件名格式） ======
+                // Agent 模式关闭时，消耗积分的工具先暂停，等用户在确认卡上点执行。
+                if (eventType === 'tool_confirmation_required' && toolName) {
+                  setPendingToolConfirmations(current => [...current, {
+                    toolName,
+                    toolArgs: parsed.toolArgs && typeof parsed.toolArgs === 'object' ? parsed.toolArgs : {},
+                    label: parsed.label || toolName,
+                  }]);
+                  continue;
+                }
+
                 // Agent模式事件兼容：tool_execution_start / tool_start 都识别为工具开始
                 if ((eventType === 'tool_execution_start' || eventType === 'tool_start') && toolName) {
                   const toolLabel = parsed.label || `正在执行 ${toolName}...`;
@@ -3412,7 +3456,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                       progress: parsed.success ? 100 : toolExecutions[execIdx].progress,
                       result: parsed.result,
                       imageUrls: parsed.imageUrls,
-                      videoUrl: parsed.videoUrl,
+                      videoUrl: parsed.videoUrl || parsed.videoUrls?.[0],
                       error: parsed.error,
                     };
                   }
@@ -3425,11 +3469,14 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   if (parsed.imageUrls && parsed.imageUrls.length > 0) {
                     toolGeneratedImages.push(...parsed.imageUrls);
                   }
-                  if (parsed.videoUrl) {
-                    toolGeneratedVideo = parsed.videoUrl;
+                  const resultVideoUrl = parsed.videoUrl || parsed.videoUrls?.[0];
+                  if (resultVideoUrl) {
+                    toolGeneratedVideo = resultVideoUrl;
                   }
                   // 收集异步任务ID（后端直接发送 {taskId, model, providerId, type} 对象数组）
                   if (parsed.taskIds && parsed.taskIds.length > 0) {
+                    const skillRunId = parsed.taskIds.find((task: { runId?: unknown }) => typeof task.runId === 'string')?.runId;
+                    if (typeof skillRunId === 'string') toolSkillRunId = skillRunId;
                     // 如果同时有imageUrls，直接使用imageUrls；否则添加到待轮询列表
                     if (!parsed.imageUrls || parsed.imageUrls.length === 0) {
                       toolPendingTaskIds.push(...parsed.taskIds);
@@ -3438,6 +3485,9 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                         persistMessageUpdate(assistantMessageId, message => ({ ...message, agentRunId: runId }));
                       }
                     }
+                  }
+                  if (parsed.workflow && Array.isArray(parsed.workflow.nodes)) {
+                    toolWorkflow = parsed.workflow as Workflow;
                   }
                   continue;
                 }
@@ -3517,10 +3567,51 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       const hasGenerateTags = generateMatches.length > 0;
       const hasToolGeneratedImages = toolGeneratedImages.length > 0 || !!toolGeneratedVideo || toolPendingTaskIds.length > 0;
 
+      // build_workflow 不产出图片，单独处理：消息上挂预览卡，并写入节点模式。
+      if (toolWorkflow) {
+        const builtWorkflow = toolWorkflow;
+        setMessages(prev => prev.map(msg =>
+          msg.id === assistantMessageId ? { ...msg, workflow: builtWorkflow } : msg
+        ));
+        onApplyWorkflow?.(builtWorkflow);
+      }
+
       // 优先使用 Function Calling 工具生成的图片
       if (hasToolGeneratedImages) {
         // 工具执行已由流中的 tool_execution_result/tool_execution_complete 事件处理
         console.log('[ChatImage] Function Calling generated', toolGeneratedImages.length, 'images, pending tasks:', toolPendingTaskIds.length);
+
+        // 工具已完成的图片直接放上画布；异步任务的结果由下方轮询完成后放上画布。
+        if (toolGeneratedImages.length > 0) {
+          const toolMessage = messagesRef.current.find(msg => msg.id === assistantMessageId);
+          if (toolMessage) {
+            for (const imageUrl of toolGeneratedImages) {
+              await addGeneratedImageToCanvas(imageUrl, toolMessage);
+            }
+          }
+        }
+        if (toolGeneratedVideo && !addedImageUrls.has(toolGeneratedVideo)) {
+          addedImageUrls.add(toolGeneratedVideo);
+          if (onAddImages) await onAddImages([toolGeneratedVideo]);
+          persistMessageUpdate(assistantMessageId, msg => ({
+            ...msg,
+            generatedImages: [...new Set([...(msg.generatedImages || []), toolGeneratedVideo])],
+          }));
+        }
+        if (toolSkillRunId && projectId) {
+          try {
+            const skillReferences = await loadCompletedCanvasSkillAssets({
+              projectId,
+              runId: toolSkillRunId,
+              sourceVersionIds: [],
+              authority: canvasAuthority,
+              expectedActorId: skillAccountKey,
+            });
+            if (skillReferences.length > 0) await receiveSkillOutputs(skillReferences, { runId: toolSkillRunId });
+          } catch (error) {
+            console.warn('[ChatSkill] 技能产物添加到画布失败:', error);
+          }
+        }
 
         // 当工具返回 taskIds（异步任务）但没有直接的 imageUrls 时，需要轮询获取结果
         if (toolPendingTaskIds.length > 0) {
@@ -4002,34 +4093,34 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
 
       // ====== P0-1: ChatCanvas 画布操作解析与提示 ======
       const canvasAction = extractCanvasActionFromAIResponse(assistantContent);
-      if (canvasAction && selectedCanvasImage) {
-        console.log('[ChatCanvas] 解析到画布操作指令:', canvasAction.type);
-        // 注：实际执行需要后续集成画布操作API
-        // 当前仅解析指令并在回复中提示用户
-        const actionLabel = {
-          upscale: '放大',
-          remove_bg: '去背景',
-          img2img: '图生图',
-          erase: '擦除',
-          extend: '扩展画面',
-          crop: '裁切',
-          generate: '生成新图',
-          filter: '滤镜风格',
-          move: '移动位置',
-          delete: '删除',
-          duplicate: '复制',
-          arrange: '排列',
-          color_adjust: '色彩调整',
-          add_text: '添加文字',
-          composite: '合成',
-        }[canvasAction.type] || canvasAction.type;
-        // 替换CANVAS_ACTION标签为可点击的提示
-        assistantContent = assistantContent.replace(/\[CANVAS_ACTION\][\s\S]*?\[\/CANVAS_ACTION\]/, 
-          `💡 **画布操作建议**: ${actionLabel} - 请在画布中选中图片后使用工具栏执行此操作`);
+      const canvasActionRequest = canvasAction
+        ? resolveChatCanvasAction(canvasAction, canvasImages, selectedCanvasImage?.id)
+        : null;
+      if (canvasAction) {
+        // 指令块不展示给用户；能落到画布图片上的，渲染为“在画布执行”按钮。
+        assistantContent = assistantContent
+          .replace(/\[CANVAS_ACTION\][\s\S]*?\[\/CANVAS_ACTION\]/, '')
+          .replace(/```canvas-action\s*\{[\s\S]*?\}\s*```/, '')
+          .trim();
+        if (!canvasActionRequest) {
+          assistantContent += '\n\n💡 请先在画布中选中一张图片，再使用工具栏执行此操作。';
+        }
+        setMessages(prev => prev.map(msg =>
+          msg.id === assistantMessageId
+            ? { ...msg, content: assistantContent, canvasAction: canvasActionRequest || undefined }
+            : msg
+        ));
       }
 
       // 保存对话
-      const finalMessages = [...newMessages, { id: assistantMessageId, role: 'assistant' as const, content: assistantContent, timestamp: Date.now() }];
+      const finalMessages = [...newMessages, {
+        id: assistantMessageId,
+        role: 'assistant' as const,
+        content: assistantContent,
+        timestamp: Date.now(),
+        ...(toolWorkflow ? { workflow: toolWorkflow } : {}),
+        ...(canvasActionRequest ? { canvasAction: canvasActionRequest } : {}),
+      }];
       saveSession(finalMessages, model, systemPrompt, taskSessionId);
       // 记录聊天使用
       try { UserManager.getInstance().recordUsage('chat'); } catch {}
@@ -4047,6 +4138,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       abortControllerRef.current = null;
     }
   }, [input, isLoading, isChatModelReady, messages, model, systemPrompt, isThinkingMode, saveSession, persistMessageUpdate, pendingImages, allAgents, activeMentions, brandDna, tuneContextString, onAddImages, currentSessionId, projectId]);
+  handleSendRef.current = handleSend;
 
   const handleUseSkill = useCallback((skill: SkillDefinition) => {
     skillProjectionControllerRef.current?.abort();
@@ -5291,6 +5383,60 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                       </div>
                     </div>
                   )}
+                  {/* build_workflow 工作流预览卡 */}
+                  {message.role === 'assistant' && message.workflow && Array.isArray(message.workflow.nodes) && (() => {
+                    const workflow = message.workflow;
+                    return (
+                      <div data-testid="chat-workflow-preview" className={`mt-2 rounded-xl overflow-hidden ${isGold ? 'bg-black/30 border border-gold/15' : 'bg-gray-50 border border-gray-200'}`}>
+                        <div className={`px-3 py-1.5 flex items-center gap-2 ${isGold ? 'bg-gold/5 border-b border-gold/10' : 'bg-gray-100 border-b border-gray-200'}`}>
+                          <Zap size={12} className={isGold ? 'text-gold' : 'text-blue-500'} />
+                          <span className={`text-xs font-medium flex-1 truncate ${isGold ? 'text-gold/90' : 'text-gray-700'}`}>{workflow.name}</span>
+                          <span className={`text-[10px] ${isGold ? 'text-gold/60' : 'text-gray-500'}`}>{workflow.nodes.length} 个节点</span>
+                        </div>
+                        <div className="px-3 py-2 flex flex-wrap items-center gap-1">
+                          {workflow.nodes.slice(0, 8).map((node, nodeIdx) => (
+                            <span key={node.id} className="flex items-center gap-1">
+                              {nodeIdx > 0 && <ArrowRight size={10} className={isGold ? 'text-gold/40' : 'text-gray-400'} />}
+                              <span className={`text-[11px] px-1.5 py-0.5 rounded ${isGold ? 'bg-gold/10 text-gold/80' : 'bg-white border border-gray-200 text-gray-700'}`}>{node.label || node.type}</span>
+                            </span>
+                          ))}
+                          {workflow.nodes.length > 8 && <span className={`text-[10px] ${isGold ? 'text-gold/50' : 'text-gray-400'}`}>…</span>}
+                        </div>
+                        {onApplyWorkflow && (
+                          <div className="px-3 pb-2">
+                            <button
+                              type="button"
+                              data-testid="chat-workflow-open"
+                              onClick={() => onApplyWorkflow(workflow)}
+                              className={`text-xs px-2.5 py-1 rounded-lg ${isGold ? 'bg-gold/15 text-gold hover:bg-gold/25' : 'bg-blue-500 text-white hover:bg-blue-600'}`}
+                            >
+                              在节点模式打开
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                  {/* [CANVAS_ACTION] 画布操作：点击后在画布打开对应工具，由用户确认参数和费用 */}
+                  {message.role === 'assistant' && message.canvasAction && (() => {
+                    const action = message.canvasAction;
+                    const targetExists = canvasImages.some(image => image.id === action.imageId);
+                    return (
+                      <div className="mt-2">
+                        <button
+                          type="button"
+                          data-testid="chat-canvas-action"
+                          disabled={!targetExists}
+                          title={targetExists ? undefined : '目标图片已不在画布上'}
+                          onClick={() => requestChatCanvasAction(action)}
+                          className={`text-xs px-2.5 py-1 rounded-lg flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed ${isGold ? 'bg-gold/15 text-gold hover:bg-gold/25' : 'bg-blue-500 text-white hover:bg-blue-600'}`}
+                        >
+                          <Wand2 size={12} />
+                          在画布执行：{chatCanvasToolLabel(action.type)}{action.imageName ? `（${action.imageName}）` : ''}
+                        </button>
+                      </div>
+                    );
+                  })()}
                   {/* AI生成的图片 - ChatGPT风格：每张图独立卡片，垂直排列 */}
                   {message.generatedImages && message.generatedImages.length > 0 && (
                     <div className="flex flex-col gap-3 mt-3">
@@ -5594,6 +5740,19 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
           {/* 图片引用预览 - Lovart风格：小方形缩略图在输入框上方 */}
           {/* (缩略图已移至输入区域上方渲染) */}
 
+          {pendingToolConfirmation && (
+            <div className="mx-4 mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+              <p className="mb-2 font-medium">执行前确认</p>
+              <p className="mb-3 text-muted-foreground">
+                {pendingToolConfirmation.label}会消耗积分，确认后才会执行。
+                {pendingToolConfirmations.length > 1 ? `（还有 ${pendingToolConfirmations.length - 1} 项等待确认）` : ''}
+              </p>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={confirmPendingTool} disabled={isLoading}>确认执行</Button>
+                <Button size="sm" variant="outline" onClick={cancelPendingTool} disabled={isLoading}>取消</Button>
+              </div>
+            </div>
+          )}
           <div ref={messagesEndRef} />
         </div>
 
