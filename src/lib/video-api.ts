@@ -305,15 +305,16 @@ export const VIDEO_MODEL_REGISTRY: Record<string, VideoModelInfo> = {
   },
   'doubao-seedance-2.0-face': {
     profile: 'apimart-video', name: 'Seedance 2.0 Face (APImart)', short: 'SD2.0F', provider: 'ByteDance/APImart',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: true, multiShot: false, maxDuration: 15, durations: [5,6,7,8,9,10,11,12,13,14,15], ratios: ['1:1','4:3','3:4','16:9','9:16','21:9'], resolutions: ['480p','720p','1080p','4K'], region: 'global' },
+    // 官方文档：duration 4–15 秒（聚合器 README 与 Nomi handoff 双源一致）
+    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: true, multiShot: false, maxDuration: 15, durations: [4,5,6,7,8,9,10,11,12,13,14,15], ratios: ['1:1','4:3','3:4','16:9','9:16','21:9'], resolutions: ['480p','720p','1080p','4K'], region: 'global' },
   },
   'doubao-seedance-2.0-fast-face': {
     profile: 'apimart-video', name: 'Seedance 2.0 Fast Face (APImart)', short: 'SD2.0FF', provider: 'ByteDance/APImart',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: true, multiShot: false, maxDuration: 15, durations: [5,6,7,8,9,10,11,12,13,14,15], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p'], region: 'global' },
+    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: true, multiShot: false, maxDuration: 15, durations: [4,5,6,7,8,9,10,11,12,13,14,15], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p'], region: 'global' },
   },
   'doubao-seedance-2.0-mini': {
     profile: 'apimart-video', name: 'Seedance 2.0 Mini (APImart)', short: 'SD2.0M', provider: 'ByteDance/APImart',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5, 6, 10], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p'], region: 'global' },
+    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 15, durations: [4,5,6,7,8,9,10,11,12,13,14,15], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p'], region: 'global' },
   },
   'kling-v3-omni': {
     profile: 'apimart-video', name: 'Kling V3 Omni (APImart)', short: 'KlingV3O', provider: 'Kuaishou/APImart',
@@ -1142,23 +1143,35 @@ function buildRestGenericSubmit(baseUrl: string, apiKey: string, params: VideoGe
   };
 }
 
-/** APImart videos/generations submit (per docs.apib.ai).
+/** APImart videos/generations submit.
  * POST /v1/videos/generations
- * Fields: model, prompt, n(optional), aspect_ratio, duration, image_urls[], negative_prompt,
- *         resolution(720p/1080p/4k), generation_type(frame=文生视频/reference=图生视频), seed
+ * Sources: docs.apimart.ai/cn quickstart (sora-2: aspect_ratio), Kling v3 Omni page
+ * (image_urls + aspect_ratio), verified aggregator README + Nomi handoff for Seedance 2.x
+ * (size 16:9/9:16/1:1/4:3/3:4/21:9/adaptive, duration 4-15, image_urls XOR image_with_roles).
  * Response: {code:200, data:[{status:"submitted", task_id}]}
  */
 function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
   const cleanBase = ensureBaseUrl(baseUrl);
   const referenceImages = params.referenceImages || [];
-  const imageWithRoles: Array<{ url: string; role: 'first_frame' | 'last_frame' | 'reference_image' }> = [];
 
-  // APImart Seedance 2.0: image_urls are reference-only. Explicitly tag
-  // first/last frames so the provider no longer reinterprets their positions.
-  if (params.imageUrl) imageWithRoles.push({ url: params.imageUrl, role: 'first_frame' });
-  if (params.lastFrameImageUrl) imageWithRoles.push({ url: params.lastFrameImageUrl, role: 'last_frame' });
-  if (imageWithRoles.length > 0) {
+  // Official docs derive the mode from parameter combinations; `image_with_roles`
+  // (first_frame/last_frame/reference_image) is only documented for Seedance 2.x.
+  // Other APIMart models (e.g. Kling v3 Omni) document the flat `image_urls` array.
+  const usesRoles = /seedance-2[.-]0/i.test(params.model);
+  const imageWithRoles: Array<{ url: string; role: 'first_frame' | 'last_frame' | 'reference_image' }> = [];
+  const flatImageUrls: string[] = [];
+  if (params.imageUrl) {
+    if (usesRoles) imageWithRoles.push({ url: params.imageUrl, role: 'first_frame' });
+    else flatImageUrls.push(params.imageUrl);
+  }
+  if (params.lastFrameImageUrl) {
+    if (usesRoles) imageWithRoles.push({ url: params.lastFrameImageUrl, role: 'last_frame' });
+    else flatImageUrls.push(params.lastFrameImageUrl);
+  }
+  if (usesRoles && imageWithRoles.length > 0) {
     imageWithRoles.push(...referenceImages.map(url => ({ url, role: 'reference_image' as const })));
+  } else {
+    flatImageUrls.push(...referenceImages);
   }
 
   // APIMart Seedance 2.0 names the ratio field `size` (16:9/9:16/1:1/4:3/3:4/21:9/adaptive);
@@ -1171,10 +1184,9 @@ function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
     model: params.model,
     prompt: params.prompt,
     n: 1,
-    generation_type: (imageWithRoles.length > 0 || referenceImages.length > 0) ? 'reference' : 'frame',
-    ...(imageWithRoles.length > 0
+    ...(usesRoles && imageWithRoles.length > 0
       ? { image_with_roles: imageWithRoles }
-      : referenceImages.length > 0 ? { image_urls: referenceImages } : {}),
+      : flatImageUrls.length > 0 ? { image_urls: flatImageUrls } : {}),
     ...(params.aspectRatio ? { [ratioField]: params.aspectRatio } : {}),
     ...(params.duration ? { duration: params.duration } : {}),
     ...(advResolution ? { resolution: advResolution } : {}),
