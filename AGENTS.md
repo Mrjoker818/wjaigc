@@ -81,6 +81,7 @@ src/
 │       │   └── inpaint/route.ts    # 涂抹消除/蒙版修图 API (IOPaint+LaMa)
 │       ├── admin/
 │       │   ├── api-balance/route.ts   # API 余额与用量分析 API
+│       │   ├── export-api-settings/route.ts # 管理员API设置导出/导入 API (含api_key完整导出, 跨项目迁移, merge/replace两种导入模式)
 │       │   ├── op-log/route.ts        # 操作日志 API (查询/统计/AI分析/修复/批量删除/导出)
 │       │   └── restore-user-data/route.ts # 管理员数据恢复 API (cloud_tasks时间窗→画布缺失图→追加恢复项目, 只追加+幂等+审计)
 │       └── design/
