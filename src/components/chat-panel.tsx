@@ -33,6 +33,7 @@ import { classifyIntent, ClassifiedIntent, IntentCategory } from '@/lib/intent-c
 import { generateClarificationMessage, detectVagueScenarios, type ClarificationTemplate, type VagueScenario } from '@/lib/clarification-templates';
 import { generateSuggestions, type Suggestion, type SuggestionContext, type ContentCategory } from '@/lib/suggestion-engine';
 import { parseCanvasOperationIntent, extractCanvasActionFromAIResponse, type CanvasAction, type CanvasActionResult, type CanvasActionType } from '@/lib/canvas-action-executor';
+import { chatCanvasToolLabel, requestChatCanvasAction, resolveChatCanvasAction, type ChatCanvasActionRequest } from '@/lib/chat-canvas-action';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
@@ -114,6 +115,8 @@ interface Message {
   suggestions?: NextSuggestion[]; // 建议下一步操作
   isClarifying?: boolean; // 是否为追问消息
   toolExecutions?: ToolExecution[]; // Agent工具执行记录
+  workflow?: Workflow; // build_workflow 产出的工作流，渲染为预览卡
+  canvasAction?: ChatCanvasActionRequest; // 模型给出的 [CANVAS_ACTION]，由用户点击后在画布打开对应工具
 }
 
 interface ToolExecution {
@@ -3564,6 +3567,15 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       const hasGenerateTags = generateMatches.length > 0;
       const hasToolGeneratedImages = toolGeneratedImages.length > 0 || !!toolGeneratedVideo || toolPendingTaskIds.length > 0;
 
+      // build_workflow 不产出图片，单独处理：消息上挂预览卡，并写入节点模式。
+      if (toolWorkflow) {
+        const builtWorkflow = toolWorkflow;
+        setMessages(prev => prev.map(msg =>
+          msg.id === assistantMessageId ? { ...msg, workflow: builtWorkflow } : msg
+        ));
+        onApplyWorkflow?.(builtWorkflow);
+      }
+
       // 优先使用 Function Calling 工具生成的图片
       if (hasToolGeneratedImages) {
         // 工具执行已由流中的 tool_execution_result/tool_execution_complete 事件处理
@@ -3600,7 +3612,6 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             console.warn('[ChatSkill] 技能产物添加到画布失败:', error);
           }
         }
-        if (toolWorkflow) onApplyWorkflow?.(toolWorkflow);
 
         // 当工具返回 taskIds（异步任务）但没有直接的 imageUrls 时，需要轮询获取结果
         if (toolPendingTaskIds.length > 0) {
@@ -4082,34 +4093,34 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
 
       // ====== P0-1: ChatCanvas 画布操作解析与提示 ======
       const canvasAction = extractCanvasActionFromAIResponse(assistantContent);
-      if (canvasAction && selectedCanvasImage) {
-        console.log('[ChatCanvas] 解析到画布操作指令:', canvasAction.type);
-        // 注：实际执行需要后续集成画布操作API
-        // 当前仅解析指令并在回复中提示用户
-        const actionLabel = {
-          upscale: '放大',
-          remove_bg: '去背景',
-          img2img: '图生图',
-          erase: '擦除',
-          extend: '扩展画面',
-          crop: '裁切',
-          generate: '生成新图',
-          filter: '滤镜风格',
-          move: '移动位置',
-          delete: '删除',
-          duplicate: '复制',
-          arrange: '排列',
-          color_adjust: '色彩调整',
-          add_text: '添加文字',
-          composite: '合成',
-        }[canvasAction.type] || canvasAction.type;
-        // 替换CANVAS_ACTION标签为可点击的提示
-        assistantContent = assistantContent.replace(/\[CANVAS_ACTION\][\s\S]*?\[\/CANVAS_ACTION\]/, 
-          `💡 **画布操作建议**: ${actionLabel} - 请在画布中选中图片后使用工具栏执行此操作`);
+      const canvasActionRequest = canvasAction
+        ? resolveChatCanvasAction(canvasAction, canvasImages, selectedCanvasImage?.id)
+        : null;
+      if (canvasAction) {
+        // 指令块不展示给用户；能落到画布图片上的，渲染为“在画布执行”按钮。
+        assistantContent = assistantContent
+          .replace(/\[CANVAS_ACTION\][\s\S]*?\[\/CANVAS_ACTION\]/, '')
+          .replace(/```canvas-action\s*\{[\s\S]*?\}\s*```/, '')
+          .trim();
+        if (!canvasActionRequest) {
+          assistantContent += '\n\n💡 请先在画布中选中一张图片，再使用工具栏执行此操作。';
+        }
+        setMessages(prev => prev.map(msg =>
+          msg.id === assistantMessageId
+            ? { ...msg, content: assistantContent, canvasAction: canvasActionRequest || undefined }
+            : msg
+        ));
       }
 
       // 保存对话
-      const finalMessages = [...newMessages, { id: assistantMessageId, role: 'assistant' as const, content: assistantContent, timestamp: Date.now() }];
+      const finalMessages = [...newMessages, {
+        id: assistantMessageId,
+        role: 'assistant' as const,
+        content: assistantContent,
+        timestamp: Date.now(),
+        ...(toolWorkflow ? { workflow: toolWorkflow } : {}),
+        ...(canvasActionRequest ? { canvasAction: canvasActionRequest } : {}),
+      }];
       saveSession(finalMessages, model, systemPrompt, taskSessionId);
       // 记录聊天使用
       try { UserManager.getInstance().recordUsage('chat'); } catch {}
@@ -5372,6 +5383,60 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                       </div>
                     </div>
                   )}
+                  {/* build_workflow 工作流预览卡 */}
+                  {message.role === 'assistant' && message.workflow && Array.isArray(message.workflow.nodes) && (() => {
+                    const workflow = message.workflow;
+                    return (
+                      <div data-testid="chat-workflow-preview" className={`mt-2 rounded-xl overflow-hidden ${isGold ? 'bg-black/30 border border-gold/15' : 'bg-gray-50 border border-gray-200'}`}>
+                        <div className={`px-3 py-1.5 flex items-center gap-2 ${isGold ? 'bg-gold/5 border-b border-gold/10' : 'bg-gray-100 border-b border-gray-200'}`}>
+                          <Zap size={12} className={isGold ? 'text-gold' : 'text-blue-500'} />
+                          <span className={`text-xs font-medium flex-1 truncate ${isGold ? 'text-gold/90' : 'text-gray-700'}`}>{workflow.name}</span>
+                          <span className={`text-[10px] ${isGold ? 'text-gold/60' : 'text-gray-500'}`}>{workflow.nodes.length} 个节点</span>
+                        </div>
+                        <div className="px-3 py-2 flex flex-wrap items-center gap-1">
+                          {workflow.nodes.slice(0, 8).map((node, nodeIdx) => (
+                            <span key={node.id} className="flex items-center gap-1">
+                              {nodeIdx > 0 && <ArrowRight size={10} className={isGold ? 'text-gold/40' : 'text-gray-400'} />}
+                              <span className={`text-[11px] px-1.5 py-0.5 rounded ${isGold ? 'bg-gold/10 text-gold/80' : 'bg-white border border-gray-200 text-gray-700'}`}>{node.label || node.type}</span>
+                            </span>
+                          ))}
+                          {workflow.nodes.length > 8 && <span className={`text-[10px] ${isGold ? 'text-gold/50' : 'text-gray-400'}`}>…</span>}
+                        </div>
+                        {onApplyWorkflow && (
+                          <div className="px-3 pb-2">
+                            <button
+                              type="button"
+                              data-testid="chat-workflow-open"
+                              onClick={() => onApplyWorkflow(workflow)}
+                              className={`text-xs px-2.5 py-1 rounded-lg ${isGold ? 'bg-gold/15 text-gold hover:bg-gold/25' : 'bg-blue-500 text-white hover:bg-blue-600'}`}
+                            >
+                              在节点模式打开
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                  {/* [CANVAS_ACTION] 画布操作：点击后在画布打开对应工具，由用户确认参数和费用 */}
+                  {message.role === 'assistant' && message.canvasAction && (() => {
+                    const action = message.canvasAction;
+                    const targetExists = canvasImages.some(image => image.id === action.imageId);
+                    return (
+                      <div className="mt-2">
+                        <button
+                          type="button"
+                          data-testid="chat-canvas-action"
+                          disabled={!targetExists}
+                          title={targetExists ? undefined : '目标图片已不在画布上'}
+                          onClick={() => requestChatCanvasAction(action)}
+                          className={`text-xs px-2.5 py-1 rounded-lg flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed ${isGold ? 'bg-gold/15 text-gold hover:bg-gold/25' : 'bg-blue-500 text-white hover:bg-blue-600'}`}
+                        >
+                          <Wand2 size={12} />
+                          在画布执行：{chatCanvasToolLabel(action.type)}{action.imageName ? `（${action.imageName}）` : ''}
+                        </button>
+                      </div>
+                    );
+                  })()}
                   {/* AI生成的图片 - ChatGPT风格：每张图独立卡片，垂直排列 */}
                   {message.generatedImages && message.generatedImages.length > 0 && (
                     <div className="flex flex-col gap-3 mt-3">
