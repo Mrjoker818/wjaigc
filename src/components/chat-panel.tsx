@@ -25,6 +25,7 @@ import { ThirdPartyModelDialog } from '@/components/third-party-model-dialog';
 import { UniversalApiManager } from '@/lib/universal-api-manager';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import type { CanvasImage } from '@/components/infinite-canvas';
+import type { Workflow } from '@/lib/workflow-engine';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { readPersistedImageModelSelection, selectInitialModel } from '@/lib/model-defaults';
 import { getPromptTemplates, searchTemplates, type PromptTemplate } from '@/lib/prompt-templates';
@@ -574,6 +575,8 @@ interface ChatPanelProps {
   onSuggestionAction?: (action: string, data?: Record<string, string>) => void;
   /** Called when user clicks "generate image" suggestion - triggers image generation directly */
   onGenerateImage?: (prompt: string, outputCount?: number, aspectRatio?: string, quality?: string) => void;
+  /** 模型通过 build_workflow 创建了工作流：写入节点模式并切过去 */
+  onApplyWorkflow?: (workflow: Workflow) => void;
   brandDna?: Record<string, unknown> | null;
   onInjectBrandDna?: (dna: Record<string, unknown>) => void;
   /** Image sent from canvas right-click menu "发送到聊天修改" */
@@ -1307,7 +1310,7 @@ function extractPromptForGeneration(content: string): string {
 /* ========== 智能体搭建弹窗 ========== */
 /* AgentBuilderDialog 已提取至 src/components/chat/AgentBuilderDialog.tsx */
 
-export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAuthority = 'legacy', onAddToPrompt, onAddImages, onAddGeneratedImage, onAddGeneratedImages, canvasImages = [], selectedCanvasImage, onResolveCanvasImageForChat, onChatModelChange, onSuggestionAction, onGenerateImage, brandDna, onInjectBrandDna, chatInitialImage, chatInitialImageResolved = false, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage, externalPrompt, onExternalPromptConsumed }: ChatPanelProps) {
+export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAuthority = 'legacy', onAddToPrompt, onAddImages, onAddGeneratedImage, onAddGeneratedImages, canvasImages = [], selectedCanvasImage, onResolveCanvasImageForChat, onChatModelChange, onSuggestionAction, onGenerateImage, onApplyWorkflow, brandDna, onInjectBrandDna, chatInitialImage, chatInitialImageResolved = false, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage, externalPrompt, onExternalPromptConsumed }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [showFullHistory, setShowFullHistory] = useState(false);
   const visibleMessages = useMemo(() => (showFullHistory ? messages : messages.slice(-CHAT_RENDER_WINDOW)).filter(Boolean), [messages, showFullHistory]);
@@ -1356,6 +1359,12 @@ export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAutho
   const [systemPrompt, setSystemPrompt] = useState('');
   const [isThinkingMode, setIsThinkingMode] = useState(false);
   const [isAgentMode, setIsAgentMode] = useState(false);
+  // Agent 模式关闭时，消耗积分的工具会暂停在这里，等用户确认后再执行。
+  const [pendingToolConfirmation, setPendingToolConfirmation] = useState<{
+    toolName: string;
+    toolArgs: Record<string, unknown>;
+    label: string;
+  } | null>(null);
   const [agentSteps, setAgentSteps] = useState<Array<{id: string; tool: string; status: 'pending'|'running'|'done'|'error'; result?: string; startTime?: number}>>([]);
   const [isLoading, setIsLoading] = useState(false);
   const thinkingStartTimeRef = useRef<number>(0);
@@ -2772,9 +2781,23 @@ export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAutho
     }
   };
 
-  const handleSend = useCallback(async (overrideText?: string, options?: { systemPromptOverride?: string }) => {
+  // 用户确认了暂停的付费工具：用同一请求上下文只执行这一个调用。
+  const handleSendRef = useRef<((text?: string, options?: { confirmedToolCall?: { name: string; arguments: Record<string, unknown> } }) => void) | null>(null);
+  const confirmPendingTool = useCallback(() => {
+    const pending = pendingToolConfirmation;
+    if (!pending) return;
+    setPendingToolConfirmation(null);
+    void handleSendRef.current?.('', { confirmedToolCall: { name: pending.toolName, arguments: pending.toolArgs } });
+  }, [pendingToolConfirmation]);
+
+  const cancelPendingTool = useCallback(() => {
+    setPendingToolConfirmation(null);
+    toast.info('已取消这次操作');
+  }, []);
+
+  const handleSend = useCallback(async (overrideText?: string, options?: { systemPromptOverride?: string; confirmedToolCall?: { name: string; arguments: Record<string, unknown> } }) => {
     const textToSend = overrideText ?? input;
-    if (textToSend.trim() || isLoading) {
+    if (textToSend.trim() || isLoading || options?.confirmedToolCall) {
       // continue
     } else {
       return;
@@ -3242,6 +3265,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
           messageId: assistantMessageId,
           sourceVersionIds: chatSourceVersionIds,
           selectedEntityIds: chatSelectedEntityIds,
+          ...(options?.confirmedToolCall ? { confirmedToolCall: options.confirmedToolCall } : {}),
         }),
       });
 
@@ -3269,6 +3293,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       const addedImageUrls = new Set<string>(); // 已添加到画布的图片URL去重
       const toolPendingTaskIds: Array<{ taskId: string; model: string; providerId: string; type: 'image' | 'video'; runId?: string }> = []; // 工具返回的异步任务，需轮询
       let toolGeneratedVideo: string | undefined; // 工具生成的视频URL
+      let toolSkillRunId: string | undefined; // 模型通过 run_skill 启动的技能运行
+      let toolWorkflow: Workflow | undefined; // 模型通过 build_workflow 创建的工作流
       let currentSSEEvent = ''; // 当前SSE事件类型
       let sseBuffer = ''; // SSE buffer拼接，防止跨chunk JSON破裂
 
@@ -3355,6 +3381,16 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 }
 
                 // ====== 处理Agent工具调用事件（兼容两种事件名格式） ======
+                // Agent 模式关闭时，消耗积分的工具先暂停，等用户在确认卡上点执行。
+                if (eventType === 'tool_confirmation_required' && toolName) {
+                  setPendingToolConfirmation({
+                    toolName,
+                    toolArgs: parsed.toolArgs && typeof parsed.toolArgs === 'object' ? parsed.toolArgs : {},
+                    label: parsed.label || toolName,
+                  });
+                  continue;
+                }
+
                 // Agent模式事件兼容：tool_execution_start / tool_start 都识别为工具开始
                 if ((eventType === 'tool_execution_start' || eventType === 'tool_start') && toolName) {
                   const toolLabel = parsed.label || `正在执行 ${toolName}...`;
@@ -3412,7 +3448,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                       progress: parsed.success ? 100 : toolExecutions[execIdx].progress,
                       result: parsed.result,
                       imageUrls: parsed.imageUrls,
-                      videoUrl: parsed.videoUrl,
+                      videoUrl: parsed.videoUrl || parsed.videoUrls?.[0],
                       error: parsed.error,
                     };
                   }
@@ -3425,11 +3461,14 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                   if (parsed.imageUrls && parsed.imageUrls.length > 0) {
                     toolGeneratedImages.push(...parsed.imageUrls);
                   }
-                  if (parsed.videoUrl) {
-                    toolGeneratedVideo = parsed.videoUrl;
+                  const resultVideoUrl = parsed.videoUrl || parsed.videoUrls?.[0];
+                  if (resultVideoUrl) {
+                    toolGeneratedVideo = resultVideoUrl;
                   }
                   // 收集异步任务ID（后端直接发送 {taskId, model, providerId, type} 对象数组）
                   if (parsed.taskIds && parsed.taskIds.length > 0) {
+                    const skillRunId = parsed.taskIds.find((task: { runId?: unknown }) => typeof task.runId === 'string')?.runId;
+                    if (typeof skillRunId === 'string') toolSkillRunId = skillRunId;
                     // 如果同时有imageUrls，直接使用imageUrls；否则添加到待轮询列表
                     if (!parsed.imageUrls || parsed.imageUrls.length === 0) {
                       toolPendingTaskIds.push(...parsed.taskIds);
@@ -3438,6 +3477,9 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                         persistMessageUpdate(assistantMessageId, message => ({ ...message, agentRunId: runId }));
                       }
                     }
+                  }
+                  if (parsed.workflow && Array.isArray(parsed.workflow.nodes)) {
+                    toolWorkflow = parsed.workflow as Workflow;
                   }
                   continue;
                 }
@@ -3521,6 +3563,39 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       if (hasToolGeneratedImages) {
         // 工具执行已由流中的 tool_execution_result/tool_execution_complete 事件处理
         console.log('[ChatImage] Function Calling generated', toolGeneratedImages.length, 'images, pending tasks:', toolPendingTaskIds.length);
+
+        // 工具已完成的图片直接放上画布；异步任务的结果由下方轮询完成后放上画布。
+        if (toolGeneratedImages.length > 0) {
+          const toolMessage = messagesRef.current.find(msg => msg.id === assistantMessageId);
+          if (toolMessage) {
+            for (const imageUrl of toolGeneratedImages) {
+              await addGeneratedImageToCanvas(imageUrl, toolMessage);
+            }
+          }
+        }
+        if (toolGeneratedVideo && !addedImageUrls.has(toolGeneratedVideo)) {
+          addedImageUrls.add(toolGeneratedVideo);
+          if (onAddImages) await onAddImages([toolGeneratedVideo]);
+          persistMessageUpdate(assistantMessageId, msg => ({
+            ...msg,
+            generatedImages: [...new Set([...(msg.generatedImages || []), toolGeneratedVideo])],
+          }));
+        }
+        if (toolSkillRunId && projectId) {
+          try {
+            const skillReferences = await loadCompletedCanvasSkillAssets({
+              projectId,
+              runId: toolSkillRunId,
+              sourceVersionIds: [],
+              authority: canvasAuthority,
+              expectedActorId: skillAccountKey,
+            });
+            if (skillReferences.length > 0) await receiveSkillOutputs(skillReferences, { runId: toolSkillRunId });
+          } catch (error) {
+            console.warn('[ChatSkill] 技能产物添加到画布失败:', error);
+          }
+        }
+        if (toolWorkflow) onApplyWorkflow?.(toolWorkflow);
 
         // 当工具返回 taskIds（异步任务）但没有直接的 imageUrls 时，需要轮询获取结果
         if (toolPendingTaskIds.length > 0) {
@@ -4047,6 +4122,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       abortControllerRef.current = null;
     }
   }, [input, isLoading, isChatModelReady, messages, model, systemPrompt, isThinkingMode, saveSession, persistMessageUpdate, pendingImages, allAgents, activeMentions, brandDna, tuneContextString, onAddImages, currentSessionId, projectId]);
+  handleSendRef.current = handleSend;
 
   const handleUseSkill = useCallback((skill: SkillDefinition) => {
     skillProjectionControllerRef.current?.abort();
@@ -5594,6 +5670,18 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
           {/* 图片引用预览 - Lovart风格：小方形缩略图在输入框上方 */}
           {/* (缩略图已移至输入区域上方渲染) */}
 
+          {pendingToolConfirmation && (
+            <div className="mx-4 mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+              <p className="mb-2 font-medium">执行前确认</p>
+              <p className="mb-3 text-muted-foreground">
+                {pendingToolConfirmation.label}会消耗积分，确认后才会执行。
+              </p>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={confirmPendingTool} disabled={isLoading}>确认执行</Button>
+                <Button size="sm" variant="outline" onClick={cancelPendingTool} disabled={isLoading}>取消</Button>
+              </div>
+            </div>
+          )}
           <div ref={messagesEndRef} />
         </div>
 

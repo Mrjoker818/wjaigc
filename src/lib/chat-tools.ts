@@ -9,6 +9,12 @@ import {
   withImageOutputPreference,
   type ImageBackgroundMode,
 } from './image-generation-output';
+import { listSkillsForSurface } from './skill-runtime/catalog';
+import { createSkillRun, dispatchSkillRunExecution, getSkillRun } from './skill-runtime/service';
+import { requiredSkillModelRoles, type SkillDefinition } from './skill-runtime/types';
+import type { FrozenBindings } from './skill-runtime/cost-estimator';
+import type { User } from './user-types';
+import { AI_BUILD_PROMPT, createWorkflowFromAIResult, parseAIBuildResponse } from './workflow-engine';
 
 // 服务器端口，所有服务器间 fetch 调用统一使用 localhost + 此端口
 const SERVER_PORT = process.env.DEPLOY_RUN_PORT || '5000';
@@ -22,6 +28,11 @@ const SERVER_PORT = process.env.DEPLOY_RUN_PORT || '5000';
  */
 
 // ============ Tool Definitions (OpenAI function calling 格式) ============
+
+// 会消耗积分或产生素材的工具。Agent 模式关闭时，执行前要在对话里确认。
+export const PAID_CHAT_TOOLS = new Set([
+  'generate_image', 'img2img', 'remove_bg', 'upscale', 'generate_video', 'extend_canvas', 'run_skill',
+]);
 
 export const CHAT_TOOLS = [
   {
@@ -260,6 +271,44 @@ export const CHAT_TOOLS = [
       },
     },
   },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'run_skill',
+      description: '运行一个预设技能来完成多步骤创作任务，例如电商套图、营销海报、视频脚本。技能目录见系统提示。只在用户的需求明确对应某个技能时使用，普通的单张出图、修图、放大请直接用对应的单一工具。',
+      parameters: {
+        type: 'object',
+        properties: {
+          skill_id: {
+            type: 'string',
+            description: '要运行的技能 id，必须来自系统提示中的技能目录',
+          },
+          request: {
+            type: 'string',
+            description: '用户的具体需求，会作为技能的输入',
+          },
+        },
+        required: ['skill_id', 'request'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'build_workflow',
+      description: '根据用户的描述在节点模式里创建一个可复用的工作流。当用户要求搭建流程、工作流、自动化流水线，或描述的是多个步骤串联的生产过程时使用。单次的出图、修图、放大不要用这个工具。',
+      parameters: {
+        type: 'object',
+        properties: {
+          description: {
+            type: 'string',
+            description: '用户想要的工作流，用自然语言描述目标和步骤',
+          },
+        },
+        required: ['description'],
+      },
+    },
+  },
 ];
 
 // ============ Tool Execution ============
@@ -323,6 +372,8 @@ export interface ToolCallResult {
   taskIds?: Array<{ taskId: string; model: string; providerId: string; type: 'image' | 'video'; runId?: string }>;
   /** 结果描述，用于回传给 LLM */
   resultText: string;
+  /** build_workflow 产出的工作流，前端写入节点模式并在画布放预览卡 */
+  workflow?: import('./workflow-engine').Workflow;
   /** Server-only continuation for an agent-v2 task admitted without provider execution. */
   admittedExecution?: AdmittedToolExecution;
 }
@@ -432,6 +483,10 @@ export async function executeToolCall(
       return executeAnalyzeImage(args, context);
     case 'extend_canvas':
       return executeExtendCanvas(args, context);
+    case 'run_skill':
+      return executeRunSkill(args, context);
+    case 'build_workflow':
+      return executeBuildWorkflow(args, context);
     default:
       return { success: false, error: `未知工具: ${toolName}`, resultText: `错误：未知工具 ${toolName}` };
   }
@@ -618,29 +673,20 @@ async function executeGenerateImage(
       imageUrls.push(data.imageUrl);
     }
 
-    // 如果是异步任务（taskIds），不再在工具内阻塞轮询，直接返回 taskIds 给前端轮询
-    // 这样 LLM 不需要等待图片生成完成，可以立即继续回复用户
+    // 异步任务先等它完成，再把成品交还模型，模型才能基于结果继续下一步。
+    // 等待超时或 agent-v2 延迟执行时，退回 taskIds 由前端或续跑流程接管。
     const taskIds: string[] = data.taskIds || (data.taskId ? [data.taskId] : []);
     if (taskIds.length > 0 && imageUrls.length === 0) {
-      return {
-        success: true,
-        imageUrls: [],
-        taskIds: taskIds.map(tid => ({
-          taskId: tid,
+      return finishSubmittedChatTasks(
+        taskIds.map(taskId => ({
+          taskId,
           model: data.model || '',
           providerId: data.providerId || '',
           type: 'image' as const,
         })),
-        ...(context.deferAgentExecution ? {
-          admittedExecution: {
-            kind: 'generation' as const,
-            taskIds,
-            userId: context.userId,
-            userRole: context.userRole || 'user',
-          },
-        } : {}),
-        resultText: `已提交 ${taskIds.length} 个图像生成任务，正在生成中...图片完成后将自动添加到画布。`,
-      };
+        context,
+        `已提交 ${taskIds.length} 个图像生成任务，仍在生成中，完成后将自动添加到画布。`,
+      );
     }
 
     if (imageUrls.length === 0) {
@@ -842,19 +888,11 @@ async function executeImg2Img(
     }
 
     if (taskIds.length > 0) {
-      return {
-        success: true,
-        taskIds: taskIds.map(tid => ({ taskId: tid, model: data.model || '', providerId: data.providerId || '', type: 'image' as const })),
-        ...(context.deferAgentExecution ? {
-          admittedExecution: {
-            kind: 'generation' as const,
-            taskIds,
-            userId: context.userId,
-            userRole: context.userRole || 'user',
-          },
-        } : {}),
-        resultText: `图生图任务已提交（任务ID: ${taskIds.join(', ')}），正在生成中。`,
-      };
+      return finishSubmittedChatTasks(
+        taskIds.map(taskId => ({ taskId, model: data.model || '', providerId: data.providerId || '', type: 'image' as const })),
+        context,
+        `图生图任务已提交（任务ID: ${taskIds.join(', ')}），仍在生成中。`,
+      );
     }
 
     return { success: false, error: '图生图未返回结果', resultText: '图生图API未返回有效结果。' };
@@ -899,11 +937,11 @@ async function executeRemoveBg(
       return { success: true, imageUrls: resultUrls, resultText: `成功移除了图片背景。透明背景图和蒙版图已添加到画布上。` };
     }
     if (taskIds.length > 0) {
-      return {
-        success: true,
-        taskIds: taskIds.map(tid => ({ taskId: tid, model: data.model || '', providerId: data.providerId || '', type: 'image' as const })),
-        resultText: `移除背景任务已提交，正在处理中。`,
-      };
+      return finishSubmittedChatTasks(
+        taskIds.map(taskId => ({ taskId, model: data.model || '', providerId: data.providerId || '', type: 'image' as const })),
+        context,
+        '移除背景任务已提交，仍在处理中。',
+      );
     }
     return { success: false, error: '未返回结果', resultText: '移除背景API未返回有效结果。' };
   } catch (err) {
@@ -950,11 +988,11 @@ async function executeUpscale(
       return { success: true, imageUrls: resultUrls, resultText: `成功将图片放大了${scale}倍。放大后的图片已添加到画布上。` };
     }
     if (taskIds.length > 0) {
-      return {
-        success: true,
-        taskIds: taskIds.map(tid => ({ taskId: tid, model: data.model || '', providerId: data.providerId || '', type: 'image' as const })),
-        resultText: `图片放大任务已提交，正在处理中。`,
-      };
+      return finishSubmittedChatTasks(
+        taskIds.map(taskId => ({ taskId, model: data.model || '', providerId: data.providerId || '', type: 'image' as const })),
+        context,
+        '图片放大任务已提交，仍在处理中。',
+      );
     }
     return { success: false, error: '未返回结果', resultText: '图片放大API未返回有效结果。' };
   } catch (err) {
@@ -998,16 +1036,16 @@ async function executeGenerateVideo(
     const taskIds: string[] = data.taskIds || (data.taskId ? [data.taskId] : []);
 
     if (taskIds.length > 0) {
-      return {
-        success: true,
-        taskIds: taskIds.map(tid => ({
-          taskId: tid,
+      return finishSubmittedChatTasks(
+        taskIds.map(taskId => ({
+          taskId,
           model: data.model || '',
           providerId: data.providerId || '',
           type: 'video' as const,
         })),
-        resultText: `视频生成任务已提交（任务ID: ${taskIds.join(', ')}），视频生成通常需要1-3分钟。`,
-      };
+        context,
+        `视频生成任务已提交（任务ID: ${taskIds.join(', ')}），仍在生成中，完成后将自动添加到画布。`,
+      );
     }
 
     const videoUrls: string[] = data.videoUrls || (data.videoUrl ? [data.videoUrl] : []);
@@ -1139,17 +1177,323 @@ async function executeExtendCanvas(
       return { success: true, imageUrls: resultUrls, resultText: `成功扩展了画面。扩展后的图片已添加到画布上。` };
     }
     if (taskIds.length > 0) {
-      return {
-        success: true,
-        taskIds: taskIds.map(tid => ({ taskId: tid, model: data.model || '', providerId: data.providerId || '', type: 'image' as const })),
-        resultText: `扩展画面任务已提交，正在处理中。`,
-      };
+      return finishSubmittedChatTasks(
+        taskIds.map(taskId => ({ taskId, model: data.model || '', providerId: data.providerId || '', type: 'image' as const })),
+        context,
+        '扩展画面任务已提交，仍在处理中。',
+      );
     }
     return { success: false, error: '未返回结果', resultText: '扩展画面API未返回有效结果。' };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { success: false, error: msg, resultText: `扩展画面出错: ${msg}` };
   }
+}
+
+// ============ Skill execution ============
+
+// 技能运行等待上限。技能可能包含多步生成，给足时间；超时则退回 runId，
+// 由前端技能面板继续跟踪，不阻断对话。
+const SKILL_RUN_WAIT_MS = 90_000;
+const SKILL_RUN_POLL_INTERVAL_MS = 3_000;
+
+const TEXT_INPUT_KINDS = new Set(['text', 'select', 'number']);
+
+function skillRequestInputKey(skill: SkillDefinition): string | undefined {
+  const named = skill.inputs.find(input => input.key === 'request' && TEXT_INPUT_KINDS.has(input.kind));
+  if (named) return named.key;
+  const required = skill.inputs.find(input => input.required && TEXT_INPUT_KINDS.has(input.kind));
+  return required?.key ?? skill.inputs.find(input => TEXT_INPUT_KINDS.has(input.kind))?.key;
+}
+
+function skillModelBindings(skill: SkillDefinition, context: ToolContext): FrozenBindings | string {
+  const bindings: FrozenBindings = {};
+  for (const role of requiredSkillModelRoles(skill)) {
+    if ((role === 'orchestrator' || role === 'vision') && context.chatProviderId && context.chatModel) {
+      bindings[role] = { providerId: context.chatProviderId, modelId: context.chatModel };
+    } else if ((role === 'image' || role === 'edit') && context.imageProviderId && context.imageModel) {
+      bindings[role] = { providerId: context.imageProviderId, modelId: context.imageModel };
+    } else {
+      return `当前没有为技能配置 ${role} 模型，无法运行`;
+    }
+  }
+  return bindings;
+}
+
+function skillRunText(outputs: unknown): string {
+  if (!Array.isArray(outputs)) return '';
+  return outputs
+    .filter((output): output is { kind: string; content: string } => (
+      Boolean(output) && typeof output === 'object'
+      && (output as { kind?: unknown }).kind === 'text'
+      && typeof (output as { content?: unknown }).content === 'string'
+    ))
+    .map(output => output.content.trim())
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+async function executeRunSkill(
+  args: Record<string, unknown>,
+  context: ToolContext,
+): Promise<ToolCallResult> {
+  const skillId = String(args.skill_id);
+  const request = String(args.request);
+  const skill = listSkillsForSurface('canvas').find(candidate => candidate.id === skillId);
+  if (!skill) {
+    return { success: false, error: `未知技能: ${skillId}`, resultText: `没有找到技能 ${skillId}，请改用技能目录中的技能。` };
+  }
+  if (!context.projectId) {
+    return { success: false, error: '缺少项目', resultText: '当前没有打开的项目，无法运行技能。' };
+  }
+  const inputKey = skillRequestInputKey(skill);
+  if (!inputKey) {
+    return { success: false, error: '技能不接受文本输入', resultText: `${skill.name} 需要图片等素材输入，请在技能面板中运行。` };
+  }
+  const modelBindings = skillModelBindings(skill, context);
+  if (typeof modelBindings === 'string') {
+    return { success: false, error: modelBindings, resultText: modelBindings };
+  }
+
+  const actor: User = {
+    id: context.userId,
+    name: context.userId,
+    role: context.userRole ?? 'user',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  let runId: string;
+  try {
+    const created = await createSkillRun({
+      actor,
+      request: {
+        skillId: skill.id,
+        skillVersion: skill.version,
+        surface: 'canvas',
+        projectId: context.projectId,
+        workspaceId: `canvas:${context.projectId}`,
+        inputValues: { [inputKey]: request },
+        sourceVersionIds: [],
+        modelBindings,
+        idempotencyKey: context.idempotencyKey || `chat-skill:${context.projectId}:${skill.id}:${Date.now()}`,
+      },
+    });
+    runId = created.runId;
+    await dispatchSkillRunExecution({ actorUserId: context.userId, runId });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { success: false, error: message, resultText: `技能运行失败：${message}` };
+  }
+
+  const runTask = { taskId: runId, model: '', providerId: '', type: 'image' as const, runId };
+  const deadline = Date.now() + SKILL_RUN_WAIT_MS;
+  let lastStatus = 'queued';
+  while (Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, SKILL_RUN_POLL_INTERVAL_MS));
+    let history: Awaited<ReturnType<typeof getSkillRun>>;
+    try {
+      history = await getSkillRun({ actorUserId: context.userId, runId });
+    } catch {
+      continue;
+    }
+    lastStatus = history.status;
+    if (history.status === 'completed') {
+      const text = skillRunText(history.outputs);
+      const assetCount = history.assetVersionIds.length;
+      return {
+        success: true,
+        taskIds: [runTask],
+        resultText: `${skill.name} 已完成。${text ? `结果：\n${text}` : ''}${assetCount > 0 ? `\n产出 ${assetCount} 个素材，已添加到画布。` : ''}`,
+      };
+    }
+    if (history.status === 'failed' || history.status === 'cancelled' || history.status === 'timeout') {
+      const reason = history.error?.message || history.status;
+      return { success: false, error: reason, taskIds: [runTask], resultText: `${skill.name} 运行失败：${reason}` };
+    }
+  }
+  return {
+    success: true,
+    taskIds: [runTask],
+    resultText: `${skill.name} 仍在运行（状态：${lastStatus}），完成后结果会自动添加到画布。`,
+  };
+}
+
+async function executeBuildWorkflow(
+  args: Record<string, unknown>,
+  context: ToolContext,
+): Promise<ToolCallResult> {
+  const description = String(args.description);
+  if (!context.chatModel) {
+    return { success: false, error: '未配置对话模型', resultText: '当前没有可用的对话模型，无法创建工作流。' };
+  }
+  let content = '';
+  try {
+    const response = await fetchWithV1Retry(context.chatBaseUrl, '/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${context.chatApiKey}`,
+      },
+      body: JSON.stringify({
+        model: context.chatModel,
+        temperature: 0.7,
+        messages: [
+          { role: 'system', content: AI_BUILD_PROMPT },
+          { role: 'user', content: description },
+        ],
+      }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!response.ok) {
+      return { success: false, error: `工作流生成失败: ${response.status}`, resultText: `创建工作流失败（HTTP ${response.status}）。` };
+    }
+    const payload = await response.json() as { choices?: Array<{ message?: { content?: unknown } }> };
+    const message = payload.choices?.[0]?.message?.content;
+    content = typeof message === 'string' ? message : '';
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { success: false, error: message, resultText: `创建工作流出错：${message}` };
+  }
+
+  const parsed = parseAIBuildResponse(content);
+  if (!parsed || parsed.nodes.length < 2) {
+    return { success: false, error: '工作流格式无效', resultText: '没有生成可用的工作流，请把需求描述得更具体一些。' };
+  }
+  const workflow = createWorkflowFromAIResult(parsed, { defaultChatModel: context.chatModel });
+  return {
+    success: true,
+    data: { workflow },
+    workflow,
+    resultText: `已创建工作流「${workflow.name}」，包含 ${workflow.nodes.length} 个节点，已写入节点模式。`,
+  };
+}
+
+// ============ Task completion waiting ============
+
+// 工具在把结果交还模型前等待任务完成的上限。超过上限则退回 taskIds，
+// 由前端继续轮询，避免一次工具调用耗尽整轮 Agent 超时。
+const TOOL_TASK_WAIT_MS = 90_000;
+const TOOL_TASK_POLL_INTERVAL_MS = 3_000;
+
+type SubmittedChatTask = { taskId: string; model: string; providerId: string; type: 'image' | 'video' };
+
+interface AwaitedChatTasks {
+  imageUrls: string[];
+  videoUrls: string[];
+  pending: SubmittedChatTask[];
+  failed: string[];
+}
+
+/**
+ * 轮询已提交的任务直到完成、失败或超时。
+ * 完成的图片/视频 URL 直接交还模型，让模型能基于成品继续下一步；
+ * 超时仍未完成的任务保留为 pending，交由前端继续轮询。
+ */
+async function awaitChatTasks(
+  tasks: SubmittedChatTask[],
+  context: ToolContext,
+): Promise<AwaitedChatTasks> {
+  const imageUrls: string[] = [];
+  const videoUrls: string[] = [];
+  const pending: SubmittedChatTask[] = [];
+  const failed: string[] = [];
+  const deadline = Date.now() + TOOL_TASK_WAIT_MS;
+
+  for (const task of tasks) {
+    let settled = false;
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, TOOL_TASK_POLL_INTERVAL_MS));
+      let payload: Record<string, unknown>;
+      try {
+        const response = await fetch(`http://localhost:${SERVER_PORT}/api/poll-task`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(await getInternalRequestHeaders(context.userId, context.userRole)),
+          },
+          body: JSON.stringify({ taskId: task.taskId, model: task.model, providerId: task.providerId }),
+          signal: AbortSignal.timeout(20_000),
+        });
+        payload = await response.json() as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      const status = typeof payload.status === 'string' ? payload.status : '';
+      if (status === 'completed') {
+        const images = Array.isArray(payload.imageUrls)
+          ? payload.imageUrls.filter((url): url is string => typeof url === 'string' && url.length > 0)
+          : [];
+        if (typeof payload.imageUrl === 'string' && payload.imageUrl && !images.includes(payload.imageUrl)) {
+          images.unshift(payload.imageUrl);
+        }
+        const videos = Array.isArray(payload.videoUrls)
+          ? payload.videoUrls.filter((url): url is string => typeof url === 'string' && url.length > 0)
+          : [];
+        if (typeof payload.videoUrl === 'string' && payload.videoUrl && !videos.includes(payload.videoUrl)) {
+          videos.unshift(payload.videoUrl);
+        }
+        imageUrls.push(...images);
+        videoUrls.push(...videos);
+        settled = true;
+        break;
+      }
+      if (status === 'failed' || status === 'cancelled' || status === 'timeout' || payload.retryable === false) {
+        failed.push(typeof payload.error === 'string' && payload.error ? payload.error : `任务 ${task.taskId} 未完成`);
+        settled = true;
+        break;
+      }
+    }
+    if (!settled) pending.push(task);
+  }
+
+  return { imageUrls, videoUrls, pending, failed };
+}
+
+/**
+ * 工具提交出异步任务后的统一收尾：等待完成并把成品交还模型。
+ * agent-v2 的延迟执行路径不在这里等待，任务由准入后的续跑流程接管。
+ */
+async function finishSubmittedChatTasks(
+  tasks: SubmittedChatTask[],
+  context: ToolContext,
+  pendingText: string,
+): Promise<ToolCallResult> {
+  if (context.deferAgentExecution) {
+    return {
+      success: true,
+      taskIds: tasks,
+      admittedExecution: {
+        kind: 'generation' as const,
+        taskIds: tasks.map(task => task.taskId),
+        userId: context.userId,
+        userRole: context.userRole || 'user',
+      },
+      resultText: pendingText,
+    };
+  }
+
+  const awaited = await awaitChatTasks(tasks, context);
+  if (awaited.imageUrls.length > 0 || awaited.videoUrls.length > 0) {
+    const finished = [...awaited.imageUrls, ...awaited.videoUrls];
+    const note = awaited.pending.length > 0
+      ? `另有 ${awaited.pending.length} 个任务仍在生成，完成后会自动添加到画布。`
+      : '';
+    return {
+      success: true,
+      imageUrls: awaited.imageUrls,
+      videoUrls: awaited.videoUrls,
+      ...(awaited.pending.length > 0 ? { taskIds: awaited.pending } : {}),
+      resultText: `已完成，生成结果：${finished.join(' ')}。${note}可基于这些结果继续下一步。`,
+    };
+  }
+  if (awaited.pending.length > 0) {
+    return { success: true, taskIds: awaited.pending, resultText: pendingText };
+  }
+  return {
+    success: false,
+    error: awaited.failed[0] || '任务未完成',
+    resultText: `任务失败：${awaited.failed.join('；') || '未获得结果'}`,
+  };
 }
 
 // ============ Helpers ============

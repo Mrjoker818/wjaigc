@@ -7222,6 +7222,13 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
     });
   }, [getCurrentImageModel, handleGenerate, notifyMissingImageModel]);
 
+  // 智能对话创建的工作流写入节点模式并切过去，用户可以直接运行或调整。
+  const handleApplyChatWorkflow = useCallback((workflow: Workflow) => {
+    setNodeWorkflow(workflow);
+    safeSwitchMode('node');
+    toast.success(`已创建工作流「${workflow.name}」，已切换到节点模式`);
+  }, [safeSwitchMode]);
+
   // 适配 InfiniteCanvas 的简单回调函数
   const handleCanvasGenerateVariation = useCallback((image: CanvasImage) => {
     setExternalReferenceImage({ url: image.url, description: image.prompt || '' });
@@ -8601,7 +8608,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
               </div>
             </div>
             <div className={activePanel === 'chat' ? 'flex-1 overflow-hidden' : 'hidden'}>
-              <ChatPanel isVisible={!panelCollapsed && activePanel === 'chat'} canvasAuthority={collaborativeCanvas.authority==='unknown'?'pending':collaborativeCanvas.authority} themeStyle={themeStyle} projectId={currentProject?.id} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} onAddGeneratedImage={handleAddEmbeddedChatImage} onAddGeneratedImages={handleAddEmbeddedChatImages} canvasImages={images} selectedCanvasImage={selectedImage} onResolveCanvasImageForChat={resolveCanvasImageForChat} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage?.scope === canvasChatScopeRef.current.epoch ? chatInitialImage.image : null} chatInitialImageResolved onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} onGenerateImage={handleChatGenerateImage} externalPrompt={externalChatPrompt} onExternalPromptConsumed={() => setExternalChatPrompt(undefined)} />
+              <ChatPanel isVisible={!panelCollapsed && activePanel === 'chat'} canvasAuthority={collaborativeCanvas.authority==='unknown'?'pending':collaborativeCanvas.authority} themeStyle={themeStyle} projectId={currentProject?.id} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} onAddGeneratedImage={handleAddEmbeddedChatImage} onAddGeneratedImages={handleAddEmbeddedChatImages} canvasImages={images} selectedCanvasImage={selectedImage} onResolveCanvasImageForChat={resolveCanvasImageForChat} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage?.scope === canvasChatScopeRef.current.epoch ? chatInitialImage.image : null} chatInitialImageResolved onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} onGenerateImage={handleChatGenerateImage} onApplyWorkflow={handleApplyChatWorkflow} externalPrompt={externalChatPrompt} onExternalPromptConsumed={() => setExternalChatPrompt(undefined)} />
             </div>
 
             {/* 固定在底部的开始生成按钮 */}

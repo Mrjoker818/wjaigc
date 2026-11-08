@@ -7,7 +7,7 @@ import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { consumeCredits, refundCredits, resolveConfiguredTokenPricing, settleTokenCharge } from '@/lib/credits';
 import type { TokenCreditPricing } from '@/lib/credit-pricing';
-import { CHAT_TOOLS, executeAdmittedToolCall, executeToolCall, parseToolCallsFromStream, ToolCallResult } from '@/lib/chat-tools';
+import { CHAT_TOOLS, PAID_CHAT_TOOLS, executeAdmittedToolCall, executeToolCall, parseToolCallsFromStream, ToolCallResult } from '@/lib/chat-tools';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { logOperation, logError, startTimer, OP_ACTIONS } from '@/lib/op-log';
 import { resolveChatAgentToolChoice } from '@/lib/chat-agent-tool-choice';
@@ -40,6 +40,7 @@ interface ChatTaskContext {
   messageId?: string;
   sourceVersionIds?: string[];
   selectedEntityIds?: string[];
+  confirmedToolCall?: { name?: string; arguments?: Record<string, unknown> };
 }
 
 function runtimeToolId(toolName: string): 'generate_image' | 'edit_image' | 'analyze_image' | null {
@@ -262,6 +263,7 @@ export async function POST(request: NextRequest) {
       messageId: requestMessageId = undefined as string | undefined,
       sourceVersionIds: requestSourceVersionIds = undefined as string[] | undefined,
       selectedEntityIds: requestSelectedEntityIds = undefined as string[] | undefined,
+      confirmedToolCall = undefined as { name?: string; arguments?: Record<string, unknown> } | undefined,
     } = parseBoundedAgentSurfaceBody(await request.text()) as {
       model?: string;
       messages?: Array<{ role: string; content: string; images?: string[] }>;
@@ -280,6 +282,7 @@ export async function POST(request: NextRequest) {
       messageId?: string;
       sourceVersionIds?: string[];
       selectedEntityIds?: string[];
+  confirmedToolCall?: { name?: string; arguments?: Record<string, unknown> };
     };
     
     // P2-9: 极度模糊时强制禁用工具，确保LLM只追问不执行
@@ -481,6 +484,16 @@ export async function POST(request: NextRequest) {
     // 当 enableTools=true 时，执行 Agent 循环：
     // LLM 思考 → 返回 tool_calls → 执行工具 → 结果回传 LLM → 继续思考
     // 直到 LLM 返回纯文本（无 tool_calls）或达到最大循环次数
+
+    // 用户确认了之前暂停的付费工具：只执行这一个调用，不再让模型重新决策。
+    if (confirmedToolCall && typeof confirmedToolCall.name === 'string' && confirmedToolCall.name) {
+      return executeConfirmedToolStream({
+        toolName: confirmedToolCall.name,
+        toolArgs: confirmedToolCall.arguments && typeof confirmedToolCall.arguments === 'object' ? confirmedToolCall.arguments : {},
+        chatApiKey, chatBaseUrl, origin, userId, model, providerId,
+        imageModel, imageProviderId, availableTools, taskContext, agentRuntimeMode, runtimeActor,
+      });
+    }
 
     if (effectiveEnableTools && stream) {
       return handleAgentStream(fixedMessages, requestModel, chatApiKey, chatBaseUrl, origin, userId, model, providerId, isThinkingModel, availableTools, imageModel, imageProviderId, isAgentMode, taskContext, tokenBillingHooks, agentRuntimeMode, runtimeActor);
@@ -750,6 +763,93 @@ export async function POST(request: NextRequest) {
 
 // ============ Agent Stream Handler ============
 
+// 用户在对话里确认了暂停的付费工具后，直接执行这一个调用并把结果流回去。
+async function executeConfirmedToolStream(input: {
+  toolName: string;
+  toolArgs: Record<string, unknown>;
+  chatApiKey: string;
+  chatBaseUrl: string;
+  origin: string;
+  userId: string;
+  model?: string;
+  providerId?: string;
+  imageModel?: string;
+  imageProviderId?: string;
+  availableTools: typeof CHAT_TOOLS;
+  taskContext?: ChatTaskContext | null;
+  agentRuntimeMode: AgentRuntimeMode;
+  runtimeActor?: User | null;
+}): Promise<Response> {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const emit = (event: Record<string, unknown>) => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+      };
+      emit({
+        type: 'tool_execution_start',
+        toolName: input.toolName,
+        toolCallId: 'confirmed',
+        toolArgs: input.toolArgs,
+        label: `正在执行 ${input.toolName}...`,
+        iteration: 0,
+      });
+      let toolResult: ToolCallResult;
+      try {
+        toolResult = await Promise.race([
+          executeCanvasChatTool({
+            toolName: input.toolName,
+            toolArgs: input.toolArgs,
+            toolCallIndex: 0,
+            iteration: 0,
+            chatApiKey: input.chatApiKey,
+            chatBaseUrl: input.chatBaseUrl,
+            origin: input.origin,
+            userId: input.userId,
+            userRole: input.runtimeActor?.role === 'admin' ? 'admin' : 'user',
+            chatModel: input.model || '',
+            chatProviderId: input.providerId || '',
+            imageModel: input.imageModel || '',
+            imageProviderId: input.imageProviderId || '',
+            allowedTools: input.availableTools.map(tool => tool.function.name),
+            taskContext: input.taskContext ?? {},
+            agentRuntimeMode: input.agentRuntimeMode,
+            runtimeActor: input.runtimeActor ?? undefined,
+          }),
+          new Promise<ToolCallResult>((_, reject) =>
+            setTimeout(() => reject(new Error('Tool execution timeout')), TOOL_EXECUTION_TIMEOUT)
+          ),
+        ]);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        toolResult = { success: false, error: message, resultText: `工具执行超时或出错: ${message}` };
+      }
+      emit({
+        type: 'tool_execution_result',
+        toolName: input.toolName,
+        toolCallId: 'confirmed',
+        success: toolResult.success,
+        error: toolResult.error,
+        imageUrls: toolResult.imageUrls || [],
+        videoUrls: toolResult.videoUrls || [],
+        taskIds: toolResult.taskIds || [],
+        ...(toolResult.workflow ? { workflow: toolResult.workflow } : {}),
+        iteration: 0,
+      });
+      emit({ type: 'content', content: toolResult.resultText });
+      controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    },
+  });
+}
+
 async function handleAgentStream(
   fixedMessages: Array<Record<string, unknown>>,
   requestModel: string,
@@ -949,6 +1049,29 @@ async function handleAgentStream(
               toolArgs = {};
             }
 
+            // Agent 模式关闭时，消耗积分的工具先停下来等用户确认，确认后由前端带同一调用续跑。
+            if (!agentModeEnabled && PAID_CHAT_TOOLS.has(toolName)) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                type: 'tool_confirmation_required',
+                toolName,
+                toolCallId: toolCall.id,
+                toolArgs,
+                label: toolName === 'generate_image' ? '生成图片' :
+                       toolName === 'generate_video' ? '生成视频' :
+                       toolName === 'run_skill' ? '运行技能' :
+                       toolName === 'remove_bg' ? '去除背景' :
+                       toolName === 'upscale' ? '放大图片' :
+                       `执行 ${toolName}`,
+                iteration,
+              })}\n\n`));
+              currentMessages.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                content: '已暂停，等待用户确认后再执行。',
+              });
+              continue;
+            }
+
             // Send tool execution progress event
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({
               type: 'tool_execution_start',
@@ -1004,6 +1127,7 @@ async function handleAgentStream(
               imageUrls: toolResult.imageUrls || [],
               videoUrls: toolResult.videoUrls || [],
               taskIds: toolResult.taskIds || [],
+              ...(toolResult.workflow ? { workflow: toolResult.workflow } : {}),
               iteration,
             })}\n\n`));
 
