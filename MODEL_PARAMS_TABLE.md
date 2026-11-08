@@ -35,7 +35,7 @@
 | gpt-image-1.5 | auto, 1:1, 3:2, 2:3, 4:3, 3:4, 5:4, 4:5, 16:9, 9:16, 2:1, 1:2, 3:1, 1:3, 21:9, 9:21 (16种) | 1K, 2K, 4K | auto, low, medium, high | both | 中间版本 |
 | chatgpt-image-latest | auto, 1:1, 3:2, 2:3, 4:3, 3:4, 5:4, 4:5, 16:9, 9:16, 2:1, 1:2, 3:1, 1:3, 21:9, 9:21 (16种) | 1K, 2K, 4K | auto, low, medium, high | both | 最新版本别名 |
 
-**官方文档参考**：https://docs.apimart.ai/cn/api-reference/images/gpt-image-2/generation
+**官方文档参考**：APIMart 图像生成文档（网关使用 api.apib.ai，不要使用已失效的 api.apimart.ai）
 
 ---
 
@@ -197,7 +197,7 @@
 | 供应商 | 主要模型系列 | API域名 | 备注 |
 |--------|-------------|---------|------|
 | 火山引擎 Volcengine | Seedream, Seedance, Kling | volcengine.com | 国内主要图像/视频供应商 |
-| APIMart | GPT-Image, DALL-E, Gemini, MJ | api.apimart.ai | OpenAI兼容网关 |
+| APIMart | GPT-Image, DALL-E, Gemini, MJ | api.apib.ai | OpenAI兼容网关 |
 | PearAPI | GPT-Image, Nano Banana, Ideogram | api.pearapi.ai | 国内代理供应商 |
 | Google | Gemini, Imagen | ai.google.dev | 官方直连 |
 | OpenAI | GPT-Image, DALL-E | api.openai.com | 官方直连 |

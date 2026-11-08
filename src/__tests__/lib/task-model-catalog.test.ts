@@ -57,7 +57,7 @@ describe('task model catalog', () => {
       createProvider({
         id: 'provider-a',
         type: 'image',
-        baseUrl: 'https://api.apimart.ai',
+        baseUrl: 'https://api.apib.ai',
         selectedModels: ['gpt-image-1', 'shared-image'],
         discoveredModels: [
           { id: 'gpt-image-1', name: 'GPT Image', providerId: 'provider-a', type: 'image' },

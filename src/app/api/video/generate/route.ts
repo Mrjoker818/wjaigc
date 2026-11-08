@@ -16,6 +16,7 @@ import { mediaImportFailure } from '@/lib/collaboration/document-media-request';
 import { assertCanvasShareMutationRequest } from '@/lib/canvas-share/request';
 import { after, NextRequest, NextResponse } from 'next/server';
 import { findProviderForFeature, findProviderForModel, findProviderById } from '@/lib/server-api-config';
+import { assertSafeProviderUrl, PoisonedApiHostError } from '@/lib/poisoned-api-host';
 import {
   registerTask,
   registerTaskAbortController,
@@ -372,6 +373,17 @@ export async function POST(request: NextRequest) {
 
     const apiKey = provider.apiKey;
     const baseUrl = provider.baseUrl;
+    if (!apiKey || !baseUrl?.trim()) {
+      return NextResponse.json({ error: '请先在管理员后台配置可用模型' }, { status: 400 });
+    }
+    try {
+      assertSafeProviderUrl(baseUrl);
+    } catch (error) {
+      if (error instanceof PoisonedApiHostError) {
+        return NextResponse.json({ error: '所选模型网关地址不可用，请在管理后台改用可用网关' }, { status: 400 });
+      }
+      return NextResponse.json({ error: '所选模型网关地址不可用，请在管理后台改用可用网关' }, { status: 400 });
+    }
     let advancedParams = provider.advancedParams 
       ? (typeof provider.advancedParams === 'string' ? JSON.parse(provider.advancedParams) : provider.advancedParams) 
       : {};
@@ -818,6 +830,7 @@ export async function POST(request: NextRequest) {
         updateTaskProgress(taskId, { progress: 5, label: `${modeLabel} · ${modelName} · 提交中...` });
 
         const req = buildVideoSubmitRequest(profile, videoParams);
+        assertSafeProviderUrl(req.url);
         console.log(`[video/generate] Submit request: url=${req.url}, method=${req.method}`);
         const submitSignal = AbortSignal.any([submitController.signal, AbortSignal.timeout(30000)]);
 
@@ -864,6 +877,7 @@ export async function POST(request: NextRequest) {
             };
             console.log(`[video/generate] Fallback from video to images endpoint: ${fallbackUrl}, reason: status=${response.status}, modelNotFound=${isModelNotFound}`);
             updateTaskProgress(taskId, { progress: 8, label: `${modeLabel} · ${modelName} · 重试备用端点...` });
+            assertSafeProviderUrl(fallbackUrl);
             response = await fetch(fallbackUrl, {
               method: req.method,
               headers: req.headers,

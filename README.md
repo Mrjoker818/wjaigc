@@ -162,7 +162,7 @@ pnpm start
 ```bash
 # API 配置 / API configuration
 APIMART_API_KEY=your_apimart_key
-APIMART_BASE_URL=https://api.apimart.ai
+APIMART_BASE_URL=https://api.apib.ai
 
 # Google Gemini 配置 / Google Gemini configuration
 GEMINI_API_KEY=your_gemini_key

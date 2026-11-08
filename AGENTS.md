@@ -633,7 +633,7 @@ COZE_API_KEY=your_api_key
 # API 提供商配置（管理员后台动态添加，支持任意 OpenAI 兼容 API）
 # 以下环境变量为向后兼容保留，优先使用管理员后台配置
 APIMART_API_KEY=your_apimart_key
-APIMART_BASE_URL=https://api.apimart.ai
+APIMART_BASE_URL=https://api.apib.ai
 
 # Google Gemini 配置
 GEMINI_API_KEY=your_gemini_key

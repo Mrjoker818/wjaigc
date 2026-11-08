@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('server-only', () => ({}));
 
 import { sanitizeAdminProvider, sanitizeProvider } from '@/lib/server-api-config';
+import { poisonedApiHost } from '@/lib/poisoned-api-host';
 import type { ApiProvider } from '@/lib/universal-api-types';
 
 describe('sanitizeProvider', () => {
@@ -58,5 +59,20 @@ describe('sanitizeProvider', () => {
     expect(adminProvider).not.toHaveProperty('apiKey');
     expect(adminProvider).not.toHaveProperty('balanceUsername');
     expect(adminProvider).not.toHaveProperty('balancePassword');
+  });
+});
+
+describe('poisonedApiHost', () => {
+  it('rejects the poisoned apimart.ai domain and its subdomains', () => {
+    expect(poisonedApiHost('https://api.apimart.ai/v1')).toBe('apimart.ai');
+    expect(poisonedApiHost('https://upload.apimart.ai/file.png')).toBe('apimart.ai');
+    expect(poisonedApiHost('apimart.ai')).toBe('apimart.ai');
+  });
+
+  it('keeps the clean APIMart gateway and unrelated hosts', () => {
+    expect(poisonedApiHost('https://api.apib.ai/v1')).toBeNull();
+    expect(poisonedApiHost('https://api.pearapi.ai')).toBeNull();
+    expect(poisonedApiHost('https://notapimart.ai')).toBeNull();
+    expect(poisonedApiHost('')).toBeNull();
   });
 });

@@ -12,7 +12,7 @@ import { VIDEO_MODEL_REGISTRY, buildVideoSubmitRequest } from '@/lib/video-api';
 // 未文档化且无实测证据的字段不发送。其余模型保持现有字段。
 // 待确认项见交付报告，不在此猜测。
 
-const BASE = 'https://api.apimart.ai';
+const BASE = 'https://api.apib.ai';
 
 function body(model: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
   const request = buildVideoSubmitRequest('apimart-video', {

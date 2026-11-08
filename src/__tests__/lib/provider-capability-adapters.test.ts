@@ -39,7 +39,7 @@ describe('provider capability adapters', () => {
       provider('pear', 'https://api.pearapi.ai/v1', 'layer'),
     )).toBe('pear');
     expect(classifyProviderCapabilityFamily(
-      provider('apib', 'https://api.apimart.ai/v1', 'image'),
+      provider('apib', 'https://api.apib.ai/v1', 'image'),
     )).toBe('apib');
     expect(classifyProviderCapabilityFamily(
       provider('4s', 'https://api.4sapi.com/v1', 'image'),
@@ -59,7 +59,7 @@ describe('provider capability adapters', () => {
     // Source: https://docs.apib.ai/cn/api-reference/images/gpt-image-2/generation
     // Endpoint: POST /v1/images/generations; reviewed 2026-08-24.
     const adapter = resolveProviderCapabilityAdapter(
-      provider('apib', 'https://api.apimart.ai/v1', 'image'),
+      provider('apib', 'https://api.apib.ai/v1', 'image'),
       model('apib', 'gpt-image-2', 'image'),
     );
 
@@ -87,7 +87,7 @@ describe('provider capability adapters', () => {
       model('4s', 'gpt-image-2', 'image'),
     );
     const apib = resolveProviderCapabilityAdapter(
-      provider('apib', 'https://api.apimart.ai/v1', 'image'),
+      provider('apib', 'https://api.apib.ai/v1', 'image'),
       model('apib', 'gpt-image-2', 'image'),
     );
 

@@ -132,7 +132,7 @@ describe('provider request contracts', () => {
 
   it('builds the Midjourney request from its documented whitelist and merges references', () => {
     const profile = resolveProfileForModel('mj-v7', {
-      baseUrl: 'https://apimart.ai/v1',
+      baseUrl: 'https://api.apib.ai/v1',
     });
     const { body, endpoint } = adjustRequestForProfile({
       model: 'mj-v7',
