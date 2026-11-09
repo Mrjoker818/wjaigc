@@ -55,6 +55,24 @@ describe('build_workflow chat tool', () => {
     expect(parseAIBuildResponse(workflowJson)?.nodes).toHaveLength(4);
   });
 
+  it('reads the workflow from an SSE body when the gateway streams anyway', async () => {
+    const half = Math.floor(workflowJson.length / 2);
+    const sse = [workflowJson.slice(0, half), workflowJson.slice(half)]
+      .map(piece => `data: ${JSON.stringify({ choices: [{ delta: { content: piece } }] })}\n\n`)
+      .join('') + 'data: [DONE]\n\n';
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(sse, {
+      status: 200, headers: { 'Content-Type': 'text/event-stream' },
+    }));
+
+    const result = await executeToolCall('build_workflow', {
+      description: '做一个商品主图：先生成再去背景',
+    }, toolContext);
+
+    expect(result.success).toBe(true);
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body)).stream).toBe(false);
+    expect((result.data as { workflow?: { name?: string } }).workflow?.name).toBe('商品主图流程');
+  });
+
   it('fails clearly when the model does not return a usable workflow', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       choices: [{ message: { content: '我不太明白你的需求' } }],
