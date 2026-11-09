@@ -7,14 +7,10 @@ import {
   Eye, GripVertical, Sun, Camera, Package, Cpu, Wand2, Sliders, Ratio, BadgeCheck
 } from 'lucide-react';
 import {
-  MODEL_ASPECT_RATIOS as SHARED_MODEL_ASPECT_RATIOS,
-  MODEL_QUALITIES as SHARED_MODEL_QUALITIES,
   QUALITY_DISPLAY_NAMES as SHARED_QUALITY_DISPLAY_NAMES,
-  DEFAULT_ASPECT_RATIOS as SHARED_DEFAULT_ASPECT_RATIOS,
-  DEFAULT_QUALITIES as SHARED_DEFAULT_QUALITIES,
   ASPECT_RATIO_TO_PIXELS as SHARED_ASPECT_RATIO_TO_PIXELS,
-  findModelConfig as sharedFindModelConfig,
 } from '@/lib/canvas-generation-group';
+import { indexImageToolCapabilities, resolveImageToolOptions, type ImageToolCapabilityIndex } from '@/lib/image-tool-model-options';
 import { useProgressTimer } from '@/hooks/useProgressTimer';
 import {
   constrainFloatingPanelPosition,
@@ -206,6 +202,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
   const [sourceImage, setSourceImage] = useState<string>(initialImageUrl || '');
   const [selectedModel, setSelectedModel] = useState('');
   const [models, setModels] = useState<ImageModel[]>([]);
+  const [modelCapabilities, setModelCapabilities] = useState<ImageToolCapabilityIndex>({});
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [runPhase, setRunPhaseState] = useState<RefineRunPhase>('idle');
   const runPhaseRef = useRef<RefineRunPhase>('idle');
@@ -279,6 +276,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
             };
           });
           setModels(imageModels);
+          setModelCapabilities(indexImageToolCapabilities(modelData.capabilities));
           if (imageModels.length > 0) setSelectedModel(imageModels[0].providerId ? `${imageModels[0].providerId}::${imageModels[0].id}` : imageModels[0].id);
         }
       } catch (err) {
@@ -330,17 +328,25 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
   // ─── Derived state ───
   const selectedCategoryName = categories.find(c => c.id === selectedCategory)?.name || '默认';
 
+  // ─── Options for a model key (providerId::modelId), from the exact capability catalog ───
+  const toolOptionsFor = useCallback((modelKey: string) => {
+    const pureModelId = modelKey.includes('::') ? modelKey.split('::').pop()! : modelKey;
+    return resolveImageToolOptions(pureModelId, modelCapabilities[modelKey]);
+  }, [modelCapabilities]);
+
   // ─── Get supported aspect ratios for selected model ───
-  const getSupportedAspectRatios = useCallback(() => {
-    const pureModelId = selectedModel.includes('::') ? selectedModel.split('::').pop()! : selectedModel;
-    return sharedFindModelConfig(SHARED_MODEL_ASPECT_RATIOS, pureModelId) || SHARED_DEFAULT_ASPECT_RATIOS;
-  }, [selectedModel]);
+  const getSupportedAspectRatios = useCallback(() => toolOptionsFor(selectedModel).ratios, [selectedModel, toolOptionsFor]);
 
   // ─── Get supported qualities for selected model ───
-  const getSupportedQualities = useCallback(() => {
-    const pureModelId = selectedModel.includes('::') ? selectedModel.split('::').pop()! : selectedModel;
-    return sharedFindModelConfig(SHARED_MODEL_QUALITIES, pureModelId) || SHARED_DEFAULT_QUALITIES;
-  }, [selectedModel]);
+  const getSupportedQualities = useCallback(() => toolOptionsFor(selectedModel).qualities, [selectedModel, toolOptionsFor]);
+
+  // Keep the selection inside the model's range when the catalog arrives after the default model is picked.
+  useEffect(() => {
+    if (!selectedModel) return;
+    const next = toolOptionsFor(selectedModel);
+    setAspectRatio(value => next.ratios.includes(value) ? value : (next.ratios[0] || '1:1'));
+    setQuality(value => next.qualities.includes(value) ? value : (next.qualities[0] || 'standard'));
+  }, [selectedModel, toolOptionsFor]);
 
   // ─── Get pixel size hint for current aspect ratio ───
   const getPixelSize = useCallback((ratio: string): string => {
@@ -1325,11 +1331,9 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
                             setSelectedModel(m.providerId ? `${m.providerId}::${m.id}` : m.id);
                             setShowModelDropdown(false);
                             // Reset aspect ratio and quality when model changes
-                            const pureModelId = m.id.includes('::') ? m.id.split('::').pop()! : m.id;
-                            const supportedRatios = sharedFindModelConfig(SHARED_MODEL_ASPECT_RATIOS, pureModelId) || SHARED_DEFAULT_ASPECT_RATIOS;
-                            setAspectRatio(supportedRatios[0] || '1:1');
-                            const supportedQuals = sharedFindModelConfig(SHARED_MODEL_QUALITIES, pureModelId) || SHARED_DEFAULT_QUALITIES;
-                            setQuality(supportedQuals[0] || 'standard');
+                            const next = toolOptionsFor(m.providerId ? `${m.providerId}::${m.id}` : m.id);
+                            setAspectRatio(next.ratios[0] || '1:1');
+                            setQuality(next.qualities[0] || 'standard');
                           }}
                           className="w-full px-3 py-2.5 text-left transition-colors"
                           style={{

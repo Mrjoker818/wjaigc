@@ -322,6 +322,17 @@ export const VIDEO_MODEL_CREDITS: Record<string, { creditsPerSecond: number; lab
     label: 'MiniMax 视频',
     minDuration: 5,
   },
+  // APIMart 网关 id（2026-11-09）：关键词推断覆盖不到的两个
+  'wan2.5-preview': {
+    creditsPerSecond: 30,
+    label: '万相 2.5 视频',
+    minDuration: 5,
+  },
+  'gemini-omni-flash-preview': {
+    creditsPerSecond: 30,
+    label: 'Gemini Omni Flash',
+    minDuration: 5,
+  },
 };
 
 // ========== LLM聊天模型积分消耗 ==========

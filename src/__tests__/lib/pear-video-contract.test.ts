@@ -6,7 +6,7 @@ import { buildVideoPollRequest, buildVideoSubmitRequest, parseVideoPollResponse,
 // 提交 api-533519667 / 查询 api-533519668 的 OpenAPI 描述，逐字核对）。
 // - 提交 POST /v1/videos/generations；查询 GET /v1/videos/tasks/{id}
 // - generation_mode: text2video | image2video | reference2video | video2video（省略时按素材自动判断）
-// - ratio 与 aspect_ratio 等效；duration 与 seconds 等效（4–15 整数）；resolution 720P/480P
+// - ratio 与 aspect_ratio 等效；duration 与 seconds 等效；时长/清晰度/比例/素材上限按模型（src/lib/pear-video-models.ts）
 // - 参考素材 images/videos/audios ≤10 或统一 reference_contents[{type,media_url,name}]
 // - 提交成功取 id；完成后读 output.video_url；失败原因在 error.message
 
@@ -47,9 +47,10 @@ describe('PearAPI video submit contract', () => {
     expect(submitBody({ duration: 6.7 })).toMatchObject({ duration: 6 });
   });
 
-  it('passes the documented resolution value through', () => {
+  it('passes only the resolutions the model documents, upper-cased', () => {
     expect(submitBody({ advancedParams: { resolution: '720p' } })).toMatchObject({ resolution: '720P' });
-    expect(submitBody({ advancedParams: { resolution: '480p' } })).toMatchObject({ resolution: '480P' });
+    // mini 只开放 720P
+    expect(submitBody({ advancedParams: { resolution: '480p' } })).not.toHaveProperty('resolution');
   });
 
   it('maps reference material into reference_contents and caps it at 10 entries', () => {
@@ -61,6 +62,30 @@ describe('PearAPI video submit contract', () => {
       referenceImages: Array.from({ length: 14 }, (_, i) => `https://example.com/${i}.png`),
     });
     expect((many.reference_contents as unknown[]).length).toBe(10);
+  });
+
+  it('follows each documented model spec for duration, resolution, ratio and references', () => {
+    const body = (model: string, extra: Record<string, unknown>) => JSON.parse(buildVideoSubmitRequest('pearapi-video', {
+      baseUrl: BASE, apiKey: KEY, model, prompt: 'p', ...extra,
+    }).body);
+    expect(body('doubao-seedance-2-0-260128', { advancedParams: { resolution: '480p' } })).toMatchObject({ resolution: '480P' });
+    expect(body('doubao-seedance-2-5-260628', { duration: 20, advancedParams: { resolution: '1080p' } }))
+      .toMatchObject({ duration: 20, resolution: '1080P' });
+    expect(body('minimax-h3', { advancedParams: { resolution: '2k' } })).toMatchObject({ resolution: '2K' });
+    expect(body('hailuo-2.3', { duration: 8, advancedParams: { resolution: '768p' } }))
+      .toMatchObject({ duration: 6, resolution: '768P' });
+    expect(body('happyhorse-1.0', { aspectRatio: '4:3' })).toMatchObject({ aspect_ratio: '16:9' });
+    expect(body('seedance-1.0-pro', { aspectRatio: '21:9', duration: 11 })).toMatchObject({ aspect_ratio: '21:9', duration: 10 });
+    const refs = body('doubao-seedance-2-0-260128', {
+      referenceImages: Array.from({ length: 12 }, (_, i) => `https://example.com/${i}.png`),
+    }).reference_contents as unknown[];
+    expect(refs).toHaveLength(9);
+  });
+
+  it('sends the source video as a video reference for video2video', () => {
+    expect(submitBody({ videoUrl: 'https://example.com/v.mp4' }).reference_contents).toEqual([
+      { type: 'video', media_url: 'https://example.com/v.mp4' },
+    ]);
   });
 
   it('reads the task id from the documented id field', () => {

@@ -4,6 +4,7 @@ import React, { useState, useCallback, useEffect, useLayoutEffect, useMemo, useR
 import { createPortal } from 'react-dom';
 import { constrainFloatingPanelPosition, getFloatingPanelViewport, subscribeFloatingPanelViewport, type FloatingPanelPosition } from '@/lib/floating-panel-position';
 import { getModelDisplayName } from '@/lib/model-name-map';
+import { fitImageToolSelection, indexImageToolCapabilities, resolveImageToolOptions, type ImageToolCapabilityIndex } from '@/lib/image-tool-model-options';
 import { VenueRegionCanvas, hasVenueRegionCoordinates, type VenueRegion } from '@/components/venue-region-canvas';
 import {
   Box, X, Minus, Maximize2, Upload, Image as ImageIcon, Layers,
@@ -363,6 +364,17 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
   const [availableModels, setAvailableModels] = useState<{ providerId: string; model: string; displayName?: string; providerName?: string }[]>([]);
   const [selectedModel, setSelectedModel] = useState('');
   const [selectedProviderId, setSelectedProviderId] = useState('');
+  const [imageCapabilities, setImageCapabilities] = useState<ImageToolCapabilityIndex>({});
+  const selectedImageCapability = imageCapabilities[`${selectedProviderId}::${selectedModel}`];
+  // 生成比例按所选模型能力给出；目录里没有该模型时沿用原有列表
+  const generateRatioOptions = useMemo(() => (selectedImageCapability
+    ? resolveImageToolOptions(selectedModel, selectedImageCapability).ratios
+    : ['16:9', '4:3', '1:1', '3:4', '9:16']), [selectedImageCapability, selectedModel]);
+  useEffect(() => {
+    setGenerateAspectRatio(value => generateRatioOptions.includes(value)
+      ? value
+      : (generateRatioOptions.includes('16:9') ? '16:9' : generateRatioOptions[0] || value));
+  }, [generateRatioOptions]);
   const [chatModels, setChatModels] = useState<{ id: string; name: string; providerId: string; providerName: string }[]>([]);
   const [selectedChatModel, setSelectedChatModel] = useState('');
   const [selectedChatProviderId, setSelectedChatProviderId] = useState('');
@@ -384,6 +396,7 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
             providerName: providerMap.get(m.providerId || '')?.name || '',
           }));
         setAvailableModels(models);
+        setImageCapabilities(indexImageToolCapabilities(data.taskModelCatalog));
         // Auto-select from localStorage or first available
         const saved = typeof window !== 'undefined' ? localStorage.getItem('currentImageModel') : '';
         if (saved) {
@@ -596,7 +609,10 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
           dimensions, budget, materialStyle, lightingStyle,
           crowdStyle, viewOptions, renderStyle, outputResolution, outputFormat, outputQuality, prompt,
           model: selectedModel, providerId: selectedProviderId,
-          quality: outputQuality === '超高' ? '4K' : outputQuality === '高' ? '2K' : '1K',
+          // 质量档 标准/高/极高 → 1K/2K/4K，再按所选模型能力收敛
+          quality: fitImageToolSelection(selectedModel, selectedImageCapability, {
+            quality: outputQuality === '极高' ? '4K' : outputQuality === '高' ? '2K' : '1K',
+          }).quality,
           aspectRatio: generateAspectRatio,
         }),
       });
@@ -694,7 +710,7 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
       setErrorMsg('提交结果暂无法确认，请先查看任务记录后再决定是否重新生成。');
       stopGenerating();
     }
-  }, [brandName, productName, sceneType, environment, dimensions, imageUsageMode, materialStyle, lightingStyle, budget, viewOptions, renderStyle, outputResolution, outputFormat, outputQuality, customPrompt, crowdStyle, assets, onAddImages, captureCanvasInsertion, selectedModel, selectedProviderId, brandColor, focusProduct, generateAspectRatio, unconfirmedTaskId]);
+  }, [brandName, productName, sceneType, environment, dimensions, imageUsageMode, materialStyle, lightingStyle, budget, viewOptions, renderStyle, outputResolution, outputFormat, outputQuality, customPrompt, crowdStyle, assets, onAddImages, captureCanvasInsertion, selectedModel, selectedProviderId, brandColor, focusProduct, generateAspectRatio, unconfirmedTaskId, selectedImageCapability]);
 
   // === Decompose handler ===
   const handleDecompose = useCallback(async () => {
@@ -2105,7 +2121,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                   <div className="mb-3">
                     <label className="block text-[12px] mb-1" style={{ color: textMuted }}>生成比例</label>
                     <div className="flex gap-1 flex-wrap">
-                      {(['16:9', '4:3', '1:1', '3:4', '9:16'] as const).map(ratio => (
+                      {generateRatioOptions.map(ratio => (
                         <button
                           key={ratio}
                           onClick={() => setGenerateAspectRatio(ratio)}

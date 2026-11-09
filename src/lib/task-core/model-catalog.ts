@@ -295,7 +295,11 @@ function getVideoSupportedOperations(
   info: ReturnType<typeof getVideoModelInfo>,
 ): SupportedOperation[] {
   const operations: SupportedOperation[] = ['text-to-video'];
-  if (info?.features.firstLastFrame || info?.features.multiReference) {
+  if (
+    info?.features.firstLastFrame
+    || info?.features.multiReference
+    || info?.features.imageToVideo
+  ) {
     operations.push('image-to-video');
   }
   if (info?.features.firstLastFrame) operations.push('first-last-frame');
@@ -374,7 +378,9 @@ function createBaseDescriptor(
       provider.baseUrl,
     );
     const supportsReferenceImages = Boolean(
-      info?.features.firstLastFrame || info?.features.multiReference,
+      info?.features.firstLastFrame
+      || info?.features.multiReference
+      || info?.features.imageToVideo,
     );
     return withFallbackSources({
       providerId: provider.id,
@@ -387,18 +393,22 @@ function createBaseDescriptor(
         ? [...model.supportedAspectRatios]
         : [...(info?.features.ratios || [])],
       allowedSizes: [...(info?.features.resolutions || [])],
+      // APIMart video has no quality field; resolution (or mode on kling-v3-omni) sets the tier.
       qualityOptions: model.supportedQualities !== undefined
         ? [...model.supportedQualities]
-        : ['std', 'pro'],
+        : protocol === 'apimart-video' ? [] : ['std', 'pro'],
       maxOutputs: model.maxImages ?? 1,
       maxDurationSeconds: info?.features.maxDuration,
       allowedDurationsSeconds: [...(info?.features.durations || [])],
       supportsReferenceImages,
-      maxReferenceImages: info?.features.multiReference
-        ? 4
-        : info?.features.firstLastFrame
-          ? 2
-          : undefined,
+      maxReferenceImages: info?.features.maxReferenceImages
+        ?? (info?.features.multiReference
+          ? 4
+          : info?.features.firstLastFrame
+            ? 2
+            : info?.features.imageToVideo
+              ? 1
+              : undefined),
       supportsMask: false,
       supportedOperations: getVideoSupportedOperations(info),
       outputKinds: ['mp4'],

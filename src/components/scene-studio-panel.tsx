@@ -6,6 +6,7 @@ import { Canvas, useThree, ThreeEvent, extend } from '@react-three/fiber';
 import { OrbitControls, TransformControls, Grid, GizmoHelper, GizmoViewport, useGLTF, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { withClientImageOutputPreference } from '@/lib/image-generation-output-preference';
+import { fitImageToolSelection, indexImageToolCapabilities, readSavedImageSelection, resolveImageToolOptions, type ImageToolCapabilityIndex } from '@/lib/image-tool-model-options';
 import { constrainFloatingPanelPosition, getFloatingPanelViewport, subscribeFloatingPanelViewport } from '@/lib/floating-panel-position';
 
 // Register Three.js classes with R3F to avoid React 19 "incorrect casing" warnings
@@ -1439,6 +1440,24 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
   const [imageModels, setImageModels] = useState<{ id: string; name: string; providerId: string; providerName: string }[]>([]);
   const [chatModels, setChatModels] = useState<{ id: string; name: string; providerId: string; providerName: string }[]>([]);
   const [selectedImageModelId, setSelectedImageModelId] = useState<string>('');
+  const [imageCapabilities, setImageCapabilities] = useState<ImageToolCapabilityIndex>({});
+  const selectedImageCapability = imageCapabilities[selectedImageModelId];
+  const selectedPureImageModelId = selectedImageModelId.includes('::') ? selectedImageModelId.split('::').pop()! : selectedImageModelId;
+  // 比例与数量按所选模型能力给出；目录里没有该模型时沿用原有列表
+  const sceneRatioOptions = useMemo(() => {
+    if (!selectedImageCapability) return [...ASPECT_RATIOS] as string[];
+    return resolveImageToolOptions(selectedPureImageModelId, selectedImageCapability).ratios;
+  }, [selectedImageCapability, selectedPureImageModelId]);
+  const sceneCountOptions = useMemo(() => {
+    const max = selectedImageCapability
+      ? resolveImageToolOptions(selectedPureImageModelId, selectedImageCapability).maxOutputs
+      : 4;
+    return max >= 4 ? [1, 4] : [1];
+  }, [selectedImageCapability, selectedPureImageModelId]);
+  useEffect(() => {
+    setAspectRatio(value => sceneRatioOptions.includes(value) ? value : (sceneRatioOptions.includes('16:9') ? '16:9' : sceneRatioOptions[0] || value));
+    setImageCount(value => sceneCountOptions.includes(value) ? value : 1);
+  }, [sceneRatioOptions, sceneCountOptions]);
   const [selectedChatModelId, setSelectedChatModelId] = useState<string>('');
   const [showImageModelDropdown, setShowImageModelDropdown] = useState(false);
   const [showChatModelDropdown, setShowChatModelDropdown] = useState(false);
@@ -1466,6 +1485,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
             providerName: m.providerId ? (providerMap[m.providerId] || m.providerId) : '',
           }));
           setImageModels(models);
+          setImageCapabilities(indexImageToolCapabilities(imgData.taskModelCatalog));
           if (models.length > 0) setSelectedImageModelId(models[0].id);
         }
         if (chatRes.ok) {
@@ -1819,7 +1839,9 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
           body: JSON.stringify(withClientImageOutputPreference({
             prompt: fullPrompt,
             aspectRatio,
-            quality: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).quality : '2K'; } catch { return '2K'; } })(),
+            quality: fitImageToolSelection(currentImageModel.model || '', currentImageModel.model === selectedPureImageModelId ? selectedImageCapability : undefined, {
+              quality: readSavedImageSelection().quality || '2K',
+            }).quality,
             n: imageCount,
             referenceImageUrl,
             strength: strengthInfo?.value || 60,
@@ -1880,7 +1902,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
     } finally {
       setIsGenerating(false);
     }
-  }, [prompt, generationMode, strengthMode, negativePrompt, captureScreenshot, aspectRatio, imageCount, selectedImageModelId]);
+  }, [prompt, generationMode, strengthMode, negativePrompt, captureScreenshot, aspectRatio, imageCount, selectedImageModelId, selectedImageCapability, selectedPureImageModelId]);
 
   // AI Auto Layout
   const handleAILayout = useCallback(async (description: string) => {
@@ -2688,8 +2710,8 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
                     <div className="space-y-2">
                       <div>
                         <div className="text-xs mb-1" style={{ color: isMonochrome ? '#666' : '#888' }}>画面比例</div>
-                        <div className="flex gap-1">
-                          {(['1:1', '16:9', '9:16', '4:3', '3:4'] as const).map(r => (
+                        <div className="flex flex-wrap gap-1">
+                          {sceneRatioOptions.map(r => (
                             <button
                               key={r}
                               className="px-2 py-1 rounded text-xs cursor-pointer transition-colors"
@@ -2707,7 +2729,7 @@ export default function SceneStudioPanel({ onClose, onAddImages, isMonochrome, i
                       <div>
                         <div className="text-xs mb-1" style={{ color: isMonochrome ? '#666' : '#888' }}>生成数量</div>
                         <div className="flex gap-1">
-                          {[1, 4].map(n => (
+                          {sceneCountOptions.map(n => (
                             <button
                               key={n}
                               className="px-2.5 py-1 rounded text-xs cursor-pointer transition-colors"

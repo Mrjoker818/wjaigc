@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { useProgressTimer } from '@/hooks/useProgressTimer';
 import { normalizeBrandFactoryImageUrl } from '@/lib/brand-factory-image-url';
+import { fitImageToolSelection, indexImageToolCapabilities, readSavedImageSelection, type ImageToolCapabilityIndex } from '@/lib/image-tool-model-options';
 
 /* ========== TYPES ========== */
 interface BrandProject {
@@ -451,6 +452,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
   const [llmModels, setLlmModels] = useState<ImageModel[]>([]);
   const [selectedImageModel, setSelectedImageModel] = useState('');
   const [selectedImageProviderId, setSelectedImageProviderId] = useState('');
+  const [imageCapabilities, setImageCapabilities] = useState<ImageToolCapabilityIndex>({});
   const [selectedLlmModel, setSelectedLlmModel] = useState('');
   const [selectedLlmProviderId, setSelectedLlmProviderId] = useState('');
   const [showModelPanel, setShowModelPanel] = useState(false);
@@ -583,6 +585,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
             return { id: m.id, name: m.name, providerId: m.providerId || '', providerName: prov?.name || '' };
           });
           setImageModels(mapped);
+          setImageCapabilities(indexImageToolCapabilities(data.taskModelCatalog));
           const saved = localStorage.getItem('wujie_bf_image_model');
           if (saved && mapped.some(m => m.id === saved)) {
             setSelectedImageModel(saved);
@@ -667,12 +670,18 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
     startApiTimer();
     setError('');
     try {
+      // 主面板上次的比例/画质按当前图像模型能力收敛
+      const fitted = fitImageToolSelection(
+        selectedImageModel,
+        imageCapabilities[`${selectedImageProviderId}::${selectedImageModel}`],
+        readSavedImageSelection(),
+      );
       const res = await fetch('/api/brand-factory', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, ...body, imageModel: selectedImageModel, imageProviderId: selectedImageProviderId, llmModel: selectedLlmModel, llmProviderId: selectedLlmProviderId,
-          quality: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).quality : undefined; } catch { return undefined; } })(),
-          aspectRatio: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).aspectRatio : undefined; } catch { return undefined; } })(),
+          quality: fitted.quality,
+          aspectRatio: fitted.aspectRatio,
         }),      });
       const data = await res.json();
       if (!data.success) throw new Error(data.error || '操作失败');

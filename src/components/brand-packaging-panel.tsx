@@ -11,6 +11,7 @@ import {
   Tag, Info, Loader2, Type, Scissors, PenLine, Video, GitBranch
 } from 'lucide-react';
 import { getModelDisplayName } from '@/lib/model-name-map';
+import { fitImageToolSelection, indexImageToolCapabilities, readSavedImageSelection, type ImageToolCapabilityIndex } from '@/lib/image-tool-model-options';
 import { constrainFloatingPanelPosition, getFloatingPanelViewport, subscribeFloatingPanelViewport } from '@/lib/floating-panel-position';
 
 /* ============================================================
@@ -272,6 +273,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
   const [imageModels, setImageModels] = useState<{ id: string; name: string; providerId: string; providerName: string }[]>([]);
   const [selectedModel, setSelectedModel] = useState('');
   const [selectedProviderId, setSelectedProviderId] = useState('');
+  const [imageCapabilities, setImageCapabilities] = useState<ImageToolCapabilityIndex>({});
   const [chatModels, setChatModels] = useState<{ id: string; name: string; providerId: string; providerName: string }[]>([]);
   const [selectedChatModel, setSelectedChatModel] = useState('');
   const [selectedChatProviderId, setSelectedChatProviderId] = useState('');
@@ -378,6 +380,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
             providerName: providerMap.get(m.providerId || '')?.name || '',
           }));
           setImageModels(mapped);
+          setImageCapabilities(indexImageToolCapabilities(data.taskModelCatalog));
           // Read saved model from localStorage (same key as generation-panel)
           const saved = localStorage.getItem('wujie_selected_image_model');
           if (saved) {
@@ -499,6 +502,16 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
   };
 
   // === Generate ===
+  // 主面板上次的比例/画质按当前图像模型能力收敛
+  const fitSavedImageSelection = useCallback(() => {
+    const fitted = fitImageToolSelection(
+      selectedModel,
+      imageCapabilities[`${selectedProviderId}::${selectedModel}`],
+      readSavedImageSelection(),
+    );
+    return { quality: fitted.quality, aspectRatio: fitted.aspectRatio };
+  }, [imageCapabilities, selectedModel, selectedProviderId]);
+
   const handleGenerate = useCallback(async () => {
     setErrorMsg('');
     if (!brandName.trim()) return;
@@ -518,8 +531,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
           chatModel: selectedChatModel,
           chatProviderId: selectedChatProviderId,
           showcaseSpec,
-          quality: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).quality : undefined; } catch { return undefined; } })(),
-          aspectRatio: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).aspectRatio : undefined; } catch { return undefined; } })(),
+          ...fitSavedImageSelection(),
         }),
       });
       const data = await res.json();
@@ -587,7 +599,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
       console.error('[brand-packaging] Generate failed:', e);
       setIsGenerating(false);
     }
-  }, [brandName, productName, category, structure, materialCraft, outputModes, skuMatrix, extendScenes, customPrompt, logoUrl, brandColors, uploads, advancedOptions, onAddImages, selectedModel, selectedProviderId, selectedChatModel, selectedChatProviderId, showcaseSpec]);
+  }, [brandName, productName, category, structure, materialCraft, outputModes, skuMatrix, extendScenes, customPrompt, logoUrl, brandColors, uploads, advancedOptions, onAddImages, selectedModel, selectedProviderId, selectedChatModel, selectedChatProviderId, showcaseSpec, fitSavedImageSelection]);
 
   // === Generate same series ===
   const handleGenerateSeries = useCallback(async () => {
@@ -608,8 +620,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
           chatModel: selectedChatModel,
           chatProviderId: selectedChatProviderId,
           showcaseSpec,
-          quality: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).quality : undefined; } catch { return undefined; } })(),
-          aspectRatio: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).aspectRatio : undefined; } catch { return undefined; } })(),
+          ...fitSavedImageSelection(),
         }),
       });
       const data = await res.json();
@@ -650,7 +661,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
       console.error('[brand-packaging] Series generation failed:', e);
       setIsGenerating(false);
     }
-  }, [brandName, productName, category, structure, materialCraft, skuMatrix, extendScenes, customPrompt, logoUrl, brandColors, uploads, advancedOptions, results, onAddImages, selectedModel, selectedProviderId, selectedChatModel, selectedChatProviderId]);
+  }, [brandName, productName, category, structure, materialCraft, skuMatrix, extendScenes, customPrompt, logoUrl, brandColors, uploads, advancedOptions, results, onAddImages, selectedModel, selectedProviderId, selectedChatModel, selectedChatProviderId, fitSavedImageSelection]);
 
   // === Generate scene display ===
   const handleGenerateScene = useCallback(async () => {
@@ -670,8 +681,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
           providerId: selectedProviderId,
           chatModel: selectedChatModel,
           chatProviderId: selectedChatProviderId,
-          quality: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).quality : undefined; } catch { return undefined; } })(),
-          aspectRatio: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).aspectRatio : undefined; } catch { return undefined; } })(),
+          ...fitSavedImageSelection(),
         }),
       });
       const data = await res.json();
@@ -712,7 +722,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
       console.error('[brand-packaging] Scene generation failed:', e);
       setIsGenerating(false);
     }
-  }, [brandName, productName, category, structure, materialCraft, skuMatrix, extendScenes, customPrompt, logoUrl, brandColors, uploads, advancedOptions, results, onAddImages, selectedModel, selectedProviderId, selectedChatModel, selectedChatProviderId]);
+  }, [brandName, productName, category, structure, materialCraft, skuMatrix, extendScenes, customPrompt, logoUrl, brandColors, uploads, advancedOptions, results, onAddImages, selectedModel, selectedProviderId, selectedChatModel, selectedChatProviderId, fitSavedImageSelection]);
 
   // === Download image ===
   const handleDownloadImage = useCallback(async (url: string, filename: string) => {

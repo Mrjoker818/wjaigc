@@ -2521,8 +2521,9 @@ export function buildNodeExecutionRequest(
         mode: config.mode || 'text2video',
         aspectRatio: config.aspectRatio || '16:9',
         duration: Number(config.duration) || 5,
-        quality: config.quality || 'std',
-        resolution: config.resolution || '1080p',
+        // No forced defaults: the route checks resolution against the model's exact list.
+        quality: config.quality || undefined,
+        resolution: config.resolution || undefined,
         generateAudio: config.generateAudio === true || config.generateAudio === 'true',
         negativePrompt: config.negativePrompt || '',
         seed: config.seed ? Number(config.seed) : undefined,
@@ -2545,8 +2546,9 @@ export function buildNodeExecutionRequest(
         lastFrameImageUrl: config.lastFrameImageUrl || '',
         aspectRatio: config.aspectRatio || '16:9',
         duration: Number(config.duration) || 5,
-        quality: config.quality || 'std',
-        resolution: config.resolution || '1080p',
+        // No forced defaults: the route checks resolution against the model's exact list.
+        quality: config.quality || undefined,
+        resolution: config.resolution || undefined,
         generateAudio: config.generateAudio === true || config.generateAudio === 'true',
         negativePrompt: config.negativePrompt || '',
         seed: config.seed ? Number(config.seed) : undefined,

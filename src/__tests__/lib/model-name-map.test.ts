@@ -28,6 +28,18 @@ describe('model-name-map exact display fallbacks', () => {
     ['seedance-1.0', 'Seedance 1.0 Pro', 'Seedance 1.0 Pro', 'ByteDance', 'video'],
     ['doubao-seedream-4-5-251128', 'Seedream 4.5', 'Seedream 4.5', 'ByteDance', 'image'],
     ['doubao-seedream-4-0-250828', 'Seedream 4.0', 'Seedream 4.0', 'ByteDance', 'image'],
+    // APIMart gateway ids (GET /v1/models, 2026-11-09)
+    ['seedance-2.0', 'Seedance 2.0', 'SD 2.0', 'ByteDance', 'video'],
+    ['seedance-2.0-fast', 'Seedance 2.0 Fast', 'SD 2.0F', 'ByteDance', 'video'],
+    ['seedance-2.0-mini', 'Seedance 2.0 Mini', 'SD 2.0 Mini', 'ByteDance', 'video'],
+    ['seedance-2.0-face', 'Seedance 2.0 Face', 'SD 2.0 Face', 'ByteDance', 'video'],
+    ['seedance-2.0-fast-face', 'Seedance 2.0 Fast Face', 'SD 2.0F Face', 'ByteDance', 'video'],
+    ['MiniMax-Hailuo-02', '海螺 Hailuo 02', 'Hailuo 02', 'MiniMax', 'video'],
+    ['kling-3.0-turbo', '可灵 3.0 Turbo 视频', 'Kling 3.0 Turbo', 'Kuaishou', 'video'],
+    ['wan2.5-preview', '万相 2.5 视频', 'Wan 2.5', 'Alibaba', 'video'],
+    ['gpt-image-2.5-flare', 'GPT Image 2.5', 'GPT Image 2.5', 'OpenAI', 'image'],
+    ['qwen-image-3.0-pro', '通义万相 3.0', '通义万相 3.0', 'Alibaba', 'image'],
+    ['gemini-3.1-flash-lite-image', 'Gemini 3.1 Flash Lite Image', 'GF 3.1 Lite Image', 'Google', 'image'],
   ] as const;
 
   it.each(donorCases)(
