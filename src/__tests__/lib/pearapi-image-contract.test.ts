@@ -35,4 +35,39 @@ describe('PearAPI image profile contract', () => {
     }, PROFILE_PEARAPI, { hasImage: true, isEditEndpoint: true });
     expect(endpoint).toBe('/images/edits');
   });
+
+  it('sends references as the documented images array', () => {
+    const { body } = adjustRequestForProfile({
+      model: 'nano-banana-2', prompt: 'p', size: '1:1', image: 'https://e/a.png', image_urls: ['https://e/a.png', 'https://e/b.png'],
+    }, PROFILE_PEARAPI, { hasReferenceImages: true });
+    expect(body.images).toEqual(['https://e/a.png', 'https://e/b.png']);
+    expect(body).not.toHaveProperty('image');
+    expect(body).not.toHaveProperty('image_urls');
+  });
+
+  it('drops fields and values a model does not document', () => {
+    const grok = adjustRequestForProfile({
+      model: 'grok-imagine-image-2.0', prompt: 'p', size: '16:9', resolution: '2K', quality: 'high',
+    }, PROFILE_PEARAPI).body;
+    expect(grok).not.toHaveProperty('size');
+    expect(grok).not.toHaveProperty('resolution');
+    expect(grok).not.toHaveProperty('quality');
+    const nano = adjustRequestForProfile({
+      model: 'nano-banana', prompt: 'p', size: '1:1', resolution: '4K', quality: 'high', image_count: 6,
+    }, PROFILE_PEARAPI).body;
+    expect(nano).not.toHaveProperty('resolution');
+    expect(nano).not.toHaveProperty('quality');
+    expect(nano.n).toBe(4);
+    const zImage = adjustRequestForProfile({
+      model: 'z-image', prompt: 'p', size: '1:1', image_urls: ['https://e/a.png'],
+    }, PROFILE_PEARAPI, { hasReferenceImages: true }).body;
+    expect(zImage).not.toHaveProperty('images');
+  });
+
+  it('keeps undocumented local model ids unchanged apart from the image fields', () => {
+    const { body } = adjustRequestForProfile({
+      model: 'gpt-image-2-4k', prompt: 'p', size: '1:1', resolution: '4K', quality: 'high',
+    }, PROFILE_PEARAPI);
+    expect(body).toMatchObject({ resolution: '4K', quality: 'high' });
+  });
 });

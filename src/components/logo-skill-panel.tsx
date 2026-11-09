@@ -4,6 +4,7 @@ import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useId
 import { constrainFloatingPanelPosition, getCenteredFloatingPanelPosition, getFloatingPanelViewport,
   subscribeFloatingPanelViewport, type FloatingPanelPosition, type FloatingPanelViewport } from '@/lib/floating-panel-position';
 import ReactDOM from 'react-dom';
+import { fitImageToolSelection, indexImageToolCapabilities, readSavedImageSelection, type ImageToolCapabilityIndex } from '@/lib/image-tool-model-options';
 import {
   PenTool, X, Loader2, Wand2, Star, Eye, ArrowRight,
   Copy, Check, ChevronDown, ChevronRight, RotateCcw,
@@ -279,6 +280,7 @@ export default function LogoSkillPanel({
   // 模型列表
   const [imageModels, setImageModels] = useState<ImageModel[]>([]);
   const [selectedImageModel, setSelectedImageModel] = useState('');
+  const [imageCapabilities, setImageCapabilities] = useState<ImageToolCapabilityIndex>({});
   const [llmModels, setLlmModels] = useState<ImageModel[]>([]);
   const [selectedLlmModel, setSelectedLlmModel] = useState('');
   const [showLlmDropdown, setShowLlmDropdown] = useState(false);
@@ -358,6 +360,7 @@ export default function LogoSkillPanel({
           };
         });
         setImageModels(models);
+        setImageCapabilities(indexImageToolCapabilities(data.taskModelCatalog));
         if (models.length > 0) {
           setSelectedImageModel(`${models[0].providerId}::${models[0].id}`);
         }
@@ -486,9 +489,14 @@ export default function LogoSkillPanel({
     setStep('generate');
     try {
       const { modelId: imgModel, providerId: imgProviderId } = parseCompositeKey(selectedImageModel);
-      const imgModelInfo = (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s) : {}; } catch { return {}; } })();
-      const imgQuality = imgModelInfo.quality || '1K';
-      const imgAspectRatio = imgModelInfo.aspectRatio || '1:1';
+      const saved = readSavedImageSelection();
+      // 主面板上次的比例/画质未必适用于这里选的模型，按该模型能力收敛
+      const fitted = fitImageToolSelection(imgModel, imageCapabilities[selectedImageModel], {
+        aspectRatio: saved.aspectRatio || '1:1',
+        quality: saved.quality || '1K',
+      });
+      const imgQuality = fitted.quality || '1K';
+      const imgAspectRatio = fitted.aspectRatio || '1:1';
       const res = await fetch('/api/logo-skill', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -54,7 +54,8 @@ const RANDOM_EXAMPLES = [
   '浮生六记', '食光食堂', '如故', '一念之间', '潮汐',
 ];
 
-import { MODEL_ASPECT_RATIOS, DEFAULT_ASPECT_RATIOS, findModelConfig, ASPECT_RATIO_TO_PIXELS } from '@/lib/canvas-generation-group';
+import { ASPECT_RATIO_TO_PIXELS } from '@/lib/canvas-generation-group';
+import { indexImageToolCapabilities, resolveImageToolOptions, type ImageToolCapabilityIndex } from '@/lib/image-tool-model-options';
 import { extractFontDesignPollImageUrl } from '@/lib/font-design-poll-result';
 
 const COLOR_OPTIONS = [
@@ -161,6 +162,14 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
   const [graphicOptionList, setGraphicOptionList] = useState<{ id: string; name: string }[]>([]);
   const [materialList, setMaterialList] = useState<{ id: string; name: string }[]>([]);
   const [imageModels, setImageModels] = useState<ImageModel[]>([]);
+  const [modelCapabilities, setModelCapabilities] = useState<ImageToolCapabilityIndex>({});
+  const ratiosFor = (modelId: string, providerId: string) => resolveImageToolOptions(modelId, modelCapabilities[`${providerId}::${modelId}`]).ratios;
+  // Capabilities can arrive after the first model is picked; keep the ratio inside the exact list.
+  useEffect(() => {
+    if (!selectedModel || ratio === 'logo') return;
+    const supported = resolveImageToolOptions(selectedModel, modelCapabilities[`${selectedProviderId}::${selectedModel}`]).ratios;
+    if (supported.length > 0 && !supported.includes(ratio)) setRatio(supported[0]);
+  }, [selectedModel, selectedProviderId, modelCapabilities, ratio]);
   const selectedImageModel = imageModels.find(
     model => model.id === selectedModel && model.providerId === selectedProviderId,
   );
@@ -310,6 +319,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
           providerName: providerMap.get(m.providerId) || m.providerId,
         }));
         setImageModels(models);
+        setModelCapabilities(indexImageToolCapabilities(data.taskModelCatalog));
         if (models.length > 0 && !selectedModel) {
           setSelectedModel(models[0].id);
           setSelectedProviderId(models[0].providerId);
@@ -1040,7 +1050,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                           {imageModels.map((m) => (
                             <button
                               key={`${m.providerId}::${m.id}`}
-                              onClick={() => { setSelectedModel(m.id); setSelectedProviderId(m.providerId); setShowModelDropdown(false); const supportedRatios = findModelConfig(MODEL_ASPECT_RATIOS, m.id) || DEFAULT_ASPECT_RATIOS; if (!supportedRatios.includes(ratio) && ratio !== 'logo') setRatio(supportedRatios[0]); }}
+                              onClick={() => { setSelectedModel(m.id); setSelectedProviderId(m.providerId); setShowModelDropdown(false); const supportedRatios = ratiosFor(m.id, m.providerId); if (!supportedRatios.includes(ratio) && ratio !== 'logo') setRatio(supportedRatios[0]); }}
                               className="w-full px-3 py-2.5 text-left text-xs flex items-center gap-2 transition-colors"
                               style={{
                                 borderLeft: selectedModel === m.id && selectedProviderId === m.providerId ? `2px solid ${accentColor}` : '2px solid transparent',
@@ -1067,7 +1077,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                       画面比例
                     </label>
                     <div className="flex gap-1.5 flex-wrap">
-                      {(findModelConfig(MODEL_ASPECT_RATIOS, selectedModel) || DEFAULT_ASPECT_RATIOS).map((r: string) => (
+                      {ratiosFor(selectedModel, selectedProviderId).map((r: string) => (
                         <button key={r} onClick={() => setRatio(r)} style={chipStyle(ratio === r)}>
                           {r}
                         </button>
@@ -1253,7 +1263,7 @@ export default function FontDesignPanel({ isMonochrome = false, onClose, onAddIm
                     <div>
                       <p className="text-[11px] mb-1.5" style={{ color: `${subTextColor}aa` }}>画面比例</p>
                       <div className="flex gap-1.5 flex-wrap">
-                        {(findModelConfig(MODEL_ASPECT_RATIOS, selectedModel) || DEFAULT_ASPECT_RATIOS).map((r: string) => (
+                        {ratiosFor(selectedModel, selectedProviderId).map((r: string) => (
                           <button key={r} onClick={() => setRatio(r)} aria-pressed={ratio === r} style={chipStyle(ratio === r)}>
                             {r}
                           </button>

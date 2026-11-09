@@ -7,6 +7,7 @@ import { getModelDisplayName } from '@/lib/model-name-map';
 import { getStickerModelLoadDiagnosticMessage } from '@/lib/sticker-model-load-state';
 import { getStickerFailureMessage } from '@/lib/sticker-failure-message';
 import { withClientImageOutputPreference } from '@/lib/image-generation-output-preference';
+import { fitImageToolSelection, indexImageToolCapabilities, readSavedImageSelection, type ImageToolCapabilityIndex } from '@/lib/image-tool-model-options';
 import { constrainFloatingPanelPosition, getCenteredFloatingPanelPosition, getFloatingPanelViewport, subscribeFloatingPanelViewport } from '@/lib/floating-panel-position';
 
 
@@ -669,6 +670,7 @@ export default function StickerAssistantPanel({
   /* ── 模型选择 ── */
   const [models, setModels] = useState<ModelOption[]>([]);
   const [selectedModelId, setSelectedModelId] = useState('');
+  const [imageCapabilities, setImageCapabilities] = useState<ImageToolCapabilityIndex>({});
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelDiagnostic, setModelDiagnostic] = useState('');
   const [chatModelId, setChatModelId] = useState('');
@@ -723,6 +725,7 @@ export default function StickerAssistantPanel({
             }
           }
           setModels(loaded);
+          setImageCapabilities(indexImageToolCapabilities(data.taskModelCatalog));
           if (loaded.length > 0 && !selectedModelId) {
             setSelectedModelId(loaded[0].id);
           }
@@ -1044,7 +1047,12 @@ ${themeDesc}
       n: 1,
       outputCount: 1,
       submitOnly: true,
-      quality: (() => { try { const s = localStorage.getItem('wujie_selected_model'); return s ? JSON.parse(s).quality : 'standard'; } catch { return 'standard'; } })(),
+      // 贴纸固定 1:1；画质取主面板上次的选择，并按所选模型能力收敛
+      quality: fitImageToolSelection(
+        selectedModelId.includes('::') ? selectedModelId.split('::').pop()! : selectedModelId,
+        imageCapabilities[selectedModelId],
+        { quality: readSavedImageSelection().quality || 'standard' },
+      ).quality,
     };
 
     if (selectedModelId) {
@@ -1143,7 +1151,7 @@ ${themeDesc}
     } catch { /* 保留原图 */ }
 
     return imageUrl!;
-  }, [styleKey, customStyle, selectedStyle, selectedModelId, models, subjectImage, subjectSource, subjectDetail, buildIdentityLock]);
+  }, [styleKey, customStyle, selectedStyle, selectedModelId, models, subjectImage, subjectSource, subjectDetail, buildIdentityLock, imageCapabilities]);
 
   useEffect(() => {
     if (!generating || step !== 2 || plan.length === 0) return;

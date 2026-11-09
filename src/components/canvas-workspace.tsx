@@ -94,6 +94,7 @@ import {
   type QuickCreateCompileResult,
   type QuickCreateCompileSseEvent,
 } from '@/lib/quick-create-compile';
+import { fitImageToolSelection } from '@/lib/image-tool-model-options';
 import {
   flushQuickCreateSseBuffer,
   parseQuickCreateSseChunk,
@@ -6980,6 +6981,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
     const generationQuality = (quality: QuickCreateCompileResult['quality']) => (
       resolveQuickCreateGenerationQuality(quality, imageCapability)
     );
+    // 比例与张数同样按所选图像模型能力收敛（快捷创作的选项是通用列表）
+    const fitQuickCreateSelection = (aspectRatio: string, outputCount: number) => {
+      const fitted = fitImageToolSelection(quickCreateImageModel.id, imageCapability, { aspectRatio, count: outputCount });
+      return { aspectRatio: fitted.aspectRatio ?? aspectRatio, outputCount: fitted.count ?? outputCount };
+    };
 
     quickCreateCompileControllerRef.current?.abort();
     const controller = new AbortController();
@@ -7021,8 +7027,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
 
       void handleGenerate({
         prompt: finalResult.positivePrompt,
-        outputCount: finalResult.outputCount,
-        aspectRatio: finalResult.aspectRatio,
+        ...fitQuickCreateSelection(finalResult.aspectRatio, finalResult.outputCount),
         size: '',
         referenceImages: request.referenceImages,
         referenceMode: 'style',
@@ -7151,8 +7156,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
 
       void handleGenerate({
         prompt: compiledPrompt,
-        outputCount: finalResult.outputCount,
-        aspectRatio: finalResult.aspectRatio,
+        ...fitQuickCreateSelection(finalResult.aspectRatio, finalResult.outputCount),
         size: '',
         referenceImages: request.referenceImages,
         referenceMode: 'style',

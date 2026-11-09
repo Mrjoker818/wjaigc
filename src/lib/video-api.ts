@@ -4,6 +4,8 @@
  * 所有视频 API 统一采用"异步提交 + 轮询结果"模式
  */
 
+import { getPearVideoModelSpec } from './pear-video-models';
+
 // ==================== Types ====================
 
 export type VideoCompatProfile =
@@ -34,6 +36,8 @@ export interface VideoModelFeatures {
   ratios: string[];           // 支持的画面比例
   aspectRatios?: string[];    // 别名（部分前端组件使用 aspectRatios）
   resolutions: string[];      // 支持的分辨率
+  imageToVideo?: boolean;     // 仅首帧图生视频（无首尾帧/多参考时）
+  maxReferenceImages?: number; // 文档规定的参考图上限
   region: 'cn' | 'global';   // 国内/海外
 }
 
@@ -142,6 +146,12 @@ function getApiNumber(value: unknown, ...path: string[]): number | undefined {
 }
 
 // ==================== Model Registry ====================
+
+function secondsRange(start: number, end: number): number[] {
+  return Array.from({ length: end - start + 1 }, (_, index) => start + index);
+}
+
+const SEEDANCE_APIMART_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'];
 
 export const VIDEO_MODEL_REGISTRY: Record<string, VideoModelInfo> = {
   // === 国内模型 ===
@@ -279,50 +289,78 @@ export const VIDEO_MODEL_REGISTRY: Record<string, VideoModelInfo> = {
     features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 8, durations: [4, 8], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
   },
   // ==== APImart 视频模型 ====
+  // 参数来源：docs.apib.ai/cn/api-reference/videos/*（2026-11-09 核对），模型 id 以网关 /v1/models 为准。
+  // sora-2 不在网关模型列表中，已移除。
   'veo3.1-fast': {
     profile: 'apimart-video', name: 'Veo 3.1 Fast (APImart)', short: 'Veo3.1F', provider: 'Google/APImart',
-    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 8, durations: [8], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
+    // image_urls 最多 3 张：2 张按首尾帧，3 张按参考图；duration 固定 8 秒
+    features: { firstLastFrame: true, multiReference: true, audio: false, characterConsistency: false, videoEdit: false, videoExtend: false, cameraControl: false, motionBrush: false, multiShot: false, maxDuration: 8, durations: [8], ratios: ['16:9','9:16'], resolutions: ['720p','1080p','4K'], maxReferenceImages: 3, region: 'global' },
   },
   'veo3.1-quality': {
     profile: 'apimart-video', name: 'Veo 3.1 Quality (APImart)', short: 'Veo3.1Q', provider: 'Google/APImart',
-    features: { firstLastFrame: false, multiReference: true, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 8, durations: [8], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p','4K'], region: 'global' },
+    // quality 不支持 reference 参考图模式
+    features: { firstLastFrame: true, multiReference: false, audio: false, characterConsistency: false, videoEdit: false, videoExtend: false, cameraControl: false, motionBrush: false, multiShot: false, maxDuration: 8, durations: [8], ratios: ['16:9','9:16'], resolutions: ['720p','1080p','4K'], maxReferenceImages: 2, region: 'global' },
   },
   'veo3.1-lite': {
     profile: 'apimart-video', name: 'Veo 3.1 Lite (APImart)', short: 'Veo3.1L', provider: 'Google/APImart',
-    features: { firstLastFrame: false, multiReference: false, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 8, durations: [8], ratios: ['16:9','9:16','1:1'], resolutions: ['720p'], region: 'global' },
+    // lite 不支持 image_urls
+    features: { firstLastFrame: false, multiReference: false, audio: false, characterConsistency: false, videoEdit: false, videoExtend: false, cameraControl: false, motionBrush: false, multiShot: false, maxDuration: 8, durations: [8], ratios: ['16:9','9:16'], resolutions: ['720p','1080p','4K'], region: 'global' },
   },
-  'sora-2': {
-    profile: 'apimart-video', name: 'Sora 2', short: 'Sora2', provider: 'OpenAI',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 20, durations: [4, 5, 8, 10, 12, 15, 20], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
-  },
-  'minimax-hailuo-02': {
+  'MiniMax-Hailuo-02': {
     profile: 'apimart-video', name: 'MiniMax Hailuo 02 (APImart)', short: 'Hailuo02', provider: 'MiniMax/APImart',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: true, cameraControl: true, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 10, durations: [5,10], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
+    // 无比例参数（不发送）；first_frame_image / last_frame_image；1080p 仅支持 5 秒
+    features: { firstLastFrame: true, multiReference: false, audio: false, characterConsistency: false, videoEdit: false, videoExtend: false, cameraControl: false, motionBrush: false, multiShot: false, maxDuration: 10, durations: [5, 10], ratios: ['16:9'], resolutions: ['512p','768p','1080p'], maxReferenceImages: 2, region: 'global' },
   },
-  'wan2.5-video': {
-    profile: 'apimart-video', name: 'Wan2.5 Video (APImart)', short: 'Wan2.5V', provider: 'Wan/APImart',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 8, durations: [5,8], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
+  'wan2.5-preview': {
+    profile: 'apimart-video', name: 'Wan2.5 Preview (APImart)', short: 'Wan2.5', provider: 'Wan/APImart',
+    // image_urls 仅 1 张首帧；图生视频不能传 size；480p 仅 16:9/9:16/1:1；audio 只能为 true（不发送）
+    features: { firstLastFrame: false, multiReference: false, imageToVideo: true, audio: false, characterConsistency: false, videoEdit: false, videoExtend: false, cameraControl: false, motionBrush: false, multiShot: false, maxDuration: 10, durations: [5, 10], ratios: ['16:9','9:16','1:1','4:3','3:4'], resolutions: ['480p','720p','1080p'], maxReferenceImages: 1, region: 'global' },
   },
-  'doubao-seedance-2.0-face': {
-    profile: 'apimart-video', name: 'Seedance 2.0 Face (APImart)', short: 'SD2.0F', provider: 'ByteDance/APImart',
-    // 官方文档：duration 4–15 秒（聚合器 README 与 Nomi handoff 双源一致）
-    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: true, multiShot: false, maxDuration: 15, durations: [4,5,6,7,8,9,10,11,12,13,14,15], ratios: ['1:1','4:3','3:4','16:9','9:16','21:9'], resolutions: ['480p','720p','1080p','4K'], region: 'global' },
+  'seedance-2.0': {
+    profile: 'apimart-video', name: 'Seedance 2.0 (APImart)', short: 'SD2.0', provider: 'ByteDance/APImart',
+    // 正文写 4~15 秒（参数表另写 5~15），按正文；1080p/4k 仅 seedance-2.0 支持；参考图最多 9 张
+    features: { firstLastFrame: true, multiReference: true, audio: true, characterConsistency: false, videoEdit: false, videoExtend: false, cameraControl: false, motionBrush: false, multiShot: false, maxDuration: 15, durations: secondsRange(4, 15), ratios: SEEDANCE_APIMART_RATIOS, resolutions: ['480p','720p','1080p','4K'], maxReferenceImages: 9, region: 'global' },
   },
-  'doubao-seedance-2.0-fast-face': {
-    profile: 'apimart-video', name: 'Seedance 2.0 Fast Face (APImart)', short: 'SD2.0FF', provider: 'ByteDance/APImart',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: false, videoExtend: false, audio: true, cameraControl: false, motionBrush: false, characterConsistency: true, multiShot: false, maxDuration: 15, durations: [4,5,6,7,8,9,10,11,12,13,14,15], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p'], region: 'global' },
+  'seedance-2.0-fast': {
+    profile: 'apimart-video', name: 'Seedance 2.0 Fast (APImart)', short: 'SD2.0Fast', provider: 'ByteDance/APImart',
+    features: { firstLastFrame: true, multiReference: true, audio: true, characterConsistency: false, videoEdit: false, videoExtend: false, cameraControl: false, motionBrush: false, multiShot: false, maxDuration: 15, durations: secondsRange(4, 15), ratios: SEEDANCE_APIMART_RATIOS, resolutions: ['480p','720p'], maxReferenceImages: 9, region: 'global' },
   },
-  'doubao-seedance-2.0-mini': {
+  'seedance-2.0-mini': {
     profile: 'apimart-video', name: 'Seedance 2.0 Mini (APImart)', short: 'SD2.0M', provider: 'ByteDance/APImart',
-    features: { firstLastFrame: true, multiReference: false, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 15, durations: [4,5,6,7,8,9,10,11,12,13,14,15], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['480p','720p'], region: 'global' },
+    features: { firstLastFrame: true, multiReference: true, audio: true, characterConsistency: false, videoEdit: false, videoExtend: false, cameraControl: false, motionBrush: false, multiShot: false, maxDuration: 15, durations: secondsRange(4, 15), ratios: SEEDANCE_APIMART_RATIOS, resolutions: ['480p','720p'], maxReferenceImages: 9, region: 'global' },
+  },
+  'seedance-2.0-face': {
+    profile: 'apimart-video', name: 'Seedance 2.0 Face (APImart)', short: 'SD2.0F', provider: 'ByteDance/APImart',
+    features: { firstLastFrame: true, multiReference: true, audio: true, characterConsistency: true, videoEdit: false, videoExtend: false, cameraControl: false, motionBrush: false, multiShot: false, maxDuration: 15, durations: secondsRange(4, 15), ratios: SEEDANCE_APIMART_RATIOS, resolutions: ['480p','720p'], maxReferenceImages: 9, region: 'global' },
+  },
+  'seedance-2.0-fast-face': {
+    profile: 'apimart-video', name: 'Seedance 2.0 Fast Face (APImart)', short: 'SD2.0FF', provider: 'ByteDance/APImart',
+    features: { firstLastFrame: true, multiReference: true, audio: true, characterConsistency: true, videoEdit: false, videoExtend: false, cameraControl: false, motionBrush: false, multiShot: false, maxDuration: 15, durations: secondsRange(4, 15), ratios: SEEDANCE_APIMART_RATIOS, resolutions: ['480p','720p'], maxReferenceImages: 9, region: 'global' },
+  },
+  'seedance-2.5': {
+    profile: 'apimart-video', name: 'Seedance 2.5 (APImart)', short: 'SD2.5', provider: 'ByteDance/APImart',
+    // 4~30 秒（平台上限另行截断）；480p/720p/1080p，4k 不可用；参考图最多 30 张
+    features: { firstLastFrame: true, multiReference: true, audio: true, characterConsistency: false, videoEdit: false, videoExtend: false, cameraControl: false, motionBrush: false, multiShot: false, maxDuration: 30, durations: secondsRange(4, 30), ratios: SEEDANCE_APIMART_RATIOS, resolutions: ['480p','720p','1080p'], maxReferenceImages: 30, region: 'global' },
   },
   'kling-v3-omni': {
     profile: 'apimart-video', name: 'Kling V3 Omni (APImart)', short: 'KlingV3O', provider: 'Kuaishou/APImart',
-    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: true, audio: true, cameraControl: true, motionBrush: true, characterConsistency: true, multiShot: false, maxDuration: 30, durations: [5, 10, 15, 30], ratios: ['1:1','4:3','16:9','9:16'], resolutions: ['1K','2K','4K'], region: 'global' },
+    // 3~15 秒；清晰度档位映射到 mode：720p→std、1080p→pro、4K→4k；音效字段为 audio
+    features: { firstLastFrame: true, multiReference: true, audio: true, characterConsistency: false, videoEdit: false, videoExtend: false, cameraControl: false, motionBrush: false, multiShot: false, maxDuration: 15, durations: secondsRange(3, 15), ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p','4K'], region: 'global' },
+  },
+  'kling-3.0-turbo': {
+    profile: 'apimart-video', name: 'Kling 3.0 Turbo (APImart)', short: 'Kling3T', provider: 'Kuaishou/APImart',
+    // 仅 first_frame_image 首帧；图生视频时 aspect_ratio 无效
+    features: { firstLastFrame: false, multiReference: false, imageToVideo: true, audio: false, characterConsistency: false, videoEdit: false, videoExtend: false, cameraControl: false, motionBrush: false, multiShot: false, maxDuration: 15, durations: secondsRange(3, 15), ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], maxReferenceImages: 1, region: 'global' },
   },
   'grok-imagine-1.5-video-apimart': {
     profile: 'apimart-video', name: 'Grok Imagine 1.5 Video (APImart)', short: 'GrokI1.5', provider: 'xAI/APImart',
-    features: { firstLastFrame: false, multiReference: true, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 8, durations: [3, 5, 8], ratios: ['16:9','9:16','1:1'], resolutions: ['720p','1080p'], region: 'global' },
+    // 比例字段为 size；6~15 秒；480p/720p；image_urls 最多 7 张
+    features: { firstLastFrame: false, multiReference: true, audio: false, characterConsistency: false, videoEdit: false, videoExtend: false, cameraControl: false, motionBrush: false, multiShot: false, maxDuration: 15, durations: secondsRange(6, 15), ratios: ['16:9','9:16','1:1','3:2','2:3'], resolutions: ['480p','720p'], maxReferenceImages: 7, region: 'global' },
+  },
+  'gemini-omni-flash-preview': {
+    profile: 'apimart-video', name: 'Gemini Omni Flash (APImart)', short: 'OmniFlash', provider: 'Google/APImart',
+    // 无 duration 参数（输出 3~10 秒，不发送）；仅 720p；image_urls 最多 16 张；输出自带音频
+    features: { firstLastFrame: false, multiReference: true, audio: false, characterConsistency: false, videoEdit: false, videoExtend: false, cameraControl: false, motionBrush: false, multiShot: false, maxDuration: 10, durations: [10], ratios: ['16:9','9:16'], resolutions: ['720p'], maxReferenceImages: 16, region: 'global' },
   },
   // ==== AI Link 视频模型 ====
   'kling-v3': {
@@ -733,7 +771,7 @@ export function buildVideoPollRequest(
       };
     case 'apimart-video':
       return {
-        url: `${cleanBaseUrl}/v1/tasks/${taskId}`,
+        url: `${cleanBaseUrl}/v1/tasks/${taskId}?language=zh`,
         headers: { 'Authorization': `Bearer ${apiKey}` },
         method: 'GET',
       };
@@ -1143,65 +1181,115 @@ function buildRestGenericSubmit(baseUrl: string, apiKey: string, params: VideoGe
   };
 }
 
-/** APImart videos/generations submit (verified 2026-11-08 against api.apib.ai).
+/** Request fields each APIMart video model documents (docs.apib.ai/cn, 2026-11-09). */
+interface ApiMartVideoSpec {
+  /** Ratio field name; null when the model has no ratio parameter. */
+  ratioField: 'size' | 'aspect_ratio' | null;
+  /** Whether the ratio is still sent when an input image decides the frame. */
+  ratioWithImage: boolean;
+  /** roles: image_with_roles; flat: image_urls; frame-fields: first/last_frame_image; first-frame: first_frame_image only. */
+  images: 'roles' | 'flat' | 'frame-fields' | 'first-frame' | 'none';
+  audioField: 'generate_audio' | 'audio' | null;
+  resolutionField: 'resolution' | 'mode';
+  sendsDuration: boolean;
+  sendsNegativePrompt: boolean;
+  sendsSeed: boolean;
+}
+
+const LEGACY_APIMART_VIDEO_SPEC: ApiMartVideoSpec = {
+  ratioField: 'aspect_ratio', ratioWithImage: true, images: 'flat', audioField: 'generate_audio',
+  resolutionField: 'resolution', sendsDuration: true, sendsNegativePrompt: true, sendsSeed: true,
+};
+
+function getApiMartVideoSpec(modelId: string): ApiMartVideoSpec {
+  const id = modelId.toLowerCase();
+  const base = { ...LEGACY_APIMART_VIDEO_SPEC, sendsNegativePrompt: false, sendsSeed: false, audioField: null };
+  // Seedance 2.0 / 2.5: size, image_with_roles, generate_audio
+  if (/seedance-2[.-][05]/.test(id)) return { ...LEGACY_APIMART_VIDEO_SPEC, ratioField: 'size', images: 'roles' };
+  // Kling v3 Omni: mode std/pro/4k, audio, negative_prompt
+  if (id.startsWith('kling-v3-omni')) return { ...base, audioField: 'audio', resolutionField: 'mode', sendsNegativePrompt: true };
+  // Kling 3.0 Turbo: first_frame_image; aspect_ratio is ignored for image-to-video
+  if (id.startsWith('kling-3.0-turbo')) return { ...base, images: 'first-frame', ratioWithImage: false };
+  // MiniMax Hailuo 02: no ratio parameter, first_frame_image / last_frame_image
+  if (id.includes('hailuo')) return { ...base, ratioField: null, images: 'frame-fields' };
+  // Wan2.5: size only for text-to-video, one first-frame image, negative_prompt and seed
+  if (id.startsWith('wan2.5')) return { ...base, ratioField: 'size', ratioWithImage: false, sendsNegativePrompt: true, sendsSeed: true };
+  // Veo 3.1: lite does not accept image_urls
+  if (id.startsWith('veo3')) return { ...base, images: id.startsWith('veo3.1-lite') ? 'none' : 'flat' };
+  // Grok Imagine video: ratio field is size
+  if (id.startsWith('grok-imagine') && id.includes('video')) return { ...base, ratioField: 'size' };
+  // Gemini Omni Flash: no duration parameter
+  if (id.startsWith('gemini-omni')) return { ...base, sendsDuration: false };
+  return LEGACY_APIMART_VIDEO_SPEC;
+}
+
+/** APImart videos/generations submit.
  * POST /v1/videos/generations
- * Sources: docs.apimart.ai quickstart (sora-2: aspect_ratio), Kling v3 Omni page
- * (image_urls + aspect_ratio + mode std/pro/4k), verified aggregator README and
- * Nomi handoff for Seedance 2.x (size, duration 4-15, image_urls XOR image_with_roles),
- * plus live gateway probes (resolution 480p/720p/1080p/4k, lowercase only).
+ * Field names per model come from docs.apib.ai/cn/api-reference/videos/* (reviewed 2026-11-09)
+ * plus live gateway probes from 2026-11-08 (resolution lowercase only: 480p/720p/1080p/4k).
  * Response: {code:200, data:[{status:"submitted", task_id}]}
  */
 function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
   const cleanBase = ensureBaseUrl(baseUrl);
+  const spec = getApiMartVideoSpec(params.model);
   const referenceImages = params.referenceImages || [];
+  const lowerModel = params.model.toLowerCase();
 
-  // Official docs derive the mode from parameter combinations; `image_with_roles`
-  // (first_frame/last_frame/reference_image) is only documented for Seedance 2.x.
-  // Other APIMart models (e.g. Kling v3 Omni) document the flat `image_urls` array.
-  const usesRoles = /seedance-2[.-]0/i.test(params.model);
-  const imageWithRoles: Array<{ url: string; role: 'first_frame' | 'last_frame' | 'reference_image' }> = [];
-  const flatImageUrls: string[] = [];
-  if (params.imageUrl) {
-    if (usesRoles) imageWithRoles.push({ url: params.imageUrl, role: 'first_frame' });
-    else flatImageUrls.push(params.imageUrl);
-  }
-  if (params.lastFrameImageUrl) {
-    if (usesRoles) imageWithRoles.push({ url: params.lastFrameImageUrl, role: 'last_frame' });
-    else flatImageUrls.push(params.lastFrameImageUrl);
-  }
-  if (usesRoles && imageWithRoles.length > 0) {
-    imageWithRoles.push(...referenceImages.map(url => ({ url, role: 'reference_image' as const })));
-  } else {
-    flatImageUrls.push(...referenceImages);
-  }
-
-  // APIMart Seedance 2.0 names the ratio field `size` (16:9/9:16/1:1/4:3/3:4/21:9/adaptive);
-  // `aspect_ratio` is the older Seedance 1.5 Pro name. Other APIMart video models keep it.
-  const ratioField = /seedance-2[.-]0/i.test(params.model) ? 'size' : 'aspect_ratio';
-  // `resolution` is only forwarded when the user explicitly sets it via advancedParams.
-  // The gateway rejects uppercase tier suffixes ("1K" → invalid_resolution, only
-  // 480p/720p/1080p/4k pass), so normalize the trailing K.
+  // The gateway rejects uppercase tier suffixes ("1K" → invalid_resolution), so normalize the trailing K.
   const advResolutionRaw = getApiString(params.advancedParams, 'resolution');
   const advResolution = advResolutionRaw ? advResolutionRaw.replace(/K$/, 'k') : undefined;
+
+  if (lowerModel.includes('hailuo') && advResolution === '1080p' && (params.duration ?? 5) > 5) {
+    throw new Error('MiniMax Hailuo 02 的 1080p 仅支持 5 秒，请改为 5 秒或选择 768p');
+  }
+  if (lowerModel.startsWith('wan2.5') && advResolution === '480p' && params.aspectRatio
+    && !['16:9', '9:16', '1:1'].includes(params.aspectRatio) && !params.imageUrl) {
+    throw new Error('Wan2.5 的 480p 仅支持 16:9、9:16、1:1，请换比例或选择 720p/1080p');
+  }
+
+  const imageFields: Record<string, unknown> = {};
+  if (spec.images === 'roles') {
+    const roles: Array<{ url: string; role: 'first_frame' | 'last_frame' | 'reference_image' }> = [];
+    if (params.imageUrl) roles.push({ url: params.imageUrl, role: 'first_frame' });
+    if (params.lastFrameImageUrl) roles.push({ url: params.lastFrameImageUrl, role: 'last_frame' });
+    if (roles.length > 0) {
+      roles.push(...referenceImages.map(url => ({ url, role: 'reference_image' as const })));
+      imageFields.image_with_roles = roles;
+    } else if (referenceImages.length > 0) {
+      imageFields.image_urls = [...referenceImages];
+    }
+  } else if (spec.images === 'flat') {
+    const urls = [params.imageUrl, params.lastFrameImageUrl, ...referenceImages]
+      .filter((url): url is string => typeof url === 'string' && url.length > 0);
+    if (urls.length > 0) imageFields.image_urls = urls;
+  } else if (spec.images === 'frame-fields') {
+    if (params.imageUrl) imageFields.first_frame_image = params.imageUrl;
+    if (params.lastFrameImageUrl) imageFields.last_frame_image = params.lastFrameImageUrl;
+  } else if (spec.images === 'first-frame') {
+    const firstFrame = params.imageUrl || referenceImages[0];
+    if (firstFrame) imageFields.first_frame_image = firstFrame;
+  }
+  const hasInputImage = Object.keys(imageFields).length > 0;
+
   // kling-v3-omni validates `mode` (std/pro/4k) and ignores `resolution`.
-  // Map the UI tier onto mode; other APIMart models keep the resolution field.
-  const omniMode = /kling-v3-omni/i.test(params.model) && advResolution
+  const omniMode = spec.resolutionField === 'mode' && advResolution
     ? ({ '720p': 'std', '1080p': 'pro', '1k': 'std', '2k': 'pro', '4k': '4k' } as Record<string, string>)[advResolution.toLowerCase()]
     : undefined;
+  const sendRatio = spec.ratioField && params.aspectRatio && (spec.ratioWithImage || !hasInputImage);
 
   const body: Record<string, unknown> = {
     model: params.model,
     prompt: params.prompt,
     n: 1,
-    ...(usesRoles && imageWithRoles.length > 0
-      ? { image_with_roles: imageWithRoles }
-      : flatImageUrls.length > 0 ? { image_urls: flatImageUrls } : {}),
-    ...(params.aspectRatio ? { [ratioField]: params.aspectRatio } : {}),
-    ...(params.duration ? { duration: params.duration } : {}),
-    ...(omniMode ? { mode: omniMode } : advResolution ? { resolution: advResolution } : {}),
-    ...(params.generateAudio !== undefined ? { generate_audio: params.generateAudio } : {}),
-    ...(params.negativePrompt ? { negative_prompt: params.negativePrompt } : {}),
-    ...(params.seed !== undefined ? { seed: params.seed } : {}),
+    ...imageFields,
+    ...(sendRatio && spec.ratioField ? { [spec.ratioField]: params.aspectRatio } : {}),
+    ...(spec.sendsDuration && params.duration ? { duration: params.duration } : {}),
+    ...(spec.resolutionField === 'mode'
+      ? (omniMode ? { mode: omniMode } : {})
+      : advResolution ? { resolution: advResolution } : {}),
+    ...(spec.audioField && params.generateAudio !== undefined ? { [spec.audioField]: params.generateAudio } : {}),
+    ...(spec.sendsNegativePrompt && params.negativePrompt ? { negative_prompt: params.negativePrompt } : {}),
+    ...(spec.sendsSeed && params.seed !== undefined ? { seed: params.seed } : {}),
   };
 
   return {
@@ -1284,34 +1372,40 @@ function buildPearApiVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
     generationMode = 'image2video';
   }
 
-  // duration 与 seconds 等效，4–15 整数秒
-  const pearDuration = params.duration != null
-    ? Math.min(15, Math.max(4, Math.floor(params.duration)))
+  // duration 与 seconds 等效，整数秒；按模型文档取最近的可选时长（未收录的模型沿用 4–15）
+  const spec = getPearVideoModelSpec(params.model);
+  const requestedDuration = params.duration != null ? Math.floor(params.duration) : undefined;
+  const pearDuration = requestedDuration != null
+    ? spec
+      ? spec.durations.reduce((nearest, value) => (
+        Math.abs(value - requestedDuration) < Math.abs(nearest - requestedDuration) ? value : nearest
+      ), spec.durations[0])
+      : Math.min(15, Math.max(4, Math.floor(requestedDuration)))
     : undefined;
-  // 清晰度仅接受文档枚举（720P/480P）
-  const rawResolution = getApiString(params.advancedParams, 'resolution');
-  const pearResolution = rawResolution
-    ? ({ '720p': '720P', '480p': '480P' } as Record<string, string>)[rawResolution.toLowerCase()]
-    : undefined;
+  // 清晰度仅接受文档枚举（大写 P，如 720P/768P/1080P/2K）
+  const rawResolution = getApiString(params.advancedParams, 'resolution')?.toUpperCase();
+  const allowedResolutions = spec?.resolutions ?? ['720P', '480P'];
+  const pearResolution = rawResolution && allowedResolutions.includes(rawResolution) ? rawResolution : undefined;
+  const requestedRatio = params.aspectRatio || '16:9';
+  const pearRatio = !spec || spec.ratios.includes(requestedRatio) ? requestedRatio : spec.ratios[0];
 
   const body: Record<string, unknown> = {
     model: params.model,
     prompt: params.prompt,
     generation_mode: generationMode,
-    ...(params.aspectRatio ? { aspect_ratio: params.aspectRatio } : { aspect_ratio: '16:9' }),
-    ...(pearDuration ? { duration: pearDuration } : {}),
+    aspect_ratio: pearRatio,
+    ...(pearDuration !== undefined ? { duration: pearDuration } : {}),
     ...(pearResolution ? { resolution: pearResolution } : {}),
     ...(params.negativePrompt ? { negative_prompt: params.negativePrompt } : {}),
     ...(params.seed !== undefined ? { seed: params.seed } : {}),
   };
 
-  // PearAPI 统一参考素材写法 reference_contents: [{type, media_url, name?}]，最多 10 个
-  if (refImages.length > 0) {
-    body.reference_contents = refImages.slice(0, 10).map((url) => ({
-      type: 'image',
-      media_url: url,
-    }));
-  }
+  // PearAPI 统一参考素材写法 reference_contents: [{type, media_url, name?}]，数量按模型上限
+  const references = [
+    ...refImages.slice(0, spec?.maxImages ?? 10).map(url => ({ type: 'image', media_url: url })),
+    ...(params.videoUrl && (spec?.maxVideos ?? 1) > 0 ? [{ type: 'video', media_url: params.videoUrl }] : []),
+  ];
+  if (references.length > 0) body.reference_contents = references;
 
   return {
     url: `${cleanBase}/v1/videos/generations`,

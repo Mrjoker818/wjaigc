@@ -2336,9 +2336,13 @@ export async function GET(_request: NextRequest) {
       }
     }
 
+    const { loadImageToolCapabilities } = await import('@/lib/task-core/image-tool-capabilities');
+    const capabilities = await loadImageToolCapabilities().catch(() => ({}));
+
     return NextResponse.json({
       supportedModels: editModels.map(m => m.id),
       models: editModels,
+      capabilities,
     });
   } catch {
     // 降级：返回静态列表

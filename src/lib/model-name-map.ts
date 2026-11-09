@@ -24,6 +24,7 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   { pattern: 'gemini-3.1-flash-image', entry: { name: 'Nano Banana 2', short: 'NB2', type: 'image', provider: 'Google' } },
   { pattern: 'gemini-3-pro-image', entry: { name: 'Nano Banana 2 Pro', short: 'NB2 Pro', type: 'image', provider: 'Google' } },
   { pattern: 'gemini-3-flash-image', entry: { name: 'Nano Banana 2 Flash', short: 'NB2F', type: 'image', provider: 'Google' } },
+  { pattern: 'gemini-3.1-flash-lite-image', entry: { name: 'Gemini 3.1 Flash Lite Image', short: 'GF 3.1 Lite Image', type: 'image', provider: 'Google' } },
   { pattern: 'gemini-2.5-flash-image', entry: { name: 'Nano Banana', short: 'NB', type: 'image', provider: 'Google' } },
   { pattern: 'gemini-2.5-pro-image', entry: { name: 'Nano Banana Pro', short: 'NB Pro', type: 'image', provider: 'Google' } },
   { pattern: 'gemini-flash-image', entry: { name: 'Nano Banana', short: 'NB', type: 'image', provider: 'Google' } },
@@ -57,6 +58,7 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   { pattern: 'gpt-image-2-4k', entry: { name: 'GPT Image 2 4K', short: 'GPT Image 2 4K', type: 'image', provider: 'OpenAI' } },
   { pattern: 'gpt-image-2-2k', entry: { name: 'GPT Image 2 2K', short: 'GPT Image 2 2K', type: 'image', provider: 'OpenAI' } },
   { pattern: 'gpt-image-2', entry: { name: 'GPT Image 2', type: 'image', provider: 'OpenAI' } },
+  { pattern: 'gpt-image-2.5', entry: { name: 'GPT Image 2.5', type: 'image', provider: 'OpenAI' } },
   { pattern: 'gpt-image-1.5', entry: { name: 'GPT Image 1.5', type: 'image', provider: 'OpenAI' } },
   { pattern: 'gpt-image-1', entry: { name: 'GPT Image 1', type: 'image', provider: 'OpenAI' } },
   { pattern: 'gpt-image', entry: { name: 'GPT Image', type: 'image', provider: 'OpenAI' } },
@@ -105,6 +107,7 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   { pattern: 'jimeng', entry: { name: '即梦', type: 'image', provider: 'ByteDance' } },
   // 可灵
   { pattern: 'kling-v3-omni', entry: { name: '可灵 V3 Omni 视频', short: 'Kling V3 Omni', type: 'video', provider: 'Kuaishou' } },
+  { pattern: 'kling-3.0-turbo', entry: { name: '可灵 3.0 Turbo 视频', short: 'Kling 3.0 Turbo', type: 'video', provider: 'Kuaishou' } },
   { pattern: 'kling-v3', entry: { name: '可灵 V3', type: 'image', provider: 'Kuaishou' } },
   { pattern: 'kling-v2', entry: { name: '可灵 V2', type: 'image', provider: 'Kuaishou' } },
   { pattern: 'kling', entry: { name: '可灵', type: 'image', provider: 'Kuaishou' } },
@@ -123,14 +126,21 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   { pattern: 'sora-2', entry: { name: 'Sora 2', type: 'video', provider: 'OpenAI' } },
   // 通义万相 Image
   { pattern: 'qwen-image-2', entry: { name: '通义万相 2.0', type: 'image', provider: 'Alibaba' } },
+  { pattern: 'qwen-image-3', entry: { name: '通义万相 3.0', type: 'image', provider: 'Alibaba' } },
   { pattern: 'qwen-image', entry: { name: '通义万相', type: 'image', provider: 'Alibaba' } },
   // Wan (阿里万相视频)
   { pattern: 'wan2.7-image-pro', entry: { name: '万相 2.7 Pro', type: 'image', provider: 'Alibaba' } },
   { pattern: 'wan2.7-image', entry: { name: '万相 2.7', type: 'image', provider: 'Alibaba' } },
   { pattern: 'wan2.7', entry: { name: '万相 2.7', type: 'image', provider: 'Alibaba' } },
+  { pattern: 'wan2.5-preview', entry: { name: '万相 2.5 视频', short: 'Wan 2.5', type: 'video', provider: 'Alibaba' } },
   // Seedance (字节视频)
   { pattern: 'seedance-2-5', entry: { name: 'Seedance 2.5', short: 'Seedance 2.5', type: 'video', provider: 'ByteDance' } },
   { pattern: 'seedance-2.5', entry: { name: 'Seedance 2.5', short: 'Seedance 2.5', type: 'video', provider: 'ByteDance' } },
+  { pattern: 'seedance-2.0-fast-face', entry: { name: 'Seedance 2.0 Fast Face', short: 'SD 2.0F Face', type: 'video', provider: 'ByteDance' } },
+  { pattern: 'seedance-2.0-face', entry: { name: 'Seedance 2.0 Face', short: 'SD 2.0 Face', type: 'video', provider: 'ByteDance' } },
+  { pattern: 'seedance-2.0-fast', entry: { name: 'Seedance 2.0 Fast', short: 'SD 2.0F', type: 'video', provider: 'ByteDance' } },
+  { pattern: 'seedance-2.0-mini', entry: { name: 'Seedance 2.0 Mini', short: 'SD 2.0 Mini', type: 'video', provider: 'ByteDance' } },
+  { pattern: 'seedance-2.0', entry: { name: 'Seedance 2.0', short: 'SD 2.0', type: 'video', provider: 'ByteDance' } },
   { pattern: 'seedance-1.5', entry: { name: 'Seedance 1.5 Pro', short: 'Seedance 1.5 Pro', type: 'video', provider: 'ByteDance' } },
   { pattern: 'seedance-1.0', entry: { name: 'Seedance 1.0 Pro', short: 'Seedance 1.0 Pro', type: 'video', provider: 'ByteDance' } },
   { pattern: 'seedance', entry: { name: 'Seedance', type: 'video', provider: 'ByteDance' } },
@@ -146,6 +156,7 @@ const MODEL_NAME_MAP: Array<{ pattern: string; entry: ModelNameEntry }> = [
   { pattern: 'z-image', entry: { name: 'Z Image', type: 'image', provider: 'Zhipu' } },
   // MiniMax Hailuo
   { pattern: 'minimax-hailuo', entry: { name: 'Hailuo', type: 'image', provider: 'MiniMax' } },
+  { pattern: 'minimax-hailuo-02', entry: { name: '海螺 Hailuo 02', short: 'Hailuo 02', type: 'video', provider: 'MiniMax' } },
   { pattern: 'hailuo', entry: { name: 'Hailuo', type: 'image', provider: 'MiniMax' } },
 
   // ===== Chat Models =====

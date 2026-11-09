@@ -20,6 +20,8 @@
  *   const result   = parseResponseForProfile(apiResponse, profile);
  */
 
+import { PEAR_IMAGE_MAX_OUTPUTS, getPearImageModelSpec } from './pear-image-models';
+
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1835,32 +1837,40 @@ export function adjustRequestForProfile(
       delete body.image_urls;
     }
   } else if (profile.id === 'pearapi' || profile.id === 'pearapi-task') {
-    // PearAPI 扁平格式：image (string) + images (string[])
+    // PearAPI（pearapi.apifox.cn 图像生成）：参考图统一放 images (string[])，文档未定义单数 image 字段
     const flatImages: string[] = [];
     const seenUrls = new Set<string>();
-    if (body.image && typeof body.image === 'string') {
-      const url = body.image as string;
-      if (!seenUrls.has(url)) { seenUrls.add(url); flatImages.push(url); }
-    }
-    if (Array.isArray(body.image_urls)) {
-      for (const url of body.image_urls as string[]) {
-        if (typeof url === 'string' && !seenUrls.has(url)) {
-          seenUrls.add(url); flatImages.push(url);
-        }
-      }
-    }
-    if (flatImages.length > 0) {
-      // 第一张放 image，其余放 images 数组
-      body.image = flatImages[0];
-      if (flatImages.length > 1) {
-        body.images = flatImages;  // PearAPI 也接受 images 数组包含全部（含第一张）
-      }
-      delete body.image_urls;
-    }
+    const appendImage = (value: unknown): void => {
+      if (typeof value === 'string' && value && !seenUrls.has(value)) { seenUrls.add(value); flatImages.push(value); }
+    };
+    appendImage(body.image);
+    if (Array.isArray(body.images)) body.images.forEach(appendImage);
+    if (Array.isArray(body.image_urls)) body.image_urls.forEach(appendImage);
+    delete body.image;
+    delete body.image_urls;
+    delete body.images;
     // PearAPI专用字段：数量 n、返回URL格式、强制同步模式（避免轮询找不到端点）
     if (body.image_count !== undefined) {
       body.n = body.image_count;
       delete body.image_count;
+    }
+    const pearSpec = typeof body.model === 'string' ? getPearImageModelSpec(body.model) : undefined;
+    if (pearSpec) {
+      // 按模型文档只发送该模型定义的字段与取值
+      if (pearSpec.ratios.length === 0) {
+        delete body.size;
+        delete body.aspect_ratio;
+      }
+      const resolution = typeof body.resolution === 'string' ? body.resolution.toUpperCase() : undefined;
+      if (resolution && pearSpec.resolutions.includes(resolution)) body.resolution = resolution;
+      else delete body.resolution;
+      if (typeof body.quality !== 'string' || !pearSpec.qualities.includes(body.quality)) delete body.quality;
+      flatImages.splice(pearSpec.maxImages);
+    }
+    if (flatImages.length > 0) body.images = flatImages;
+    if (body.n !== undefined) {
+      const count = Math.floor(Number(body.n));
+      body.n = Number.isFinite(count) ? Math.min(Math.max(count, 1), PEAR_IMAGE_MAX_OUTPUTS) : 1;
     }
     body.response_format = 'url';
     body.task_type = 'sync';
@@ -1891,6 +1901,20 @@ export function adjustRequestForProfile(
     if (body.image_count !== undefined) {
       body.n = body.image_count;
       delete body.image_count;
+    }
+    const apimartModel = typeof body.model === 'string' ? body.model.toLowerCase() : '';
+    if (apimartModel === 'grok-imagine-image-2.0') {
+      // docs.apib.ai images/grok-imagine-2.0-ext/official：比例字段为 aspect_ratio，resolution 仅 1k/2k（小写）
+      if (typeof body.size === 'string') body.aspect_ratio = body.size;
+      delete body.size;
+      if (typeof body.resolution === 'string') body.resolution = body.resolution.toLowerCase();
+      delete body.quality;
+    } else if (apimartModel === 'grok-imagine-2.0-ext') {
+      // 传 quality 返回 400 invalid_quality；resolution 不是像素档位，也不接受 auto 比例和参考图
+      delete body.quality;
+      delete body.resolution;
+      if (body.size === 'auto') delete body.size;
+      delete body.image_urls;
     }
   }
 

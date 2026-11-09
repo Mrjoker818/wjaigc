@@ -69,7 +69,8 @@ const MODEL_HINTS: Record<string, string> = {
 };
 
 import { getModelDisplayName } from '@/lib/model-name-map';
-import { MODEL_ASPECT_RATIOS, MODEL_QUALITIES, DEFAULT_ASPECT_RATIOS, DEFAULT_QUALITIES, QUALITY_DISPLAY_NAMES, findModelConfig } from '@/lib/canvas-generation-group';
+import { QUALITY_DISPLAY_NAMES } from '@/lib/canvas-generation-group';
+import { indexImageToolCapabilities, resolveImageToolOptions, type ImageToolCapabilityIndex } from '@/lib/image-tool-model-options';
 import { taskEventsClient } from '@/lib/task-events-client';
 import { constrainFloatingPanelPosition, getCenteredFloatingPanelPosition, getFloatingPanelViewport, subscribeFloatingPanelViewport, type FloatingPanelPosition } from '@/lib/floating-panel-position';
 import { getPromptTemplates, searchTemplates, type PromptTemplate } from '@/lib/prompt-templates';
@@ -235,9 +236,16 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
   // 模型选择：使用 "server::<providerId>::<modelId>" 作为 key
   const [selectedModelKey, setSelectedModelKey] = useState('');
 
-  // 根据当前选择的模型动态计算可用的画面比例和质量
-  const availableRatios = findModelConfig(MODEL_ASPECT_RATIOS, selectedModelKey.split('::').pop() || '') || DEFAULT_ASPECT_RATIOS;
-  const availableQualities = findModelConfig(MODEL_QUALITIES, selectedModelKey.split('::').pop() || '') || DEFAULT_QUALITIES;
+  // 按 providerId::modelId 的精确能力取画面比例、质量和张数，目录缺失时回退到按名称的表
+  const [modelCapabilities, setModelCapabilities] = useState<ImageToolCapabilityIndex>({});
+  const toolOptionsFor = useCallback((key: string) => {
+    const parts = key.split('::');
+    return resolveImageToolOptions(parts.slice(2).join('::') || parts.pop() || '', modelCapabilities[parts.slice(1).join('::')]);
+  }, [modelCapabilities]);
+  const selectedToolOptions = toolOptionsFor(selectedModelKey);
+  const availableRatios = selectedToolOptions.ratios;
+  const availableQualities = selectedToolOptions.qualities;
+  const availableCounts = COUNTS.filter(c => c <= selectedToolOptions.maxOutputs);
   const [modelListExpanded, setModelListExpanded] = useState(false);
 
   const [isLoading, setIsLoading] = useState(false);
@@ -631,6 +639,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
             }));
             setImageModels(models);
           }
+          setModelCapabilities(indexImageToolCapabilities(editData.capabilities));
         }
       } catch (err) {
         console.error('Failed to load edit models:', err);
@@ -708,19 +717,27 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
     setSelectedModelKey(key);
     setModelListExpanded(false);
     localStorage.setItem('wujie_edit_selected_model', key);
-    // 切换模型后自动调整画面比例和质量
-    const modelId = key.split('::').pop() || '';
-    const newRatios = findModelConfig(MODEL_ASPECT_RATIOS, modelId) || DEFAULT_ASPECT_RATIOS;
-    if (!newRatios.includes(aspectRatio)) setAspectRatio(newRatios[0]);
-    const newQualities = findModelConfig(MODEL_QUALITIES, modelId) || DEFAULT_QUALITIES;
-    if (!newQualities.includes(quality)) setQuality(newQualities[0]);
-  }, [aspectRatio, quality]);
+    // 切换模型后自动调整画面比例、质量和张数
+    const next = toolOptionsFor(key);
+    if (!next.ratios.includes(aspectRatio)) setAspectRatio(next.ratios[0]);
+    if (!next.qualities.includes(quality)) setQuality(next.qualities[0]);
+    if (outputCount > next.maxOutputs) setOutputCount(next.maxOutputs);
+  }, [aspectRatio, quality, outputCount, toolOptionsFor]);
 
   const handleLlmSelect = useCallback((key: string) => {
     setSelectedLlmKey(key);
     setLlmListExpanded(false);
     localStorage.setItem('wujie_edit_selected_llm', key);
   }, []);
+
+  // 恢复上次选择或能力目录晚到时，把越界的参数收回到当前模型的取值范围
+  useEffect(() => {
+    if (!selectedModelKey) return;
+    const next = toolOptionsFor(selectedModelKey);
+    setAspectRatio(value => next.ratios.includes(value) ? value : next.ratios[0]);
+    setQuality(value => next.qualities.includes(value) ? value : next.qualities[0]);
+    setOutputCount(value => Math.min(value, next.maxOutputs));
+  }, [selectedModelKey, toolOptionsFor]);
 
   // 同步参数变化
   useEffect(() => {
@@ -1264,7 +1281,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
         llmProviderId: llmProviderId || undefined,
         referenceImages: refDataUrls,
         editHistory: editContextHistory.slice(-5),
-        count: Math.max(1, Math.min(outputCount, 4)),
+        count: Math.max(1, Math.min(outputCount, selectedToolOptions.maxOutputs)),
       };
 
       // ★ 提交+轮询模式：提交单个任务（后端内部处理多张输出）
@@ -1480,7 +1497,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
       // Ensure progressInterval is always cleaned up
       if (progressIntervalId) clearInterval(progressIntervalId);
     }
-  }, [prompt, selectedModelKey, selectedLlmKey, currentImageUrl, aspectRatio, quality, outputCount, currentModelSupportsMask, exportMask, clearMask, currentHistoryIndex, referenceImages, imageToDataUrl, compressImageDataUrl]);
+  }, [prompt, selectedModelKey, selectedLlmKey, currentImageUrl, aspectRatio, quality, outputCount, selectedToolOptions.maxOutputs, currentModelSupportsMask, exportMask, clearMask, currentHistoryIndex, referenceImages, imageToDataUrl, compressImageDataUrl]);
 
   // ★ 确认使用自动Mask（将预览mask绘制到Canvas上，与手动mask互斥）
   const handleConfirmAutoMask = useCallback(() => {
@@ -2434,7 +2451,7 @@ export function ImageEditor({ image, onClose, onConfirm, canvasImages, connectio
                 onChange={(e) => setOutputCount(Number(e.target.value))}
                 className={`w-full px-2.5 py-2 ${thInput} rounded text-sm appearance-none cursor-pointer focus:outline-none`}
               >
-                {COUNTS.map(c => <option key={c} value={c}>{c}张</option>)}
+                {availableCounts.map(c => <option key={c} value={c}>{c}张</option>)}
               </select>
             </div>
           </div>

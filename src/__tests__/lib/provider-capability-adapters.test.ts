@@ -164,4 +164,67 @@ describe('provider capability adapters', () => {
       model('302', '302-upscale-v60', 'upscaler'),
     )).toBeUndefined();
   });
+
+  // Source: docs.apib.ai/cn/api-reference/images/* (reviewed 2026-11-09).
+  it.each([
+    ['gpt-image-2-official', { allowedSizes: ['1K', '2K', '4K'], qualityOptions: ['auto', 'low', 'medium', 'high'], maxOutputs: 4, maxReferenceImages: 16 }],
+    ['gpt-image-2.5-flare', { allowedSizes: ['1K', '2K', '4K'], maxOutputs: 4, maxReferenceImages: 16 }],
+    ['gemini-3-pro-image-preview', { allowedSizes: ['1K', '2K', '4K'], maxOutputs: 1, maxReferenceImages: 14 }],
+    ['gemini-3.1-flash-lite-image', { allowedSizes: [], maxOutputs: 4 }],
+    ['seedream-5-0-pro', { allowedSizes: ['1K', '2K'], maxOutputs: 1, maxReferenceImages: 10 }],
+    ['seedream-5-0-lite', { allowedSizes: ['2K', '3K', '4K'], maxOutputs: 15 }],
+    ['qwen-image-3.0-pro', { allowedSizes: ['1K', '2K'], maxOutputs: 6, maxReferenceImages: 3 }],
+    ['grok-imagine-2.0-ext', { allowedSizes: [], maxOutputs: 12, supportsReferenceImages: false, supportedOperations: ['text-to-image'] }],
+    ['grok-imagine-image-2.0', { allowedSizes: ['1K', '2K'], maxOutputs: 10, maxReferenceImages: 3 }],
+  ] as const)('uses the documented APIMart limits for %s', (modelId, expected) => {
+    const adapter = resolveProviderCapabilityAdapter(
+      provider('apib', 'https://api.apib.ai/v1', 'image'),
+      model('apib', modelId, 'image'),
+    );
+    expect(adapter).toMatchObject(expected);
+    expect(adapter?.allowedRatios?.length).toBeGreaterThan(0);
+  });
+
+  it('keeps per-model ratio lists distinct for APIMart image models', () => {
+    const apib = provider('apib', 'https://api.apib.ai/v1', 'image');
+    const ratios = (id: string) => resolveProviderCapabilityAdapter(apib, model('apib', id, 'image'))?.allowedRatios;
+    expect(ratios('gemini-3.1-flash-image-preview')).toContain('8:1');
+    expect(ratios('gemini-3-pro-image-preview')).not.toContain('8:1');
+    expect(ratios('seedream-5-0-lite')).not.toContain('auto');
+    expect(ratios('grok-imagine-2.0-ext')).not.toContain('auto');
+    expect(ratios('grok-imagine-image-2.0')).toContain('19.5:9');
+  });
+  it('derives Pear image capabilities from the documented model specs', () => {
+    const pear = provider('pear', 'https://api.pearapi.ai', 'image');
+    const caps = (id: string) => resolveProviderCapabilityAdapter(pear, model('pear', id, 'image'));
+    expect(caps('gpt-image-2')).toMatchObject({
+      allowedSizes: ['1K', '2K', '4K'], qualityOptions: ['auto', 'low', 'medium', 'high'],
+      maxOutputs: 4, maxReferenceImages: 16,
+    });
+    expect(caps('gpt-image-2.5')?.qualityOptions).toContain('max');
+    expect(caps('nano-banana-2')?.allowedSizes).toEqual(['1K', '2K', '4K']);
+    expect(caps('nano-banana')).toMatchObject({ allowedSizes: ['1K'], qualityOptions: [], maxReferenceImages: 14 });
+    expect(caps('doubao-seedream-5-0-260128')).toMatchObject({ allowedSizes: ['2K'], maxReferenceImages: 10 });
+    expect(caps('z-image')).toMatchObject({
+      allowedSizes: [], supportsReferenceImages: false, supportedOperations: ['text-to-image'],
+    });
+    expect(caps('firered-image-edit1.1')?.supportedOperations).toEqual(['image-to-image']);
+    expect(caps('gpt-image-2-4k')).toBeUndefined();
+  });
+
+  it('derives Pear video capabilities without touching AI Link specs for the same id', () => {
+    const pear = provider('pear', 'https://api.pearapi.ai', 'video');
+    const caps = (id: string) => resolveProviderCapabilityAdapter(pear, model('pear', id, 'video'));
+    expect(caps('doubao-seedance-2-0-260128')).toMatchObject({
+      allowedRatios: ['16:9', '9:16', '1:1', '4:3', '3:4'], allowedSizes: ['720p', '480p'],
+      maxDurationSeconds: 15, maxReferenceImages: 9,
+    });
+    expect(caps('doubao-seedance-2-5-260628')?.allowedDurationsSeconds).toHaveLength(27);
+    expect(caps('hailuo-2.3')).toMatchObject({
+      allowedDurationsSeconds: [6, 10], allowedSizes: ['768p'], supportedOperations: ['image-to-video'],
+    });
+    expect(caps('minimax-h3')?.allowedSizes).toEqual(['768p', '2K', '480p', '720p']);
+    const aiLink = provider('ai', 'https://api.ai-link.shop', 'video');
+    expect(resolveProviderCapabilityAdapter(aiLink, model('ai', 'doubao-seedance-2-0-260128', 'video'))).toBeUndefined();
+  });
 });

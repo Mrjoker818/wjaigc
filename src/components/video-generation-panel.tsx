@@ -711,6 +711,8 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
   const platformDurations = getPlatformVideoDurations(currentDescriptor?.allowedDurationsSeconds ?? []);
   const availableDurations = platformDurations;
   const availableResolutions = currentDescriptor?.allowedSizes ?? [];
+  const availableQualities = (currentDescriptor?.qualityOptions ?? [])
+    .filter((q): q is 'std' | 'pro' => q === 'std' || q === 'pro');
   const supportedOperations = currentDescriptor?.supportedOperations ?? [];
 
   // 首尾帧开关（图生视频模式内可展开尾帧）
@@ -740,6 +742,7 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
       if (!availableRatios.includes(aspectRatio)) setAspectRatio(availableRatios[0] || '');
       if (!availableDurations.includes(duration)) setDuration(availableDurations[0] || 0);
       if (!availableResolutions.includes(resolution)) setResolution(availableResolutions[0] || '');
+      if (availableQualities.length > 0 && !availableQualities.includes(quality)) setQuality(availableQualities[0]);
       if (!availableDurations.includes(extendDuration)) setExtendDuration(availableDurations[0] || 0);
       if (!currentFeatures.firstLastFrame && showLastFrame) setShowLastFrame(false);
       if (!currentFeatures.videoExtend && mode === 'video-extend') setMode('text2video');
@@ -2478,10 +2481,11 @@ Rules:
                   />
                 </div>
               </div>
+              {availableQualities.length > 0 && (
               <div>
                 <label className={labelClass}>生成质量</label>
                 <div className="grid grid-cols-2 gap-1">
-                  {(['std', 'pro'] as const).map(q => (
+                  {availableQualities.map(q => (
                     <button
                       key={q}
                       onClick={() => setQuality(q)}
@@ -2495,6 +2499,7 @@ Rules:
                   ))}
                 </div>
               </div>
+              )}
               <div>
                 <label className={labelClass}>生成数量</label>
                 <div className="flex items-center gap-1">
