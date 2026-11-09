@@ -1353,6 +1353,29 @@ async function executeRunSkill(
   };
 }
 
+/** 读出 chat/completions 的回复文本；部分网关忽略 stream:false 仍按 SSE 返回，也一并拼接。 */
+function readChatCompletionText(body: string): string {
+  const trimmed = body.trim();
+  if (!trimmed.startsWith('data:')) {
+    const payload = JSON.parse(trimmed) as { choices?: Array<{ message?: { content?: unknown } }> };
+    const message = payload.choices?.[0]?.message?.content;
+    return typeof message === 'string' ? message : '';
+  }
+  let text = '';
+  for (const line of trimmed.split('\n')) {
+    const data = line.trim().replace(/^data:\s*/, '');
+    if (!line.trim().startsWith('data:') || !data || data === '[DONE]') continue;
+    try {
+      const chunk = JSON.parse(data) as { choices?: Array<{ delta?: { content?: unknown }; message?: { content?: unknown } }> };
+      const piece = chunk.choices?.[0]?.delta?.content ?? chunk.choices?.[0]?.message?.content;
+      if (typeof piece === 'string') text += piece;
+    } catch {
+      // 跳过不完整或非 JSON 的事件行
+    }
+  }
+  return text;
+}
+
 async function executeBuildWorkflow(
   args: Record<string, unknown>,
   context: ToolContext,
@@ -1372,6 +1395,7 @@ async function executeBuildWorkflow(
       body: JSON.stringify({
         model: context.chatModel,
         temperature: 0.7,
+        stream: false,
         messages: [
           { role: 'system', content: AI_BUILD_PROMPT },
           { role: 'user', content: description },
@@ -1382,9 +1406,7 @@ async function executeBuildWorkflow(
     if (!response.ok) {
       return { success: false, error: `工作流生成失败: ${response.status}`, resultText: `创建工作流失败（HTTP ${response.status}）。` };
     }
-    const payload = await response.json() as { choices?: Array<{ message?: { content?: unknown } }> };
-    const message = payload.choices?.[0]?.message?.content;
-    content = typeof message === 'string' ? message : '';
+    content = readChatCompletionText(await response.text());
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { success: false, error: message, resultText: `创建工作流出错：${message}` };
