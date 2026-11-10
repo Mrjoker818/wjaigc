@@ -358,7 +358,9 @@ async function readConfig(options: ReadConfigOptions = {}): Promise<StoredApiCon
 
   // Fallback to file system
   try {
-    const raw = await readFile(configPath().file, 'utf8');
+    // turbopackIgnore: the path is resolved at runtime (WUJIE_DATA_DIR-aware) and must not be
+    // traced into the serverless output, otherwise the whole project is bundled.
+    const raw = await readFile(/* turbopackIgnore: true */ configPath().file, 'utf8');
     const parsed = JSON.parse(raw) as StoredApiConfig;
     if (options.strict && (!parsed || !Array.isArray(parsed.providers))) {
       throw new Error('Invalid API provider configuration');

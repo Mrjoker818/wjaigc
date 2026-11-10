@@ -32,5 +32,9 @@ pnpm run build
 echo "[coze-deploy-build] Backing up build artifacts to dist/..."
 rm -rf dist
 cp -r .next dist
+# The Turbopack/webpack build cache (.next/cache) is build-only and is by far the
+# largest artifact. It is never read at runtime (next start serves .next/server +
+# .next/static), so drop it from the deployable copy to keep the FaaS package small.
+rm -rf dist/cache
 
 echo "[coze-deploy-build] Build completed successfully."

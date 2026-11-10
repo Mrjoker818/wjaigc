@@ -243,7 +243,9 @@ async function writeAuthFile(filePath: string, value: unknown): Promise<void> {
 
 async function readAuthSecretFileRaw(): Promise<string | null> {
   try {
-    return await readFile(authPaths().secret, 'utf8');
+    // turbopackIgnore: runtime-resolved data path; opting out of tracing avoids bundling
+    // the entire project into the serverless output.
+    return await readFile(/* turbopackIgnore: true */ authPaths().secret, 'utf8');
   } catch (error) {
     if (isMissingFileError(error)) return null;
     throw persistenceUnavailable();
