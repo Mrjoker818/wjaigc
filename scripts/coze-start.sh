@@ -61,17 +61,10 @@ if artifact_matches_source ".next"; then
   start_server
 fi
 
-# --- Restore from dist/ backup if .next is missing ---
-# (FaaS packaging may exclude .next via .dockerignore; dist/ is not ignored)
-if artifact_matches_source "dist"; then
-  echo "[coze-start] Restoring build artifacts from dist/..."
-  rm -rf .next
-  cp -r dist .next
-  echo "[coze-start] Restore complete."
-  start_server
-fi
-
 # --- Fallback: build from scratch (dev environment or cold start) ---
+# Note: the former dist/ backup restore path was removed (dist/ is no longer
+# produced by coze-deploy-build.sh). If .next is missing or stale, we rebuild
+# from source right here as the last-resort fallback.
 echo "[coze-start] No matching build artifacts found. Building..."
 
 # Install dependencies if needed

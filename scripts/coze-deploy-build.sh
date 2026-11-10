@@ -27,14 +27,13 @@ fi
 echo "[coze-deploy-build] Building Next.js project..."
 pnpm run build
 
-# Step 3: Backup build artifacts to dist/ (not in .dockerignore)
-# This ensures FaaS runtime can access the build output even if .next is excluded
-echo "[coze-deploy-build] Backing up build artifacts to dist/..."
-rm -rf dist
-cp -r .next dist
-# The Turbopack/webpack build cache (.next/cache) is build-only and is by far the
-# largest artifact. It is never read at runtime (next start serves .next/server +
-# .next/static), so drop it from the deployable copy to keep the FaaS package small.
-rm -rf dist/cache
+# Step 3: Keep .next as the sole build artifact; drop the build cache.
+# The Turbopack build cache (.next/cache) is build-only and is by far the
+# largest artifact (~400M). It is never read at runtime (next start serves
+# .next/server + .next/static), so removing it here keeps both the build-time
+# disk usage and the FaaS runtime package small. A dist/ backup copy was
+# removed: .next ships in the package (.dockerignore does not exclude it) and
+# coze-start.sh can rebuild from source as a last-resort fallback.
+rm -rf .next/cache
 
 echo "[coze-deploy-build] Build completed successfully."
