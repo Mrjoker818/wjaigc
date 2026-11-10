@@ -7,7 +7,7 @@ import { APP_VERSION_LABEL } from '@/config/app-meta';
 import { Label } from '@/components/ui/label';
 import {
   User as UserIcon,
-  Settings,
+  Lock,
   Zap,
   Eye,
   EyeOff,
@@ -399,7 +399,7 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
                     </Label>
                     <div className="relative">
                       <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                        <Settings className="w-4 h-4 text-muted-foreground" />
+                        <Lock className="w-4 h-4 text-muted-foreground" />
                       </div>
                       <input
                         id={`${formId}-register-password`}
@@ -430,7 +430,7 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
                     </Label>
                     <div className="relative">
                       <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                        <Settings className="w-4 h-4 text-muted-foreground" />
+                        <Lock className="w-4 h-4 text-muted-foreground" />
                       </div>
                       <input
                         id={`${formId}-register-confirm`}
@@ -556,7 +556,7 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
                     <Label htmlFor={`${formId}-login-password`} className="block text-xs font-medium text-muted-foreground mb-1.5">密码</Label>
                     <div className="relative">
                       <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                        <Settings className="w-4 h-4 text-muted-foreground" />
+                        <Lock className="w-4 h-4 text-muted-foreground" />
                       </div>
                       <input
                         id={`${formId}-login-password`}

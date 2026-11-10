@@ -918,9 +918,9 @@ function createMarkdownComponents(isGold: boolean, onAddImage?: (url: string) =>
       isGold ? 'border-gold' : 'border-gray-300'
     }`}>{children}</blockquote>,
     // Table
-    table: ({ children }) => <table className="border-collapse my-1.5 text-sm">{children}</table>,
-    th: ({ children }) => <th className={`border px-2 py-1 ${isGold ? 'border-white/[0.04]' : 'border-gray-300'}`}>{children}</th>,
-    td: ({ children }) => <td className={`border px-2 py-1 ${isGold ? 'border-white/[0.04]' : 'border-gray-300'}`}>{children}</td>,
+    table: ({ children }) => <div className="my-1.5 max-w-full overflow-x-auto"><table className="border-collapse text-sm">{children}</table></div>,
+    th: ({ children }) => <th className={`border px-2 py-1 whitespace-nowrap ${isGold ? 'border-white/[0.04]' : 'border-gray-300'}`}>{children}</th>,
+    td: ({ children }) => <td className={`border px-2 py-1 min-w-[4.5em] align-top ${isGold ? 'border-white/[0.04]' : 'border-gray-300'}`}>{children}</td>,
   };
 }
 
@@ -4697,7 +4697,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       <button ref={compactControlsToggleRef} type="button" className="hidden [@media(max-height:400px)]:block shrink-0 min-h-11 px-3 py-1 text-left text-xs" aria-expanded={compactControlsOpen} onClick={() => setCompactControlsOpen(value => !value)}>{compactControlsOpen ? '收起聊天设置和导航' : '展开聊天设置和导航'}</button>
       {/* Header with Tabs - 精致标签设计 */}
       <div className={`shrink-0 ${!compactControlsOpen ? '[@media(max-height:400px)]:hidden' : ''} ${isGold ? 'border-b border-white/[0.04]' : ''}`}>
-        <div className="px-4 pt-3 flex items-center justify-between">
+        <div className="px-4 pt-3 flex items-center justify-between gap-2 flex-wrap">
           <div className={`relative flex items-center ${isGold ? 'bg-white/[0.04] p-0.5 rounded-lg' : 'bg-gray-100 p-0.5 rounded-lg'}`}>
             <button
               aria-label="智能对话"
@@ -4734,7 +4734,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             <button
               aria-label="Skills技能库"
               onClick={() => setActiveTab('skills')}
-              className={`relative z-10 px-1.5 py-1 min-h-11 text-xs font-medium rounded-md transition-all flex items-center gap-1 whitespace-nowrap ${
+              className={`relative z-10 px-1.5 py-1 min-h-11 md:min-h-[32px] text-xs font-medium rounded-md transition-all flex items-center gap-1 whitespace-nowrap ${
                 activeTab === 'skills'
                   ? isGold
                     ? 'bg-gold/15 text-gold shadow-sm'
@@ -4785,7 +4785,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               </button>
               <button
                 onClick={() => { setShowHistoryPanel(!showHistoryPanel); setShowFilePanel(false); }}
-                className={`p-2 rounded-lg transition-colors ${
+                className={`p-1.5 rounded-md transition-colors ${
                   showHistoryPanel
                     ? isGold ? 'text-gold bg-gold/10' : 'text-gray-900 bg-gray-100'
                     : isGold ? 'text-gold-muted hover:text-gold hover:bg-white/[0.06]' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-100'
@@ -4796,7 +4796,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               </button>
               <button
                 onClick={() => { setShowFilePanel(!showFilePanel); setShowHistoryPanel(false); }}
-                className={`p-2 rounded-lg transition-colors ${
+                className={`p-1.5 rounded-md transition-colors ${
                   showFilePanel
                     ? isGold ? 'text-gold bg-gold/10' : 'text-gray-900 bg-gray-100'
                     : isGold ? 'text-gold-muted hover:text-gold hover:bg-white/[0.06]' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-100'
@@ -4807,7 +4807,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               </button>
               <button
                 onClick={clearChat}
-                className={`p-2 rounded-lg transition-colors ${
+                className={`p-1.5 rounded-md transition-colors ${
                   isGold ? 'text-gold-muted hover:text-red-400 hover:bg-red-400/10' : 'text-gray-400 hover:text-red-500 hover:bg-red-50'
                 }`}
                 title="清空聊天"
@@ -4922,7 +4922,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
           <div className="flex items-center gap-2 flex-wrap">
             {/* LLM模型选择器 */}
             <Select key={'chat-model-' + String(isVisible)} open={isVisible ? undefined : false} value={model} onValueChange={setModel}>
-              <SelectTrigger className={`h-7 text-xs flex-1 min-w-[120px] ${themeClasses.inputBg} ${themeClasses.border} ${themeClasses.text}`}>
+              <SelectTrigger className={`h-7 text-xs flex-1 min-w-[180px] ${themeClasses.inputBg} ${themeClasses.border} ${themeClasses.text}`}>
                 <SelectValue placeholder="选择模型" />
               </SelectTrigger>
               <SelectContent
@@ -5892,7 +5892,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
           )}
 
           {/* Toolbar Row - 上传/Tune/快捷指令 + 发送按钮 */}
-          <div className="flex items-center gap-2 mb-2 [@media(max-height:400px)]:mb-0 [@media(max-width:400px)]:flex-wrap">
+          <div className="flex items-center gap-2 mb-2 flex-wrap [@media(max-height:400px)]:mb-0 [@media(max-height:400px)]:flex-nowrap">
             <input
               ref={fileInputRef}
               type="file"
