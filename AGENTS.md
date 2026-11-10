@@ -15,6 +15,13 @@
 - **差异化生成**: `src/lib/brand-ip-generation.ts` 的 `BRAND_IP_ASSET_TYPES` 定义标准角色图、单色版、小尺寸、表情包四类输出。生成请求必须携带合法 `assetType`，并由提示词编译器加入对应产出约束，最终写入资产元数据。
 - **策略模型选择**: `POST /api/brand-ip/strategy` 以 `providerId + model` 精确匹配用户已授权的聊天模型；未授权选择必须返回 SSE 错误，不能静默降级到其他模型。
 
+## 认证与隔离部署种子
+
+- **持久化模式**: `resolveAuthPersistenceMode`（`src/lib/auth/auth-persistence.ts`）在 DB 已配置时强制 `DB_ONLY`，用户只从 `wujie_users` 表读取；生产环境禁止 `FILE_ONLY`。
+- **密钥环自举**: `resolveDatabaseSecretRing`（`src/lib/auth/auth-repository.ts`）在库内无环行、无 legacy `auth_secret` 行、且无 `WUJIE_AUTH_SECRET` 时，生成 48 字节随机密钥建环并持久化到 `wujie_system_settings`（`auth_secret_ring_v1`），不再 fail-closed 抛 `AUTH_CONFIGURATION_UNAVAILABLE`。会话签名密钥因此跨冷启动稳定；legacy 口令哈希校验恒定包含代码常量 `LEGACY_AUTH_SECRETS`，与环内容无关。
+- **部署种子**: veFaas 部署形态无持久卷（数据根回落 `/tmp/wujie-data`）且使用独立空库。`deploy-seed/system/{users.json,api-providers.json}` 随包携带，`server-data-root.seedBundledSystemFiles` 仅在解析到非持久数据根时把它们复制进数据根，供启动期 file→DB 迁移播种（`ON CONFLICT DO NOTHING`，绝不覆盖库内更新数据）。
+- **种子生成与安全**: `node scripts/export-deploy-seed.mjs` 从当前库导出种子；users 仅含持 scrypt 凭据的启用账号且 `passwordHash` 一律置空（scrypt 校验独立于口令哈希），providers 含 API Key（属主私有仓库，可在管理界面轮换）。持久卷可用（/space 或 WUJIE_DATA_DIR）时播种逻辑不执行，本地开发不受影响。
+
 ## 项目概览
 
 这是一个基于 Next.js 16 + React 19 + TypeScript 的 AI 图像与视频生成协作平台，支持无限画布操作、AI 聊天、图像/视频生成与编辑、图生图、PSD/SVG 导出等功能。

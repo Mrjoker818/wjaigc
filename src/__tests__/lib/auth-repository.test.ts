@@ -543,21 +543,30 @@ describe('transactional authentication secret ring resolution', () => {
     expect(client.release).toHaveBeenCalledOnce();
   });
 
-  it('fails closed without generating or persisting a secret when no valid source exists', async () => {
+  it('seeds a random persisted secret ring on an isolated fresh database without env configuration', async () => {
+    // Fresh veFaas-style deployment: empty wujie_system_settings, no WUJIE_AUTH_SECRET.
+    // The repository must self-provision a cryptographically random ring and persist
+    // it so sessions remain stable across cold starts; failing closed here locked
+    // every administrator out of isolated production databases.
     const query = vi.fn().mockResolvedValue({ rows: [], rowCount: 0 });
     const client = useClient(query);
 
-    await expect(resolveDatabaseSecretRing({ configuredSecret: null, now })).rejects.toMatchObject({
-      code: 'AUTH_CONFIGURATION_UNAVAILABLE',
-      retryable: true,
-    });
+    const ring = await resolveDatabaseSecretRing({ configuredSecret: null, now });
 
-    expect(sqlCalls(client)).toEqual([
-      'BEGIN',
-      "SELECT pg_advisory_xact_lock(hashtext('wujie:auth-secret-ring:v1'))",
-      'SELECT key, value FROM wujie_system_settings WHERE key = ANY($1::text[]) FOR UPDATE',
-      'ROLLBACK',
-    ]);
+    expect(ring.version).toBe(1);
+    expect(ring.active.secret.length).toBeGreaterThanOrEqual(32);
+    expect(ring.active.secret).not.toContain('wujie-ai-stable-auth-secret-fallback');
+    expect(ring.active.activatedAt).toBe(now);
+
+    const calls = sqlCalls(client);
+    expect(calls[0]).toBe('BEGIN');
+    expect(calls[1]).toBe("SELECT pg_advisory_xact_lock(hashtext('wujie:auth-secret-ring:v1'))");
+    expect(calls[2]).toBe('SELECT key, value FROM wujie_system_settings WHERE key = ANY($1::text[]) FOR UPDATE');
+    expect(calls[calls.length - 1]).toBe('COMMIT');
+    const insertCall = client.query.mock.calls.find(([sql]) => String(sql).includes('INSERT INTO wujie_system_settings'));
+    expect(insertCall).toBeDefined();
+    const persistedRing = JSON.parse(insertCall![1][1] as string) as AuthSecretRingV1;
+    expect(persistedRing.active.secret).toBe(ring.active.secret);
     expect(client.release).toHaveBeenCalledOnce();
   });
 

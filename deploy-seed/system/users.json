@@ -1,0 +1,57 @@
+{
+  "users": [
+    {
+      "id": "user_1784777366175_f40u6h",
+      "name": "canvas-user",
+      "passwordHash": "",
+      "credentialHash": "scrypt-v1$32768$8$1$m203UO_143y5xm-d8cd85Q$Mn012TKnLH_p_Kgyg_Kxhoy0KqPY5pe5KPaYXT_B0hE",
+      "role": "user",
+      "status": "active",
+      "productType": "canvas,chat",
+      "chatModels": [],
+      "imageModels": [],
+      "apiPermissions": {
+        "vlm": true,
+        "chat": true,
+        "audio": true,
+        "image": true,
+        "layer": true,
+        "video": true,
+        "threeD": true,
+        "removebg": true,
+        "upscaler": true,
+        "imageEdit": true,
+        "vectorize": true
+      },
+      "storageFolder": "data/users/user_1784777366175_f40u6h",
+      "createdAt": "1784777366175",
+      "updatedAt": "1788178158565"
+    },
+    {
+      "id": "admin_mr_joker",
+      "name": "Mr.joker",
+      "passwordHash": "",
+      "credentialHash": "scrypt-v1$32768$8$1$aaQtl9ka3RvtPR1RjdQrEQ$ae_bQiCDX3vDet3Yf_YTOExNdPV4l3xVbG2t3FRq5NQ",
+      "role": "admin",
+      "status": "active",
+      "productType": "canvas,chat",
+      "apiPermissions": {
+        "vlm": true,
+        "chat": true,
+        "audio": true,
+        "image": true,
+        "layer": true,
+        "video": true,
+        "threeD": true,
+        "removebg": true,
+        "upscaler": true,
+        "imageEdit": true,
+        "vectorize": true
+      },
+      "storageFolder": "data/users/admin_mr_joker",
+      "createdAt": "1786274310613",
+      "updatedAt": "1787500369057"
+    }
+  ],
+  "updatedAt": 1794316324036
+}

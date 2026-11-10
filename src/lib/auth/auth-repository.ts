@@ -1,3 +1,5 @@
+import crypto from 'crypto';
+
 import type { PoolClient, QueryResult } from 'pg';
 
 import { getPool } from '../db-client';
@@ -237,10 +239,15 @@ export async function resolveDatabaseSecretRing(input: {
         );
       }
     } else {
-      const initialSecret = legacySecret ?? input.configuredSecret;
-      if (!initialSecret) {
-        throw configurationUnavailable();
-      }
+      // Isolated fresh database (e.g. per-deploy veFaas instance) with no persisted
+      // legacy secret and no env-configured secret: self-provision a cryptographically
+      // random ring instead of failing closed, which locked every administrator out of
+      // isolated production databases. The ring row is persisted below, keeping the
+      // session signer stable across cold starts; legacy password hashes keep
+      // verifying through the fixed LEGACY_AUTH_SECRETS candidate list.
+      const initialSecret = legacySecret
+        ?? input.configuredSecret
+        ?? crypto.randomBytes(48).toString('base64url');
       ring = createInitialRing(initialSecret, input.now);
       if (input.configuredSecret && input.configuredSecret !== initialSecret) {
         ring = planSecretRingRotation(ring, input.configuredSecret, input.now, false);

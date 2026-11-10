@@ -17,7 +17,7 @@ describe('authentication rollback replica refresh', () => {
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
     expect(refresh).toContain('withDatabaseAuthReplicaLock(async client => {');
-    expect(refresh).toContain('refreshAuthJsonFileAtomic(USERS_PATH, async () => {');
+    expect(refresh).toContain('refreshAuthJsonFileAtomic(authPaths().users, async () => {');
     expect(refresh.indexOf('readDatabaseStore(client)')).toBeGreaterThan(
       refresh.indexOf('withDatabaseAuthReplicaLock(async client => {'),
     );
