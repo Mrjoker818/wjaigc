@@ -145,6 +145,12 @@ const nextConfig: NextConfig = {
     // 代理请求体大小限制：默认 1MB 不够 base64 图片（语言修图等）
     proxyClientMaxBodySize: '50mb',
   },
+  // 部署沙箱 Node 默认堆 ~2GB，构建期全量 tsc 类型检查会 OOM
+  // (FATAL ERROR: Ineffective mark-compacts near heap limit) 导致 BUILD_CMD 退出码 1。
+  // 类型安全由独立的 `pnpm ts-check`（test_run 静态检查）把关，构建期跳过。
+  typescript: {
+    ignoreBuildErrors: true,
+  },
   // Standard Next.js output (no standalone)
   // output: 'standalone',
 };
