@@ -204,7 +204,7 @@ import {
 import { resolveUpscaleProductMode, type UpscaleProductMode } from '@/lib/upscale-orchestrator';
 import { resolveCanvasUpscaleSource } from '@/lib/canvas-upscale-source';
 import { deliverCanvasImageFiles, DocumentCanvasUploadError, isDocumentCanvasMediaFile } from '@/lib/collaboration/document-canvas-upload';
-import { getCenteredFloatingPanelPosition } from '@/lib/floating-panel-position';
+import { constrainFloatingPanelPosition, getCenteredFloatingPanelPosition } from '@/lib/floating-panel-position';
 import { DEFAULT_IMAGE_TOOLBAR_ITEM_ORDER, normalizeImageToolbarPreferences } from '@/lib/image-toolbar-preferences';
 import OhMyPrompt from '@/components/oh-my-prompt';
 import { CanvasHelpModal } from '@/components/canvas/CanvasHelpModal';
@@ -1621,6 +1621,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   const canvasGenFrameHeight = 288; // 16:9 ratio
   // 浮动面板拖拽状态
   const [canvasGenPanelPos, setCanvasGenPanelPos] = useState({ x: 60, y: 60 });
+  const canvasGenPanelRef = useRef<HTMLDivElement>(null);
   const [canvasGenDragging, setCanvasGenDragging] = useState(false);
   const [canvasGenDragOffset, setCanvasGenDragOffset] = useState({ x: 0, y: 0 });
   const [canvasGenMinimized, setCanvasGenMinimized] = useState(false);
@@ -8890,18 +8891,38 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     const target = e.target as HTMLElement;
     const header = target.closest('[data-panel-header]');
     if (!header) return;
+    // 头部的最小化/关闭按钮不触发拖拽，否则点击后面板会跟随指针
+    if (target.closest('button, select, input, textarea')) return;
     e.preventDefault();
     e.stopPropagation();
     setCanvasGenDragging(true);
     setCanvasGenDragOffset({ x: e.clientX - canvasGenPanelPos.x, y: e.clientY - canvasGenPanelPos.y });
   }, [canvasGenPanelPos]);
 
+  const constrainCanvasGenPanelPos = useCallback((pos: { x: number; y: number }) => {
+    const panel = canvasGenPanelRef.current;
+    return constrainFloatingPanelPosition({
+      ...pos,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      panelWidth: panel?.offsetWidth ?? 420,
+      panelHeight: panel?.offsetHeight ?? 48,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!showCanvasGenerator) return;
+    const onResize = () => setCanvasGenPanelPos(prev => constrainCanvasGenPanelPos(prev));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [showCanvasGenerator, constrainCanvasGenPanelPos]);
+
   useEffect(() => {
     if (!canvasGenDragging) return;
     const onMove = (e: MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      setCanvasGenPanelPos({ x: e.clientX - canvasGenDragOffset.x, y: e.clientY - canvasGenDragOffset.y });
+      setCanvasGenPanelPos(constrainCanvasGenPanelPos({ x: e.clientX - canvasGenDragOffset.x, y: e.clientY - canvasGenDragOffset.y }));
     };
     const onUp = (e: MouseEvent) => {
       e.preventDefault();
@@ -8914,7 +8935,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
-  }, [canvasGenDragging, canvasGenDragOffset]);
+  }, [canvasGenDragging, canvasGenDragOffset, constrainCanvasGenPanelPos]);
 
   // ============ ChatCanvas 批注功能 ============
 
@@ -18974,6 +18995,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       {showCanvasGenerator && (() => {
         return (
           <div
+            ref={canvasGenPanelRef}
             className="fixed z-[200]"
             style={{
               left: canvasGenPanelPos.x,
@@ -19231,15 +19253,16 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                 const modelResolutions = descriptor?.allowedSizes ?? [];
                 const modelQualities = descriptor?.qualityOptions ?? [];
                 return (
-                <div className="flex items-center gap-2.5 flex-wrap">
-                  <label className={`text-xs font-medium min-w-[42px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>图像比例</label>
+                <div className="grid grid-cols-3 gap-2">
+                  <label className={`flex flex-col gap-1 min-w-0 text-xs font-medium ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>
+                  图像比例
                   <select
                     value={canvasGenAspectRatio}
                     onChange={(e) => {
                       const newAr = e.target.value;
                       setCanvasGenAspectRatio(newAr);
                     }}
-                    className={`text-xs [@media(pointer:coarse)]:min-h-11 rounded-lg px-3 py-2 border outline-none focus-visible:ring-2 focus-visible:ring-primary/30 transition-colors w-[110px] ${
+                    className={`text-xs [@media(pointer:coarse)]:min-h-11 rounded-lg px-3 py-2 border outline-none focus-visible:ring-2 focus-visible:ring-primary/30 transition-colors w-full min-w-0 ${
                       isMonochrome
                         ? 'bg-white border-gray-200 text-gray-900 focus:border-gray-400'
                         : 'bg-[#0d0d0d] border-white/[0.12] text-text-bright focus:border-gold/40'
@@ -19252,13 +19275,15 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       return <option key={r} value={r}>{r} ({px})</option>;
                     })}
                   </select>
+                  </label>
                   {modelResolutions.length > 0 && (
                     <>
-                      <label className={`text-xs font-medium min-w-[30px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>分辨率</label>
+                      <label className={`flex flex-col gap-1 min-w-0 text-xs font-medium ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>
+                      分辨率
                       <select
                         value={canvasGenResolution}
                         onChange={(e) => setCanvasGenResolution(e.target.value)}
-                        className={`text-xs [@media(pointer:coarse)]:min-h-11 rounded-lg px-3 py-2 border outline-none focus-visible:ring-2 focus-visible:ring-primary/30 transition-colors w-[90px] ${
+                        className={`text-xs [@media(pointer:coarse)]:min-h-11 rounded-lg px-3 py-2 border outline-none focus-visible:ring-2 focus-visible:ring-primary/30 transition-colors w-full min-w-0 ${
                           isMonochrome
                             ? 'bg-white border-gray-200 text-gray-900 focus:border-gray-400'
                             : 'bg-[#0d0d0d] border-white/[0.12] text-text-bright focus:border-gold/40'
@@ -19266,15 +19291,17 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       >
                         {modelResolutions.map(r => <option key={r} value={r}>{RESOLUTION_TIER_DISPLAY_NAMES[r] || r}</option>)}
                       </select>
+                      </label>
                     </>
                   )}
                   {modelQualities.length > 0 && (
                     <>
-                      <label className={`text-xs font-medium min-w-[30px] ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>质量</label>
+                      <label className={`flex flex-col gap-1 min-w-0 text-xs font-medium ${isMonochrome ? 'text-gray-500' : 'text-[#777]'}`}>
+                      质量
                       <select
                         value={canvasGenQuality}
                         onChange={(e) => setCanvasGenQuality(e.target.value)}
-                        className={`text-xs [@media(pointer:coarse)]:min-h-11 rounded-lg px-3 py-2 border outline-none focus-visible:ring-2 focus-visible:ring-primary/30 transition-colors w-[90px] ${
+                        className={`text-xs [@media(pointer:coarse)]:min-h-11 rounded-lg px-3 py-2 border outline-none focus-visible:ring-2 focus-visible:ring-primary/30 transition-colors w-full min-w-0 ${
                           isMonochrome
                             ? 'bg-white border-gray-200 text-gray-900 focus:border-gray-400'
                             : 'bg-[#0d0d0d] border-white/[0.12] text-text-bright focus:border-gold/40'
@@ -19282,6 +19309,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       >
                         {modelQualities.map(q => <option key={q} value={q}>{QUALITY_LEVEL_DISPLAY_NAMES[q] || QUALITY_DISPLAY_NAMES[q] || q}</option>)}
                       </select>
+                      </label>
                     </>
                   )}
                 </div>);
@@ -19418,7 +19446,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                   <>
                     <Wand2 size={14} />
                     生成
-                    <span className={`text-xs font-normal ${isMonochrome ? 'text-gray-500' : 'text-black/50'}`}>Ctrl+Enter</span>
+                    <span className={`text-xs font-normal ${!canvasGenPrompt.trim() ? 'opacity-70' : isMonochrome ? 'text-white/70' : 'text-black/50'}`}>Ctrl+Enter</span>
                   </>
                 )}
               </button>
