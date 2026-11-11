@@ -405,7 +405,7 @@ async function prepareLegacyImage(
       const resolved = await resolveVerifiedS3Source(storageKey, undefined, byteSize, bounded, dependencies);
       source = resolved.source; contentType = resolved.contentType;
       const provisional: ManagedAssetMediaDescriptor = { assetVersionId: version.id, assetKind: 'image',
-        mimeType: '', byteSize, width: null, height: null, checksum: null, source };
+        mimeType: contentType ?? '', byteSize, width: null, height: null, checksum: null, source };
       result = await readDescriptor(provisional, { start: 0, end: byteSize - 1 }, bounded, dependencies);
     } else {
       const local = await readLegacyLocalImage(relativePath,
@@ -563,6 +563,7 @@ async function readDescriptor(
       timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       eTag: descriptor.source.eTag,
       versionId: descriptor.source.versionId,
+      contentType: descriptor.mimeType || undefined,
       signal: options.signal,
     },
   );

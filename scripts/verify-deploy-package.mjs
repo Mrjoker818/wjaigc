@@ -1,4 +1,5 @@
-import { lstat, readdir, readFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { access, lstat, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -65,9 +66,10 @@ async function readTraceFiles(manifest) {
 }
 
 async function main() {
-  const [phase] = process.argv.slice(2);
-  if (process.argv.length !== 3 || (phase !== '--source' && phase !== '--built')) {
-    throw new VerificationError('Expected --source or --built.');
+  const [phase, option, ...extra] = process.argv.slice(2);
+  if (extra.length || (phase !== '--source' && phase !== '--built')
+    || (option !== undefined && (phase !== '--built' || option !== '--coze-media'))) {
+    throw new VerificationError('Expected --source or --built [--coze-media].');
   }
 
   for (const file of BLOCKED_PATHS) {
@@ -94,7 +96,31 @@ async function main() {
     }
   }
 
+  if (option === '--coze-media') await verifyCozeMediaBundle();
   console.log(`[deploy-package] Verified ${manifests.length} NFT manifests and copy paths under .next and public.`);
+}
+
+async function verifyCozeMediaBundle() {
+  const manifest = '.next/server/app/api/collaboration/document-assets/upload/route.js.nft.json';
+  const traceRoot = path.dirname(manifest);
+  const traced = new Set((await readTraceFiles(manifest)).map(portablePath));
+  const bundle = `assets/wujie-coze-media/${process.arch}`;
+  for (const name of ['ffmpeg', 'ffprobe', 'LICENSE.txt']) {
+    const file = `${bundle}/${name}`;
+    const stat = await statIfPresent(file);
+    if (!stat?.isFile() || stat.size === 0) {
+      throw new VerificationError(`Missing or invalid Coze media file ${file}.`);
+    }
+    if (name !== 'LICENSE.txt') {
+      await access(file, constants.X_OK).catch(() => {
+        throw new VerificationError(`Coze media file is not executable: ${file}.`);
+      });
+    }
+    if (!traced.has(portablePath(path.relative(traceRoot, file)))) {
+      throw new VerificationError(`Coze document upload trace is missing ${file}.`);
+    }
+  }
+  console.log(`[deploy-package] Verified Coze media bundle for ${process.arch}.`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {

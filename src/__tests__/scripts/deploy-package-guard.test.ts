@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const verifier = resolve('scripts/verify-deploy-package.mjs');
@@ -140,6 +140,25 @@ describe('deployment package guard', () => {
     expect(run(process.execPath, [verifier, '--built']).status).toBe(0);
   });
 
+  it('requires both executables and their license in the document upload trace for a Coze media build', () => {
+    const manifest = '.next/server/app/api/collaboration/document-assets/upload/route.js.nft.json';
+    const bundle = `assets/wujie-coze-media/${process.arch}`;
+    const entries = ['ffmpeg', 'ffprobe', 'LICENSE.txt'].map(name => `${bundle}/${name}`);
+    const references = entries.map(file => relative(dirname(manifest), file));
+    writeTrace(manifest, references.slice(0, 1));
+    writeExecutable(entries[0], ['exit 0']);
+    writeExecutable(entries[1], ['exit 0']);
+    writeFixture(entries[2], 'Synthetic license');
+
+    expect(run(process.execPath, [verifier, '--built', '--coze-media']).output).toContain('trace is missing');
+
+    writeTrace(manifest, references);
+    expect(run(process.execPath, [verifier, '--built', '--coze-media']).status).toBe(0);
+
+    rmSync(join(fixture, entries[1]));
+    expect(run(process.execPath, [verifier, '--built', '--coze-media']).output).toContain('ffprobe');
+  });
+
   it('prunes the three generated credential paths while retaining neighboring files', () => {
     const manifest = '.next/server/instrumentation.js.nft.json';
     const retained = ['../../data/system/auth-secret.backup', '../../data/system/settings.json'];
@@ -157,6 +176,7 @@ describe('deployment package guard', () => {
   });
 
   it('fails the Coze deployment build if compilation produces a legacy NFT reference', () => {
+    writeExecutable('fake-bin/uname', ['echo Darwin']);
     writeExecutable('fake-bin/pnpm', [
       'if [[ -v WUJIE_BOOTSTRAP_PROVIDERS_JSON || -v WUJIE_ADMIN_PASSWORD ]]; then exit 8; fi',
       'if [ "$*" = "install --frozen-lockfile" ]; then echo synthetic-install; exit 0; fi',
@@ -175,6 +195,45 @@ describe('deployment package guard', () => {
     expect(result.output).toContain('deploy-seed/system/users.json');
   }, 15_000);
 
+  it('stages Linux tools before building and runs the media package guard', () => {
+    const bundle = `assets/wujie-coze-media/${process.arch}`;
+    const manifest = '.next/server/app/api/collaboration/document-assets/upload/route.js.nft.json';
+    const references = ['ffmpeg', 'ffprobe', 'LICENSE.txt']
+      .map(name => relative(dirname(manifest), `${bundle}/${name}`).replaceAll('\\', '/'));
+    writeExecutable('fake-bin/uname', ['echo Linux']);
+    writeExecutable('scripts/stage-coze-media-tools.sh', [
+      `mkdir -p ${bundle}`,
+      `printf '%s\\n' '#!/usr/bin/env bash' 'exit 0' | tee ${bundle}/ffmpeg > ${bundle}/ffprobe`,
+      `chmod +x ${bundle}/ffmpeg ${bundle}/ffprobe`,
+      `printf '%s\\n' 'Synthetic license' > ${bundle}/LICENSE.txt`,
+    ]);
+    writeExecutable('fake-bin/pnpm', [
+      'if [ "$*" = "install --frozen-lockfile" ]; then exit 0; fi',
+      '[ "$*" = "run build" ] || exit 2',
+      `[ -x ${bundle}/ffmpeg ] && [ -x ${bundle}/ffprobe ] || exit 3`,
+      `mkdir -p ${dirname(manifest).replaceAll('\\', '/')}`,
+      `printf '%s\\n' '${JSON.stringify({ version: 1, files: references })}' > ${manifest}`,
+    ]);
+
+    const result = runCoze('coze-deploy-build.sh', [], {});
+    expect(result.status).toBe(0);
+    expect(result.output).toContain('Verified Coze media bundle');
+  }, 15_000);
+
+  it('rejects an unpinned download before extraction or execution', () => {
+    writeExecutable('fake-bin/uname', ['echo x86_64']);
+    writeExecutable('fake-bin/curl', [
+      'while [ "$1" != "--output" ]; do shift; done',
+      'printf "%s\\n" wrong-archive > "$2"',
+    ]);
+    writeExecutable('fake-bin/tar', ['echo unexpected-extraction', 'exit 1']);
+
+    const result = runCoze('stage-coze-media-tools.sh', [], {});
+    expect(result.status).toBe(1);
+    expect(result.output).toContain('SHA-256 mismatch');
+    expect(result.output).not.toContain('unexpected-extraction');
+  }, 15_000);
+
   it('starts a packaged deployment without NFT manifests', () => {
     writeFixture('.next/BUILD_ID', 'synthetic-build');
     writeExecutable('fake-bin/git', ['exit 1']);
@@ -189,6 +248,27 @@ describe('deployment package guard', () => {
 
     expect(result.status).toBe(0);
     expect(result.output).toContain('synthetic-runtime-started');
+  }, 15_000);
+
+  it.each([
+    ['Linux', true, 'bundle'],
+    ['Linux', false, 'system'],
+    ['Darwin', true, 'system'],
+  ])('resolves media tools on %s with a complete bundle=%s', (platform, complete, expected) => {
+    const arch = process.arch === 'arm64' ? 'aarch64' : 'x86_64';
+    const bundle = `assets/wujie-coze-media/${process.arch}`;
+    writeFixture('.next/BUILD_ID', 'synthetic-build');
+    writeExecutable('fake-bin/git', ['exit 1']);
+    writeExecutable('fake-bin/uname', [`if [ "$1" = "-s" ]; then echo ${platform}; else echo ${arch}; fi`]);
+    for (const tool of ['ffmpeg', 'ffprobe']) {
+      writeExecutable(`fake-bin/${tool}`, [`echo system-${tool}`]);
+      if (complete || tool === 'ffmpeg') writeExecutable(`${bundle}/${tool}`, [`echo bundle-${tool}`]);
+    }
+    writeExecutable('node_modules/.bin/next', ['ffmpeg -version', 'ffprobe -version']);
+
+    const result = runCoze('coze-start.sh', ['--deployment']);
+    expect(result.status).toBe(0);
+    expect(result.output).toContain(`${expected}-ffmpeg\n${expected}-ffprobe`);
   }, 15_000);
 
   it('blocks a packaged deployment with a generated credential replica at its source path', () => {

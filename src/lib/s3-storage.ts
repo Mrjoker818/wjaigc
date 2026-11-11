@@ -15,6 +15,8 @@
 
 import { S3Storage } from 'coze-coding-dev-sdk';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { request as requestHttp, type IncomingMessage } from 'node:http';
+import { request as requestHttps } from 'node:https';
 import {
   DeleteObjectCommand,
   GetObjectCommand,
@@ -29,13 +31,13 @@ import { EXPORT_KEY, binaryExtensions, exportMediaDescriptor, BINARY_MEDIA_CHUNK
 let _storage: S3Storage | null = null;
 let _binaryStorage: S3Client | null = null;
 
-function getBinaryStorage(): { client: S3Client; bucket: string } | null {
+function getBinaryStorage(): { client: S3Client; bucket: string; usesCozeWorkloadIdentity: boolean } | null {
   const endpoint = process.env.COZE_BUCKET_ENDPOINT_URL;
   const bucket = process.env.COZE_BUCKET_NAME;
   if (!endpoint || !bucket) return null;
+  const accessKeyId = process.env.COZE_BUCKET_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.COZE_BUCKET_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY;
   if (!_binaryStorage) {
-    const accessKeyId = process.env.COZE_BUCKET_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID;
-    const secretAccessKey = process.env.COZE_BUCKET_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY;
     _binaryStorage = new S3Client({
       endpoint,
       region: process.env.COZE_BUCKET_REGION || 'cn-beijing',
@@ -52,7 +54,11 @@ function getBinaryStorage(): { client: S3Client; bucket: string } | null {
       { step: 'build', name: 'injectStorageToken' },
     );
   }
-  return { client: _binaryStorage, bucket };
+  return {
+    client: _binaryStorage,
+    bucket,
+    usesCozeWorkloadIdentity: Boolean(process.env.COZE_WORKLOAD_IDENTITY_API_KEY) && !accessKeyId && !secretAccessKey,
+  };
 }
 
 function getStorage(): S3Storage | null {
@@ -703,6 +709,92 @@ async function withExactS3Deadline<T>(
   }
 }
 
+// Use Node's request API so both calls honor cancellation and signed URLs stay out of Next's fetch spans.
+function requestCozeStorage(
+  url: URL, headers: Record<string, string>, signal: AbortSignal, body?: Buffer,
+): Promise<IncomingMessage> {
+  const send = url.protocol === 'https:' ? requestHttps : requestHttp;
+  return new Promise((resolve, reject) => {
+    const request = send(url, { method: body ? 'POST' : 'GET', headers, signal }, resolve);
+    request.once('error', () => reject(signal.aborted ? signal.reason : new S3BoundedReadError('S3_READ_FAILED')));
+    request.end(body);
+  });
+}
+
+async function signCozeStorageKey(bucket: string, key: string, timeoutMs: number, signal: AbortSignal): Promise<URL> {
+  const token = process.env.COZE_WORKLOAD_IDENTITY_API_KEY;
+  const endpointValue = process.env.COZE_BUCKET_ENDPOINT_URL || '';
+  const endpoint = URL.canParse(endpointValue) ? new URL(endpointValue) : null;
+  if (!token || !endpoint || !['https:', 'http:'].includes(endpoint.protocol)
+    || endpoint.username || endpoint.password || endpoint.hash || endpoint.search) {
+    throw new S3BoundedReadError('S3_READ_FAILED');
+  }
+  endpoint.pathname = `${endpoint.pathname.replace(/\/$/u, '')}/sign-url`;
+  const body = Buffer.from(JSON.stringify({ bucket_name: bucket, path: key,
+    expire_time: Math.max(60, Math.ceil(timeoutMs / 1000) + 30) }));
+  const response = await requestCozeStorage(endpoint, {
+    'Content-Type': 'application/json', 'Content-Length': String(body.length), 'x-storage-token': token,
+  }, signal, body);
+  try {
+    if (response.statusCode !== 200) throw new S3BoundedReadError('S3_READ_FAILED');
+    const text = (await collectExactS3Body(response, 16 * 1024, signal)).toString('utf8').trim();
+    let signed = text;
+    if (text.startsWith('{')) {
+      try {
+        const data: { data?: { url?: string }; url?: string; signed_url?: string; presigned_url?: string } = JSON.parse(text);
+        signed = data.data?.url ?? data.url ?? data.signed_url ?? data.presigned_url ?? '';
+      } catch { throw new S3BoundedReadError('S3_READ_FAILED'); }
+    }
+    const url = typeof signed === 'string' && URL.canParse(signed) ? new URL(signed) : null;
+    if (!url || url.protocol !== 'https:' || url.port || url.username || url.password || url.hash || !url.search
+      || (url.hostname !== 'tos.coze.site' && !url.hostname.endsWith('.tos.coze.site'))) {
+      throw new S3BoundedReadError('S3_READ_FAILED');
+    }
+    return url;
+  } finally { response.destroy(); }
+}
+
+// The Coze workload proxy reports zero bytes on HEAD and serves the whole object for Range.
+// Its short-lived object URL supports conditional ranges with the original ETag.
+async function readCozeSignedExactRange(
+  bucket: string,
+  key: string,
+  range: { start: number; end: number },
+  binding: { eTag: string; contentType?: string; expectedTotalBytes?: number },
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<S3ExactRangeReadResult | null> {
+  const url = await signCozeStorageKey(bucket, key, timeoutMs, signal);
+  signal.throwIfAborted();
+  const response = await requestCozeStorage(url, {
+    Range: `bytes=${range.start}-${range.end}`,
+    'If-Match': binding.eTag,
+    'Accept-Encoding': 'identity',
+  }, signal);
+  try {
+    if (response.statusCode === 404) return null;
+    const length = range.end - range.start + 1;
+    const contentRange = response.headers['content-range'];
+    const declared = typeof contentRange === 'string' ? contentRange.match(/^bytes (\d+)-(\d+)\/(\d+)$/u) : null;
+    const totalBytes = Number(declared?.[3]);
+    const contentType = response.headers['content-type']?.trim().toLowerCase();
+    const encoding = response.headers['content-encoding'];
+    if (response.statusCode !== 206 || !declared
+      || Number(declared[1]) !== range.start || Number(declared[2]) !== range.end
+      || !Number.isSafeInteger(totalBytes) || totalBytes <= range.end
+      || (binding.expectedTotalBytes !== undefined && totalBytes !== binding.expectedTotalBytes)
+      || response.headers['content-length'] !== String(length)
+      || normalizeS3IdentityToken(response.headers.etag) !== binding.eTag
+      || (binding.contentType !== undefined && contentType !== binding.contentType)
+      || (encoding !== undefined && encoding !== 'identity')) {
+      throw new S3BoundedReadError('S3_READ_FAILED');
+    }
+    const bytes = await collectExactS3Body(response, length, signal);
+    if (bytes.byteLength !== length) throw new S3BoundedReadError('S3_READ_FAILED');
+    return { bytes, totalBytes };
+  } finally { response.destroy(); }
+}
+
 /** Inspect one persisted exact key without listing prefixes or resolving client URLs. */
 export async function inspectS3ObjectExact(
   key: string,
@@ -713,26 +805,28 @@ export async function inspectS3ObjectExact(
   const storage = getBinaryStorage();
   if (!storage) return null;
   try {
-    const result = await withExactS3Deadline(
-      timeoutMs,
-      signal,
-      abortSignal => storage.client.send(new HeadObjectCommand({
+    return await withExactS3Deadline(timeoutMs, signal, async abortSignal => {
+      const result = await storage.client.send(new HeadObjectCommand({
         Bucket: storage.bucket,
         Key: key,
-      }), { abortSignal }),
-    );
-    if (!Number.isSafeInteger(result.ContentLength) || (result.ContentLength ?? -1) < 0) {
-      throw new S3BoundedReadError('S3_READ_FAILED');
-    }
-    const eTag = normalizeS3IdentityToken(result.ETag);
-    const versionId = normalizeS3IdentityToken(result.VersionId);
-    if (!eTag && !versionId) throw new S3BoundedReadError('S3_READ_FAILED');
-    return {
-      byteSize: result.ContentLength!,
-      contentType: result.ContentType?.trim().toLowerCase() || null,
-      eTag,
-      versionId,
-    };
+      }), { abortSignal });
+      if (!Number.isSafeInteger(result.ContentLength) || (result.ContentLength ?? -1) < 0) {
+        throw new S3BoundedReadError('S3_READ_FAILED');
+      }
+      const eTag = normalizeS3IdentityToken(result.ETag);
+      const versionId = normalizeS3IdentityToken(result.VersionId);
+      if (!eTag && !versionId) throw new S3BoundedReadError('S3_READ_FAILED');
+      const contentType = result.ContentType?.trim().toLowerCase() || null;
+      let byteSize = result.ContentLength!;
+      if (byteSize === 0 && storage.usesCozeWorkloadIdentity && eTag && !versionId) {
+        const range = await readCozeSignedExactRange(storage.bucket, key, { start: 0, end: 0 }, {
+          eTag, contentType: contentType ?? undefined,
+        }, timeoutMs, abortSignal);
+        if (!range) return null;
+        byteSize = range.totalBytes;
+      }
+      return { byteSize, contentType, eTag, versionId };
+    });
   } catch (error) {
     if (isS3MissingObject(error)) return null;
     if (error instanceof S3BoundedReadError) throw error;
@@ -829,6 +923,11 @@ export async function readS3ObjectRangeExact(
       options.timeoutMs,
       options.signal,
       async abortSignal => {
+        if (storage.usesCozeWorkloadIdentity && eTag && !versionId) {
+          return readCozeSignedExactRange(storage.bucket, key, range, {
+            eTag, contentType: options.contentType, expectedTotalBytes: options.expectedTotalBytes,
+          }, options.timeoutMs, abortSignal);
+        }
         const result = await storage.client.send(new GetObjectCommand({
           Bucket: storage.bucket,
           Key: key,

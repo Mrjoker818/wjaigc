@@ -42,6 +42,12 @@ const nextConfig: NextConfig = {
     },
   },
   outputFileTracingRoot: path.resolve(__dirname),
+  outputFileTracingIncludes: {
+    // The Coze build stages these files before Next traces the deployment.
+    '/api/collaboration/document-assets/upload': [
+      `assets/wujie-coze-media/${process.arch}/{ffmpeg,ffprobe,LICENSE.txt}`,
+    ],
+  },
   outputFileTracingExcludes: {
     '*': LOCAL_BUILD_ARTIFACT_EXCLUDES,
     instrumentation: LOCAL_BUILD_ARTIFACT_EXCLUDES,

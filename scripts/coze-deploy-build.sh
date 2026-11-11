@@ -27,13 +27,19 @@ else
   echo "[coze-deploy-build] Database URL is not configured; skipping migrations."
 fi
 
+MEDIA_GUARD=()
+if [ "$(uname -s)" = Linux ]; then
+  bash scripts/stage-coze-media-tools.sh
+  MEDIA_GUARD=(--coze-media)
+fi
+
 # Step 2: Build the project
 echo "[coze-deploy-build] Building Next.js project..."
 pnpm run build
 
-node scripts/verify-deploy-package.mjs --built
+node scripts/verify-deploy-package.mjs --built "${MEDIA_GUARD[@]}"
 
-# Step 3: Keep .next as the sole build artifact; drop the build cache.
+# Step 3: Keep the Next output and traced media tools; drop the build cache.
 # The Turbopack build cache (.next/cache) is build-only and is by far the
 # largest artifact (~400M). It is never read at runtime (next start serves
 # .next/server + .next/static), so removing it here keeps both the build-time

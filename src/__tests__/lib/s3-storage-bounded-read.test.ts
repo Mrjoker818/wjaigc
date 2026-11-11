@@ -1,3 +1,4 @@
+import { PassThrough, Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -12,7 +13,30 @@ const mocks = vi.hoisted(() => ({
   listFiles: vi.fn(),
   readFile: vi.fn(),
   uploadFile: vi.fn(),
+  httpsRequest: vi.fn(),
 }));
+
+vi.mock('node:https', async importOriginal => ({
+  ...await importOriginal<typeof import('node:https')>(),
+  request: mocks.httpsRequest,
+}));
+
+const cozeSignedUrl = 'https://tos.coze.site/qa/exact.png?synthetic=1';
+
+function mockCozeResponse(statusCode: number, headers: Record<string, string>, body: Readable) {
+  const response = Object.assign(body, { statusCode, headers });
+  const end = vi.fn<(body?: Buffer) => void>();
+  mocks.httpsRequest.mockImplementationOnce((_url, _options, onResponse) => ({
+    once: vi.fn(),
+    end: (body?: Buffer) => { end(body); queueMicrotask(() => onResponse(response)); },
+  }));
+  return end;
+}
+
+function mockCozeSigner() {
+  return mockCozeResponse(200, { 'content-type': 'application/json' },
+    Readable.from([Buffer.from(JSON.stringify({ data: { url: cozeSignedUrl } }))]));
+}
 
 vi.mock('@aws-sdk/client-s3', () => ({
   S3Client: class {
@@ -57,6 +81,7 @@ describe('readImageFromS3Bounded cancellation', () => {
     mocks.awsSend.mockReset().mockResolvedValue({});
     mocks.middlewareAdd.mockReset();
     mocks.s3ClientConfig.mockReset();
+    mocks.httpsRequest.mockReset();
     mocks.recordAssetCleanupFailure.mockReset().mockResolvedValue(undefined);
     delete process.env.COZE_WORKLOAD_IDENTITY_API_KEY;
     delete process.env.COZE_BUCKET_ACCESS_KEY;
@@ -267,6 +292,98 @@ describe('readImageFromS3Bounded cancellation', () => {
       'images/gateway/unidentified.png',
       1000,
     )).rejects.toMatchObject({ code: 'S3_READ_FAILED' });
+  });
+
+  it('confirms Coze workload storage length with one identity-bound byte when HEAD reports zero', async () => {
+    process.env.COZE_WORKLOAD_IDENTITY_API_KEY = 'synthetic-workload-identity';
+    mocks.awsSend.mockResolvedValueOnce({ ContentLength: 0, ContentType: 'image/png', ETag: '"coze-object"' });
+    const signerBody = mockCozeSigner();
+    mockCozeResponse(206, {
+      'content-range': 'bytes 0-0/68', 'content-length': '1',
+      'content-type': 'image/png', etag: '"coze-object"',
+    }, Readable.from([Buffer.from([137])]));
+
+    const { inspectS3ObjectExact } = await import('@/lib/s3-storage');
+    await expect(inspectS3ObjectExact('exports/0123456789abcdef-exact.png', 1000)).resolves.toEqual({
+      byteSize: 68, contentType: 'image/png', eTag: '"coze-object"', versionId: null,
+    });
+    expect(mocks.httpsRequest).toHaveBeenNthCalledWith(1, new URL('https://bucket.test/sign-url'), expect.objectContaining({
+      method: 'POST', signal: expect.any(AbortSignal),
+    }), expect.any(Function));
+    expect(JSON.parse(String(signerBody.mock.calls[0]?.[0]))).toEqual({
+      bucket_name: 'test-bucket', path: 'exports/0123456789abcdef-exact.png', expire_time: 60,
+    });
+    expect(mocks.httpsRequest).toHaveBeenNthCalledWith(2, new URL(cozeSignedUrl), expect.objectContaining({
+      headers: expect.objectContaining({ Range: 'bytes=0-0', 'If-Match': '"coze-object"' }),
+      signal: expect.any(AbortSignal),
+    }), expect.any(Function));
+  });
+
+  it('reads Coze workload storage ranges without accepting the proxy full-object response', async () => {
+    process.env.COZE_WORKLOAD_IDENTITY_API_KEY = 'synthetic-workload-identity';
+    mockCozeSigner();
+    mockCozeResponse(206, {
+      'content-range': 'bytes 2-4/10', 'content-length': '3',
+      'content-type': 'image/png', etag: '"coze-object"',
+    }, Readable.from([Buffer.from([2, 3, 4])]));
+
+    const { readS3ObjectRangeExact } = await import('@/lib/s3-storage');
+    await expect(readS3ObjectRangeExact('images/qa/exact.png', { start: 2, end: 4 }, {
+      expectedTotalBytes: 10, maxBytes: 3, timeoutMs: 1000, eTag: '"coze-object"', contentType: 'image/png',
+    })).resolves.toEqual({ bytes: Buffer.from([2, 3, 4]), totalBytes: 10 });
+    expect(mocks.awsSend).not.toHaveBeenCalled();
+    expect(mocks.httpsRequest).toHaveBeenNthCalledWith(2, new URL(cozeSignedUrl), expect.objectContaining({
+      headers: expect.objectContaining({ Range: 'bytes=2-4', 'If-Match': '"coze-object"' }),
+      signal: expect.any(AbortSignal),
+    }), expect.any(Function));
+  });
+
+  it('uses the same Coze deadline for signing and reading a full-span range', async () => {
+    process.env.COZE_WORKLOAD_IDENTITY_API_KEY = 'synthetic-workload-identity';
+    mockCozeSigner();
+    mockCozeResponse(206, {
+      'content-range': 'bytes 0-2/3', 'content-length': '3',
+      'content-type': 'image/png', etag: '"coze-object"',
+    }, Readable.from([Buffer.from([1, 2, 3])]));
+    const { readS3ObjectRangeExact } = await import('@/lib/s3-storage');
+    await expect(readS3ObjectRangeExact('images/qa/exact.png', { start: 0, end: 2 }, {
+      expectedTotalBytes: 3, maxBytes: 3, timeoutMs: 1000, eTag: '"coze-object"', contentType: 'image/png',
+    })).resolves.toEqual({ bytes: Buffer.from([1, 2, 3]), totalBytes: 3 });
+    expect(mocks.httpsRequest.mock.calls[0]?.[1].signal).toBe(mocks.httpsRequest.mock.calls[1]?.[1].signal);
+  });
+
+  it('aborts the underlying Coze signing request if its deadline expires', async () => {
+    process.env.COZE_WORKLOAD_IDENTITY_API_KEY = 'synthetic-workload-identity';
+    let signingSignal: AbortSignal | undefined;
+    mocks.httpsRequest.mockImplementationOnce((_url, options) => {
+      signingSignal = options.signal;
+      return { once: vi.fn(), end: vi.fn() };
+    });
+    const { readS3ObjectRangeExact } = await import('@/lib/s3-storage');
+    await expect(readS3ObjectRangeExact('images/qa/exact.png', { start: 0, end: 0 }, {
+      expectedTotalBytes: 3, maxBytes: 1, timeoutMs: 15, eTag: '"coze-object"',
+    })).rejects.toMatchObject({ code: 'S3_READ_TIMEOUT' });
+    expect(signingSignal?.aborted).toBe(true);
+    expect(mocks.httpsRequest).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['full response', 200, 'bytes 2-4/10', '"coze-object"'],
+    ['different identity', 206, 'bytes 2-4/10', '"changed-object"'],
+    ['different object size', 206, 'bytes 2-4/11', '"coze-object"'],
+  ] as const)('rejects a signed Coze range with a %s before consuming the body', async (_reason, status, contentRange, etag) => {
+    process.env.COZE_WORKLOAD_IDENTITY_API_KEY = 'synthetic-workload-identity';
+    mockCozeSigner();
+    const body = new PassThrough();
+    mockCozeResponse(status, {
+      'content-range': contentRange, 'content-length': '3', 'content-type': 'image/png', etag,
+    }, body);
+
+    const { readS3ObjectRangeExact } = await import('@/lib/s3-storage');
+    await expect(readS3ObjectRangeExact('images/qa/exact.png', { start: 2, end: 4 }, {
+      expectedTotalBytes: 10, maxBytes: 3, timeoutMs: 1000, eTag: '"coze-object"', contentType: 'image/png',
+    })).rejects.toMatchObject({ code: 'S3_READ_FAILED' });
+    expect(body.destroyed).toBe(true);
   });
 
   it('rejects an exact range before GetObject when no identity condition is available', async () => {

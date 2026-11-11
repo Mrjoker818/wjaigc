@@ -975,5 +975,9 @@
   "src/lib/display3d-generation-task.ts",
   "CHANGELOG.md",
   ".github/workflows/stage-0-quality.yml",
-  "package.json"
+  "package.json",
+  "scripts/stage-coze-media-tools.sh",
+  "src/__tests__/scripts/deploy-package-guard.test.ts",
+  "src/__tests__/lib/s3-storage-bounded-read.test.ts",
+  "src/__tests__/lib/legacy-managed-image-read.test.ts"
 ]

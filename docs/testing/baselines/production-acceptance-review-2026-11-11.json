@@ -2572,11 +2572,12 @@
     {
       "path": "scripts/verify-deploy-package.mjs",
       "disposition": "reviewed",
-      "reviewedBlob": "a4e56380db77a932cd14b3cd9826e35da7907869",
-      "summary": "Rejects retired source paths, copied credentials and legacy trace references by path without reading credential payloads.",
+      "reviewedBlob": "0d77284ce32fc016d7f0a548d418e41008d168c3",
+      "summary": "Rejects retired credential paths and verifies both Linux media tools and their license are present and traced when preparing the Coze package.",
       "evidence": [
         "Build unverified-de8536ce95e06480056d504fde1c9e8a passed the final package verifier over 259 trace manifests and copied .next/public paths.",
-        "Real local Next production processes against dedicated PostgreSQL retained the login, prior session cookie, and four exact provider/model pairs after restart without bootstrap variables. A second empty database without bootstrap refused login and stayed empty. See output/production-acceptance-20261111/cold-start-d90b8066733978cb/attempt-eb8ddf598f/evidence.json."
+        "Real local Next production processes against dedicated PostgreSQL retained the login, prior session cookie, and four exact provider/model pairs after restart without bootstrap variables. A second empty database without bootstrap refused login and stayed empty. See output/production-acceptance-20261111/cold-start-d90b8066733978cb/attempt-eb8ddf598f/evidence.json.",
+        "Five relevant suites passed 161 tests, including missing and non-executable package artifacts. Source guard and shell validation passed."
       ]
     },
     {
@@ -2872,6 +2873,88 @@
         "The final official npm audit reports zero advisories at every severity. pnpm 9 accepted a frozen install and resolved the previous lint plugin version.",
         "The official npm production audit returned zero for all severities. Frozen installation verified the exact lock without replacing the original runtime environment.",
         "The official npm production audit moved from eight advisories to zero. Frozen installation and exact version checks passed without replacing the original environment."
+      ]
+    },
+    {
+      "path": "next.config.ts",
+      "disposition": "reviewed",
+      "reviewedBlob": "a56564781d2efc1ea06a6605623b9a4ebd439ef6",
+      "summary": "Explicitly traces the staged, architecture-matched FFmpeg executables and license for the document media route.",
+      "evidence": [
+        "Deploy-package tests assert that the Linux media bundle is included in the actual route trace contract."
+      ]
+    },
+    {
+      "path": "scripts/coze-deploy-build.sh",
+      "disposition": "reviewed",
+      "reviewedBlob": "3c8be03fd661d4eb954e852c293ac2c42c605376",
+      "summary": "Stages checked Linux media tools before Next builds and requires their presence in the production trace.",
+      "evidence": [
+        "Package regressions prove the correct build order, no skipped verification, and retention of the original credential guard."
+      ]
+    },
+    {
+      "path": "scripts/coze-start.sh",
+      "disposition": "reviewed",
+      "reviewedBlob": "1caf76b26df58584d7ba9a8dc89dd26994b0d043",
+      "summary": "Resolves bundled executable FFmpeg tools in the Linux deployment process and keeps the normal system tool path elsewhere.",
+      "evidence": [
+        "Linux complete and incomplete bundle and Darwin fixture cases pass while existing deployment identity and build guards remain."
+      ]
+    },
+    {
+      "path": "scripts/stage-coze-media-tools.sh",
+      "disposition": "reviewed",
+      "reviewedBlob": "87f2a02d624873e03a1affd4b00695458b0e44d2",
+      "summary": "Obtains pinned Linux x64 or arm64 FFmpeg and FFprobe from the publisher release, checks SHA-256 before extraction, and includes the license.",
+      "evidence": [
+        "Publisher release archive digests match both downloaded archives. The package test rejects a modified archive before extraction or execution."
+      ]
+    },
+    {
+      "path": "src/__tests__/scripts/deploy-package-guard.test.ts",
+      "disposition": "reviewed",
+      "reviewedBlob": "5aa8993785cf10d55f866f0b29f95a5904383ad8",
+      "summary": "Covers the pinned Coze media packaging and runtime resolution while keeping historical credential absence checks.",
+      "evidence": [
+        "Package guard regressions ran as part of the verified 161 tests."
+      ]
+    },
+    {
+      "path": "src/lib/s3-storage.ts",
+      "disposition": "reviewed",
+      "reviewedBlob": "ebf62e6782b13bc3ebda884d4ada438c27a3e837",
+      "summary": "Uses the Coze workload signer and conditional byte-range reads when the proxy cannot provide usable object length or ranges.",
+      "evidence": [
+        "Preview canary HEAD returned length zero and proxy Range returned HTTP 200 full bytes. Direct, bounded Coze signing and full-span HTTPS GET returned HTTP 206, matched length, MIME, ETag and every byte. Tests cover expired deadlines, identity mismatch, and rejection of full HTTP 200."
+      ]
+    },
+    {
+      "path": "src/lib/asset-core/managed-media-read.ts",
+      "disposition": "reviewed",
+      "reviewedBlob": "01e630c8e6659044b32231bcdb0bad84642b5fa7",
+      "summary": "Binds managed range reads to verified media type while preserving legacy byte recognition when the storage has no MIME.",
+      "evidence": [
+        "Managed share snapshot, legacy image and document enable test files passed with the same range, size, identity, and byte protections.",
+        "Independent review caught an empty legacy MIME being forwarded. Legacy null, generic and PNG metadata pass exact bound-read and actual byte validation, and three inconsistent types still fail."
+      ]
+    },
+    {
+      "path": "src/__tests__/lib/s3-storage-bounded-read.test.ts",
+      "disposition": "reviewed",
+      "reviewedBlob": "8fadf6972cdb5c3375ad6cf18fe4948414e8c9de",
+      "summary": "Models the observed Coze zero-length HEAD and records exact identity, range, timeout and stream-closure contracts.",
+      "evidence": [
+        "The new cases fail with the previous transport and pass alongside the existing non-Coze exact object, export, and abort checks."
+      ]
+    },
+    {
+      "path": "src/__tests__/lib/legacy-managed-image-read.test.ts",
+      "disposition": "reviewed",
+      "reviewedBlob": "a950ba73754d084a422a926086b017ece5494cc3",
+      "summary": "Asserts the exact ranged request binds storage MIME only when inspection reported it.",
+      "evidence": [
+        "Three valid legacy S3 cases fail on the earlier candidate then pass alongside three MIME conflict checks."
       ]
     }
   ]

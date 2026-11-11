@@ -301,6 +301,7 @@ function s3(bytes: Buffer, contentType: string | null): ManagedMediaReadDependen
   }), readS3RangeExact: async (key, range, options): Promise<import('@/lib/s3-storage').S3ExactRangeReadResult> => {
     expect(key).toBe('images/legacy/original.bin'); expect(range).toEqual({ start: 0, end: bytes.length - 1 });
     expect(options).toMatchObject({ eTag: '"pinned"', versionId: 'version-1', expectedTotalBytes: bytes.length, maxBytes: bytes.length });
+    expect(options.contentType).toBe(contentType ?? undefined);
     return { bytes, totalBytes: bytes.length };
   } };
 }

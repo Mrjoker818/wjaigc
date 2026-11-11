@@ -23,6 +23,18 @@ start_server() {
   if [ "$DEPLOYMENT" -eq 1 ]; then
     export WUJIE_DEPLOYMENT_DB_ONLY=1
     export WUJIE_AUTH_PERSISTENCE_MODE=DB_ONLY
+    if [ "$(uname -s)" = Linux ]; then
+      local media_arch=""
+      case "$(uname -m)" in
+        x86_64) media_arch=x64 ;;
+        aarch64) media_arch=arm64 ;;
+      esac
+      local media_dir="$PWD/assets/wujie-coze-media/${media_arch}"
+      if [ -n "$media_arch" ] && [ -f "$media_dir/ffmpeg" ] && [ -x "$media_dir/ffmpeg" ] \
+        && [ -f "$media_dir/ffprobe" ] && [ -x "$media_dir/ffprobe" ]; then
+        export PATH="$media_dir:$PATH"
+      fi
+    fi
   fi
   if [ "${WUJIE_PRESENCE_ENABLED:-}" = "true" ] || [ "${WUJIE_YJS_ENABLED:-}" = "true" ]; then
     echo "[coze-start] Starting production server with collaboration on port ${PORT}..."
