@@ -2922,6 +2922,24 @@
       ]
     },
     {
+      "path": "src/components/canvas-workspace.tsx",
+      "disposition": "reviewed",
+      "reviewedBlob": "61f9b3c1c67b5995f6f17acb7ab5ed12a3f8c13c",
+      "summary": "Waits for project persistence authority before restoring existing task results and holds a terminal event across a temporary projection gate in the same account and project.",
+      "evidence": [
+        "The isolated Edge reopening regression exposed three premature polls in the old build and passed on the fixed source. The existing write guard, actor and project isolation, and poll budget remain in effect. Eighteen focused projector, placeholder and polling tests passed."
+      ]
+    },
+    {
+      "path": "tests/e2e/generation-progressive-slots.spec.ts",
+      "disposition": "reviewed",
+      "reviewedBlob": "822a995c053d19c6864edb85a2a234a7553edc6f",
+      "summary": "Uses the current model-catalog contract and controls project authority after closing and reopening the Edge page.",
+      "evidence": [
+        "Edge recovered all four original slots in the fixture, polled each unfinished task for its terminal result once, and left the generation submission count at one across two page reloads. It used synthetic responses and no real provider."
+      ]
+    },
+    {
       "path": "src/lib/s3-storage.ts",
       "disposition": "reviewed",
       "reviewedBlob": "ebf62e6782b13bc3ebda884d4ada438c27a3e837",

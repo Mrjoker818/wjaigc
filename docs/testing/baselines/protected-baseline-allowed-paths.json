@@ -979,5 +979,6 @@
   "scripts/stage-coze-media-tools.sh",
   "src/__tests__/scripts/deploy-package-guard.test.ts",
   "src/__tests__/lib/s3-storage-bounded-read.test.ts",
-  "src/__tests__/lib/legacy-managed-image-read.test.ts"
+  "src/__tests__/lib/legacy-managed-image-read.test.ts",
+  "tests/e2e/generation-progressive-slots.spec.ts"
 ]

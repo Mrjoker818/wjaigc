@@ -770,7 +770,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
   }, [isDocumentHistoryRecoveryPending]);
 
   const projectWorkspaceTaskEvent = useCallback((event: CanvasTaskEvent) => {
-    setImages((current) => applyCanvasTaskEventToProcessingPlaceholders(current, event));
+    return setImages((current) => applyCanvasTaskEventToProcessingPlaceholders(current, event));
   }, [setImages]);
 
   const flushQueuedCanvasHistoryChange = useCallback(() => {
@@ -2712,6 +2712,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
   useEffect(() => () => imageGenerationSession.dispose(), [imageGenerationSession]);
 
   const resumedTaskIdsRef = useRef<Set<string>>(new Set());
+  const resumedTerminalEventsRef = useRef<Map<string, CanvasTaskEvent>>(new Map());
   const resumedTaskPollingGenerationRef = useRef(0);
   const legacyRecoveryAttemptedRef = useRef<Set<string>>(new Set());
   const legacyRecoveryInFlightRef = useRef<Set<string>>(new Set());
@@ -2802,16 +2803,42 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
   }, [currentProject?.id, images, legacyRecoveryRevision, setImages]);
 
   useEffect(() => {
+    const terminalEvents = resumedTerminalEventsRef.current;
     resumedTaskPollingGenerationRef.current += 1;
     resumedTaskIdsRef.current.clear();
+    terminalEvents.clear();
     return () => {
       resumedTaskPollingGenerationRef.current += 1;
+      terminalEvents.clear();
     };
-  }, [currentProject?.id]);
+  }, [currentProject?.id, currentUser?.id]);
 
   useEffect(() => {
+    const projectId = currentProject?.id;
+    const actorId = currentUser?.id;
+    if (!projectId || !actorId) return;
+
+    const projectionReadiness = () => {
+      const canvas = collaborativeCanvasRef.current;
+      if (!canvas || canvas.projectId !== projectId
+        || canvas.status === 'checking' || canvas.status === 'connecting'
+        || isDocumentHistoryRecoveryPending()) return 'waiting';
+      if (canvas.authority === 'legacy'
+        || (canvas.authority === 'document' && (canvas.status === 'saved' || canvas.status === 'pending'))) return 'ready';
+      return 'blocked';
+    };
+    const readiness = projectionReadiness();
+    if (readiness === 'waiting') return;
+    for (const [taskId, event] of resumedTerminalEventsRef.current) {
+      resumedTerminalEventsRef.current.delete(taskId);
+      if (readiness === 'ready') projectWorkspaceTaskEvent(event);
+    }
+    if (readiness !== 'ready') return;
+
     const pending = images.filter((image) => image.isProcessingPlaceholder && image.processing?.taskId);
     const pollingGeneration = resumedTaskPollingGenerationRef.current;
+    const isCurrent = () => pollingGeneration === resumedTaskPollingGenerationRef.current
+      && currentProjectRef.current?.id === projectId && currentUserRef.current?.id === actorId;
 
     for (const image of pending) {
       const taskId = image.processing?.taskId;
@@ -2826,7 +2853,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
       resumedTaskIdsRef.current.add(taskId);
 
       void (async () => {
-        for (let attempt = 0; attempt < RESUMED_TASK_MAX_POLL_ATTEMPTS && pollingGeneration === resumedTaskPollingGenerationRef.current; attempt += 1) {
+        for (let attempt = 0; attempt < RESUMED_TASK_MAX_POLL_ATTEMPTS && isCurrent(); attempt += 1) {
           try {
             const response = await fetch('/api/poll-task', {
               method: 'POST',
@@ -2834,6 +2861,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
               body: JSON.stringify({ taskId, model: image.model || image.modelName, providerId: image.apiProviderId }),
             });
             const data = await response.json();
+            if (!isCurrent()) return;
+            let terminalEvent: CanvasTaskEvent | undefined;
             const videoUrl = data.videoUrl || data.result?.videoUrl;
             const videoThumbnailUrl = data.videoThumbnailUrl
               || data.thumbnailUrl
@@ -2847,7 +2876,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
                   thumbnailUrl: videoThumbnailUrl || undefined,
                 })
                 : undefined;
-              projectWorkspaceTaskEvent({
+              terminalEvent = {
                 taskId,
                 outputIndex: image.processing?.outputIndex ?? 0,
                 status: 'completed',
@@ -2866,11 +2895,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
                     mediaType: completedVideoMedia ? 'video' : image.mediaType,
                   },
                 },
-              });
-              return;
-            }
-            if (data.status === 'failed' || data.status === 'cancelled') {
-              projectWorkspaceTaskEvent({
+              };
+            } else if (data.status === 'failed' || data.status === 'cancelled') {
+              terminalEvent = {
                 taskId,
                 outputIndex: image.processing?.outputIndex ?? 0,
                 status: data.status,
@@ -2882,24 +2909,33 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
                   source: 'provider',
                   retryable: false,
                 }),
+              };
+            } else {
+              projectWorkspaceTaskEvent({
+                taskId,
+                outputIndex: image.processing?.outputIndex ?? 0,
+                status: data.status === 'queued' || data.status === 'uploading' || data.status === 'submitting'
+                  ? data.status
+                  : 'processing',
+                progress: Math.max(image.processing?.progress || 0, data.progress || 0),
+                label: data.label || image.processing?.label || '生成中',
+                source: 'recovery',
               });
+            }
+            if (terminalEvent) {
+              if (projectionReadiness() === 'ready' && projectWorkspaceTaskEvent(terminalEvent)) return;
+              // Replay only after a known gate changes. A permanent rejection has
+              // no retry, and a received terminal result cannot become a timeout.
+              if (projectionReadiness() === 'waiting') {
+                resumedTerminalEventsRef.current.set(taskId, terminalEvent);
+              }
               return;
             }
-            projectWorkspaceTaskEvent({
-              taskId,
-              outputIndex: image.processing?.outputIndex ?? 0,
-              status: data.status === 'queued' || data.status === 'uploading' || data.status === 'submitting'
-                ? data.status
-                : 'processing',
-              progress: Math.max(image.processing?.progress || 0, data.progress || 0),
-              label: data.label || image.processing?.label || '生成中',
-              source: 'recovery',
-            });
           } catch { /* transient polling errors are retried */ }
           await new Promise((resolve) => setTimeout(resolve, 3000));
         }
 
-        if (pollingGeneration === resumedTaskPollingGenerationRef.current) {
+        if (isCurrent()) {
           const outcome = getResumedTaskPollingOutcome(RESUMED_TASK_MAX_POLL_ATTEMPTS, true);
           if (outcome) {
             projectWorkspaceTaskEvent({
@@ -2920,7 +2956,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
         }
       })();
     }
-  }, [images, projectWorkspaceTaskEvent]);
+  }, [images, currentProject?.id, currentUser?.id, collaborativeCanvas.projectId,
+    collaborativeCanvas.authority, collaborativeCanvas.status, documentHistoryRecoveryState,
+    isDocumentHistoryRecoveryPending, projectWorkspaceTaskEvent]);
 
   // ★ 追踪图片删除：当 images 减少时，记录被删除的 ID，5 秒后自动清除
   const prevImageIdsRef2 = useRef<Set<string>>(new Set());
