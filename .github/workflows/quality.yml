@@ -98,7 +98,7 @@ jobs:
         run: pnpm build
 
   unit-and-integration-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -203,7 +203,7 @@ jobs:
           --pool=forks --poolOptions.forks.singleFork=true
 
   stage-3-canvas-kernel:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -306,7 +306,7 @@ jobs:
           if-no-files-found: error
 
   stage-4-workspace-interoperability:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     services:
       postgres:
@@ -400,7 +400,7 @@ jobs:
       github.event_name != 'pull_request' ||
       (github.event.pull_request.head.repo.full_name == github.repository &&
       github.actor != 'dependabot[bot]')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}

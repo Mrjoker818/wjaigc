@@ -2830,6 +2830,49 @@
       "evidence": [
         "The diff changes one history line and the current source no longer contains the retired value."
       ]
+    },
+    {
+      "path": ".github/workflows/quality.yml",
+      "reviewArea": "infra",
+      "reviewedBlob": "b5ac9f7671578f9faa2fbdfde6d05c9d5eda7fa0",
+      "disposition": "reviewed",
+      "summary": "Pins the four Playwright jobs to Ubuntu 24.04, which supports the repository's locked Playwright release.",
+      "evidence": [
+        "GitHub runner log confirms Ubuntu 26.04 rejected Playwright 1.60.0. YAML comparison verified all existing job triggers, commands, and required checks."
+      ]
+    },
+    {
+      "path": ".github/workflows/stage-0-quality.yml",
+      "reviewArea": "infra",
+      "reviewedBlob": "79f935254c1d55a1239d8ea38ebac97ad34c7c1d",
+      "disposition": "reviewed",
+      "summary": "Pins the internal and external Playwright job runners to Ubuntu 24.04.",
+      "evidence": [
+        "Parsed YAML differed only in the two browser runner labels. Existing release gate contracts remain in place."
+      ]
+    },
+    {
+      "path": "package.json",
+      "reviewArea": "infra",
+      "reviewedBlob": "82265de89aee38f3d047fc77a70a90a261062a68",
+      "disposition": "reviewed",
+      "summary": "Pins the published fixes for the production Next.js, PSD, Zod and redirect dependencies. The development lint configuration retains the repository's existing rule version.",
+      "evidence": [
+        "pnpm 9 frozen installation verified the resolved runtime versions. The previous PSD reopened with both layers; a new PSD round trip preserved exact RGBA pixels. The 84 targeted tests and two isolated document WebSocket cases passed.",
+        "pnpm 9 frozen installation verified the resolved versions. The old PSD reopened with both layers; a new PSD round trip preserved the exact RGBA pixels. The 84 targeted tests and two isolated document WebSocket checks passed."
+      ]
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "reviewArea": "infra",
+      "reviewedBlob": "d79751298eac592b17cf0427fe56090d759dc9fd",
+      "disposition": "reviewed",
+      "summary": "Resolves the reviewed production fixes from the previous lock and retains the original React Hooks lint plugin.",
+      "evidence": [
+        "The final official npm audit reports zero advisories at every severity. pnpm 9 accepted a frozen install and resolved the previous lint plugin version.",
+        "The official npm production audit returned zero for all severities. Frozen installation verified the exact lock without replacing the original runtime environment.",
+        "The official npm production audit moved from eight advisories to zero. Frozen installation and exact version checks passed without replacing the original environment."
+      ]
     }
   ]
 }

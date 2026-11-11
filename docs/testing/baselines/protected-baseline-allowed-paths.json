@@ -973,5 +973,7 @@
   "src/lib/paid-provider-submit.ts",
   "src/lib/activity-venue-submission.ts",
   "src/lib/display3d-generation-task.ts",
-  "CHANGELOG.md"
+  "CHANGELOG.md",
+  ".github/workflows/stage-0-quality.yml",
+  "package.json"
 ]

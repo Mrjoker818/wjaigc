@@ -213,7 +213,7 @@ jobs:
 
   stage-1-automated-tests:
     if: github.ref != 'refs/heads/stable'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -276,7 +276,7 @@ jobs:
     needs:
       - protected-baseline
       - stage-1-local-gates
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
       E2E_BASE_URL: ${{ inputs.deployment_url }}
