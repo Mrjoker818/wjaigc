@@ -558,12 +558,13 @@ test('completes chat to canvas to workflow to chat with durable lineage and refr
   await page.getByRole('combobox', { name: '目标画布项目' }).selectOption(canvasProjectId);
   const upload = await page.request.get('/logo.png');
   expect(upload.ok()).toBe(true);
+  const attachmentName = 'stage-4-workspace-chain.png';
   await page.locator('#chat-file-upload').setInputFiles({
-    name: 'stage-4-workspace-chain.png',
+    name: attachmentName,
     mimeType: 'image/png',
     buffer: await upload.body(),
   });
-  await expect(page.locator('img[alt=""]').last()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('img', { name: attachmentName, exact: true })).toBeVisible({ timeout: 20_000 });
   const chatInput = page.getByPlaceholder(/输入消息/);
   await chatInput.fill(`WORKSPACE_CHAIN_E2E E2E_PROFILE:${fixture.browserProfile}`);
   await chatInput.press('Enter');
