@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -43,8 +44,12 @@ function runCoze(script: string, args: string[] = [], env: FixtureEnv = runtimeE
   mkdirSync(join(fixture, 'scripts'), { recursive: true });
   copyFileSync(resolve('scripts', script), join(fixture, 'scripts', script));
   copyFileSync(verifier, join(fixture, 'scripts/verify-deploy-package.mjs'));
+  return runBashFixture(`scripts/${script}`, args, env);
+}
+
+function runBashFixture(file: string, args: string[] = [], env: FixtureEnv = {}) {
   return run(bash, [
-    '-c', 'PATH="$PWD/fake-bin:$PATH" exec bash "$@"', 'coze-test', `scripts/${script}`, ...args,
+    '-c', 'PATH="$PWD/fake-bin:$PATH" exec bash "$@"', 'coze-test', file, ...args,
   ], env);
 }
 
@@ -223,6 +228,7 @@ describe('deployment package guard', () => {
   it('rejects an unpinned download before extraction or execution', () => {
     writeExecutable('fake-bin/uname', ['echo x86_64']);
     writeExecutable('fake-bin/curl', [
+      'echo "${@: -1}"',
       'while [ "$1" != "--output" ]; do shift; done',
       'printf "%s\\n" wrong-archive > "$2"',
     ]);
@@ -230,8 +236,65 @@ describe('deployment package guard', () => {
 
     const result = runCoze('stage-coze-media-tools.sh', [], {});
     expect(result.status).toBe(1);
+    expect(result.output).toContain('https://bin.ffmpeg.download/btbn_ffmpeg_builds/linux/x86_64/');
     expect(result.output).toContain('SHA-256 mismatch');
     expect(result.output).not.toContain('unexpected-extraction');
+  }, 15_000);
+
+  it('falls back to the publisher if the mirror is unavailable and still checks the archive', () => {
+    writeExecutable('fake-bin/uname', ['echo x86_64']);
+    writeExecutable('fake-bin/curl', [
+      'case "${@: -1}" in',
+      '  https://bin.ffmpeg.download/*) echo mirror-unavailable; exit 22 ;;',
+      '  https://github.com/FFmpeg-Builds/*) echo publisher-download ;;',
+      '  *) exit 7 ;;',
+      'esac',
+      'while [ "$1" != "--output" ]; do shift; done',
+      'printf "%s\\n" wrong-archive > "$2"',
+    ]);
+    writeExecutable('fake-bin/tar', ['echo unexpected-extraction', 'exit 1']);
+
+    const result = runCoze('stage-coze-media-tools.sh', [], {});
+    expect(result.status).toBe(1);
+    expect(result.output).toMatch(/mirror-unavailable[\s\S]+publisher-download/);
+    expect(result.output).toContain('SHA-256 mismatch');
+    expect(result.output).not.toContain('unexpected-extraction');
+  }, 15_000);
+
+  it.each([false, true])('uses a complete x64 cache only when its digest matches (changed=%s)', (changed) => {
+    const bundle = 'assets/wujie-coze-media/x64';
+    const script = 'scripts/stage-coze-media-tools.sh';
+    let source = readFileSync(resolve(script), 'utf8');
+    for (const [name, pin] of [
+      ['ffmpeg', 'ffmpeg_sha256'],
+      ['ffprobe', 'ffprobe_sha256'],
+      ['LICENSE.txt', 'license_sha256'],
+    ]) {
+      const path = `${bundle}/${name}`;
+      if (name === 'LICENSE.txt') writeFixture(path, 'Synthetic license');
+      else writeExecutable(path, ['[ "$1" = "-version" ] || exit 1', `touch ran-${name}`]);
+      const alternate = writeFixture(`alternate-cache/${path}`, readFileSync(join(fixture, path), 'utf8'));
+      if (name !== 'LICENSE.txt') chmodSync(alternate, 0o755);
+      const digest = createHash('sha256').update(readFileSync(join(fixture, path))).digest('hex');
+      source = source.replace(new RegExp(`${pin}=[a-f0-9]{64}`), `${pin}=${digest}`);
+    }
+    writeFixture(script, source.replaceAll('\r\n', '\n'));
+    if (changed) writeExecutable(`${bundle}/ffprobe`, ['touch ran-changed-tool']);
+    writeExecutable('fake-bin/uname', ['echo x86_64']);
+    writeExecutable('fake-bin/curl', ['echo download-requested', 'exit 22']);
+
+    const result = runBashFixture(script, [], { CDPATH: 'alternate-cache' });
+    expect(result.status).toBe(changed ? 22 : 0);
+    if (changed) {
+      expect(result.output).toContain('download-requested');
+      expect(() => readFileSync(join(fixture, bundle, 'ran-changed-tool'))).toThrow();
+      expect(() => readFileSync(join(fixture, bundle, 'ran-ffmpeg'))).toThrow();
+    } else {
+      expect(result.output).toContain('Reused verified');
+      expect(result.output).not.toContain('download-requested');
+      expect(readFileSync(join(fixture, bundle, 'ran-ffmpeg'))).toHaveLength(0);
+      expect(readFileSync(join(fixture, bundle, 'ran-ffprobe'))).toHaveLength(0);
+    }
   }, 15_000);
 
   it('starts a packaged deployment without NFT manifests', () => {

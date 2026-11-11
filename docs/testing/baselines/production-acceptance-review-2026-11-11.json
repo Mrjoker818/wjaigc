@@ -2905,19 +2905,20 @@
     {
       "path": "scripts/stage-coze-media-tools.sh",
       "disposition": "reviewed",
-      "reviewedBlob": "87f2a02d624873e03a1affd4b00695458b0e44d2",
-      "summary": "Obtains pinned Linux x64 or arm64 FFmpeg and FFprobe from the publisher release, checks SHA-256 before extraction, and includes the license.",
+      "reviewedBlob": "fac37ffce23ee26318a2048d62b470077f3b8de9",
+      "summary": "Stages the pinned Linux FFmpeg release and license. On x64, Coze can reuse a cache verified against three file hashes or download the same release bytes from a faster mirror.",
       "evidence": [
-        "Publisher release archive digests match both downloaded archives. The package test rejects a modified archive before extraction or execution."
+        "Coze's Linux x64 sandbox downloaded all 153175100 bytes from the mirror, matched the publisher archive SHA-256, extracted three files, and executed both tools at n9.0.2-39-g7adfbe40dc.",
+        "The cold path checks the pinned publisher archive hash before extraction. The cached path checks both executables and the license against hashes from that verified archive before execution. The arm64 archive and publisher source remain pinned."
       ]
     },
     {
       "path": "src/__tests__/scripts/deploy-package-guard.test.ts",
       "disposition": "reviewed",
-      "reviewedBlob": "5aa8993785cf10d55f866f0b29f95a5904383ad8",
+      "reviewedBlob": "60f4dd32a9ed2972eff98c95639a5118d7af08f5",
       "summary": "Covers the pinned Coze media packaging and runtime resolution while keeping historical credential absence checks.",
       "evidence": [
-        "Package guard regressions ran as part of the verified 161 tests."
+        "All 32 package guard tests passed. Four focused cases passed again after anchoring the cache path against CDPATH. They cover a verified cache without network, a tampered cache with neither tool executed, the publisher fallback after a mirror transfer failure, and archive mismatch rejection before extraction."
       ]
     },
     {
