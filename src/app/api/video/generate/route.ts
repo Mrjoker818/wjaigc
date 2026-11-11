@@ -28,10 +28,13 @@ import {
   buildVideoSubmitRequest,
   parseVideoSubmitResponse,
   resolveVideoCompatProfile,
+  resolveVideoSubmitDuration,
+  resolvePearVideoMaterials,
   getVideoModelInfo,
   ratioToSize,
   type VideoGenerateParams,
 } from '@/lib/video-api';
+import { PEAR_VIDEO_GENERATE_OPERATIONS } from '@/lib/pear-video-models';
 import { buildDirectorPrompt, type VideoDirectorMode } from '@/lib/video-director';
 import { getInternalRequestHeaders, requireApiAuthOrReject } from '@/lib/api-auth';
 import { calculateConfiguredCreditCost, InsufficientCreditsError } from '@/lib/credits';
@@ -197,7 +200,7 @@ export async function POST(request: NextRequest) {
       referenceImages,
       aspectRatio = '16:9',
       resolution,
-      duration = 5,
+      duration: requestedDuration,
       mode = 'std',
       generateAudio = false,
       negativePrompt,
@@ -229,10 +232,6 @@ export async function POST(request: NextRequest) {
     }
 
     let pureModel = model;
-    const parsedDuration = Number(duration);
-    if (parsedDuration > runtimeSettings.maxVideoDuration) {
-      return NextResponse.json({ error: `Video duration exceeds the ${runtimeSettings.maxVideoDuration}s platform limit` }, { status: 400 });
-    }
 
     // 仅确认用户身份。积分在持久化任务创建后以数据库原子语句扣除，
     // 防止任务未落库或并发请求时产生不可追溯的重复扣费。
@@ -336,41 +335,6 @@ export async function POST(request: NextRequest) {
         retryable: false,
       }, { status: 400 });
     }
-    const referenceImageCount = [
-      imageUrl,
-      lastFrameImageUrl,
-      ...(Array.isArray(referenceImages) ? referenceImages : []),
-      ...(Array.isArray(characterReferences) ? characterReferences : []),
-    ].filter(value => typeof value === 'string' && value.trim()).length;
-    const videoCapabilityAdmission = validateTaskModelSelection(descriptor, {
-      operation: toSupportedVideoOperation(
-        imageUrl,
-        lastFrameImageUrl,
-        referenceImages,
-        characterReferences,
-      ),
-      aspectRatio,
-      size: typeof resolution === 'string' && resolution.trim() ? resolution : undefined,
-      durationSeconds: parsedDuration,
-      referenceImageCount: referenceImageCount,
-    });
-    if (!videoCapabilityAdmission.ok) {
-      return NextResponse.json({
-        success: false,
-        code: 'MODEL_CAPABILITY_MISMATCH',
-        error: `所选视频模型不支持当前参数：${videoCapabilityAdmission.error.field}`,
-        retryable: false,
-        details: {
-          providerId: provider.id,
-          modelId: pureModel,
-          field: videoCapabilityAdmission.error.field,
-          received: videoCapabilityAdmission.error.received,
-          allowed: videoCapabilityAdmission.error.allowed,
-        },
-        requestId,
-      }, { status: 400 });
-    }
-
     const apiKey = provider.apiKey;
     const baseUrl = provider.baseUrl;
     if (!apiKey || !baseUrl?.trim()) {
@@ -403,6 +367,59 @@ export async function POST(request: NextRequest) {
       advancedParams?.compatProfile,
       baseUrl,
     );
+    const duration = resolveVideoSubmitDuration(profile, pureModel, requestedDuration)
+      ?? (requestedDuration === undefined ? 5 : requestedDuration);
+    const parsedDuration = Number(duration);
+    if (parsedDuration > runtimeSettings.maxVideoDuration) {
+      return NextResponse.json({ error: `Video duration exceeds the ${runtimeSettings.maxVideoDuration}s platform limit` }, { status: 400 });
+    }
+    const pearMaterials = profile === 'pearapi-video' ? resolvePearVideoMaterials({
+      model: pureModel, imageUrl, lastFrameImageUrl, referenceImages, characterReferences,
+      videoUrl: body.videoUrl, mode, action: body.action,
+    }) : undefined;
+    const pearOperation = pearMaterials && PEAR_VIDEO_GENERATE_OPERATIONS[pearMaterials.generationMode];
+    if (pearMaterials && !pearOperation) {
+      throw new ModelCapabilityError('MODEL_CAPABILITY_MISMATCH', '此生成入口不支持 Pear 视频编辑', {
+        providerId: provider.id, modelId: pureModel, field: 'operation', received: pearMaterials.generationMode,
+        allowed: descriptor.supportedOperations ?? [],
+      });
+    }
+    const referenceImageCount = pearMaterials
+      ? (pearMaterials.imageUrl ? 1 : pearMaterials.referenceImages.length)
+      : [
+        imageUrl,
+        lastFrameImageUrl,
+        ...(Array.isArray(referenceImages) ? referenceImages : []),
+        ...(Array.isArray(characterReferences) ? characterReferences : []),
+      ].filter(value => typeof value === 'string' && value.trim()).length;
+    const videoCapabilityAdmission = validateTaskModelSelection(descriptor, {
+      operation: pearOperation ?? toSupportedVideoOperation(
+        imageUrl,
+        lastFrameImageUrl,
+        referenceImages,
+        characterReferences,
+      ),
+      aspectRatio,
+      size: typeof resolution === 'string' && resolution.trim() ? resolution : undefined,
+      durationSeconds: parsedDuration,
+      referenceImageCount,
+    });
+    if (!videoCapabilityAdmission.ok) {
+      return NextResponse.json({
+        success: false,
+        code: 'MODEL_CAPABILITY_MISMATCH',
+        error: `所选视频模型不支持当前参数：${videoCapabilityAdmission.error.field}`,
+        retryable: false,
+        details: {
+          providerId: provider.id,
+          modelId: pureModel,
+          field: videoCapabilityAdmission.error.field,
+          received: videoCapabilityAdmission.error.received,
+          allowed: videoCapabilityAdmission.error.allowed,
+        },
+        requestId,
+      }, { status: 400 });
+    }
     console.log(`[video/generate] model=${pureModel}, providerId=${provider.id}, baseUrl=${baseUrl}, profile=${profile}, compatProfile=${advancedParams?.compatProfile || '(none)'}`);
 
     // 3. 获取模型特征信息
@@ -426,6 +443,7 @@ export async function POST(request: NextRequest) {
           const proto = process.env.NODE_ENV === 'production' ? 'https' : 'http';
           const port = process.env.DEPLOY_RUN_PORT || 5000;
           const resp = await fetch(`${proto}://localhost:${port}${imgUrl}`, { signal: AbortSignal.timeout(10000) });
+          if (pearMaterials && !resp.ok) return undefined;
           const buf = Buffer.from(await resp.arrayBuffer());
           return `data:image/png;base64,${buf.toString('base64')}`;
         } catch {
@@ -469,10 +487,15 @@ export async function POST(request: NextRequest) {
     };
 
     const [resolvedImageUrl, resolvedLastFrameUrl, ...resolvedRefs] = await Promise.all([
-      resolveImageUrl(imageUrl),
+      resolveImageUrl(pearMaterials?.imageUrl ?? imageUrl),
       resolveImageUrl(lastFrameImageUrl),
-      ...(referenceImages || []).map((img: string) => resolveImageUrl(img)),
+      ...(pearMaterials?.referenceImages ?? (referenceImages || [])).map((img: string) => resolveImageUrl(img)),
     ]);
+    if (pearMaterials && ((pearMaterials.imageUrl && !resolvedImageUrl) || resolvedRefs.some(url => !url))) {
+      throw new ModelCapabilityError('MODEL_CAPABILITY_MISMATCH', '视频参考图片不可用', {
+        providerId: provider.id, modelId: pureModel, field: 'referenceImages',
+      });
+    }
 
     // 4. 构建请求参数
     // 4.1 如果启用导演增强，在服务端本地"增强"提示词（拼合导演风格/参考/负向等，不依赖额外 LLM 调用，避免失败）
@@ -553,9 +576,10 @@ export async function POST(request: NextRequest) {
       characterReferences,
       motionStrength,
     };
+    const pearSubmitRequest = pearMaterials ? buildVideoSubmitRequest(profile, videoParams) : undefined;
     plannedCreditCost = skillBillingContext ? 0 : await calculateConfiguredCreditCost(
       'video_generate', pureModel, {
-          durationSeconds: Number(duration),
+          durationSeconds: parsedDuration,
           providerId: provider.id,
       },
     );
@@ -587,7 +611,7 @@ export async function POST(request: NextRequest) {
       lastFrameImageUrl,
       referenceImages,
       aspectRatio,
-      duration,
+      duration: requestedDuration === undefined ? 5 : requestedDuration,
       mode,
       generateAudio,
       negativePrompt,
@@ -829,7 +853,7 @@ export async function POST(request: NextRequest) {
         }
         updateTaskProgress(taskId, { progress: 5, label: `${modeLabel} · ${modelName} · 提交中...` });
 
-        const req = buildVideoSubmitRequest(profile, videoParams);
+        const req = pearSubmitRequest ?? buildVideoSubmitRequest(profile, videoParams);
         assertSafeProviderUrl(req.url);
         console.log(`[video/generate] Submit request: url=${req.url}, method=${req.method}`);
         const submitSignal = AbortSignal.any([submitController.signal, AbortSignal.timeout(30000)]);

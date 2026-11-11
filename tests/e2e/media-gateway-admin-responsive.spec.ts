@@ -69,6 +69,7 @@ async function expectNoHorizontalOverflow(locator: Locator): Promise<void> {
 test('media gateway admin stays within 375px through sheet and one-time secret dialog', async ({ page }) => {
   await installRoutes(page);
   await page.goto('/?view=dashboard', { waitUntil: 'domcontentloaded' });
+  await page.getByRole('button', { name: '展开导航', exact: true }).click();
   await page.getByRole('button', { name: '媒体网关' }).click();
 
   await expectNoHorizontalOverflow(page.getByTestId('media-gateway-admin'));

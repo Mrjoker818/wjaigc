@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { NextRequest } from 'next/server';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { after, NextRequest } from 'next/server';
+import { calculateConfiguredCreditCost } from '@/lib/credits';
 
 vi.mock('server-only', () => ({}));
 vi.mock('next/server', async (importOriginal) => ({
@@ -144,6 +145,11 @@ describe('trusted gateway source context', () => {
     }));
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
   it('ignores gateway headers from cookie callers and accepts them only for internal auth', () => {
     const forgedHeaders = new Headers(gatewayHeaders);
     expect(trustedGatewayContext('cookie', forgedHeaders)).toBeUndefined();
@@ -249,6 +255,112 @@ describe('trusted gateway source context', () => {
       success: false, code: 'MODEL_PROVIDER_MISMATCH', retryable: false,
     });
     expect(mocks.recordImageTaskSubmitted).not.toHaveBeenCalled();
+  });
+});
+
+describe('provider video admission', () => {
+  const model = 'doubao-seedance-2-0-mini-260615';
+  const imageUrl = 'https://example.com/first.png';
+  const secondImage = 'https://example.com/second.png';
+  let fetcher: ReturnType<typeof vi.fn<typeof fetch>>;
+
+  function request(input: Record<string, unknown> = {}) {
+    return new NextRequest('http://localhost/api/video/generate', {
+      method: 'POST', headers: gatewayHeaders,
+      body: JSON.stringify({ prompt: 'test video', providerId: 'video-provider', model, useDirector: false, ...input }),
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.source = 'internal';
+    vi.stubEnv('WUJIE_TASK_CORE_MODE', 'legacy');
+    vi.stubEnv('COZE_PROJECT_DOMAIN_DEFAULT', '');
+    fetcher = vi.fn<typeof fetch>().mockRejectedValue(new Error('unexpected fetch'));
+    vi.stubGlobal('fetch', fetcher);
+    mocks.findProviderById.mockResolvedValue({ ...mocks.videoProvider, baseUrl: 'https://api.pearapi.ai' });
+    // Deliberately allow extra operations/durations to exercise the Pear boundary even with admin overrides.
+    mocks.resolveTaskModelForUser.mockImplementation(async (providerId: string, modelId: string) => ({
+      providerId, modelId, kind: 'video', protocol: 'pearapi-video', allowedRatios: ['16:9'], allowedSizes: [],
+      allowedDurationsSeconds: [5, 6, 8, 10], supportsReferenceImages: true, maxReferenceImages: 20,
+      supportedOperations: ['text-to-video', 'image-to-video', 'first-last-frame', 'multi-reference'],
+    }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it.each([
+    [{ model: 'hailuo-2.3', duration: 6 }, 'operation'],
+    [{ model: 'hailuo-2.3', imageUrl, duration: 8 }, 'duration'],
+    [{ imageUrl, lastFrameImageUrl: secondImage }, 'operation'],
+    [{ referenceImages: [imageUrl] }, 'referenceImages'],
+    [{ characterReferences: [imageUrl, secondImage] }, 'characterReferences'],
+    [{ videoUrl: 'https://example.com/source.mp4' }, 'operation'],
+  ] as const)('rejects %j before pricing or scheduling', async (input, field) => {
+    const response = await generateVideo(request(input));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      code: 'MODEL_CAPABILITY_MISMATCH', retryable: false, details: { field },
+    });
+    expect(calculateConfiguredCreditCost).not.toHaveBeenCalled();
+    expect(mocks.recordVideoTaskSubmitted).not.toHaveBeenCalled();
+    expect(after).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('fails admission if the requested image cannot be resolved', async () => {
+    fetcher.mockResolvedValueOnce(new Response('missing', { status: 404 }));
+    const response = await generateVideo(request({ imageUrl: '/uploads/missing.png' }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: 'MODEL_CAPABILITY_MISMATCH', retryable: false });
+    expect(calculateConfiguredCreditCost).not.toHaveBeenCalled();
+    expect(mocks.recordVideoTaskSubmitted).not.toHaveBeenCalled();
+    expect(after).not.toHaveBeenCalled();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [{ model: 'hailuo-2.3', imageUrl }, 6, 'image2video', [imageUrl]],
+    [{ duration: '10', referenceImages: [imageUrl, secondImage] }, 10, 'reference2video', [imageUrl, secondImage]],
+  ] as const)('uses the admitted seconds and mode for %j', async (input, duration, generationMode, urls) => {
+    fetcher.mockResolvedValueOnce(Response.json({ id: 'synthetic-remote', status: 'queued' }));
+    const response = await generateVideo(request(input));
+    expect(response.status).toBe(200);
+    expect(calculateConfiguredCreditCost).toHaveBeenCalledWith('video_generate', 'model' in input ? input.model : model, {
+      providerId: 'video-provider', durationSeconds: duration,
+    });
+    expect(mocks.recordVideoTaskSubmitted).toHaveBeenCalledWith(expect.objectContaining({
+      submissionPayload: expect.objectContaining({ duration }),
+    }));
+    await (vi.mocked(after).mock.calls[0]?.[0] as () => Promise<void>)();
+    expect(fetcher).toHaveBeenCalledExactlyOnceWith('https://api.pearapi.ai/v1/videos/generations', expect.objectContaining({ method: 'POST' }));
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toMatchObject({
+      duration, generation_mode: generationMode,
+      reference_contents: urls.map(media_url => ({ type: 'image', media_url })),
+    });
+  });
+
+  it('admits APIMart Omni at its nominal ten seconds and omits the wire duration', async () => {
+    const omni = 'gemini-omni-flash-preview';
+    mocks.findProviderById.mockResolvedValue({ ...mocks.videoProvider, baseUrl: 'https://api.apib.ai' });
+    const rejected = await generateVideo(request({ model: omni, duration: 5 }));
+    expect(rejected.status).toBe(400);
+    expect(await rejected.json()).toMatchObject({ code: 'MODEL_CAPABILITY_MISMATCH', details: { field: 'duration' } });
+    expect(calculateConfiguredCreditCost).not.toHaveBeenCalled();
+    expect(after).not.toHaveBeenCalled();
+
+    fetcher.mockResolvedValueOnce(Response.json({ code: 200, data: [{ task_id: 'synthetic-remote' }] }));
+    const accepted = await generateVideo(request({ model: omni }));
+    expect(accepted.status).toBe(200);
+    expect(calculateConfiguredCreditCost).toHaveBeenCalledWith('video_generate', omni, {
+      providerId: 'video-provider', durationSeconds: 10,
+    });
+    await (vi.mocked(after).mock.calls[0]?.[0] as () => Promise<void>)();
+    expect(fetcher).toHaveBeenCalledExactlyOnceWith('https://api.apib.ai/v1/videos/generations', expect.objectContaining({ method: 'POST' }));
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).not.toHaveProperty('duration');
   });
 });
 

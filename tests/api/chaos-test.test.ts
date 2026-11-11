@@ -1,3 +1,4 @@
+import { requireTestCredential } from '../helpers/e2e-credentials';
 import { describe, it, expect, beforeAll } from 'vitest';
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:5000';
@@ -19,8 +20,8 @@ async function login(): Promise<string> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      name: process.env.E2E_TEST_USERNAME || 'Mr.joker',
-      password: process.env.E2E_TEST_PASSWORD || 'Wujie#2026Reset',
+      name: requireTestCredential('E2E_TEST_USERNAME'),
+      password: requireTestCredential('E2E_TEST_PASSWORD'),
     }),
   });
   const setCookie = res.headers.get('set-cookie');

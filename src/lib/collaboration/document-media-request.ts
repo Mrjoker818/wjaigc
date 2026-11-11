@@ -4,7 +4,8 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { NextResponse } from 'next/server';
 import { CanvasShareHttpError } from '@/lib/canvas-share/request';
-import { binaryExtensions } from '@/lib/asset-core/binary-media-contract';
+import { AssetVideoValidatorUnavailableError, binaryExtensions } from '@/lib/asset-core/binary-media-contract';
+import { mp4UploadDiagnosticScope } from '@/lib/asset-core/mp4-upload-diagnostic';
 import { mediaImportCommandSchema } from './canvas-asset-command';
 
 export class DocumentMediaError extends Error {
@@ -55,6 +56,8 @@ export function parseUploadHeaders(headers: Headers): { metadata: MediaUploadReq
   mediaImportLimit(mimeType);
   const extension = result.data.filename.split('.').pop()?.toLowerCase();
   if (!extension || !binaryExtensions(mimeType)?.includes(extension)) throw new DocumentMediaError('DOCUMENT_MEDIA_INVALID');
+  const diagnostic = mp4UploadDiagnosticScope.getStore();
+  if (diagnostic) diagnostic.current = { phase: 'import' };
   return { metadata: result.data, mimeType };
 }
 export function parseMediaAdoption(value: unknown): MediaAdoptionRequest {
@@ -115,6 +118,8 @@ export function consumeMediaBody(body: ReadMediaBody): BodyData {
 export async function readMediaBody(
   request: Request, maxBytes: number, signal: AbortSignal, discard: boolean = false,
 ): Promise<ReadMediaBody> {
+  const diagnostic = mp4UploadDiagnosticScope.getStore();
+  if (diagnostic) diagnostic.current = { phase: 'request_admission' };
   assertMediaActive(signal);
   const declared = request.headers.get('content-length');
   if (declared !== null && (!/^(0|[1-9][0-9]*)$/u.test(declared) || !Number.isSafeInteger(Number(declared)))) throw new DocumentMediaError('DOCUMENT_MEDIA_INVALID');
@@ -143,6 +148,7 @@ export async function readMediaBody(
     complete = true;
     const capability = Object.freeze({}) as ReadMediaBody;
     bodies.set(capability, { ...(discard ? {} : { bytes: Buffer.concat(chunks, byteSize) }), byteSize, checksum: hash.digest('hex') });
+    if (diagnostic) diagnostic.current = { phase: 'import' };
     return capability;
   } finally {
     if (!complete) void reader.cancel().catch((): void => undefined);
@@ -168,6 +174,9 @@ export function mediaImportResponse(data: Record<string, unknown>, status: numbe
   return NextResponse.json(data, { status, headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
 }
 export function mediaImportFailure(error: unknown): NextResponse {
+  if (error instanceof AssetVideoValidatorUnavailableError) {
+    return mediaImportResponse({ success: false, code: 'DOCUMENT_VIDEO_VALIDATOR_UNAVAILABLE' }, 503);
+  }
   if (error instanceof Error && error.message === 'ASSET_MEDIA_BUSY') return mediaImportResponse({ success: false, code: 'DOCUMENT_MEDIA_BUSY' }, 503);
   if (error instanceof CanvasShareHttpError) return mediaImportResponse({ success: false, code: 'DOCUMENT_MEDIA_INVALID' }, error.status);
   const statuses: Readonly<Record<string, number>> = {

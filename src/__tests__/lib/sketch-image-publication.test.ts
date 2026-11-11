@@ -377,6 +377,39 @@ describe('completed ACK-loss verification, not a new financial or model attempt'
   });
 });
 describe('commit uncertainty and confirmed rollback cleanup', () => {
+  it('reports the failing publication stage without serializing the driver error', async () => {
+    const f = fixture();
+    f.before = call => {
+      if (call.sql === 'LOCK TABLE wujie_api_providers IN SHARE MODE') {
+        throw Object.assign(new Error('fixture-internal-detail'), { code: '42501' });
+      }
+    };
+    const log = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    try {
+      expect(await publish(f)).toBe(false);
+      const entry = log.mock.calls.find(([label]) => label === '[SketchRuntime]');
+      expect(entry).toBeDefined();
+      expect(JSON.parse(String(entry?.[1]))).toMatchObject({ taskId: f.value.identity.taskId,
+        event: 'publication-refused', reason: 'SKETCH_IMAGE_PUBLICATION_MODEL_ACCESS_PG_42501' });
+      expect(String(entry?.[1])).not.toContain('fixture-internal-detail');
+      expect(f.calls.some(call => call.sql === 'ROLLBACK')).toBe(true);
+      expect(writes(f)).toEqual([]);
+    } finally { log.mockRestore(); }
+  });
+  it('rolls back without invoking a diagnostic error code accessor', async () => {
+    const f = fixture();
+    const readCode = vi.fn(() => { throw new Error('accessor must not run'); });
+    f.before = call => {
+      if (call.sql === 'LOCK TABLE wujie_api_providers IN SHARE MODE') {
+        throw Object.defineProperty(new Error(), 'code', { get: readCode });
+      }
+    };
+
+    await expect(publish(f)).resolves.toBe(false);
+    expect(readCode).not.toHaveBeenCalled();
+    expect(f.calls.some(call => call.sql === 'ROLLBACK')).toBe(true);
+    expect(f.releases).toEqual([false]);
+  });
   it.each(['before', 'after'] as const)('commit failure %s ACK discards with fixed error, no rollback/cleanup/refund', async mode => {
     const f = fixture(token, { inputTokens: 0, outputTokens: 0 }); f.commitFailure = mode;
     await expect(publish(f)).rejects.toThrow(/^SKETCH_IMAGE_PUBLICATION_UNCONFIRMED$/); expect(f.releases).toEqual([true]); expect(f.cleaned).toEqual([]);

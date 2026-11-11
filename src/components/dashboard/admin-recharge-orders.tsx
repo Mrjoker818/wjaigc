@@ -21,13 +21,16 @@ interface RechargeOrder {
   screenshotUrl?: string;
 }
 
+type OrderDecision = 'approve' | 'reject';
+
 export function AdminRechargeOrders(): JSX.Element {
   const [orders, setOrders] = useState<RechargeOrder[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
-  const [processingId, setProcessingId] = useState<string | null>(null);
+  const [processingOrders, setProcessingOrders] = useState<ReadonlyMap<string, OrderDecision>>(() => new Map());
   const [filter, setFilter] = useState<'pending' | 'submitted' | 'paid' | 'all' | 'rejected'>('submitted');
   const readVersionRef = useRef(0);
+  const pendingDecisions = useRef(new Map<string, OrderDecision>());
 
   const loadOrders = useCallback(async (): Promise<void> => {
     const version = ++readVersionRef.current;
@@ -57,53 +60,47 @@ export function AdminRechargeOrders(): JSX.Element {
 
   useEffect((): (() => void) => {
     void loadOrders();
-    return (): void => { readVersionRef.current += 1; };
+    return (): void => {
+      readVersionRef.current += 1;
+      pendingDecisions.current = new Map();
+    };
   }, [loadOrders]);
 
-  const handleConfirm = async (orderId: string) => {
-    if (!confirm('确认已收到这笔付款？确认后将立即为用户充值积分，此操作不可撤销。')) return;
-    setProcessingId(orderId);
-    try {
-      const res = await fetch('/api/credits', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'admin-confirm-paid', orderId }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        toast.success(`已确认收款，积分已到账`);
-        loadOrders();
-      } else {
-        toast.error(data.error || '确认失败');
-      }
-    } catch {
-      toast.error('操作失败，请重试');
-    } finally {
-      setProcessingId(null);
+  const handleDecision = async (orderId: string, decision: OrderDecision) => {
+    const pending = pendingDecisions.current;
+    if (pending.has(orderId)) return;
+    let reason: string | undefined;
+    if (decision === 'approve') {
+      if (!confirm('确认已收到这笔付款？确认后将立即为用户充值积分，此操作不可撤销。')) return;
+    } else {
+      reason = prompt('请输入驳回原因（例如：未收到款项、金额不符等）') || '';
+      if (!reason) return;
     }
-  };
 
-  const handleReject = async (orderId: string, presetReason = '') => {
-    const reason = presetReason || prompt('请输入驳回原因（例如：未收到款项、金额不符等）') || '';
-    if (!reason) return;
-    setProcessingId(orderId);
+    pending.set(orderId, decision);
+    setProcessingOrders(new Map(pending));
+    const action = decision === 'approve' ? 'admin-confirm-paid' : 'admin-reject';
     try {
       const res = await fetch('/api/credits', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'admin-reject', orderId, reason }),
+        body: JSON.stringify({ action, orderId, reason }),
       });
       const data = await res.json();
-      if (data.success) {
-        toast.success('订单已驳回');
-        loadOrders();
+      if (pending !== pendingDecisions.current) return;
+      if (res.ok && data.success) {
+        toast.success(decision === 'approve' ? '已确认收款，积分已到账' : '订单已驳回');
+        void loadOrders();
       } else {
-        toast.error(data.error || '驳回失败');
+        toast.error(data.error || (decision === 'approve' ? '确认失败' : '驳回失败'));
       }
     } catch {
-      toast.error('操作失败，请重试');
+      if (pending === pendingDecisions.current) toast.error('操作失败，请重试');
     } finally {
-      setProcessingId(null);
+      if (pending === pendingDecisions.current) {
+        pending.delete(orderId);
+        setProcessingOrders(new Map(pending));
+      }
     }
   };
 
@@ -219,21 +216,28 @@ export function AdminRechargeOrders(): JSX.Element {
                       <div className="flex flex-wrap gap-2 md:justify-end">
                         <Button
                           size="sm"
-                          onClick={() => handleConfirm(order.orderId)}
-                          disabled={processingId === order.orderId}
+                          onClick={() => handleDecision(order.orderId, 'approve')}
+                          disabled={processingOrders.has(order.orderId)}
+                          aria-busy={processingOrders.get(order.orderId) === 'approve'}
                           className="min-h-11 min-w-11 flex-1 bg-green-600 hover:bg-green-700 md:flex-none"
                         >
-                          {processingId === order.orderId ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4 mr-1" />}
+                          {processingOrders.get(order.orderId) === 'approve'
+                            ? <Loader2 aria-hidden="true" className="w-4 h-4 mr-1 animate-spin motion-reduce:animate-none" />
+                            : <Check aria-hidden="true" className="w-4 h-4 mr-1" />}
                           确认到账
                         </Button>
                         <Button
                           size="sm"
                           variant="destructive"
                           className="min-h-11 min-w-11 flex-1 md:flex-none"
-                          onClick={() => handleReject(order.orderId, '')}
-                          disabled={processingId === order.orderId}
+                          onClick={() => handleDecision(order.orderId, 'reject')}
+                          disabled={processingOrders.has(order.orderId)}
+                          aria-busy={processingOrders.get(order.orderId) === 'reject'}
                         >
-                          <X className="w-4 h-4 mr-1" />驳回
+                          {processingOrders.get(order.orderId) === 'reject'
+                            ? <Loader2 aria-hidden="true" className="w-4 h-4 mr-1 animate-spin motion-reduce:animate-none" />
+                            : <X aria-hidden="true" className="w-4 h-4 mr-1" />}
+                          驳回
                         </Button>
                       </div>
                     )}

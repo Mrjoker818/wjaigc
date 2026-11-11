@@ -10,7 +10,7 @@ import {readManagedAssetVersionBytes} from '@/lib/asset-core/managed-media-read'
 import type {AssetVersion,WorkspacePlacement,AssetFile} from '@/lib/asset-core/types';
 import {resolveInlineSubgraph,type Workflow,type ExecutionResult} from '@/lib/workflow-engine';
 import {assertWorkflowImageExecutionInTransaction,type WorkflowImageExecutionFenceInput,type WorkflowImageExecutionFenceSnapshot} from './workflow-image-execution-fence';
-import {workflowImageCellPreparationIdentity,assertWorkflowImageCellPreparationInTransaction,type WorkflowImageCellPreparationIdentity,type PreparedWorkflowImageCell,type WorkflowImageGridPublication} from './workflow-image-preparation';
+import {workflowImageCellPreparationIdentity,assertWorkflowImageCellPreparationInTransaction,workflowImagePublishedMediaMatches,type WorkflowImageCellPreparationIdentity,type PreparedWorkflowImageCell,type WorkflowImageGridPublication} from './workflow-image-preparation';
 import {selectWorkflowImageUpstream,readWorkflowImageInputTransform} from './workflow-image-receiver';
 import type {WorkflowImagePublicationDependencies} from './workflow-image-publication';
 export interface WorkflowImageRuntimeTargetExpectation {placementId:string;assetId:string;assetVersionId:string}
@@ -118,7 +118,12 @@ async function targetPlacement(transaction:AssetStorageTransaction,identity:Iden
   const current=await transaction.findActivePlacement(actorUserId,projectId,'workflow',workspaceId,'workflow-input',targetNodeId);
   if(!current)return null;
   const locked=await transaction.lockPlacement(actorUserId,projectId,current.id);
-  if(!locked||!isDeepStrictEqual(locked,current)||locked.status!=='active'||locked.deletedAt!==null
+  if(!locked)changed();
+  // Only the locked read projects the row's lifecycle revision.
+  const {lifecycleRevision:lockedRevision,...lockedFields}=locked;
+  const {lifecycleRevision:locatedRevision,...locatedFields}=current;
+  if(locatedRevision!==undefined&&locatedRevision!==lockedRevision||!isDeepStrictEqual(lockedFields,locatedFields)
+    ||locked.status!=='active'||locked.deletedAt!==null
     ||locked.ownerId!==actorUserId||locked.projectId!==projectId||locked.workspace!=='workflow'||locked.workspaceId!==workspaceId
     ||locked.entityType!=='workflow-input'||locked.entityId!==targetNodeId)changed();
   return structuredClone(locked);
@@ -199,9 +204,7 @@ function retained(identity:Identity,replay:Replay):string[] {
 }
 async function verifyMedia(replay:Replay,signal:AbortSignal,read:typeof readManagedAssetVersionBytes):Promise<void> {
   for(const version of [...(replay.legacyParent?[replay.legacyParent]:[]),replay.version]){
-    signal.throwIfAborted();const media=await read(version,'image',{signal,maxBytes:32*1024*1024});signal.throwIfAborted();
-    if(media.mimeType!==version.file.mimeType||media.bytes.length!==version.file.byteSize||media.totalBytes!==media.bytes.length
-      ||createHash('sha256').update(media.bytes).digest('hex')!==version.file.checksum)conflict();
+    if(!await workflowImagePublishedMediaMatches(version,signal,read))conflict();
   }
 }
 /** Actual caller-client publication. Recovery is a read-only reconciliation, never
@@ -239,6 +242,7 @@ export async function publishPreparedPersonalWorkflowImageCell(prepared:Prepared
         return {status:'committed',value:publicationValue(identity,execution,replay,revision),retainedFileUrls:retained(identity,replay)};
       }
       if(mode!=='write'){await client.query('ROLLBACK');open=false;return {status:'unknown',error:new Error('WORKFLOW_IMAGE_RUNTIME_PUBLICATION_UNCONFIRMED')};}
+      if(verified)changed();
       const current=await targetPlacement(transaction,identity);assertExpectedTarget(current,held.expectedTarget);
       // Do not reuse createVersionWithPlacement: its replay path can restore a
       // trashed asset/slot. The runtime replay above is deliberately read-only.

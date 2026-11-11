@@ -32,11 +32,32 @@ interface PaymentStatus {
   status: { wechat: boolean; alipay: boolean };
 }
 
-export default function UserCreditsTab({
-  isDark,
-  userId,
-  onToast
-}: UserCreditsTabProps) {
+interface RechargeOrderInfo {
+  orderId: string;
+  amount: number;
+  priceCny: number;
+  bonusCredits: number;
+  paymentMethod: string;
+  note: string;
+  payLink?: string;
+  paymentQrUrl?: string;
+  paymentPageUrl?: string;
+  paid?: boolean;
+}
+
+type OrderRequest =
+  | { action: 'create-order'; amount: number; paymentMethod: 'wechat' | 'alipay' }
+  | { action: 'confirm-paid' | 'query-order'; orderId: string };
+
+interface OrderStatusResponse {
+  order?: { paymentStatus?: string; status?: string; rejectReason?: string; admin_note?: string };
+}
+
+export default function UserCreditsTab({ userId, ...props }: UserCreditsTabProps) {
+  return <UserCreditsAccount key={userId} {...props} />;
+}
+
+function UserCreditsAccount({ isDark, onToast }: Omit<UserCreditsTabProps, 'userId'>) {
   const quantityId = useId();
   const [balance, setBalance] = useState(0);
   const [totalEarned, setTotalEarned] = useState(0);
@@ -47,6 +68,7 @@ export default function UserCreditsTab({
   const [hasTransactions, setHasTransactions] = useState(false);
   const [loadError, setLoadError] = useState<'balance' | 'transactions' | null>(null);
   const [filter, setFilter] = useState<'all' | 'earn' | 'spend'>('all');
+  const creditsRequest = useRef(0);
 
   // 充值相关状态
   const [showRecharge, setShowRecharge] = useState(false);
@@ -58,28 +80,21 @@ export default function UserCreditsTab({
   const [paymentStatusError, setPaymentStatusError] = useState(false);
   const [paymentStatusLoading, setPaymentStatusLoading] = useState(false);
   const paymentStatusRequest = useRef(0);
-  const [orderInfo, setOrderInfo] = useState<{
-    orderId: string;
-    amount: number;
-    priceCny: number;
-    bonusCredits: number;
-    paymentMethod: string;
-    note: string;
-    payLink?: string;
-    paymentQrUrl?: string;
-    paymentPageUrl?: string;
-  } | null>(null);
-  const [confirming, setConfirming] = useState(false);
-  const [orderQuerying, setOrderQuerying] = useState(false);
+  const [orderInfo, setOrderInfo] = useState<RechargeOrderInfo | null>(null);
+  const [pendingOrderAction, setPendingOrderAction] = useState<OrderRequest['action'] | null>(null);
+  const orderOperation = useRef<symbol | null>(null);
 
   const loadCredits = useCallback(async () => {
+    const requestId = ++creditsRequest.current;
+    const isCurrent = () => requestId === creditsRequest.current;
     setLoading(true);
     setLoadError(null);
     let reading: 'balance' | 'transactions' = 'balance';
     try {
       const res = await fetch('/api/credits');
       const data = await res.json();
-      if (data.success) {
+      if (!isCurrent()) return;
+      if (res.ok && data.success) {
         const c = data.credits || {};
         setBalance(c.balance || 0);
         setTotalEarned(c.totalRecharged || 0);
@@ -88,7 +103,8 @@ export default function UserCreditsTab({
         reading = 'transactions';
         const txRes = await fetch('/api/credits?action=transactions');
         const txData = await txRes.json();
-        if (txData.success) {
+        if (!isCurrent()) return;
+        if (txRes.ok && txData.success) {
           setTransactions((txData.transactions || []).map((t: Record<string, unknown>) => ({
             id: t.id as string,
             type: t.type as CreditTransaction['type'],
@@ -105,21 +121,20 @@ export default function UserCreditsTab({
         setLoadError('balance');
       }
     } catch (err) {
+      if (!isCurrent()) return;
       setLoadError(reading);
       console.error('Failed to load credits:', err);
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, []);
 
-  // Invalidate in-flight reads before an account switch or unmount can paint.
-  useLayoutEffect(() => {
+  // The account key resets visible data. Retire its callbacks during unmount.
+  useLayoutEffect(() => () => {
+    creditsRequest.current++;
     paymentStatusRequest.current++;
-    setPaymentStatus(null);
-    setPaymentStatusError(false);
-    setPaymentStatusLoading(false);
-    return () => { paymentStatusRequest.current++; };
-  }, [userId]);
+    orderOperation.current = null;
+  }, []);
 
   const loadPaymentStatus = useCallback(async () => {
     const requestId = ++paymentStatusRequest.current;
@@ -142,8 +157,8 @@ export default function UserCreditsTab({
     }
   }, []);
 
-  useEffect(() => { loadCredits(); }, [loadCredits]);
-  useEffect(() => { loadPaymentStatus(); }, [loadPaymentStatus, userId]);
+  useEffect(() => { void loadCredits(); }, [loadCredits]);
+  useEffect(() => { void loadPaymentStatus(); }, [loadPaymentStatus]);
 
   const filteredTransactions = filter === 'all'
     ? transactions
@@ -172,6 +187,54 @@ export default function UserCreditsTab({
     }
   };
 
+  const closeRecharge = () => {
+    orderOperation.current = null;
+    setPendingOrderAction(null);
+    setShowRecharge(false);
+    setOrderInfo(null);
+    setSelectedPackage(null);
+    setIsCustomAmount(false);
+    setCustomAmount(0);
+  };
+
+  async function performOrderAction<T>(
+    body: OrderRequest,
+    apply: (data: T) => void,
+    failure: string,
+    offline = failure,
+  ) {
+    if (orderOperation.current !== null) return;
+    const operation = Symbol();
+    orderOperation.current = operation;
+    setPendingOrderAction(body.action);
+    try {
+      const res = await fetch('/api/credits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data: T & { success?: boolean; error?: string } = await res.json();
+      if (orderOperation.current !== operation) return;
+      if (res.ok && data?.success) apply(data);
+      else onToast?.(data?.error || failure, 'error');
+    } catch (err) {
+      if (orderOperation.current !== operation) return;
+      console.error('Recharge order request failed:', err);
+      onToast?.(offline, 'error');
+    } finally {
+      if (orderOperation.current === operation) {
+        orderOperation.current = null;
+        setPendingOrderAction(null);
+      }
+    }
+  }
+
+  const showPaidReceipt = (order: RechargeOrderInfo) => {
+    setOrderInfo({ ...order, paid: true });
+    onToast?.('订单已确认，积分已到账', 'success');
+    void loadCredits();
+  };
+
   // 创建充值订单并直接支付
   const handleCreateOrder = async () => {
     const rechargeAmount = isCustomAmount ? customAmount : selectedPackage;
@@ -184,19 +247,9 @@ export default function UserCreditsTab({
       return;
     }
 
-    try {
-      setConfirming(true);
-      const res = await fetch('/api/credits', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'create-order',
-          amount: rechargeAmount,
-          paymentMethod,
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
+    await performOrderAction(
+      { action: 'create-order', amount: rechargeAmount, paymentMethod },
+      (data: RechargeOrderInfo) => {
         setOrderInfo({
           orderId: data.orderId,
           amount: data.amount,
@@ -209,15 +262,10 @@ export default function UserCreditsTab({
           paymentPageUrl: data.paymentPageUrl || undefined,
         });
         onToast?.('订单创建成功，请点击立即支付', 'success');
-      } else {
-        onToast?.(data.error || '创建订单失败', 'error');
-      }
-    } catch (err) {
-      console.error('Create order error:', err);
-      onToast?.('创建订单失败，请稍后重试', 'error');
-    } finally {
-      setConfirming(false);
-    }
+      },
+      '创建订单失败',
+      '创建订单失败，请稍后重试',
+    );
   };
 
   // 立即支付 - 直接打开微信/支付宝
@@ -235,69 +283,42 @@ export default function UserCreditsTab({
 
   // 确认已付款
   const handleConfirmPaid = async () => {
-    if (!orderInfo) return;
-    try {
-      setConfirming(true);
-      const res = await fetch('/api/credits', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'confirm-paid',
-          orderId: orderInfo.orderId,
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
+    if (!orderInfo || orderInfo.paid) return;
+    await performOrderAction(
+      { action: 'confirm-paid', orderId: orderInfo.orderId },
+      (data: { alreadyPaid?: boolean }) => {
+        if (data.alreadyPaid === true) {
+          showPaidReceipt(orderInfo);
+          return;
+        }
         onToast?.('已提交付款确认，请等待管理员审核（通常几分钟内到账）', 'info');
-        // 不关闭弹窗，让用户看到待审核状态，可点击查询状态
-        loadCredits();
-      } else {
-        onToast?.(data.error || '提交失败', 'error');
-      }
-    } catch (err) {
-      console.error('Confirm paid error:', err);
-      onToast?.('确认付款失败，请稍后重试', 'error');
-    } finally {
-      setConfirming(false);
-    }
+        void loadCredits();
+      },
+      '提交失败',
+      '确认付款失败，请稍后重试',
+    );
   };
 
   // 查询订单状态
   const handleQueryOrder = async () => {
-    if (!orderInfo) return;
-    try {
-      setOrderQuerying(true);
-      const res = await fetch('/api/credits', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'query-order',
-          orderId: orderInfo.orderId,
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        const order = data.order;
-        if (order?.paymentStatus === 'paid' || order?.status === 'paid') {
-          onToast?.('订单已确认，积分已到账', 'success');
-          setOrderInfo(null);
-          setShowRecharge(false);
-          setSelectedPackage(null);
-          loadCredits();
-        } else if (order?.paymentStatus === 'submitted' || order?.status === 'submitted') {
+    if (!orderInfo || orderInfo.paid) return;
+    await performOrderAction(
+      { action: 'query-order', orderId: orderInfo.orderId },
+      ({ order }: OrderStatusResponse) => {
+        const status = order?.paymentStatus ?? order?.status;
+        if (status === 'paid') {
+          showPaidReceipt(orderInfo);
+        } else if (status === 'submitted') {
           onToast?.('订单正在等待管理员审核，请耐心等待', 'info');
-        } else if (order?.paymentStatus === 'rejected' || order?.status === 'rejected') {
+        } else if (status === 'rejected') {
           const reason = order?.rejectReason || order?.admin_note || '支付未确认';
           onToast?.(`订单已被驳回：${reason}`, 'error');
         } else {
           onToast?.('订单尚未提交，请在手机页面点击"我已完成付款"', 'info');
         }
-      }
-    } catch {
-      onToast?.('查询订单失败', 'error');
-    } finally {
-      setOrderQuerying(false);
-    }
+      },
+      '查询订单失败',
+    );
   };
 
   const cardBg = 'bg-card border border-border/50 rounded-lg';
@@ -405,7 +426,7 @@ export default function UserCreditsTab({
                 积分充值
               </h2>
               <button
-                onClick={() => { setShowRecharge(false); setOrderInfo(null); setSelectedPackage(null); setIsCustomAmount(false); setCustomAmount(0); }}
+                onClick={closeRecharge}
                 aria-label="关闭充值"
                 className="w-11 h-11 shrink-0 flex items-center justify-center rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
               >
@@ -414,8 +435,14 @@ export default function UserCreditsTab({
             </div>
 
             <div className="min-h-0 p-4 sm:p-5 space-y-5 max-h-[70dvh] overflow-y-auto overscroll-contain">
-              {/* 订单已创建 - 扫码支付 */}
-              {orderInfo ? (
+              {orderInfo?.paid ? (
+                <div role="status" className={`${cardBg} space-y-2 p-5 text-center`}>
+                  <CheckCircle aria-hidden="true" className="mx-auto h-12 w-12 text-green-500" />
+                  <h3 className="text-base font-semibold text-foreground">积分已到账</h3>
+                  <p className="text-lg font-medium text-foreground">{orderInfo.amount.toLocaleString('zh-CN')} 积分</p>
+                  <p className="text-xs text-muted-foreground">订单号 <span className="font-mono [overflow-wrap:anywhere]">{orderInfo.orderId}</span></p>
+                </div>
+              ) : orderInfo ? (
                 <div className="space-y-4">
                   <div className="text-center">
                     <CheckCircle className="w-12 h-12 text-primary mx-auto mb-2" />
@@ -504,17 +531,17 @@ export default function UserCreditsTab({
                   <div className="pt-2 space-y-2">
                     <button
                       onClick={handleConfirmPaid}
-                      disabled={confirming}
+                      disabled={pendingOrderAction !== null}
                       className="w-full py-2.5 rounded-lg text-sm font-medium bg-muted border border-border/30 text-foreground hover:bg-muted/80 transition-colors"
                     >
-                      {confirming ? '确认中...' : '我已完成付款'}
+                      {pendingOrderAction === 'confirm-paid' ? '确认中...' : '我已完成付款'}
                     </button>
                     <button
                       onClick={handleQueryOrder}
-                      disabled={orderQuerying}
+                      disabled={pendingOrderAction !== null}
                       className="w-full py-2 rounded-lg text-xs text-muted-foreground hover:text-foreground transition-colors"
                     >
-                      {orderQuerying ? '查询中...' : '查询订单状态'}
+                      {pendingOrderAction === 'query-order' ? '查询中...' : '查询订单状态'}
                     </button>
                   </div>
                 </div>
@@ -715,10 +742,10 @@ export default function UserCreditsTab({
                   {/* 提交按钮 */}
                   <button
                     onClick={handleCreateOrder}
-                    disabled={(!selectedPackage && !(isCustomAmount && customAmount >= 10)) || !paymentStatus?.canRecharge || confirming}
+                    disabled={(!selectedPackage && !(isCustomAmount && customAmount >= 10)) || !paymentStatus?.canRecharge || pendingOrderAction !== null}
                     className="w-full py-3 rounded-lg font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    {confirming ? '创建订单中...' : (selectedPackage || (isCustomAmount && customAmount >= 10))
+                    {pendingOrderAction === 'create-order' ? '创建订单中...' : (selectedPackage || (isCustomAmount && customAmount >= 10))
                       ? `立即充值 ¥${isCustomAmount
                           ? (customAmount * CREDITS_TO_CNY).toFixed(2)
                           : RECHARGE_PACKAGES.find(p => p.amount === selectedPackage)?.price.toFixed(2)}`

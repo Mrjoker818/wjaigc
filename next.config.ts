@@ -30,6 +30,7 @@ const LOCAL_BUILD_ARTIFACT_EXCLUDES = [
   'output/**/*',
   'test-results/**/*',
   'playwright-report/**/*',
+  'deploy-seed/**/*',
 ];
 
 const nextConfig: NextConfig = {

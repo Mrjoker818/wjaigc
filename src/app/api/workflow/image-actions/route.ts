@@ -46,6 +46,7 @@ function failure(error:unknown):NextResponse {
   if(code==='DOCUMENT_MEDIA_INVALID')return response({success:false,code:'WORKFLOW_IMAGE_ACTION_INVALID'},400);
   if(code==='DOCUMENT_MEDIA_CANCELLED')return response({success:false,code:'WORKFLOW_IMAGE_ACTION_CANCELLED'},409);
   const message=error instanceof Error?error.message:'';
+  if(message==='WORKFLOW_IMAGE_GRID_OUTPUT_LIMIT')return response({success:false,code:'WORKFLOW_IMAGE_ACTION_TOO_LARGE'},413);
   if(code==='DOCUMENT_MEDIA_BUSY'||message==='WORKFLOW_IMAGE_PREPARATION_BUSY')
     return response({success:false,code:'WORKFLOW_IMAGE_ACTION_BUSY',retrySameOperation:true},503);
   if(['WORKFLOW_IMAGE_MEDIA_SOURCE_CHANGED','WORKFLOW_IMAGE_MEDIA_SOURCE_INVALID'].includes(message))

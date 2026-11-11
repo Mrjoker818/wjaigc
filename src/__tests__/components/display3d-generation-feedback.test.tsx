@@ -270,12 +270,14 @@ describe('display 3D generation feedback', () => {
     fireEvent.change(eventName,{target:{value:'原活动'}});
     fireEvent.click(screen.getByRole('button',{name:'生成 3 套布局方案'}));
     fireEvent.click(await screen.findByRole('button',{name:/原方案/}));
+    expect(screen.getByRole('button',{name:'锁定为 Design ID'})).toHaveProperty('disabled',false);
     fireEvent.change(eventName,{target:{value:'新活动'}});
     fireEvent.click(screen.getByRole('button',{name:'生成 3 套布局方案'}));
     expect(await screen.findByText('供应商未返回有效方案')).toBeTruthy();
-    expect(screen.getByRole('button',{name:/原方案/})).toBeTruthy();
-    const lockButton = screen.queryByRole('button',{name:'锁定为 Design ID'});
-    if (lockButton) { expect(lockButton).toHaveProperty('disabled',true); fireEvent.click(lockButton); }
+    fireEvent.click(screen.getByRole('button',{name:/原方案/}));
+    const lockButton = screen.getByRole('button',{name:'锁定为 Design ID'});
+    expect(lockButton).toHaveProperty('disabled',true);
+    fireEvent.click(lockButton);
     expect(lock).not.toHaveBeenCalled();
     expect(screen.getByText(/方案.*需求.*变化|需求.*变化.*方案/)).toBeTruthy();
   });
@@ -570,17 +572,23 @@ describe('display 3D generation feedback', () => {
     let releaseNew: (value: Response) => void = () => { throw new Error('new analysis missing'); };
     const oldPoll = new Promise<Response>(resolve => { releaseOld = resolve; });
     const newPoll = new Promise<Response>(resolve => { releaseNew = resolve; });
-    let submissions = 0;
+    let uploads = 0;
+    const submittedPhotos: string[] = [];
     vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function (this: HTMLInputElement) {
       if (this.type === 'file') {
-        Object.defineProperty(this, 'files', { configurable: true, value: [new File(['synthetic'], 'venue.png', { type: 'image/png' })] });
+        const photo = new File([`synthetic-venue-${++uploads}`], 'venue.png', { type: 'image/png' });
+        Object.defineProperty(this, 'files', { configurable: true, value: [photo] });
         fireEvent.change(this);
       }
     });
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.startsWith('/api/models?')) return Promise.resolve(response({providers:[],models:[]}));
-      if (url === '/api/activity-venue/analyze') return Promise.resolve(response({taskId:++submissions === 1 ? 'old-analysis' : 'new-analysis'}));
+      if (url === '/api/activity-venue/analyze') {
+        const { venueImageUrl } = JSON.parse(String(init?.body)) as { venueImageUrl: string };
+        submittedPhotos.push(venueImageUrl);
+        return Promise.resolve(response({taskId:submittedPhotos.length === 1 ? 'old-analysis' : 'new-analysis'}));
+      }
       if (url === '/api/poll-task') return (JSON.parse(String(init?.body)) as {taskId:string}).taskId === 'old-analysis' ? oldPoll : newPoll;
       throw new Error(`Unexpected fixture request: ${url}`);
     }));
@@ -588,22 +596,24 @@ describe('display 3D generation feedback', () => {
     fireEvent.click(screen.getByRole('button',{name:'活动现场'}));
     fireEvent.click(screen.getByRole('button',{name:/点击上传场馆照片/}));
     fireEvent.click(await screen.findByRole('button',{name:'AI 分析场馆'}));
-    await waitFor(() => expect(submissions).toBe(1));
     await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalledWith('/api/poll-task', expect.objectContaining({body:JSON.stringify({taskId:'old-analysis'})})));
     const remove = document.querySelector('img[src^="data:image/"]')?.parentElement?.querySelector('button');
     expect(remove).toBeTruthy();
     fireEvent.click(remove!);
     fireEvent.click(screen.getByRole('button',{name:/点击上传场馆照片/}));
     fireEvent.click(await screen.findByRole('button',{name:'AI 分析场馆'}));
-    await waitFor(() => expect(submissions).toBe(2));
     await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalledWith('/api/poll-task', expect.objectContaining({body:JSON.stringify({taskId:'new-analysis'})})));
-    const oldResponse = response({status:'completed',result:{analysis:{regions:[]}}});
+    expect(submittedPhotos).toHaveLength(2);
+    expect(submittedPhotos[0]).not.toBe(submittedPhotos[1]);
+    const oldResponse = response({status:'completed',result:{analysis:{spaceType:'旧场馆结果',regions:[]}}});
     const oldJson = vi.spyOn(oldResponse, 'json');
     await act(async () => { releaseOld(oldResponse); await Promise.resolve(); });
     await waitFor(() => expect(oldJson).toHaveBeenCalled());
     expect(screen.getByRole('button',{name:/AI 分析中/})).toHaveProperty('disabled',true);
-    await act(async () => { releaseNew(response({status:'completed',result:{analysis:{regions:[]}}})); await Promise.resolve(); });
+    expect(screen.queryByText('旧场馆结果')).toBeNull();
+    await act(async () => { releaseNew(response({status:'completed',result:{analysis:{spaceType:'新场馆结果',regions:[]}}})); await Promise.resolve(); });
     expect(await screen.findByRole('button',{name:'重新分析'})).toHaveProperty('disabled',false);
+    expect(screen.getByText('新场馆结果')).toBeTruthy();
   });
 
   it('keeps the prior preview when a later completed result cannot be added to the canvas', async () => {

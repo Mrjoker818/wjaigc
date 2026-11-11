@@ -202,6 +202,7 @@ export interface UpdateCloudTaskInput {
   remoteTaskId?: string;
   expectedStatuses?: PersistedCloudTaskStatus[];
   leaseOwner?: string;
+  expectedLeaseAttemptCount?: number;
   expectedRevision?: number;
   agentExecutionFence?: AgentExecutionFence;
 }
@@ -1080,6 +1081,8 @@ export async function settleFailedCloudTask(
 }
 
 export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInput): Promise<boolean> {
+  if (input.expectedLeaseAttemptCount !== undefined && (!input.leaseOwner
+    || !Number.isSafeInteger(input.expectedLeaseAttemptCount) || input.expectedLeaseAttemptCount < 1)) return false;
   await ensureCloudTaskTables();
 
   let expectedStatuses = input.expectedStatuses;
@@ -1158,6 +1161,11 @@ export async function updateCloudTask(taskId: string, input: UpdateCloudTaskInpu
   if (input.leaseOwner) {
     conditions.push(`lease_owner = $${index++}`);
     params.push(input.leaseOwner);
+  }
+  if (input.expectedLeaseAttemptCount !== undefined) {
+    conditions.push(`attempt_count = $${index++}`,
+      'lease_expires_at > (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::bigint');
+    params.push(input.expectedLeaseAttemptCount);
   }
   if (expectedRevision !== undefined) {
     conditions.push(`revision = $${index++}`);

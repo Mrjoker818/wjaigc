@@ -305,7 +305,8 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 function simpleChatEventResponse(event: Record<string, unknown>): Response {
-  return new Response(`data: ${JSON.stringify(event)}\n\n`, {
+  const events = event.type === 'text' ? [event, { type: 'done' }] : [event];
+  return new Response(events.map(value => `data: ${JSON.stringify(value)}\n\n`).join(''), {
     status: 200,
     headers: {
       'Content-Type': 'text/event-stream; charset=utf-8',

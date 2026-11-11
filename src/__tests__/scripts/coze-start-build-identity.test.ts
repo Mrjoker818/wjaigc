@@ -160,7 +160,7 @@ describe('Coze startup build identity', { timeout: 15_000 }, () => {
     expect(existsSync(join(fixture, 'events.log'))).toBe(false);
   });
 
-  it('restores a matching packaged dist artifact when the local Next directory is missing', () => {
+  it('rebuilds when a legacy dist artifact is present and the Next build is missing', () => {
     const expectedTree = git('rev-parse', 'HEAD^{tree}');
     mkdirSync(join(fixture, 'dist'));
     writeFileSync(join(fixture, 'dist', 'BUILD_ID'), `${expectedTree}\n`);
@@ -168,7 +168,7 @@ describe('Coze startup build identity', { timeout: 15_000 }, () => {
 
     expect(runStart()).toContain(`started:${expectedTree}`);
     expect(readFileSync(join(fixture, '.next', 'BUILD_ID'), 'utf8').trim()).toBe(expectedTree);
-    expect(existsSync(join(fixture, 'events.log'))).toBe(false);
+    expect(readFileSync(join(fixture, 'events.log'), 'utf8')).toBe('build\n');
   });
 
   it('retains the packaged runtime path when Git metadata is absent', () => {

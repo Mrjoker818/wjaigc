@@ -3,22 +3,10 @@
 // ============================================================
 
 import { accessSync } from 'fs';
+import { execFile } from 'node:child_process';
+import { stat } from 'node:fs/promises';
 import path from 'path';
-
-let _serverDataRootCache: string | null = null;
-function getServerDataRootSync(): string {
-  if (_serverDataRootCache) return _serverDataRootCache;
-  // 服务器持久化目录，与 getServerDataRoot() 保持一致
-  const env = process.env.COZE_PROJECT_ENV;
-  if (env === 'PROD') {
-    _serverDataRootCache = process.env.SERVER_DATA_ROOT || '/space/wujie-data';
-  } else {
-    _serverDataRootCache = process.env.COZE_WORKSPACE_PATH
-      ? path.join(process.env.COZE_WORKSPACE_PATH, '.wujie-data')
-      : path.join(process.cwd(), '.wujie-data');
-  }
-  return _serverDataRootCache;
-}
+import { getServerDataRoot } from '../server-data-root';
 
 /** 项目根目录下的 public 目录（开发模式HMR用） */
 export const PUBLIC_DIR = path.join(process.cwd(), 'public');
@@ -30,7 +18,7 @@ export const PUBLIC_DIR = path.join(process.cwd(), 'public');
 function resolveOutputDir(subdir: string): { dir: string; urlPrefix: string } {
   const isProd = process.env.COZE_PROJECT_ENV === 'PROD';
   if (isProd) {
-    const dir = path.join(getServerDataRootSync(), 'uploads', subdir);
+    const dir = path.join(/* turbopackIgnore: true */ getServerDataRoot(), 'uploads', subdir);
     return { dir, urlPrefix: `/api/serve-upload/uploads/${subdir}` };
   }
   // 开发环境：写 public/outputs，Next.js HMR 直接访问
@@ -90,3 +78,75 @@ const SPACE_VENV_EXISTS = (() => {
 export const PYTHON_BIN =
   process.env.PYTHON_BIN ||
   (SPACE_VENV_EXISTS ? SPACE_VENV_PYTHON : VENV_EXISTS ? VENV_PYTHON : SYSTEM_PYTHON);
+
+export const LOCAL_AI_ENABLED = process.env.LOCAL_AI_ENABLED === 'true';
+export const ONNX_MODELS_DIR = path.resolve(process.env.ONNX_MODELS_DIR || 'onnx-models');
+export const ONNX_MODEL_SHA256 = process.env.ONNX_MODEL_SHA256?.trim() ?? '';
+export const ONNX_MODEL = 'realesrgan-x4plus';
+export const ONNX_WORKER = process.env.ONNX_WORKER?.trim()
+  || path.join(process.cwd(), 'scripts', 'upscale_onnx.py');
+export const ONNX_WORKER_ENV = {
+  LOCAL_AI_ENABLED: 'true',
+  ONNX_MODELS_DIR,
+  ONNX_MODEL_SHA256,
+};
+export const IOPAINT_WORKER = process.env.IOPAINT_WORKER?.trim() ?? '';
+export const IOPAINT_MODELS_DIR = process.env.IOPAINT_MODELS_DIR?.trim() ?? '';
+export const REMBG_WORKER = process.env.REMBG_WORKER?.trim() ?? '';
+export const REMOVEBG_MODELS_DIR = process.env.REMOVEBG_MODELS_DIR?.trim() ?? '';
+export const LOCAL_WORKER_MAX_PNG_BYTES = 32 * 1024 * 1024;
+
+export async function hasLocalFile(file: string): Promise<boolean> {
+  if (!path.isAbsolute(file)) return false;
+  const info = await stat(/* turbopackIgnore: true */ file).catch(() => null);
+  return Boolean(info?.isFile() && info.size > 0);
+}
+
+export async function isOnnxConfigured(): Promise<boolean> {
+  return LOCAL_AI_ENABLED && /^[a-f0-9]{64}$/i.test(ONNX_MODEL_SHA256)
+    && await hasLocalFile(ONNX_WORKER)
+    && await hasLocalFile(path.join(ONNX_MODELS_DIR, `${ONNX_MODEL}.onnx`));
+}
+
+let inferenceActive = false;
+
+/** Share one bounded CPU worker slot across tools and readiness probes. */
+export async function runLocalPython(
+  args: string[],
+  options: { timeout: number; input?: string; env?: Record<string, string>; maxBuffer?: number },
+): Promise<string> {
+  if (!LOCAL_AI_ENABLED || inferenceActive) throw new Error('Local inference is disabled or busy');
+  inferenceActive = true;
+  try {
+    return await new Promise<string>((resolve, reject) => {
+      const child = execFile(PYTHON_BIN, args, {
+        timeout: options.timeout,
+        killSignal: 'SIGKILL',
+        maxBuffer: options.maxBuffer ?? 128 * 1024,
+        encoding: 'utf8',
+        windowsHide: true,
+        env: {
+          NODE_ENV: process.env.NODE_ENV || 'production',
+          PATH: process.env.PATH,
+          SystemRoot: process.env.SystemRoot,
+          TEMP: process.env.TEMP,
+          TMP: process.env.TMP,
+          TMPDIR: process.env.TMPDIR,
+          PYTHONUTF8: '1',
+          PYTHONDONTWRITEBYTECODE: '1',
+          OMP_NUM_THREADS: '4',
+          MKL_NUM_THREADS: '4',
+          OPENBLAS_NUM_THREADS: '4',
+          ...options.env,
+        },
+      }, (error, stdout) => {
+        if (error) reject(new Error('Local inference process failed'));
+        else resolve(stdout);
+      });
+      child.stdin?.on('error', () => { /* A worker can exit before consuming stdin. */ });
+      child.stdin?.end(options.input);
+    });
+  } finally {
+    inferenceActive = false;
+  }
+}

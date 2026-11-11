@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useLayoutEffect, useCallback, useId, useRef } from 'react';
 import type { WorkspaceThemePreference } from '@/hooks/use-workspace-theme';
+import { useModalFocus } from '../canvas/use-modal-focus';
 import {
   User, Bell, Palette, Shield, Save, Check,
   Moon, Sun, Monitor, ChevronRight, Camera, Key, Lock, History, X
@@ -40,6 +41,26 @@ export default function UserSettingsTab({
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
+  const passwordDialogRef = useRef<HTMLDivElement>(null);
+  const passwordInputRef = useRef<HTMLInputElement>(null);
+  const passwordRequest = useRef<AbortController | null>(null);
+
+  const cancelPasswordRequest = useCallback(() => {
+    const request = passwordRequest.current;
+    passwordRequest.current = null;
+    request?.abort();
+  }, []);
+  useLayoutEffect(() => cancelPasswordRequest, [cancelPasswordRequest]);
+
+  const dismissPasswordDialog = () => {
+    cancelPasswordRequest();
+    setNewPassword('');
+    setConfirmPassword('');
+    setChangingPassword(false);
+    setShowPasswordDialog(false);
+  };
+  useModalFocus(passwordDialogRef, passwordInputRef, dismissPasswordDialog, showPasswordDialog);
 
   useEffect(() => {
     try {
@@ -81,6 +102,7 @@ export default function UserSettingsTab({
   };
 
   const handlePasswordChange = async () => {
+    if (passwordRequest.current) return;
     if (!newPassword || newPassword.length < 6) {
       onToast?.('密码至少6位', 'error');
       return;
@@ -89,23 +111,31 @@ export default function UserSettingsTab({
       onToast?.('两次输入的密码不一致', 'error');
       return;
     }
+    const request = new AbortController();
+    passwordRequest.current = request;
+    setChangingPassword(true);
     try {
       const res = await fetch('/api/user/change-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ newPassword })
+        body: JSON.stringify({ newPassword }),
+        signal: request.signal,
       });
+      if (passwordRequest.current !== request) return;
       if (res.ok) {
         onToast?.('密码修改成功', 'success');
-        setShowPasswordDialog(false);
-        setNewPassword('');
-        setConfirmPassword('');
+        dismissPasswordDialog();
       } else {
         const d = await res.json();
-        onToast?.(d.error || '密码修改失败', 'error');
+        if (passwordRequest.current === request) onToast?.(d.error || '密码修改失败', 'error');
       }
     } catch {
-      onToast?.('请求失败', 'error');
+      if (passwordRequest.current === request) onToast?.('请求失败', 'error');
+    } finally {
+      if (passwordRequest.current === request) {
+        passwordRequest.current = null;
+        setChangingPassword(false);
+      }
     }
   };
 
@@ -335,21 +365,21 @@ export default function UserSettingsTab({
       {/* 修改密码弹窗 */}
       {showPasswordDialog && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setShowPasswordDialog(false)} />
-          <div className="relative w-full max-w-[380px] max-h-full overflow-y-auto overscroll-contain bg-card rounded-xl shadow-lg border border-border/50 p-4 sm:p-6">
-            <h3 className="mr-12 text-base font-semibold text-foreground mb-4">修改密码</h3>
+          <div className="absolute inset-0 bg-black/50" aria-hidden="true" onClick={dismissPasswordDialog} />
+          <div ref={passwordDialogRef} role="dialog" aria-modal="true" aria-labelledby={`${fieldId}-password-title`} tabIndex={-1} className="relative w-full max-w-[380px] max-h-full overflow-y-auto overscroll-contain bg-card rounded-xl shadow-lg border border-border/50 p-4 sm:p-6">
+            <h3 id={`${fieldId}-password-title`} className="mr-12 text-base font-semibold text-foreground mb-4">修改密码</h3>
             <div className="space-y-3">
               <div>
                 <label htmlFor={`${fieldId}-new-password`} className="text-sm font-medium text-foreground mb-1.5 block">新密码</label>
-                <input id={`${fieldId}-new-password`} autoComplete="new-password" type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="至少6位" className="w-full h-11 px-3 rounded-lg bg-background border border-border text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                <input ref={passwordInputRef} id={`${fieldId}-new-password`} autoComplete="new-password" type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="至少6位" className="w-full h-11 px-3 rounded-lg bg-background border border-border text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" />
               </div>
               <div>
                 <label htmlFor={`${fieldId}-confirm-password`} className="text-sm font-medium text-foreground mb-1.5 block">确认密码</label>
                 <input id={`${fieldId}-confirm-password`} autoComplete="new-password" type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="再次输入新密码" className="w-full h-11 px-3 rounded-lg bg-background border border-border text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30" />
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={handlePasswordChange} className="flex-1 h-11 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors">确认修改</button>
-                <button aria-label="关闭修改密码" onClick={() => setShowPasswordDialog(false)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                <button type="button" onClick={handlePasswordChange} disabled={changingPassword} className="flex-1 h-11 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60">{changingPassword ? '修改中…' : '确认修改'}</button>
+                <button type="button" aria-label="关闭修改密码" onClick={dismissPasswordDialog} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
               </div>
             </div>
 

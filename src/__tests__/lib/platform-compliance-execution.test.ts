@@ -25,7 +25,8 @@ vi.mock('@/lib/skill-runtime/document-assets', async importOriginal => ({
   ...await importOriginal<typeof import('@/lib/skill-runtime/document-assets')>(),
   createSkillDocumentAssetScope: mocks.createSkillDocumentAssetScope,
 }));
-vi.mock('@/lib/agent-runtime/event-storage', () => ({
+vi.mock('@/lib/agent-runtime/event-storage', async importOriginal => ({
+  ...await importOriginal<typeof import('@/lib/agent-runtime/event-storage')>(),
   appendAdoptedAgentEvent: mocks.appendAdoptedAgentEvent,
 }));
 vi.mock('@/lib/platform-compliance/report-asset', () => ({

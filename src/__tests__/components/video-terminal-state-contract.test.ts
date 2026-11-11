@@ -20,6 +20,8 @@ const canvasSource = readFileSync(
 
 async function assertInlineVideoPointerRouting(): Promise<void> {
   const previousWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+  const previousHitTest = Object.getOwnPropertyDescriptor(document, 'elementFromPoint');
+  const pointerPosition = { clientX: 168, clientY: 216 };
   const previousCapture = new Map<string, PropertyDescriptor | undefined>();
   const owners = new Map<number, Element>();
   const captureCalls: Array<{ action: 'set' | 'release'; id: number; owner: Element }> = [];
@@ -93,11 +95,16 @@ async function assertInlineVideoPointerRouting(): Promise<void> {
         expect(surface).not.toBeNull();
         expect(overlay).not.toBeNull();
         if (!surface || !overlay) throw new Error('POINTER_VIDEO_PUBLIC_SURFACE_MISSING');
+        Object.defineProperty(document, 'elementFromPoint', {
+          configurable: true,
+          value: (clientX: number, clientY: number): Element | null =>
+            clientX === pointerPosition.clientX && clientY === pointerPosition.clientY ? overlay : null,
+        });
         const inlineVideo = (): HTMLVideoElement | null => view.container.querySelector('video:not([data-canvas-video-preview])');
         const id = 101 + index;
         const dispatch = (type: 'pointerdown' | 'pointerup' | 'pointercancel' | 'click'): void => {
           const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0,
-            buttons: type === 'pointerdown' ? 1 : 0, clientX: 168, clientY: 216 });
+            buttons: type === 'pointerdown' ? 1 : 0, ...pointerPosition });
           Object.defineProperties(event, { pointerId: { value: id }, pointerType: { value: scenario.pointerType },
             isPrimary: { value: true }, width: { value: 1 }, height: { value: 1 } });
           fireEvent(overlay, event);
@@ -162,6 +169,10 @@ async function assertInlineVideoPointerRouting(): Promise<void> {
       (): void => {
         if (previousWidth) Object.defineProperty(window, 'innerWidth', previousWidth);
         else if (!Reflect.deleteProperty(window, 'innerWidth')) throw new Error('POINTER_WIDTH_FIXTURE_RESTORE_FAILED');
+      },
+      (): void => {
+        if (previousHitTest) Object.defineProperty(document, 'elementFromPoint', previousHitTest);
+        else if (!Reflect.deleteProperty(document, 'elementFromPoint')) throw new Error('POINTER_HIT_TEST_FIXTURE_RESTORE_FAILED');
       },
       restoreMedia,
       (): void => { vi.restoreAllMocks(); },

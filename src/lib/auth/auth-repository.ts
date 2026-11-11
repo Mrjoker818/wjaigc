@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import type { PoolClient, QueryResult } from 'pg';
 
 import { getPool } from '../db-client';
+import { isDeploymentDatabaseOnly } from '../deployment-database-mode';
 import { AuthServiceError } from './auth-errors';
 import { isValidScryptCredential } from './auth-password';
 import {
@@ -14,6 +15,7 @@ import {
 
 const AUTH_SECRET_RING_KEY = 'auth_secret_ring_v1';
 const LEGACY_AUTH_SECRET_KEY = 'auth_secret';
+const AUTH_DEPLOYMENT_BOOTSTRAP_KEY = 'auth_deployment_bootstrap_completed_v1';
 const MIN_SECRET_LENGTH = 32;
 
 export type StrictSettingRead = { found: false } | { found: true; value: unknown };
@@ -69,6 +71,40 @@ function credentialFormatInvalid(): AuthServiceError {
 
 function wrapPersistenceError(error: unknown): AuthServiceError {
   return error instanceof AuthServiceError ? error : persistenceUnavailable();
+}
+
+async function withAuthTransaction<T>(
+  work: (client: PoolClient) => Promise<T>,
+  begin = 'BEGIN',
+): Promise<T> {
+  let client: PoolClient | undefined;
+  let clientReleased = false;
+  try {
+    client = await getPool().connect();
+    await client.query(begin);
+    const result = await work(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    if (client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        const releaseError = rollbackError instanceof Error
+          ? rollbackError
+          : new Error(String(rollbackError));
+        try {
+          client.release(releaseError);
+        } catch {
+          // Preserve the sanitized repository operation error.
+        }
+        clientReleased = true;
+      }
+    }
+    throw wrapPersistenceError(error);
+  } finally {
+    if (client && !clientReleased) client.release();
+  }
 }
 
 export async function withDatabaseAuthReplicaLock<T>(
@@ -162,6 +198,48 @@ export async function readSystemSettingStrict(key: string): Promise<StrictSettin
   }
 }
 
+export async function hasCompletedDatabaseAdminBootstrap(): Promise<boolean> {
+  return (await readSystemSettingStrict(AUTH_DEPLOYMENT_BOOTSTRAP_KEY)).found;
+}
+
+export async function insertInitialDatabaseAdministrator(input: {
+  id: string;
+  name: string;
+  passwordHash: string;
+  credentialHash: string;
+  productType: string;
+  apiPermissions: Record<string, boolean>;
+  storageFolder: string;
+  createdAt: number;
+}): Promise<void> {
+  if (!isValidScryptCredential(input.credentialHash)) throw credentialFormatInvalid();
+
+  await withAuthTransaction(async client => {
+    // Serialize the empty-table check with every user writer, including registration.
+    await client.query('LOCK TABLE wujie_users IN SHARE ROW EXCLUSIVE MODE');
+    await client.query(
+      `WITH administrator AS (
+         INSERT INTO wujie_users (
+           id, name, password_hash, credential_hash, role, status, product_type,
+           api_permissions, storage_folder, created_at, updated_at
+         )
+         SELECT $1, $2, $3, $4, 'admin', 'active', $5, $6::jsonb, $7, $8, $8
+         WHERE NOT EXISTS (SELECT 1 FROM wujie_users)
+           AND NOT EXISTS (SELECT 1 FROM wujie_system_settings WHERE key = $9)
+         ON CONFLICT DO NOTHING
+         RETURNING id
+       )
+       INSERT INTO wujie_system_settings (key, value, updated_at)
+       SELECT $9, 'true'::jsonb, $8 FROM administrator`,
+      [
+        input.id, input.name, input.passwordHash, input.credentialHash, input.productType,
+        JSON.stringify(input.apiPermissions), input.storageFolder, input.createdAt,
+        AUTH_DEPLOYMENT_BOOTSTRAP_KEY,
+      ],
+    );
+  }, 'BEGIN ISOLATION LEVEL READ COMMITTED');
+}
+
 export async function readDatabaseSecretRing(
   now: number = Date.now(),
 ): Promise<AuthSecretRingV1 | null> {
@@ -197,11 +275,7 @@ export async function resolveDatabaseSecretRing(input: {
   configuredSecret: string | null;
   now: number;
 }): Promise<AuthSecretRingV1> {
-  let client: PoolClient | undefined;
-  let clientReleased = false;
-  try {
-    client = await getPool().connect();
-    await client.query('BEGIN');
+  return withAuthTransaction(async client => {
     await client.query(
       "SELECT pg_advisory_xact_lock(hashtext('wujie:auth-secret-ring:v1'))",
     );
@@ -224,6 +298,7 @@ export async function resolveDatabaseSecretRing(input: {
       throw configurationUnavailable();
     }
 
+    const deploymentDatabaseOnly = isDeploymentDatabaseOnly();
     let ring: AuthSecretRingV1;
     if (existingRing) {
       ring = existingRing;
@@ -237,8 +312,14 @@ export async function resolveDatabaseSecretRing(input: {
           input.now,
           previousNeeded,
         );
+      } else if (deploymentDatabaseOnly) {
+        return ring;
       }
     } else {
+      if (deploymentDatabaseOnly
+        && (values.has(AUTH_SECRET_RING_KEY) || (values.has(LEGACY_AUTH_SECRET_KEY) && !legacySecret))) {
+        throw configurationUnavailable();
+      }
       // Isolated fresh database (e.g. per-deploy veFaas instance) with no persisted
       // legacy secret and no env-configured secret: self-provision a cryptographically
       // random ring instead of failing closed, which locked every administrator out of
@@ -262,28 +343,8 @@ export async function resolveDatabaseSecretRing(input: {
          updated_at = EXCLUDED.updated_at`,
       [AUTH_SECRET_RING_KEY, JSON.stringify(ring), input.now],
     );
-    await client.query('COMMIT');
     return ring;
-  } catch (error) {
-    if (client) {
-      try {
-        await client.query('ROLLBACK');
-      } catch (rollbackError) {
-        const releaseError = rollbackError instanceof Error
-          ? rollbackError
-          : new Error(String(rollbackError));
-        try {
-          client.release(releaseError);
-        } catch {
-          // Preserve the sanitized repository operation error.
-        }
-        clientReleased = true;
-      }
-    }
-    throw wrapPersistenceError(error);
-  } finally {
-    if (client && !clientReleased) client.release();
-  }
+  });
 }
 
 export async function updateUserCredentialSidecar(

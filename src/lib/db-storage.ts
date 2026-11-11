@@ -5,6 +5,7 @@
  */
 
 import { execSql, getPool } from './db-client';
+import { isDeploymentDatabaseOnly } from './deployment-database-mode';
 import { ensureRefundIdentityClaims } from './refund-identity-claim';
 import { refreshAuthJsonFileAtomic } from './auth/auth-persistence';
 import { withDatabaseAuthReplicaLock } from './auth/auth-repository';
@@ -12,6 +13,10 @@ import {
   encodeSelectedModelsForStorage,
   resolveSelectedModelsStorageKind,
 } from './api-provider-selected-models-storage';
+import {
+  INVALID_DEPLOYMENT_PROVIDER_CONFIGURATION,
+  parseDeploymentProviders,
+} from './deployment-provider-config';
 import type { PoolClient } from 'pg';
 import type {
   CreatePlatformExportPresetVersionInput,
@@ -474,53 +479,142 @@ export async function dbGetApiProviderById(id: string): Promise<DbApiProvider | 
   }
 }
 
-export async function dbUpsertApiProvider(provider: DbApiProvider): Promise<boolean> {
+async function writeApiProviderRow(
+  provider: DbApiProvider,
+  options: { insertOnly?: boolean; client?: PoolClient },
+): Promise<void> {
+  const query = (sql: string, values?: unknown[]) => options.client
+    ? options.client.query(sql, values)
+    : execSql(sql, values);
+  const selectedModelsColumn = await query(`
+    SELECT column_name, data_type, udt_name
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'wujie_api_providers'
+      AND column_name = 'selected_models'
+  `);
+  const selectedModelsStorage = resolveSelectedModelsStorageKind(selectedModelsColumn.rows);
+  await query(`
+    INSERT INTO wujie_api_providers (id, name, display_name, base_url, api_key, is_enabled, type, model_type, request_style, selected_models, advanced_params, is_default, created_at, updated_at, connection_status, discovered_models, sort_order, balance_username, balance_password)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+    ${options.insertOnly ? 'ON CONFLICT (id) DO NOTHING' : `ON CONFLICT (id) DO UPDATE SET
+      name = EXCLUDED.name,
+      display_name = EXCLUDED.display_name,
+      base_url = EXCLUDED.base_url,
+      api_key = EXCLUDED.api_key,
+      is_enabled = EXCLUDED.is_enabled,
+      type = EXCLUDED.type,
+      model_type = EXCLUDED.model_type,
+      request_style = EXCLUDED.request_style,
+      selected_models = EXCLUDED.selected_models,
+      advanced_params = EXCLUDED.advanced_params,
+      is_default = EXCLUDED.is_default,
+      updated_at = EXCLUDED.updated_at,
+      connection_status = EXCLUDED.connection_status,
+      discovered_models = EXCLUDED.discovered_models,
+      sort_order = EXCLUDED.sort_order,
+      balance_username = EXCLUDED.balance_username,
+      balance_password = EXCLUDED.balance_password`}
+  `, [
+    provider.id, provider.name, provider.display_name, provider.base_url,
+    provider.api_key, provider.is_enabled, provider.type, provider.model_type,
+    provider.request_style, encodeSelectedModelsForStorage(provider.selected_models, selectedModelsStorage),
+    JSON.stringify(provider.advanced_params), provider.is_default,
+    provider.created_at, provider.updated_at,
+    provider.connection_status || null,
+    JSON.stringify(provider.discovered_models || []),
+    provider.sort_order ?? null,
+    provider.balance_username || '',
+    provider.balance_password || '',
+  ]);
+}
+
+export async function dbUpsertApiProvider(
+  provider: DbApiProvider,
+  options: { insertOnly?: boolean } = {},
+): Promise<boolean> {
   try {
-    const selectedModelsColumn = await execSql(`
-      SELECT column_name, data_type, udt_name
-      FROM information_schema.columns
-      WHERE table_schema = current_schema()
-        AND table_name = 'wujie_api_providers'
-        AND column_name = 'selected_models'
-    `);
-    const selectedModelsStorage = resolveSelectedModelsStorageKind(selectedModelsColumn.rows);
-    await execSql(`
-      INSERT INTO wujie_api_providers (id, name, display_name, base_url, api_key, is_enabled, type, model_type, request_style, selected_models, advanced_params, is_default, created_at, updated_at, connection_status, discovered_models, sort_order, balance_username, balance_password)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
-      ON CONFLICT (id) DO UPDATE SET
-        name = EXCLUDED.name,
-        display_name = EXCLUDED.display_name,
-        base_url = EXCLUDED.base_url,
-        api_key = EXCLUDED.api_key,
-        is_enabled = EXCLUDED.is_enabled,
-        type = EXCLUDED.type,
-        model_type = EXCLUDED.model_type,
-        request_style = EXCLUDED.request_style,
-        selected_models = EXCLUDED.selected_models,
-        advanced_params = EXCLUDED.advanced_params,
-        is_default = EXCLUDED.is_default,
-        updated_at = EXCLUDED.updated_at,
-        connection_status = EXCLUDED.connection_status,
-        discovered_models = EXCLUDED.discovered_models,
-        sort_order = EXCLUDED.sort_order,
-        balance_username = EXCLUDED.balance_username,
-        balance_password = EXCLUDED.balance_password
-    `, [
-      provider.id, provider.name, provider.display_name, provider.base_url,
-      provider.api_key, provider.is_enabled, provider.type, provider.model_type,
-      provider.request_style, encodeSelectedModelsForStorage(provider.selected_models, selectedModelsStorage),
-      JSON.stringify(provider.advanced_params), provider.is_default,
-      provider.created_at, provider.updated_at,
-      provider.connection_status || null,
-      JSON.stringify(provider.discovered_models || []),
-      provider.sort_order ?? null,
-      provider.balance_username || '',
-      provider.balance_password || '',
-    ]);
+    await writeApiProviderRow(provider, options);
     return true;
   } catch (e) {
-    console.error('[db-storage] dbUpsertApiProvider error:', e);
+    if (isDeploymentDatabaseOnly()) console.error({ code: 'DEPLOYMENT_PROVIDER_WRITE_FAILED' });
+    else console.error('[db-storage] dbUpsertApiProvider error:', e);
     return false;
+  }
+}
+
+const DEPLOYMENT_PROVIDER_BOOTSTRAP_KEY = 'deployment_provider_bootstrap_v1';
+let deploymentProviderBootstrap: { databaseKey: string; promise: Promise<void> } | undefined;
+
+export async function ensureDeploymentProviderBootstrap(): Promise<void> {
+  if (!isDeploymentDatabaseOnly()) return;
+  const raw = process.env.WUJIE_BOOTSTRAP_PROVIDERS_JSON;
+  if (!raw?.trim()) return;
+  const databaseKey = process.env.DATABASE_URL || process.env.PGDATABASE_URL || '';
+  if (deploymentProviderBootstrap?.databaseKey !== databaseKey) {
+    const promise = bootstrapProvidersInDatabase(raw).catch(error => {
+      if (deploymentProviderBootstrap?.promise === promise) deploymentProviderBootstrap = undefined;
+      throw error;
+    });
+    deploymentProviderBootstrap = { databaseKey, promise };
+  }
+  await deploymentProviderBootstrap.promise;
+}
+
+async function bootstrapProvidersInDatabase(raw: string): Promise<void> {
+  let client: PoolClient | undefined;
+  try {
+    await ensureCoreTables();
+    client = await getPool().connect();
+    await client.query('BEGIN ISOLATION LEVEL READ COMMITTED');
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [DEPLOYMENT_PROVIDER_BOOTSTRAP_KEY]);
+    const applied = await client.query(
+      'SELECT 1 FROM wujie_system_settings WHERE key = $1',
+      [DEPLOYMENT_PROVIDER_BOOTSTRAP_KEY],
+    );
+    if (applied.rowCount === 0) {
+      // Serialize the empty-table check against both other starts and admin writes.
+      await client.query('LOCK TABLE wujie_api_providers IN SHARE ROW EXCLUSIVE MODE');
+      const existing = await client.query('SELECT 1 FROM wujie_api_providers LIMIT 1');
+      const now = Date.now();
+      if (existing.rowCount === 0) {
+        const providers = parseDeploymentProviders(raw);
+        for (const [index, provider] of providers.entries()) {
+          await writeApiProviderRow({
+            id: provider.id,
+            name: provider.name,
+            display_name: provider.displayName ?? provider.name,
+            base_url: provider.baseUrl,
+            api_key: provider.apiKey,
+            is_enabled: provider.isEnabled,
+            type: provider.type ?? provider.modelType,
+            model_type: provider.modelType,
+            request_style: provider.requestStyle ?? (provider.modelType === 'chat' ? 'chat-completions' : 'images-generations'),
+            selected_models: provider.selectedModels,
+            advanced_params: provider.advancedParams ?? {},
+            is_default: provider.isDefault,
+            created_at: now,
+            updated_at: now,
+            connection_status: 'untested',
+            discovered_models: provider.discoveredModels,
+            sort_order: provider.sortOrder ?? index,
+            balance_username: provider.balanceUsername,
+            balance_password: provider.balancePassword,
+          }, { client, insertOnly: true });
+        }
+      }
+      await client.query(
+        'INSERT INTO wujie_system_settings (key, value, updated_at) VALUES ($1, \'true\'::jsonb, $2)',
+        [DEPLOYMENT_PROVIDER_BOOTSTRAP_KEY, now],
+      );
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client?.query('ROLLBACK').catch(() => undefined);
+    if (error instanceof Error && error.message === INVALID_DEPLOYMENT_PROVIDER_CONFIGURATION) throw error;
+    throw new Error('DEPLOYMENT_PROVIDER_CONFIGURATION_UNAVAILABLE');
+  } finally {
+    client?.release();
   }
 }
 
@@ -1062,18 +1156,22 @@ export interface DbUserGroup {
   updated_at: number;
 }
 
+function mapDatabaseGroup(row: Record<string, unknown>): DbUserGroup {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    product_types: Array.isArray(row.product_types) ? row.product_types : [],
+    credit_quota: Number(row.credit_quota) || 0,
+    is_active: row.is_active !== false,
+    created_at: Number(row.created_at),
+    updated_at: Number(row.updated_at),
+  };
+}
+
 export async function dbReadGroups(options?: { strict?: boolean }): Promise<DbUserGroup[]> {
   try {
     const result = await execSql('SELECT * FROM wujie_user_groups ORDER BY created_at ASC');
-    return (result.rows as unknown as Record<string, unknown>[]).map(row => ({
-      id: row.id as string,
-      name: row.name as string,
-      product_types: (Array.isArray(row.product_types) ? row.product_types : []) as string[],
-      credit_quota: (row.credit_quota as number) || 0,
-      is_active: row.is_active !== false,
-      created_at: row.created_at as number,
-      updated_at: row.updated_at as number,
-    }));
+    return result.rows.map(mapDatabaseGroup);
   } catch (e) {
     console.error('[db-storage] dbReadGroups error:', e);
     if (options?.strict) throw new Error('Failed to load groups');
@@ -1081,44 +1179,61 @@ export async function dbReadGroups(options?: { strict?: boolean }): Promise<DbUs
   }
 }
 
-export async function dbWriteGroup(group: DbUserGroup): Promise<boolean> {
-  try {
-    await execSql(`
-      INSERT INTO wujie_user_groups (id, name, product_types, credit_quota, is_active, created_at, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-      ON CONFLICT (id) DO UPDATE SET
-        name = EXCLUDED.name,
-        product_types = EXCLUDED.product_types,
-        credit_quota = EXCLUDED.credit_quota,
-        is_active = EXCLUDED.is_active,
-        updated_at = EXCLUDED.updated_at
-    `, [
-      group.id, group.name, JSON.stringify(group.product_types),
-      group.credit_quota, group.is_active,
-      group.created_at, group.updated_at
-    ]);
-    return true;
-  } catch (e) {
-    console.error('[db-storage] dbWriteGroup error:', e);
-    return false;
-  }
-}
+type GroupMutation =
+  | { action: 'create'; group: Omit<DbUserGroup, 'created_at' | 'updated_at'> }
+  | { action: 'update'; id: string; name?: string; productTypes?: string[]; creditQuota?: number; isActive?: boolean }
+  | { action: 'delete'; id: string };
 
-export async function dbDeleteGroup(groupId: string): Promise<boolean> {
-  try {
-    await execSql('DELETE FROM wujie_user_groups WHERE id = $1', [groupId]);
-    // 清除该分组用户的 group_id
-    await execSql('UPDATE wujie_users SET group_id = NULL WHERE group_id = $1', [groupId]);
-    return true;
-  } catch (e) {
-    console.error('[db-storage] dbDeleteGroup error:', e);
-    return false;
-  }
+type AuditActor = { id: string; name: string };
+
+export async function dbMutateGroup(mutation: GroupMutation, actor: AuditActor): Promise<DbUserGroup | null> {
+  return withAdministrationTransaction(async client => {
+    const now = Date.now();
+    const groupId = mutation.action === 'create' ? mutation.group.id : mutation.id;
+    let removedMemberships = false;
+    let result;
+    if (mutation.action === 'create') {
+      const group = mutation.group;
+      result = await client.query(`
+        INSERT INTO wujie_user_groups (id, name, product_types, credit_quota, is_active, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $6) RETURNING *
+      `, [group.id, group.name, JSON.stringify(group.product_types), group.credit_quota, group.is_active, now]);
+    } else if (mutation.action === 'update') {
+      result = await client.query(`
+        UPDATE wujie_user_groups
+        SET name = COALESCE($2, name), product_types = COALESCE($3, product_types),
+            credit_quota = COALESCE($4, credit_quota), is_active = COALESCE($5, is_active), updated_at = $6
+        WHERE id = $1 RETURNING *
+      `, [
+        mutation.id, mutation.name ?? null, mutation.productTypes ? JSON.stringify(mutation.productTypes) : null,
+        mutation.creditQuota ?? null, mutation.isActive ?? null, now,
+      ]);
+    } else {
+      result = await client.query('DELETE FROM wujie_user_groups WHERE id = $1 RETURNING *', [groupId]);
+      const cleanup = await client.query('UPDATE wujie_users SET group_id = NULL WHERE group_id = $1', [groupId]);
+      removedMemberships = (cleanup.rowCount ?? 0) > 0;
+    }
+    const row = result.rows[0];
+    if (!row && !removedMemberships) return null;
+    const group = row ? mapDatabaseGroup(row) : null;
+    const verbs = { create: '创建', update: '更新', delete: '删除' };
+    await insertAuditLog({
+      user_id: actor.id, user_name: actor.name,
+      action: `group_${mutation.action}`, target_type: 'group', target_id: groupId,
+      detail: `${verbs[mutation.action]}分组 ${mutation.action === 'delete' ? groupId : group?.name}`,
+      ip_address: null, created_at: now,
+    }, (sql, parameters) => client.query(sql, parameters));
+    return group;
+  });
 }
 
 // ─── Migration: file data → database ─────────────────────────────────────────
 
 export async function migrateFileDataToDb(): Promise<void> {
+  if (isDeploymentDatabaseOnly()) {
+    await ensureDeploymentProviderBootstrap();
+    return;
+  }
   console.log('[db-storage] Starting file→DB migration...');
   console.log('[db-storage] Safety: Migration only adds missing records, never overwrites existing DB data');
   console.log('[db-storage] wujie_user_data is NOT touched by migration — it is managed by runtime dbSetUserData only');
@@ -1273,7 +1388,7 @@ export async function migrateFileDataToDb(): Promise<void> {
             updated_at: p.updatedAt || p.updated_at || Date.now(),
             connection_status: p.connectionStatus || p.connection_status,
             discovered_models: p.discoveredModels || p.discovered_models || [],
-          });
+          }, { insertOnly: true });
           migrated++;
         }
       }
@@ -1425,6 +1540,7 @@ export async function dbGetBrandAssets(userId: string): Promise<DbBrandAsset[]> 
     return (result.rows as unknown as DbBrandAsset[]).map(row => ({
       ...row,
       brand_colors: typeof row.brand_colors === 'string' ? JSON.parse(row.brand_colors as string) : (row.brand_colors || []),
+      style_extra: typeof row.style_extra === 'string' ? row.style_extra : '',
     }));
   } catch (e) {
     console.error('[db-storage] dbGetBrandAssets error:', e);
@@ -1440,6 +1556,7 @@ export async function dbGetBrandAsset(id: string): Promise<DbBrandAsset | null> 
     return {
       ...row,
       brand_colors: typeof row.brand_colors === 'string' ? JSON.parse(row.brand_colors as string) : (row.brand_colors || []),
+      style_extra: typeof row.style_extra === 'string' ? row.style_extra : '',
     };
   } catch (e) {
     console.error('[db-storage] dbGetBrandAsset error:', e);
@@ -1470,7 +1587,7 @@ export async function dbUpsertBrandAsset(asset: DbBrandAsset): Promise<boolean> 
     `, [
       asset.id, asset.user_id, asset.name, asset.brand_name,
       JSON.stringify(asset.brand_colors || []),
-      asset.style_extra, asset.scene_desc,
+      JSON.stringify(asset.style_extra), asset.scene_desc,
       asset.reference_image_url, asset.product_image_url,
       asset.product_desc, asset.main_text, asset.secondary_text,
       asset.accent_symbol, asset.selected_model,
@@ -2146,26 +2263,48 @@ function truncateAuditField(value: string | null | undefined, maxLength: number)
   return value.slice(0, maxLength);
 }
 
+async function withAdministrationTransaction<T>(mutate: (client: PoolClient) => Promise<T>): Promise<T> {
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    const result = await mutate(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function insertAuditLog(
+  entry: Omit<DbAuditLog, 'id'>,
+  execute: (sql: string, parameters: unknown[]) => Promise<unknown>,
+): Promise<string> {
+  const id = `audit_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  await execute(
+    `INSERT INTO wujie_audit_log (id, user_id, user_name, action, target_type, target_id, detail, ip_address, created_at,
+      level, error_message, stack_trace, request_data, response_status, duration_ms, model, provider_id,
+      resolution_status, resolution_detail, resolved_at, resolved_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
+    [id, truncateAuditField(entry.user_id, 64), truncateAuditField(entry.user_name, 128),
+     truncateAuditField(entry.action, 64), truncateAuditField(entry.target_type, 64),
+     truncateAuditField(entry.target_id, 128), entry.detail || null,
+     truncateAuditField(entry.ip_address, 64), entry.created_at || Date.now(),
+     entry.level || 'info', entry.error_message || null, entry.stack_trace || null,
+     entry.request_data ? JSON.stringify(entry.request_data) : null,
+     entry.response_status || 0, entry.duration_ms || 0,
+     entry.model || null, entry.provider_id || null,
+     entry.resolution_status || 'none', entry.resolution_detail || null,
+     entry.resolved_at || null, entry.resolved_by || null]
+  );
+  return id;
+}
+
 export async function dbAddAuditLog(entry: Omit<DbAuditLog, 'id'>): Promise<string> {
   try {
-    const id = `audit_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    await execSql(
-      `INSERT INTO wujie_audit_log (id, user_id, user_name, action, target_type, target_id, detail, ip_address, created_at,
-        level, error_message, stack_trace, request_data, response_status, duration_ms, model, provider_id,
-        resolution_status, resolution_detail, resolved_at, resolved_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
-      [id, truncateAuditField(entry.user_id, 64), truncateAuditField(entry.user_name, 128),
-       truncateAuditField(entry.action, 64), truncateAuditField(entry.target_type, 64),
-       truncateAuditField(entry.target_id, 128), entry.detail || null,
-       truncateAuditField(entry.ip_address, 64), entry.created_at || Date.now(),
-       entry.level || 'info', entry.error_message || null, entry.stack_trace || null,
-       entry.request_data ? JSON.stringify(entry.request_data) : null,
-       entry.response_status || 0, entry.duration_ms || 0,
-       entry.model || null, entry.provider_id || null,
-       entry.resolution_status || 'none', entry.resolution_detail || null,
-       entry.resolved_at || null, entry.resolved_by || null]
-    );
-    return id;
+    return await insertAuditLog(entry, execSql);
   } catch (e) {
     console.error('[db-storage] dbAddAuditLog error:', e);
     return '';
@@ -2310,18 +2449,52 @@ export async function dbUpdateAuditLogResolution(
   logId: string,
   resolutionStatus: string,
   resolutionDetail: string,
-  resolvedBy: string
+  resolvedBy: string,
+  expectedStatus?: string,
 ): Promise<boolean> {
   try {
-    await execSql(
-      `UPDATE wujie_audit_log SET resolution_status = $1, resolution_detail = $2, resolved_by = $3, resolved_at = $4 WHERE id = $5`,
-      [resolutionStatus, resolutionDetail, resolvedBy, Date.now(), logId]
+    const result = await execSql(
+      `UPDATE wujie_audit_log SET resolution_status = $1, resolution_detail = $2, resolved_by = $3, resolved_at = $4
+       WHERE id = $5 AND ($6::text IS NULL OR COALESCE(resolution_status, 'none') = $6)`,
+      [resolutionStatus, resolutionDetail, resolvedBy, Date.now(), logId, expectedStatus ?? null]
     );
-    return true;
+    return result.rowCount > 0;
   } catch (e) {
     console.error('[db-storage] dbUpdateAuditLogResolution error:', e);
     return false;
   }
+}
+
+export async function dbGetAuditLogById(id: string): Promise<DbAuditLog | null> {
+  const { rows } = await execSql('SELECT * FROM wujie_audit_log WHERE id = $1', [id]);
+  return (rows[0] as unknown as DbAuditLog | undefined) ?? null;
+}
+
+export async function dbRecordAuditLogResolution(input: {
+  logId: string;
+  actor: AuditActor;
+  status: string | null;
+  detail: string;
+  action: 'op_log_resolve' | 'op_log_fix';
+  auditDetail: string;
+}): Promise<boolean> {
+  return withAdministrationTransaction(async client => {
+    const now = Date.now();
+    const actorName = input.actor.name || input.actor.id;
+    const matched = input.status === null
+      ? await client.query('SELECT id FROM wujie_audit_log WHERE id = $1 FOR UPDATE', [input.logId])
+      : await client.query(
+        'UPDATE wujie_audit_log SET resolution_status = $1, resolution_detail = $2, resolved_by = $3, resolved_at = $4 WHERE id = $5',
+        [input.status, input.detail, actorName, now, input.logId],
+      );
+    if (!matched.rowCount) return false;
+    await insertAuditLog({
+      user_id: input.actor.id, user_name: actorName, action: input.action,
+      target_type: 'audit_log', target_id: input.logId, detail: input.auditDetail,
+      ip_address: null, created_at: now, level: 'info',
+    }, (sql, parameters) => client.query(sql, parameters));
+    return true;
+  });
 }
 
 /** 批量标记日志解决状态 */

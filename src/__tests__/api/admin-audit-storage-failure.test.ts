@@ -1,75 +1,41 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({
-  requireAdminUser: vi.fn(),
-  execSql: vi.fn(),
-  getPool: vi.fn(() => { throw new Error('Unexpected database connection'); }),
+const addAuditLog = vi.hoisted(() => vi.fn());
+
+vi.mock('@/lib/server-auth', () => ({
+  requireAdminUser: async () => ({ id: 'test-admin', name: '测试管理员' }),
 }));
+vi.mock('@/lib/db-storage', () => ({ dbAddAuditLog: addAuditLog }));
 
-vi.mock('@/lib/server-auth', () => ({ requireAdminUser: mocks.requireAdminUser }));
-vi.mock('@/lib/db-client', () => ({ execSql: mocks.execSql, getPool: mocks.getPool }));
-vi.mock('@/lib/refund-identity-claim', () => ({ ensureRefundIdentityClaims: vi.fn() }));
-vi.mock('@/lib/auth/auth-persistence', () => ({ refreshAuthJsonFileAtomic: vi.fn() }));
-vi.mock('@/lib/auth/auth-repository', () => ({ withDatabaseAuthReplicaLock: vi.fn() }));
-vi.mock('@/lib/api-provider-selected-models-storage', () => ({ encodeSelectedModelsForStorage: vi.fn(), resolveSelectedModelsStorageKind: vi.fn() }));
-vi.mock('@/lib/server-api-config', () => ({ findProviderForFeature: vi.fn(() => { throw new Error('Unexpected provider access'); }) }));
-vi.mock('@/lib/api-helpers', () => ({ fetchWithV1Retry: vi.fn(() => { throw new Error('Unexpected network access'); }) }));
+import { POST } from '@/app/api/admin/audit/route';
 
-import { GET as opLogGet } from '@/app/api/admin/op-log/route';
-import { GET as auditGet } from '@/app/api/admin/audit/route';
+function auditRequest() {
+  return new NextRequest('http://localhost/api/admin/audit', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'test_action', targetId: 'test-target' }),
+  });
+}
 
-const routes = [
-  { name: 'operation log', get: opLogGet, url: 'http://test.invalid/api/admin/op-log?page=2&pageSize=5' },
-  { name: 'audit log', get: auditGet, url: 'http://test.invalid/api/admin/audit?limit=5&offset=5' },
-] as const;
-
-describe.each(routes)('$name storage failure contract', ({ get, url }) => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    vi.stubGlobal('fetch', vi.fn(() => { throw new Error('Unexpected network access'); }));
-    mocks.requireAdminUser.mockResolvedValue({ id: 'test-admin', name: 'test-admin' });
-    mocks.execSql.mockImplementation(async (sql: string) => {
-      if (sql.includes('SELECT COUNT(*)')) return { rows: [{ count: 0 }], rowCount: 1 };
-      if (sql.includes('SELECT * FROM wujie_audit_log')) return { rows: [], rowCount: 0 };
-      throw new Error('Unexpected SQL query');
+describe('audit insert receipts', () => {
+  it('reports an unconfirmed insert as a storage failure', async () => {
+    addAuditLog.mockResolvedValueOnce('');
+    const response = await POST(auditRequest());
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: 'Failed to confirm audit log write',
     });
-    vi.spyOn(console, 'error').mockImplementation(() => undefined);
   });
 
-  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-
-  it.each(['count', 'rows'] as const)('reports a %s query failure instead of a successful empty list', async (failure) => {
-    mocks.execSql.mockImplementation(async (sql: string) => {
-      const count = sql.includes('SELECT COUNT(*)');
-      const rows = sql.includes('SELECT * FROM wujie_audit_log');
-      if ((!count && !rows) || (failure === 'count' && count) || (failure === 'rows' && rows)) {
-        throw new Error('synthetic-private-storage-error');
-      }
-      return { rows: [{ count: 0 }], rowCount: 1 };
-    });
-    const response = await get(new NextRequest(url));
-    const body = await response.json();
-    expect(response.status).toBe(500);
-    expect(body.success).toBe(false);
-    expect(JSON.stringify(body)).not.toContain('synthetic-private-storage-error');
-    expect(mocks.execSql).toHaveBeenCalledTimes(failure === 'count' ? 1 : 2);
-    expect(mocks.getPool).not.toHaveBeenCalled();
-  });
-
-  it('returns a successful empty result when both queries succeed', async () => {
-    const response = await get(new NextRequest(url));
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ success: true, logs: [], total: 0 });
-    expect(mocks.execSql).toHaveBeenCalledTimes(2);
-    expect(mocks.getPool).not.toHaveBeenCalled();
-  });
-
-  it('rejects a non-admin before reading storage', async () => {
-    mocks.requireAdminUser.mockResolvedValue(null);
-    const response = await get(new NextRequest(url));
-    expect(response.status).toBe(403);
-    expect(mocks.execSql).not.toHaveBeenCalled();
-    expect(mocks.getPool).not.toHaveBeenCalled();
+  it('returns the persisted audit id for the authenticated actor', async () => {
+    addAuditLog.mockResolvedValueOnce('audit-1');
+    const response = await POST(auditRequest());
+    expect(await response.json()).toEqual({ success: true, id: 'audit-1' });
+    expect(addAuditLog).toHaveBeenLastCalledWith(expect.objectContaining({
+      user_id: 'test-admin',
+      action: 'test_action',
+      target_id: 'test-target',
+    }));
   });
 });

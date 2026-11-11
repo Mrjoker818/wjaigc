@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useLayoutEffect, useCallback } from 'react';
 import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, Download } from 'lucide-react';
+import { useModalFocus } from './canvas/use-modal-focus';
 
 interface VideoPlayerProps {
   videoUrl: string;
@@ -30,15 +31,19 @@ export default function VideoPlayer({
   width = 640,
   height = 360,
 }: VideoPlayerProps) {
+  const durationHint = typeof duration === 'number' && Number.isFinite(duration) && duration > 0 ? duration : 0;
   const videoRef = useRef<HTMLVideoElement>(null);
   const playerContainerRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [totalDuration, setTotalDuration] = useState(duration || 0);
+  const [totalDuration, setTotalDuration] = useState(durationHint);
   const [showControls, setShowControls] = useState(true);
   const hideControlsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useModalFocus(dialogRef, closeRef, onClose, modal);
 
   // 播放/暂停
   const togglePlay = useCallback(() => {
@@ -64,9 +69,9 @@ export default function VideoPlayer({
     const container = playerContainerRef.current ?? videoRef.current?.parentElement;
     if (!container) return;
     if (!document.fullscreenElement) {
-      container.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
+      void container.requestFullscreen().catch(() => {});
     } else {
-      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
+      void document.exitFullscreen().catch(() => {});
     }
   }, []);
 
@@ -109,46 +114,53 @@ export default function VideoPlayer({
   }, [isPlaying]);
 
   // Video event listeners
-  useEffect(() => {
+  useLayoutEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
     const onPlay = () => setIsPlaying(true);
     const onPause = () => setIsPlaying(false);
     const onTimeUpdate = () => setCurrentTime(video.currentTime);
-    const onDurationChange = () => setTotalDuration(video.duration);
+    const onDurationChange = () => {
+      const actual = video.duration;
+      setTotalDuration(Number.isFinite(actual) && actual > 0 ? actual : durationHint);
+    };
     const onEnded = () => { setIsPlaying(false); setShowControls(true); };
+    const onEmptied = () => { onEnded(); setCurrentTime(0); onDurationChange(); };
     const onVolumeChange = () => setIsMuted(video.muted);
-    const onFullscreenChange = () => setIsFullscreen(!!document.fullscreenElement);
+    const onFullscreenChange = () => setIsFullscreen(!!document.fullscreenElement && document.fullscreenElement === playerContainerRef.current);
 
     video.addEventListener('play', onPlay);
     video.addEventListener('pause', onPause);
     video.addEventListener('timeupdate', onTimeUpdate);
+    video.addEventListener('loadedmetadata', onDurationChange);
     video.addEventListener('durationchange', onDurationChange);
+    video.addEventListener('emptied', onEmptied);
     video.addEventListener('ended', onEnded);
     video.addEventListener('volumechange', onVolumeChange);
     document.addEventListener('fullscreenchange', onFullscreenChange);
+    // Cached media can have metadata before the player attaches its listeners.
+    onDurationChange();
+    onTimeUpdate();
+    onVolumeChange();
+    onFullscreenChange();
+    setIsPlaying(!video.paused && !video.ended);
+    setShowControls(true);
 
     return () => {
       video.removeEventListener('play', onPlay);
       video.removeEventListener('pause', onPause);
       video.removeEventListener('timeupdate', onTimeUpdate);
+      video.removeEventListener('loadedmetadata', onDurationChange);
       video.removeEventListener('durationchange', onDurationChange);
+      video.removeEventListener('emptied', onEmptied);
       video.removeEventListener('ended', onEnded);
       video.removeEventListener('volumechange', onVolumeChange);
       document.removeEventListener('fullscreenchange', onFullscreenChange);
+      if (hideControlsTimer.current !== null) clearTimeout(hideControlsTimer.current);
+      hideControlsTimer.current = null;
     };
-  }, []);
-
-  // ESC 关闭
-  useEffect(() => {
-    if (!modal) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && onClose) onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [modal, onClose]);
+  }, [durationHint, modal, videoUrl]);
 
   // 格式化时间 mm:ss
   const formatTime = (seconds: number) => {
@@ -171,9 +183,11 @@ export default function VideoPlayer({
         onMouseLeave={() => !isPlaying && setShowControls(true)}
       >
         <video
+          key={videoUrl}
           ref={videoRef}
           src={videoUrl}
           poster={thumbnailUrl}
+          muted={isMuted}
           className="w-full h-full object-contain"
           playsInline
           preload="metadata"
@@ -215,15 +229,19 @@ export default function VideoPlayer({
   // 弹窗模式
   return (
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-[500] bg-black/85 flex items-center justify-center"
       role="dialog"
       aria-modal="true"
       aria-label="视频预览"
+      tabIndex={-1}
       data-modal="video-player"
       onClick={(e) => { if (e.target === e.currentTarget && onClose) onClose(); }}
     >
       {/* 关闭按钮 */}
       <button
+        ref={closeRef}
+        type="button"
         onClick={onClose}
         aria-label="关闭视频预览"
         className="absolute top-4 right-4 w-11 h-11 rounded-full bg-[#1a1a1a]/80 hover:bg-[#1a1a1a] border border-white/10 flex items-center justify-center text-white/70 hover:text-white transition-colors cursor-pointer z-10"
@@ -241,9 +259,11 @@ export default function VideoPlayer({
       >
         <div className="relative flex min-h-0 flex-1 items-center justify-center">
         <video
+          key={videoUrl}
           ref={videoRef}
           src={videoUrl}
           poster={thumbnailUrl}
+          muted={isMuted}
           className={`block w-full object-contain ${isFullscreen ? 'h-full min-h-0' : 'max-h-[calc(100dvh-13rem)]'}`}
           playsInline
           preload="metadata"

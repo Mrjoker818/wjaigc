@@ -12,6 +12,7 @@ import { readSketchImageCheckpoint } from './image-execution';
 import { parseSketchImageAnalysis } from './image-contract';
 import { parseSketchImagePricing } from './image-pricing';
 import { sketchFields, sketchHttpId, sketchJson, SketchHttpError } from './http';
+import { createSketchRuntimeObserver } from './runtime-observation';
 
 export interface SketchImagePublicHttpDependencies {
   getTask?: typeof getCloudTaskById;
@@ -85,11 +86,17 @@ function completedProjection(value: unknown, identity: Readonly<SketchImageTaskI
 }
 function scheduleRecovery(candidate: PersistedCloudTask, requestId: string): boolean {
   try {
+    const observe = createSketchRuntimeObserver({ requestId, taskId: candidate.id,
+      providerId: candidate.providerId, modelId: candidate.model });
     after(async () => {
+      observe({ event: 'worker-start', phase: 'image-worker', reason: 'SKETCH_IMAGE_RECEIPT_RECOVERY' });
       try {
         const { recoverConfiguredSketchImageTask } = await import('./image-service');
-        await recoverConfiguredSketchImageTask(candidate, requestId);
-      } catch { /* Failed background recovery never permits POST/refund or leaks errors. */ }
+        const outcome = await recoverConfiguredSketchImageTask(candidate, requestId);
+        observe({ event: 'worker-return', phase: 'image-worker', status: outcome.status, reason: outcome.reason });
+      } catch {
+        observe({ event: 'worker-throw', phase: 'image-worker', status: 'unknown' });
+      }
     });
     return true;
   } catch { return false; }

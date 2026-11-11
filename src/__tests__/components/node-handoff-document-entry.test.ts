@@ -24,7 +24,7 @@ function navigationFixture(nodeWorkflowRef: { current: Workflow | null }, saveNo
     currentProjectRef: { current: { id: 'shared' } }, currentUserRef: actor,
     collaborativeCanvasRef: { current: { projectId: 'shared', authority: 'document', isWritable: (): boolean => true,
       isSessionActive: (): boolean => true, refreshMedia } },
-    historyTransitionEpochRef: { current: 1 },
+    historyTransitionEpochRef: { current: 1 }, projectLoadActiveRef: { current: true },
   };
   const before = actualNodeBeforeChatNavigation({ ...bindings,
     prepareWorkflowChatNavigation: (input: WorkspaceAssetReference): Promise<void> => (
@@ -147,6 +147,85 @@ describe('actual document node handoff entry', () => {
     await rejected;
     expect(fetcher.mock.calls.some(([url]) => url === '/api/workflow/save')).toBe(false);
   });
+  it.each(['another workflow', 'reopened project', 'updated same workflow'] as const)(
+    'only saves the requested graph in the same project visit (%s)', async scenario => {
+      const queue = createSimpleChatWorkspaceHandoffProjectQueue();
+      const blocker = contractDeferred<void>();
+      const first = queue.enqueue('shared', () => blocker.promise);
+      const workflow = createSimpleChatImportWorkflow('shared', 2);
+      const workflowRef = { current: workflow };
+      const epoch = { current: 1 };
+      const persistNodeWorkflow = vi.fn().mockResolvedValue(undefined);
+      const save = actualTransferCallback<(workflow: Workflow) => Promise<void>>('saveNodeWorkflowForProject', {
+        currentProjectRef: { current: { id: 'shared' } }, currentUserRef: { current: { id: 'editor' } },
+        collaborativeCanvasRef: { current: { projectId: 'shared', authority: 'document' } },
+        nodeWorkflowRef: workflowRef, historyTransitionEpochRef: epoch, projectLoadActiveRef: { current: true },
+        handoffProjectQueueRef: { current: queue }, persistNodeWorkflow,
+      });
+      const result = save({ ...workflow, updatedAt: 10 }).then(() => 'saved', () => 'cancelled');
+      workflowRef.current = { ...workflow, name: '最新编辑', id: scenario === 'another workflow' ? 'replacement' : workflow.id };
+      if (scenario === 'reopened project') epoch.current += 2;
+      blocker.release();
+      await first;
+      expect(await result).toBe(scenario === 'updated same workflow' ? 'saved' : 'cancelled');
+      if (scenario === 'updated same workflow') {
+        expect(persistNodeWorkflow).toHaveBeenCalledOnce();
+        expect(persistNodeWorkflow.mock.calls[0]?.slice(0, 2)).toEqual([
+          expect.objectContaining({ id: workflow.id, name: '最新编辑', updatedAt: 10 }), 'shared',
+        ]);
+      } else {
+        expect(persistNodeWorkflow).not.toHaveBeenCalled();
+      }
+    },
+  );
+  it('keeps the legacy project metadata intact when the workflow changes during canvas flush', async () => {
+    const flush = contractDeferred<void>();
+    const project = { id: 'shared', metadata: {} };
+    const updateProjectInMemory = vi.fn();
+    const assertSaveScope = vi.fn();
+    const persist = actualTransferCallback<(workflow: Workflow, projectId: string, guard: () => void) => Promise<void>>('persistNodeWorkflow', {
+      currentProjectRef: { current: project }, currentUserRef: { current: { id: 'editor' } },
+      collaborativeCanvasRef: { current: { projectId: 'shared', authority: 'legacy' } },
+      canvasPersistenceScheduler: { flush: () => flush.promise },
+      UserManagerCore: { getInstance: () => ({ getProject: () => project, updateProjectInMemory }) },
+      mergeWorkflowIntoProjectMetadata: vi.fn(), setCurrentProject: vi.fn(),
+    });
+    const operation = persist(createSimpleChatImportWorkflow('shared', 2), project.id, assertSaveScope);
+    const rejected = expect(operation).rejects.toThrow('工作流已切换');
+    assertSaveScope.mockImplementation(() => { throw new Error('工作流已切换'); });
+    flush.release();
+    await rejected;
+    expect(updateProjectInMemory).not.toHaveBeenCalled();
+  });
+  it('finishes the original legacy project snapshot after its standalone save commits', async () => {
+    const response = contractDeferred<Response>();
+    const fetcher = vi.fn().mockReturnValue(response.promise);
+    vi.stubGlobal('fetch', fetcher);
+    const project = { id: 'shared', userId: 'editor', metadata: { canvas: 'retained' } };
+    const workflow = createSimpleChatImportWorkflow('shared', 2);
+    const assertSaveScope = vi.fn();
+    const manager = { getCurrentUserId: () => 'editor', getProject: () => project,
+      updateProjectInMemory: vi.fn().mockReturnValue(project), flushProjectsToServerWithConflictRecovery: vi.fn(),
+      hasAcknowledgedProjectWorkflow: vi.fn().mockReturnValue(true) };
+    const setCurrentProject = vi.fn();
+    const persist = actualTransferCallback<(workflow: Workflow, projectId: string, guard: () => void, saveStandalone: boolean) => Promise<void>>('persistNodeWorkflow', {
+      currentProjectRef: { current: project }, currentUserRef: { current: { id: 'editor' } }, projectLoadActiveRef: { current: true },
+      collaborativeCanvasRef: { current: { projectId: 'shared', authority: 'legacy' } },
+      canvasPersistenceScheduler: { flush: vi.fn() }, UserManagerCore: { getInstance: () => manager },
+      mergeWorkflowIntoProjectMetadata: (metadata: object, graph: Workflow) => ({ ...metadata, workflow: graph }), setCurrentProject,
+    });
+
+    const operation = persist(workflow, project.id, assertSaveScope, true);
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+    assertSaveScope.mockImplementation(() => { throw new Error('已切换到另一份工作流'); });
+    response.release(Response.json({ success: true }));
+    await operation;
+    expect(manager.updateProjectInMemory).toHaveBeenCalledExactlyOnceWith(project.id,
+      { metadata: { canvas: 'retained', workflow: { ...workflow, projectId: project.id } } });
+    expect(manager.flushProjectsToServerWithConflictRecovery).toHaveBeenCalledOnce();
+    expect(manager.hasAcknowledgedProjectWorkflow).toHaveBeenCalledWith(project.id, { ...workflow, projectId: project.id });
+    expect(setCurrentProject).not.toHaveBeenCalled();
+  });
   it('reads the same shared placement rather than copying into personal assets', async () => {
     const fetcher = vi.fn().mockResolvedValue(Response.json(reference));
     vi.stubGlobal('fetch', fetcher);
@@ -183,6 +262,8 @@ describe('actual document node handoff entry', () => {
       body: JSON.stringify({ userId: 'editor', workflow: { ...workflow, projectId: 'shared' } }),
       headers: expect.objectContaining({ 'x-wujie-expected-actor-id': 'editor' }),
     }));
+    await expect(persist({ ...workflow, projectId: 'another-project' }, 'shared')).rejects.toThrow('工作流属于其他项目');
+    expect(fetcher).toHaveBeenCalledTimes(1);
     expect(flush).not.toHaveBeenCalled(); expect(manager.updateProjectInMemory).not.toHaveBeenCalled(); expect(setProject).not.toHaveBeenCalled();
   });
   it('restores only the actor workflow explicitly bound to this shared project', async () => {

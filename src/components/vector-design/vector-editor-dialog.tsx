@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Download, Expand, Palette, RefreshCw, Save, Sparkles, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -68,7 +68,11 @@ async function rasterizeSvg(svg: string, format: 'png' | 'jpg') {
   }
 }
 
-export function VectorEditorDialog({ asset, templateIds, onClose, onSave }: VectorEditorDialogProps) {
+export function VectorEditorDialog(props: VectorEditorDialogProps) {
+  return <VectorEditorSession key={props.asset.svgUrl || props.asset.svg} {...props} />;
+}
+
+function VectorEditorSession({ asset, templateIds, onClose, onSave }: VectorEditorDialogProps) {
   const [svg, setSvg] = useState(() => sanitizeEditableSvg(asset.svg));
   const [selectedElementId, setSelectedElementId] = useState('');
   const [selectedBox, setSelectedBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
@@ -78,11 +82,12 @@ export function VectorEditorDialog({ asset, templateIds, onClose, onSave }: Vect
   const [history, setHistory] = useState<string[]>([]);
   const stageRef = useRef<HTMLDivElement>(null);
   const mountedRef = useRef(true);
-  useEffect(() => {
+  useLayoutEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
   const closeEditor = (): void => {
+    if (!mountedRef.current) return;
     mountedRef.current = false;
     onClose();
   };
@@ -182,12 +187,13 @@ export function VectorEditorDialog({ asset, templateIds, onClose, onSave }: Vect
       });
       const data = await response.json();
       if (!response.ok || !data.success) throw new Error(data.error || '保存矢量图失败');
+      if (!mountedRef.current) return;
       onSave(data.asset);
       closeEditor();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '保存矢量图失败');
     } finally {
-      setIsApplying(false);
+      if (mountedRef.current) setIsApplying(false);
     }
   };
 

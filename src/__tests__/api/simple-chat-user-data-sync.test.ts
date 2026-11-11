@@ -110,6 +110,19 @@ describe('simple chat user data sync route', () => {
     });
   });
 
+  it('rejects a stale dashboard actor before reading the current account', async () => {
+    const response = await GET(getRequest({ 'x-wujie-expected-actor-id': 'user-old' }));
+    expect(response.status).toBe(409);
+    expect(mocks.readSimpleChatSnapshot).not.toHaveBeenCalled();
+    expect(await response.json()).not.toHaveProperty('value');
+  });
+
+  it('attests the session owner on a matching dashboard read', async () => {
+    const response = await GET(getRequest({ 'x-wujie-expected-actor-id': 'user-1' }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ userId: 'user-1', value: validProjects });
+  });
+
   it('returns the server snapshot and sync revision for only the fixed chat key', async () => {
     const response = await GET(getRequest());
 

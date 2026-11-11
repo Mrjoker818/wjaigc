@@ -2,13 +2,14 @@
  * 流程B：图片上传到无限画布 E2E 测试
  * 覆盖: 点击上传 / JPG / PNG / 画布显示 / 保存恢复
  */
+import { requireTestCredential } from '../helpers/e2e-credentials';
 import { test, expect } from '@playwright/test';
 import { collectBrowserEvidence, saveBrowserEvidence } from '../helpers/evidence';
 import path from 'node:path';
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:5000';
-const USERNAME = process.env.E2E_TEST_USERNAME || 'Mr.joker';
-const PASSWORD = process.env.E2E_TEST_PASSWORD || 'Wujie#2026Reset';
+const USERNAME = requireTestCredential('E2E_TEST_USERNAME');
+const PASSWORD = requireTestCredential('E2E_TEST_PASSWORD');
 
 async function login(page: import('@playwright/test').Page): Promise<void> {
   const context = page.context();

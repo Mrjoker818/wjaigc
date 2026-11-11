@@ -14,6 +14,7 @@ import {withWorkflowImageReceiptRead,type WorkflowImageCellPreparationIdentity} 
 import {readWorkflowImageMediaForActor,workflowImageMediaIdentity,assertWorkflowImageMediaSourceInTransaction,type WorkflowImageMedia,type WorkflowImageMediaInput} from './workflow-image-media';
 import {workflowImageRuntimeOperationId,workflowImageRuntimeTarget,readPersonalWorkflowImageCellReceiptInTransaction,matchWorkflowImageRuntimeNodeCheckpoint,type WorkflowImageLogicalExecution} from './workflow-image-runtime-publication';
 import {workflowImageReferenceNodeResult} from './workflow-image-reference-runtime';
+import {isNonbillableWorkflowImageRetry} from './workflow-image-retry-admission';
 
 type Graph={nodes:WorkflowNode[];connections:WorkflowConnection[]};
 function object(value:unknown):Record<string,unknown>|undefined{return value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:undefined;}
@@ -28,12 +29,14 @@ function imageReference(value:Record<string,unknown>):WorkflowImageMediaInput['r
   return reference;
 }
 async function sameTask(client:PoolClient,task:CloudTask):Promise<void>{
-  const selected=await client.query(`SELECT id,user_id,project_id,type,status,result,revision,idempotency_key,request_digest
+  const selected=await client.query(`SELECT id,user_id,project_id,type,status,result,revision,idempotency_key,request_digest,
+    credit_cost,credit_status,charged_transaction_id,refunded_transaction_id
     FROM cloud_tasks /* workflow-image-terminal-receipt */ WHERE id=$1 AND user_id=$2 FOR SHARE`,[task.id,task.userId]);
   const row=selected.rows[0];
   if(selected.rows.length!==1||row.id!==task.id||row.user_id!==task.userId||row.project_id!==task.projectId
     ||row.type!==task.type||row.status!==task.status||row.revision!==task.revision
     ||(row.idempotency_key??'')!==(task.idempotencyKey??'')||(row.request_digest??'')!==(task.requestDigest??'')
+    ||task.result?.imageRetry!==undefined&&!isNonbillableWorkflowImageRetry(row.credit_cost,row.credit_status,row.charged_transaction_id,row.refunded_transaction_id)
     ||!isDeepStrictEqual(row.result,json(task.result)))unconfirmed();
 }
 /** Reads a durable successful retry, its original admission and actual immutable media.
@@ -42,6 +45,7 @@ export async function verifyCompletedWorkflowImageRetry(task:CloudTask,actorUser
   task=structuredClone(task);
   const result=object(task.result),marker=object(result?.imageRetry),rawGraph=object(result?.executionGraph),saved=object(result?.results);
   if(task.userId!==actorUserId||task.type!=='workflow'||task.status!=='completed'||result?.workflowStatus!=='completed'
+    ||!isNonbillableWorkflowImageRetry(task.creditCost,task.creditStatus,task.chargedTransactionId,task.refundedTransactionId)
     ||!text(task.projectId)||result.projectId!==task.projectId||!text(result.workflowId)||!marker||marker.version!==1
     ||!text(marker.sourceExecutionId)||!text(marker.nodeId)||!['admitted','running'].includes(String(marker.phase))
     ||!rawGraph||!Array.isArray(rawGraph.nodes)||!Array.isArray(rawGraph.connections)||!saved)unconfirmed();
@@ -77,10 +81,22 @@ async function verifyWorkflowImageNodeReceipt(tasks:readonly CloudTask[],executi
     if(!isDeepStrictEqual(resolved.transform,transform))unconfirmed();
     const input:WorkflowImageMediaInput={actorUserId,projectId:execution.projectId,workspaceId:target.workspaceId,entityId:target.entityId,
       requireManagedAsset:graph.nodes.some(entry=>entry.type==='ai-skill'),reference:imageReference(resolved.image)};
-    const media=await readWorkflowImageMediaForActor(input,active),source=workflowImageMediaIdentity(media.source),proofs:WorkflowImageMedia[]=[media];
+    const output=object(checkpoint.output)!,legacyGrid=transform.kind==='grid'&&!input.reference.assetVersionId;
+    let media:WorkflowImageMedia;
+    if(legacyGrid){
+      const parentId=object(output.imageInput)?.parentVersionId;
+      if(input.requireManagedAsset||!input.reference.imageUrl||input.reference.assetId||input.reference.placementId||!text(parentId))unconfirmed();
+      // The frozen upstream URL still participates in the request digest. Its
+      // archived parent supplies the bytes and is checked against that digest.
+      const legacy=await createPostgresAssetStorage().read(transaction=>transaction.findVersion(actorUserId,execution.projectId,parentId));
+      if(!legacy)unconfirmed();
+      media=await readWorkflowImageMediaForActor({...input,requireManagedAsset:true,reference:{assetId:legacy.assetId,assetVersionId:legacy.id}},active);
+    }else media=await readWorkflowImageMediaForActor(input,active);
+    const verifiedSource=workflowImageMediaIdentity(media.source),proofs:WorkflowImageMedia[]=[media];
+    if(legacyGrid&&(verifiedSource.access.kind!=='personal'||!verifiedSource.version||verifiedSource.version.file.checksum!==verifiedSource.sha256))unconfirmed();
+    const source=legacyGrid?{input,access:verifiedSource.access,reference:null,version:null,sha256:verifiedSource.sha256}:verifiedSource;
     let cellIdentity:WorkflowImageCellPreparationIdentity|undefined;
     if(transform.kind==='grid'){
-      const output=object(checkpoint.output)!;
       const targetMedia=await readWorkflowImageMediaForActor({...input,requireManagedAsset:true,reference:imageReference(output)},active);
       const actual=workflowImageMediaIdentity(targetMedia.source),version=actual.version;
       if(!version||!actual.reference||!text(output.entityId)||actual.reference.entityId!==output.entityId)unconfirmed();
@@ -94,16 +110,7 @@ async function verifyWorkflowImageNodeReceipt(tasks:readonly CloudTask[],executi
         ||version.file.width!==cell.width||version.file.height!==cell.height)unconfirmed();
       proofs.push(targetMedia);
       cellIdentity={input:{...source.input,operationId,targetNodeId:target.entityId,columns:transform.columns,rows:transform.rows,column:transform.column,row:transform.row},
-        source,tile:{targetNodeId:target.entityId,cell,file:version.file}};
-      if(!source.version){
-        const parentId=object(output.imageInput)?.parentVersionId;if(!text(parentId))unconfirmed();
-        const legacy=await createPostgresAssetStorage().read(transaction=>transaction.findVersion(actorUserId,execution.projectId,parentId));
-        if(!legacy||legacy.file.checksum!==source.sha256)unconfirmed();
-        const parentMedia=await readWorkflowImageMediaForActor({...input,requireManagedAsset:true,reference:{assetId:legacy.assetId,assetVersionId:legacy.id}},active);
-        const parent=workflowImageMediaIdentity(parentMedia.source);
-        if(!parent.version||parent.sha256!==source.sha256)unconfirmed();
-        cellIdentity.legacyParentFile=parent.version.file;proofs.push(parentMedia);
-      }
+        source,tile:{targetNodeId:target.entityId,cell,file:version.file},...(legacyGrid?{legacyParentFile:verifiedSource.version!.file}:{})};
     }
     // IO is fully settled before SQL locks. Recheck each opaque source and both
     // immutable task snapshots under this one client; a changed grant fails closed.

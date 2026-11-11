@@ -328,7 +328,7 @@ describe('WorkflowReactFlowSurface', () => {
     // Verify the live state writers and controls instead of requiring a permanent CSS hiding class.
     expect(nodeEditorSource).toContain('data-workflow-minimap');
     expect(verifyMinimapPolicySource(nodeEditorSource)).toEqual({positive:2,negative:22,initialWidths:[320,767,768,1280]});
-  });
+  }, 15_000); // Reparse the full editor source for each positive and negative control.
 
   it('defers ResizeObserver-driven layout writes until the next animation frame', () => {
     expect(legacyRendererSource).toContain('requestAnimationFrame(() => {');

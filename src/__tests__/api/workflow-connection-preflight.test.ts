@@ -5,6 +5,7 @@ let createConnection: typeof import('@/lib/workflow-engine').createConnection;
 let createWorkflowNode: typeof import('@/lib/workflow-engine').createWorkflowNode;
 let parseComfyUIWorkflow: typeof import('@/lib/workflow-engine').parseComfyUIWorkflow;
 import { createMultiPlatformExportSkill } from '@/lib/skill-runtime/multi-platform-export-preset';
+import { createWorkflowFromPreset, WORKFLOW_PRESETS } from '@/lib/workflow-presets';
 const mocks=vi.hoisted(()=>({create:vi.fn(async(..._args:unknown[])=>undefined),update:vi.fn(async(..._args:unknown[])=>true),get:vi.fn(async(..._args:unknown[])=>null),skills:vi.fn(async()=>[] as unknown[]),auth:vi.fn(async()=>({userId:'actor',userRole:'user',user:{productType:'all'}}) as unknown),image:vi.fn(async()=>({imageUrl:'data:image/png;base64,U1lOVEhFVElD',_type:'input-image'})),claim:vi.fn(async(..._args:unknown[]):Promise<unknown>=>null),release:vi.fn(async(..._args:unknown[])=>false)}));
 vi.mock('server-only',()=>({}));
 vi.mock('@/lib/workflow-background',()=>({observeWorkflowBackground:<T>(p:Promise<T>)=>workers.observe(p)}));
@@ -33,6 +34,73 @@ function request(body:Record<string,unknown>){return new NextRequest('http://syn
 function image(){const n=createWorkflowNode('input-image',0,0);n.id='source';n.config={...n.config,source:'url',imageUrl:'data:image/png;base64,U1lOVEhFVElD'};return n;}
 async function start(nodes:ReturnType<typeof createWorkflowNode>[],connections:ReturnType<typeof createConnection>[],extra:Record<string,unknown>={}){return POST(request({action:'start',projectId:'synthetic-project',workflowId:'synthetic-workflow',nodes,connections,...extra}));}
 async function terminal(executionId:string){let result:Record<string,unknown>|undefined;await vi.waitFor(async()=>{result=await (await POST(request({action:'status',executionId}))).json();expect(['completed','failed']).toContain(result?.status)},{timeout:3000,interval:25});return result!;}
+
+it('executes the advertising preset with one synthetic chat response, seven ordered clips, and one narration', async () => {
+  const preset = WORKFLOW_PRESETS.find(candidate => candidate.id === 'ecom-video-storyboard')!;
+  const workflow = createWorkflowFromPreset(preset);
+  const scenes = Array.from({ length: 7 }, (_, index) => ({
+    prompt: `Product scene ${index + 1}`,
+    narration: `Narration ${index + 1}`,
+  }));
+  const clips = scenes.map((_, index) => `/api/serve-upload/clip-${index + 1}.mp4`);
+  const requests: { path: string; body: Record<string, unknown> }[] = [];
+  vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.origin === 'http://localhost:5000' && !url.search && !url.hash && init?.method === 'POST'
+      && typeof init.body === 'string') {
+      const body = JSON.parse(init.body);
+      requests.push({ path: url.pathname, body });
+      switch (url.pathname) {
+        case '/api/chat':
+          return Response.json({ choices: [{ message: { content: JSON.stringify({ scenes }) } }] });
+        case '/api/video/generate': {
+          const index = scenes.findIndex(scene => scene.prompt === body.prompt);
+          if (index >= 0) return Response.json({ success: true, videoUrl: clips[index] });
+          break;
+        }
+        case '/api/audio/generate':
+          return Response.json({ success: true, audioUrl: '/api/serve-upload/narration.mp3' });
+        case '/api/video/tools':
+          if (body.action === 'concat-videos') return Response.json({ success: true, videoUrl: '/api/serve-upload/concat.mp4' });
+          if (body.action === 'add-audio') return Response.json({ success: true, videoUrl: '/api/serve-upload/ad.mp4' });
+      }
+    }
+    boundary.violations.push('UNEXPECTED_FETCH');
+    throw Error('UNEXPECTED_FETCH');
+  });
+
+  const response = await start(workflow.nodes, workflow.connections);
+  const started = await response.json();
+  expect(response.status, JSON.stringify(started)).toBe(200);
+  const { executionId } = started;
+  const result = await terminal(executionId);
+  expect(result.status).toBe('completed');
+  expect(requests.filter(call => call.path === '/api/chat')).toHaveLength(1);
+  expect(requests.filter(call => call.path === '/api/video/generate').map(call => call.body.prompt))
+    .toEqual(scenes.map(scene => scene.prompt));
+  expect(requests.filter(call => call.path === '/api/audio/generate').map(call => call.body.text))
+    .toEqual([scenes.map(scene => scene.narration).join('\n')]);
+  expect(requests.filter(call => call.path === '/api/video/tools').map(call => call.body)).toEqual([
+    { action: 'concat-videos', videoUrls: clips },
+    { action: 'add-audio', videoUrl: '/api/serve-upload/concat.mp4', audioUrl: '/api/serve-upload/narration.mp3', volume: 1 },
+  ]);
+  const finalNode = workflow.nodes.find(node => node.type === 'output-video')!;
+  expect(result.results).toMatchObject({
+    [finalNode.id]: { status: 'success', output: { videoUrl: '/api/serve-upload/ad.mp4' } },
+  });
+});
+
+it('rejects an invalid storyboard selector before creating an execution', async () => {
+  const preset = WORKFLOW_PRESETS.find(candidate => candidate.id === 'ecom-video-storyboard')!;
+  const workflow = createWorkflowFromPreset(preset);
+  const firstScene = workflow.nodes.find(node => node.type === 'ai-video-generate')!;
+  firstScene.config.storyboardPart = 8;
+  const response = await start(workflow.nodes, workflow.connections);
+  expect(response.status).toBe(422);
+  expect(await response.json()).toMatchObject({ code: 'WORKFLOW_EXECUTION_GRAPH_UNSAFE' });
+  expect(mocks.create).not.toHaveBeenCalled();
+});
+
 it('LIFECYCLE drain waits for final persistence after terminal status',async()=>{
  let release!:()=>void;let entered=false;let finished=false;const gate=new Promise<void>(resolve=>{release=resolve;});
  mocks.update.mockImplementation(async(...args:unknown[])=>{const payload=args[1] as {result?:{workflowStatus?:string}}|undefined;if(payload?.result?.workflowStatus==='completed'){entered=true;await gate;finished=true;}return true;});

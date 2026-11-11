@@ -50,7 +50,11 @@ import { resolveSkillInputs } from '@/lib/skill-runtime/input-resolver';
 import { authorizeAndFreezeBindings } from '@/lib/skill-runtime/binding-authorization';
 import { requiredSkillModelRoles } from '@/lib/skill-runtime/types';
 import { resolveTaskModel } from '@/lib/task-core/model-catalog';
-import { createPostgresAssetStorage } from '@/lib/asset-core/storage';
+import { createPostgresAssetStorage, withAssetCoreTransaction } from '@/lib/asset-core/storage';
+import { getAgentExecutionFence } from '@/lib/agent-runtime/execution-fence';
+import { reduceAgentEvents } from '@/lib/agent-runtime/event-reducer';
+import { assertSkillApprovalIdentity, parseSkillApprovalIdentity, parseSkillApprovalState,
+  parseSkillRevisionInstruction, type SkillApprovalIdentity } from '@/lib/skill-runtime/approval';
 import { resolveWorkflowExecutionScope } from '@/lib/workflow-execution-scope';
 import {
   cancelWorkflowSkillRun,
@@ -79,6 +83,7 @@ import {
   renewCloudTaskLease,
   updateCloudTask,
   type CloudTask,
+  type CloudTaskLease,
 } from '@/lib/cloud-task-storage';
 import {
   buildWorkflowLayerIdempotencyKey,
@@ -116,6 +121,7 @@ interface WorkflowExecutionState {
   executionConnections?: WorkflowConnection[];
   executionGraph?: { nodes: WorkflowNode[]; connections: WorkflowConnection[] };
   recoveryStarted?: boolean;
+  skillApprovalHandoffPending?: boolean;
   recoveryLeaseOwner?: string;
   recoveryLeaseTaskId?: string;
   recoveryLeaseLost?: boolean;
@@ -338,9 +344,14 @@ async function captureRecoverableExecutionGraph(
       return undefined;
     }
     if (!hasSafeImageInputCapture(node)) return undefined;
+    const storyboardPart = node.config.storyboardPart;
+    const hasStoryboardPart = node.type === 'ai-video-generate'
+      ? typeof storyboardPart === 'number' && Number.isInteger(storyboardPart) && storyboardPart >= 1 && storyboardPart <= 7
+      : node.type === 'ai-audio' && storyboardPart === 'narration';
     const allowedKeys = new Set([
       ...getNodePropertyFields(node.type).map(field => field.key),
       ...executionConfigKeys,
+      ...(hasStoryboardPart ? ['storyboardPart'] : []),
       ...(node.type === 'input-image'
         ? ['entityId', 'imageInputTransform', 'gridIndex', 'gridCol', 'gridRow', 'blockedInputs']
         : []),
@@ -899,8 +910,15 @@ async function continueApprovedSkillWorkflow(input: {
   headers: HeadersInit;
   runId: string;
   leaseOwner: string;
+  leaseAttemptCount: number;
 }): Promise<void> {
   const startedAt = Date.now();
+  // Progress and revised pauses can persist before the approved child completes.
+  // They use the same attempt fence as downstream execution.
+  input.execState.recoveryLeaseOwner = input.leaseOwner;
+  input.execState.recoveryLeaseTaskId = input.executionId;
+  input.execState.recoveryLeaseAttemptCount = input.leaseAttemptCount;
+  input.execState.recoveryLeaseState = { lost: false };
   let leaseLost = false;
   const markLeaseLost = (): void => {
     leaseLost = true;
@@ -922,7 +940,8 @@ async function continueApprovedSkillWorkflow(input: {
       runId: input.runId,
       headers: input.headers,
       onProgress: async run => {
-        if (!await renewCloudTaskLease(input.executionId, input.leaseOwner, 120_000)) {
+        if (leaseLost || isWorkflowDispatchStopped(input.execState)
+          || !await renewCloudTaskLease(input.executionId, input.leaseOwner, 120_000)) {
           markLeaseLost();
           throw new Error('Workflow 恢复租约已失效');
         }
@@ -932,7 +951,7 @@ async function continueApprovedSkillWorkflow(input: {
           output: { runId: run.runId, taskId: run.runId, status: run.status },
           durationMs: Date.now() - startedAt,
         };
-        await persistWorkflowExecution(input.executionId, input.execState);
+        await persistWorkflowExecution(input.executionId, input.execState, true);
       },
       resolveAssetVersion: async versionId => {
         if (!input.execState.userId || !input.execState.projectId) return null;
@@ -951,6 +970,7 @@ async function continueApprovedSkillWorkflow(input: {
         });
       },
     });
+    if (leaseLost || input.execState.recoveryLeaseLost || isWorkflowDispatchStopped(input.execState)) return;
     if (output.status === 'waiting-approval') {
       input.execState.results[input.node.id] = {
         nodeId: input.node.id, status: 'waiting-approval', output,
@@ -958,7 +978,7 @@ async function continueApprovedSkillWorkflow(input: {
       };
       input.execState.status = 'paused';
       input.execState.currentNodeId = input.node.id;
-      await persistWorkflowExecution(input.executionId, input.execState);
+      await persistWorkflowExecution(input.executionId, input.execState, true);
       return;
     }
     input.execState.results[input.node.id] = {
@@ -972,15 +992,11 @@ async function continueApprovedSkillWorkflow(input: {
       if (activeRunId === input.runId) delete input.execState.activeSkillRuns?.[key];
     }
     input.execState.status = 'running';
-    if (leaseLost) return;
-    input.execState.recoveryLeaseOwner = input.leaseOwner;
-    input.execState.recoveryLeaseTaskId = input.executionId;
-    input.execState.recoveryLeaseState = { lost: false };
     await executeWorkflow(
       input.executionId, input.execState, input.nodes, input.connections,
     );
   } catch (error) {
-    if (leaseLost) return;
+    if (leaseLost || input.execState.recoveryLeaseLost || isWorkflowDispatchStopped(input.execState)) return;
     const terminal = error instanceof WorkflowSkillRunTerminalError ? error : null;
     input.execState.results[input.node.id] = {
       nodeId: input.node.id,
@@ -1000,8 +1016,11 @@ async function continueApprovedSkillWorkflow(input: {
     await drainWorkflowPersistence(input.execState);
     delete input.execState.recoveryLeaseOwner;
     delete input.execState.recoveryLeaseTaskId;
+    delete input.execState.recoveryLeaseAttemptCount;
     delete input.execState.recoveryLeaseState;
-    if (leaseLost || input.execState.recoveryLeaseLost) executionCache.delete(input.executionId);
+    if ((leaseLost || input.execState.recoveryLeaseLost) && executionCache.get(input.executionId) === input.execState) {
+      executionCache.delete(input.executionId);
+    }
     await releaseCloudTaskLease(input.executionId, input.leaseOwner).catch(() => false);
   }
 }
@@ -1315,6 +1334,8 @@ async function persistWorkflowExecutionRoot(executionId: string, execState: Work
     const persisted = await updateCloudTask(executionId, {
       ...(current?.revision !== undefined ? { expectedRevision: current.revision } : {}),
       ...(execState.recoveryLeaseOwner ? { leaseOwner: execState.recoveryLeaseOwner } : {}),
+      ...(execState.recoveryLeaseOwner && execState.recoveryLeaseAttemptCount !== undefined
+        ? { expectedLeaseAttemptCount: execState.recoveryLeaseAttemptCount } : {}),
       status: toCloudWorkflowStatus(execState.status),
       progress: execState.status === 'running' || execState.status === 'paused'
         ? Math.min(99, Math.round((Object.keys(execState.results).length / Math.max(execState.totalNodes, 1)) * 100))
@@ -1443,6 +1464,7 @@ async function restorePausedWorkflowExecution(input: {
     activeSkillRuns,
     pendingSkillSubmissions: {},
     cancellationState: { cancelled: false, ...(persistedResult.dispatchStopped === true ? { dispatchStopped: true } : {}) },
+    ...(hasPendingWorkflowSkillApproval(persisted) ? { skillApprovalHandoffPending: true } : {}),
     retryAttempts: isRecord(persistedResult.retryAttempts) ? persistedResult.retryAttempts as Record<string, number> : {},
     executionNodes: graph.nodes as WorkflowNode[],
     executionConnections: graph.connections as unknown as WorkflowConnection[],
@@ -1457,6 +1479,236 @@ async function restorePausedWorkflowExecution(input: {
   restored.persistActiveSkillRuns = () => persistWorkflowExecution(input.executionId, restored);
   if (input.cache !== false) executionCache.set(input.executionId, restored);
   return restored;
+}
+
+type WorkflowSkillApprovalActor = {
+  userId: string;
+  userRole: 'admin' | 'user';
+  userProductType?: string;
+};
+
+type WorkflowSkillApprovalHandoff = { nodeId: string; runId: string } & (
+  { action: 'cancel' } | { action: 'approve'; identity: SkillApprovalIdentity }
+  | { action: 'revise'; identity: SkillApprovalIdentity; revisionInstruction: string }
+);
+
+function readWorkflowSkillApprovalHandoff(value: unknown): WorkflowSkillApprovalHandoff | null {
+  if (!isRecord(value) || typeof value.nodeId !== 'string' || !value.nodeId
+    || typeof value.runId !== 'string' || !value.runId) return null;
+  const { nodeId, runId, action } = value;
+  if (action === 'cancel') return { nodeId, runId, action };
+  if ((action !== 'approve' && action !== 'revise') || !isRecord(value.identity)) return null;
+  try {
+    const identity = parseSkillApprovalIdentity(value.identity);
+    return action === 'revise' ? { nodeId, runId, action, identity,
+      revisionInstruction: parseSkillRevisionInstruction(value.revisionInstruction) }
+      : { nodeId, runId, action, identity };
+  } catch {
+    return null;
+  }
+}
+
+function hasPendingWorkflowSkillApproval(task: CloudTask | null | undefined): task is CloudTask & {
+  result: Record<string, unknown> & { workflowStatus: 'paused'; skillApprovalHandoff: unknown };
+} {
+  return task?.type === 'workflow' && task.status === 'processing' && task.result?.workflowStatus === 'paused'
+    && task.result.skillApprovalHandoff !== undefined;
+}
+
+function workflowSkillApprovalIdentities(results: unknown): Array<[string, string, unknown]> {
+  if (!isRecord(results)) return [];
+  return Object.keys(results).sort().flatMap<[string, string, unknown]>(nodeId => {
+    const result = results[nodeId];
+    const output = isRecord(result) && result.status === 'waiting-approval' ? result.output : null;
+    return isRecord(output) && typeof output.runId === 'string' && output.runId.length > 0
+      ? [[nodeId, output.runId, output.approval]] : [];
+  });
+}
+
+function isStaleSkillApprovalCache(cached: WorkflowExecutionState | undefined, durable: CloudTask | null): boolean {
+  if (!cached || cached.status !== 'paused' || durable?.type !== 'workflow' || durable.userId !== cached.userId) return false;
+  const identities = workflowSkillApprovalIdentities(cached.results);
+  return identities.length > 0 && (durable.status !== 'processing' || durable.result?.workflowStatus !== 'paused'
+    || !isDeepStrictEqual(identities, workflowSkillApprovalIdentities(durable.result.results)));
+}
+
+function requiresWorkflowSkillApprovalControl(durable: CloudTask | null): boolean {
+  return durable?.type === 'workflow' && durable.status === 'processing' && durable.result?.workflowStatus === 'paused'
+    && workflowSkillApprovalIdentities(durable.result.results).length > 0;
+}
+
+function pendingWorkflowSkillApprovalResponse(executionId: string, status: 200 | 409 | 503, snapshot?: CloudTask): NextResponse {
+  return NextResponse.json({ executionId, status: 'paused', approvalPending: true,
+    ...(snapshot ? { currentNodeId: snapshot.result?.currentNodeId ?? null, results: snapshot.result?.results ?? {},
+      startedAt: snapshot.result?.startedAt ?? snapshot.createdAt, completedAt: null } : {}),
+    error: 'WORKFLOW_SKILL_APPROVAL_CHECKPOINT_UNCONFIRMED' }, { status });
+}
+
+function hasLiveWorkflowApprovalLease(
+  lease: CloudTaskLease | null, executionId: string, owner: string,
+): lease is CloudTaskLease {
+  return Boolean(lease && lease.taskId === executionId && lease.owner === owner
+    && Number.isSafeInteger(lease.attemptCount) && lease.attemptCount > 0
+    && Number.isSafeInteger(lease.expiresAt) && lease.expiresAt > Date.now());
+}
+
+async function readWorkflowSkillApprovalTarget(
+  parent: CloudTask, actor: WorkflowSkillApprovalActor, nodeId: string,
+  expectedProjectId?: string, expectedWorkflowId?: string,
+): Promise<{ state: WorkflowExecutionState; node: WorkflowNode; runId: string } | null> {
+  if (parent.type !== 'workflow' || parent.status !== 'processing' || parent.userId !== actor.userId
+    || parent.result?.workflowStatus !== 'paused' || !Number.isSafeInteger(parent.revision)
+    || !Number.isSafeInteger(parent.revision! + 1)) return null;
+  const state = await restorePausedWorkflowExecution({
+    executionId: parent.id, ...actor, expectedProjectId, expectedWorkflowId, cache: false,
+    expectedRevision: parent.revision, expectedResult: parent.result,
+  });
+  if (!state || state.status !== 'paused' || state.projectId !== parent.projectId) return null;
+  const node = state.executionNodes?.find(candidate => candidate.id === nodeId);
+  const previous = state.results[nodeId];
+  const runId = previous?.output?.runId;
+  return node?.type === 'ai-skill' && previous?.nodeId === node.id && previous.status === 'waiting-approval'
+    && typeof runId === 'string' && runId ? { state, node, runId } : null;
+}
+
+async function writeWorkflowSkillApprovalCheckpoint(
+  parent: CloudTask, lease: CloudTaskLease, next: Record<string, unknown>, cancel = false,
+): Promise<CloudTask | null> {
+  if (!hasLiveWorkflowApprovalLease(lease, parent.id, lease.owner) || !Number.isSafeInteger(parent.revision)
+    || !Number.isSafeInteger(parent.revision! + 1)) return null;
+  const agent = getAgentExecutionFence();
+  const status = cancel ? 'cancelled' : 'processing';
+  const progress = cancel ? 100 : parent.progress;
+  const written = await withAssetCoreTransaction(client => client.query(`
+    UPDATE cloud_tasks SET result = $8::jsonb, status = $9, progress = $10, revision = revision + 1,
+      updated_at = (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::bigint
+    WHERE id = $1 AND user_id = $2 AND project_id IS NOT DISTINCT FROM $3::text
+      AND type = 'workflow' AND status = 'processing' AND revision = $4
+      AND lease_owner = $5 AND attempt_count = $6
+      AND lease_expires_at > (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::bigint
+      AND result->>'workflowStatus' = 'paused' AND result = $7::jsonb
+      AND (NOT EXISTS (
+        SELECT 1 FROM wujie_agent_execution_leases bound_agent
+        WHERE bound_agent.task_id = cloud_tasks.id AND bound_agent.completed_at = 0
+          AND ($11::text <> '' OR bound_agent.paused_at = 0 OR bound_agent.paused_at > 0)
+      ) OR ($11::text <> '' AND EXISTS (
+        SELECT 1 FROM wujie_agent_execution_leases agent_lease
+        WHERE agent_lease.task_id = cloud_tasks.id AND agent_lease.task_id = $11
+          AND agent_lease.lease_owner = $12 AND agent_lease.generation = $13
+          AND agent_lease.paused_at = 0 AND agent_lease.completed_at = 0
+      )))
+    RETURNING revision`, [
+    parent.id, parent.userId, parent.projectId ?? null, parent.revision,
+    lease.owner, lease.attemptCount, JSON.stringify(parent.result), JSON.stringify(next), status, progress,
+    agent?.runId ?? '', agent?.leaseOwner ?? '', agent?.generation ?? -1,
+  ]));
+  const revision = written.rows[0]?.revision;
+  return written.rowCount === 1 && revision === parent.revision! + 1
+    ? { ...parent, result: next, revision, status, progress } : null;
+}
+
+async function completeWorkflowSkillApproval(
+  parent: CloudTask, lease: CloudTaskLease, handoff: WorkflowSkillApprovalHandoff,
+  target: { state: WorkflowExecutionState; node: WorkflowNode; runId: string },
+  submitUrl: string, headers: HeadersInit,
+): Promise<'running' | 'cancelled' | null> {
+  if (parent.result?.dispatchStopped !== true || !isDeepStrictEqual(parent.result.skillApprovalHandoff, handoff)
+    || target.runId !== handoff.runId || target.node.id !== handoff.nodeId) return null;
+  const { skillApprovalHandoff: _handoff, dispatchStopped: _stop, ...saved } = parent.result;
+  const cancelled = handoff.action === 'cancel';
+  const next: Record<string, unknown> = {
+    ...saved, workflowStatus: cancelled ? 'cancelled' : 'running', currentNodeId: handoff.nodeId,
+  };
+  if (cancelled) {
+    next.completedAt = Date.now();
+    next.dispatchStopped = true;
+    next.results = { ...target.state.results, [handoff.nodeId]: {
+      ...target.state.results[handoff.nodeId], status: 'failed', error: '用户取消任务',
+    } };
+    next.activeSkillRuns = Object.fromEntries(Object.entries(target.state.activeSkillRuns || {})
+      .filter(([, runId]) => runId !== handoff.runId));
+  }
+  if (!await writeWorkflowSkillApprovalCheckpoint(parent, lease, next, cancelled)) return null;
+  executionCache.delete(parent.id);
+  if (cancelled) return 'cancelled';
+  if (!hasLiveWorkflowApprovalLease(lease, parent.id, lease.owner)) return null;
+  const { state, node, runId } = target;
+  state.status = 'running';
+  state.currentNodeId = node.id;
+  state.cancellationState = { cancelled: false };
+  state.skillApprovalHandoffPending = false;
+  executionCache.set(parent.id, state);
+  void observeWorkflowBackground(continueApprovedSkillWorkflow({
+    executionId: parent.id, execState: state, node, nodes: state.executionNodes!, connections: state.executionConnections!,
+    submitUrl, headers, runId, leaseOwner: lease.owner, leaseAttemptCount: lease.attemptCount,
+  }));
+  return 'running';
+}
+
+async function hasWorkflowSkillApprovalReceipt(
+  parent: CloudTask, state: WorkflowExecutionState, handoff: WorkflowSkillApprovalHandoff,
+): Promise<boolean> {
+  const { listAgentEventsForActor } = await import('@/lib/agent-runtime/event-storage');
+  const events = await listAgentEventsForActor({
+    actorUserId: parent.userId, projectId: state.projectId || parent.id, runId: handoff.runId,
+  });
+  const projection = reduceAgentEvents(events);
+  if (projection.runId !== handoff.runId || projection.missingSequences.length) return false;
+  const effectiveEvents = events.filter(event => !projection.ignoredEventIds.includes(event.eventId));
+  const creation = effectiveEvents.find(event => event.type === 'run.created');
+  const workspaceId = 'workflow:' + (state.workflowId || state.projectId || parent.id);
+  if (creation?.payload.workspace !== 'workflow' || creation.payload.workspaceId !== workspaceId) return false;
+  if (handoff.action === 'cancel') return projection.status === 'cancelled';
+  return effectiveEvents.some(event => {
+    const receipt = event.payload.approval;
+    return event.type === 'run.resumed' && isRecord(receipt) && receipt.action === handoff.action
+      && receipt.revision === handoff.identity.revision && receipt.generation === handoff.identity.generation
+      && receipt.planChecksum === handoff.identity.planChecksum
+      && (handoff.action !== 'revise' || receipt.revisionInstruction === handoff.revisionInstruction);
+  });
+}
+
+async function confirmRecoveredWorkflowSkillCancellation(parent: CloudTask, state: WorkflowExecutionState, runId: string): Promise<boolean> {
+  const child = await getCloudTaskForUser(runId, parent.userId);
+  if (child?.type !== 'agent-run' || child.status !== 'cancelled' || child.id !== runId
+    || child.userId !== parent.userId || child.projectId !== (state.projectId || parent.id)) return false;
+  // The cancel event can commit before the child service drains prepaid work.
+  const { cancelSkillPrepaidChildren } = await import('@/lib/skill-runtime/prepaid-generation');
+  const { abortTaskExecution } = await import('@/lib/task-core/task-abort');
+  const stopped = await cancelSkillPrepaidChildren({ actorUserId: parent.userId, runId });
+  for (const taskId of stopped) abortTaskExecution(taskId, 'cancelled');
+  return true;
+}
+
+async function recoverWorkflowSkillApproval(parent: CloudTask, actor: WorkflowSkillApprovalActor): Promise<NextResponse> {
+  const pending = (): NextResponse => pendingWorkflowSkillApprovalResponse(parent.id, 200, parent);
+  const handoff = readWorkflowSkillApprovalHandoff(parent.result?.skillApprovalHandoff);
+  if (!handoff || parent.result?.dispatchStopped !== true) return pending();
+  let leaseOwner: string | undefined;
+  let transferred = false;
+  try {
+    const target = await readWorkflowSkillApprovalTarget(parent, actor, handoff.nodeId);
+    if (!target || target.runId !== handoff.runId || !await hasWorkflowSkillApprovalReceipt(parent, target.state, handoff)) return pending();
+    leaseOwner = 'workflow-approval:' + randomUUID();
+    const lease = await claimCloudTaskLease(parent.id, leaseOwner, 120_000);
+    if (!hasLiveWorkflowApprovalLease(lease, parent.id, leaseOwner)) return pending();
+    if (handoff.action === 'cancel' && !await confirmRecoveredWorkflowSkillCancellation(parent, target.state, handoff.runId)) return pending();
+    const headers = handoff.action === 'cancel' ? {} : await getInternalRequestHeaders(
+      actor.userId, actor.userRole, actor.userProductType,
+    );
+    const status = await completeWorkflowSkillApproval(parent, lease, handoff, target,
+      getInternalApiUrl('/api/skill-runs'), { 'Content-Type': 'application/json', ...headers });
+    if (!status) return pending();
+    transferred = status === 'running';
+    return NextResponse.json({ executionId: parent.id, status, currentNodeId: handoff.nodeId,
+      results: status === 'cancelled' ? { ...target.state.results, [handoff.nodeId]: {
+        ...target.state.results[handoff.nodeId], status: 'failed', error: '用户取消任务',
+      } } : target.state.results });
+  } catch {
+    return pending();
+  } finally {
+    if (leaseOwner && !transferred) await releaseCloudTaskLease(parent.id, leaseOwner).catch(() => false);
+  }
 }
 
 function hydrateInlineSubgraphInputs(nodes: WorkflowNode[], parentInputs: Record<string, unknown>): WorkflowNode[] {
@@ -1517,6 +1769,15 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '缺少 executionId' }, { status: 400 });
       }
       const terminalImageRetry = await getCloudTaskForUser(executionId, auth.userId);
+      if (terminalImageRetry?.type === 'workflow'
+        && ((typeof projectId === 'string' && (terminalImageRetry.result?.projectId ?? terminalImageRetry.projectId) !== projectId)
+          || (typeof workflowId === 'string' && terminalImageRetry.result?.workflowId !== workflowId))) {
+        return NextResponse.json({ error: '执行记录不属于当前工作流' }, { status: 409 });
+      }
+      if (hasPendingWorkflowSkillApproval(terminalImageRetry)) {
+        return recoverWorkflowSkillApproval(terminalImageRetry, { userId: auth.userId,
+          userRole: auth.userRole === 'admin' ? 'admin' : 'user', userProductType: auth.user.productType });
+      }
       const knownImageRetry = executionCache.get(executionId)?.imageRetry
         || typeof executionId === 'string' && executionId.startsWith('exec-image-retry-')
         || terminalImageRetry?.result?.imageRetry !== undefined;
@@ -1620,6 +1881,10 @@ export async function POST(request: NextRequest) {
         }
       }
       let exec = executionCache.get(executionId);
+      if (isStaleSkillApprovalCache(exec, terminalImageRetry)) {
+        executionCache.delete(executionId);
+        exec = undefined;
+      }
       if (exec?.imageRuntime && !knownImageRetry) {
         if (exec.userId !== auth.userId) return NextResponse.json({ error: '无权查看该执行记录' }, { status: 403 });
         if (body.reconcile === true && terminalImageRetry && !exec.recoveryLeaseOwner && !exec.activeImageReads?.size && !exec.imageCancellation) {
@@ -1713,6 +1978,7 @@ export async function POST(request: NextRequest) {
                       headers: { 'Content-Type': 'application/json', ...internalHeaders },
                       runId,
                       leaseOwner,
+                      leaseAttemptCount: lease.attemptCount,
                     }));
                   }
                   leaseAcquired = false;
@@ -1861,6 +2127,11 @@ export async function POST(request: NextRequest) {
       if (exec?.userId && exec.userId !== auth.userId) {
         return NextResponse.json({ error: '无权取消该执行记录' }, { status: 403 });
       }
+      const ownedParent = await getCloudTaskForUser(executionId, auth.userId);
+      if (hasPendingWorkflowSkillApproval(ownedParent)) return pendingWorkflowSkillApprovalResponse(executionId, 409);
+      if (isStaleSkillApprovalCache(exec, ownedParent) || requiresWorkflowSkillApprovalControl(ownedParent)) {
+        return NextResponse.json({ executionId, error: '请刷新当前工作流，并在脚本审批中取消任务' }, { status: 409 });
+      }
       if (exec?.imageRuntime) {
         if (['completed', 'failed', 'cancelled'].includes(exec.status)) {
           return NextResponse.json({ executionId, status: exec.status }, { status: 409 });
@@ -1882,9 +2153,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ executionId, status: 'unconfirmed', error: 'WORKFLOW_IMAGE_REFERENCE_PUBLICATION_UNCONFIRMED' }, { status: 409 });
         }
       }
-      let persisted = !exec && auth.userId
-        ? await getCloudTaskForUser(executionId, auth.userId)
-        : null;
+      let persisted = !exec ? ownedParent : null;
       let persistedResult = persisted?.type === 'workflow' ? persisted.result : null;
       const persistedSkillRunIds = collectPersistedWorkflowSkillRunIds(persistedResult);
       let childTaskEntries = Object.entries(exec?.activeChildTasks
@@ -2143,7 +2412,13 @@ export async function POST(request: NextRequest) {
       if (!nodeId) {
         return NextResponse.json({ error: '缺少 nodeId' }, { status: 400 });
       }
-      const exec = executionCache.get(executionId) || await restorePausedWorkflowExecution({ executionId, userId: auth.userId,
+      const cached = executionCache.get(executionId);
+      const ownedParent = await getCloudTaskForUser(executionId, auth.userId);
+      if (hasPendingWorkflowSkillApproval(ownedParent)) return pendingWorkflowSkillApprovalResponse(executionId, 409);
+      if (isStaleSkillApprovalCache(cached, ownedParent) || requiresWorkflowSkillApprovalControl(ownedParent)) {
+        return NextResponse.json({ executionId, error: '请先在当前工作流中处理待确认的脚本' }, { status: 409 });
+      }
+      const exec = cached || await restorePausedWorkflowExecution({ executionId, userId: auth.userId,
         userRole: auth.userRole === 'admin' ? 'admin' : 'user', userProductType: auth.user.productType, imageRetryNodeId: nodeId, cache: false }) || undefined;
       if (!exec) {
         return NextResponse.json({ error: '执行实例不存在或已过期' }, { status: 404 });
@@ -2151,6 +2426,7 @@ export async function POST(request: NextRequest) {
       if (exec.userId && exec.userId !== auth.userId) {
         return NextResponse.json({ error: '无权重试该执行记录' }, { status: 403 });
       }
+      if (exec.skillApprovalHandoffPending) return pendingWorkflowSkillApprovalResponse(executionId, 409);
       // A lost cached object cannot dispatch or persist again; only status may replace it from the durable snapshot.
       if (!exec.executionGraph?.nodes.some(node => node.id === nodeId && node.type === 'input-image' && readWorkflowImageInputTransform(node))
         && Object.keys(exec.sketchIntents || {}).length > 0
@@ -2487,82 +2763,107 @@ export async function POST(request: NextRequest) {
       if (!executionId || typeof body.nodeId !== 'string' || !Array.isArray(nodes) || !Array.isArray(connections)) {
         return NextResponse.json({ error: '缺少 Workflow 审批上下文' }, { status: 400 });
       }
-      const exec = executionCache.get(executionId) || await restorePausedWorkflowExecution({
-        executionId,
-        userId: auth.userId,
-        userRole: auth.userRole === 'admin' ? 'admin' : 'user',
-        userProductType: auth.user.productType,
-        expectedProjectId: typeof projectId === 'string' ? projectId : undefined,
-        expectedWorkflowId: typeof workflowId === 'string' ? workflowId : undefined,
-      });
-      if (!exec) return NextResponse.json({ error: '执行实例不存在、已过期或不在待审批状态' }, { status: 404 });
-      if (exec.userId && exec.userId !== auth.userId) {
-        return NextResponse.json({ error: '无权审批该执行记录' }, { status: 403 });
+      const actor: WorkflowSkillApprovalActor = { userId: auth.userId,
+        userRole: auth.userRole === 'admin' ? 'admin' : 'user', userProductType: auth.user.productType };
+      const parent = await getCloudTaskForUser(executionId, actor.userId);
+      if (!parent || parent.type !== 'workflow' || parent.userId !== actor.userId) {
+        return NextResponse.json({ error: '执行实例不存在、已过期或不在待审批状态' }, { status: 404 });
       }
-      if (!exec.executionNodes || !exec.executionConnections) {
-        return NextResponse.json({ error: '执行快照缺失，无法安全继续审批' }, { status: 409 });
+      const pending = hasPendingWorkflowSkillApproval(parent);
+      const previousHandoff = pending ? readWorkflowSkillApprovalHandoff(parent.result.skillApprovalHandoff) : null;
+      if (pending && (!previousHandoff || parent.result.dispatchStopped !== true)) {
+        return pendingWorkflowSkillApprovalResponse(executionId, 409);
       }
-      const approvalNodes = exec.executionNodes;
-      const approvalConnections = exec.executionConnections;
-      const node = approvalNodes.find((candidate: WorkflowNode) => candidate.id === body.nodeId);
-      const previous = exec.results[body.nodeId];
-      const runId = previous?.output?.runId;
-      if (exec.status !== 'paused' || !node || node.type !== 'ai-skill' || previous?.status !== 'waiting-approval'
-        || typeof runId !== 'string') {
+      const target = await readWorkflowSkillApprovalTarget(parent, actor, body.nodeId,
+        typeof projectId === 'string' ? projectId : undefined, typeof workflowId === 'string' ? workflowId : undefined);
+      if (!target || (body.runId !== undefined && body.runId !== target.runId)
+        || (!pending && parent.result?.dispatchStopped === true)) {
         return NextResponse.json({ error: '节点不在待审批状态' }, { status: 409 });
       }
       const controlAction = body.controlAction;
-      if (!['approve', 'revise', 'cancel'].includes(controlAction)) {
+      if (controlAction !== 'approve' && controlAction !== 'revise' && controlAction !== 'cancel') {
         return NextResponse.json({ error: '审批操作无效' }, { status: 400 });
       }
-      const leaseOwner = `workflow-approval:${crypto.randomUUID()}`;
-      const lease = await claimCloudTaskLease(executionId, leaseOwner, 120_000);
-      if (!lease) {
-        return NextResponse.json({ error: '该审批正在处理，请勿重复提交' }, { status: 409 });
+      const targetIdentity = { nodeId: target.node.id, runId: target.runId };
+      let handoff: WorkflowSkillApprovalHandoff;
+      let controlBody: Record<string, unknown>;
+      if (controlAction === 'cancel') {
+        handoff = { ...targetIdentity, action: 'cancel' };
+        controlBody = { action: 'cancel' };
+      } else {
+        try {
+          const identity = parseSkillApprovalIdentity(body);
+          const paused = parseSkillApprovalState(target.state.results[target.node.id].output?.approval);
+          assertSkillApprovalIdentity(paused, identity);
+          if (controlAction === 'revise') {
+            if (!paused.allowRevision) throw new Error('SKILL_APPROVAL_CONFLICT');
+            const revisionInstruction = parseSkillRevisionInstruction(body.revisionInstruction
+              ?? (previousHandoff?.action === 'revise' ? previousHandoff.revisionInstruction : undefined));
+            handoff = { ...targetIdentity, action: controlAction, identity, revisionInstruction };
+            controlBody = { action: controlAction, ...identity, revisionInstruction };
+          } else {
+            handoff = { ...targetIdentity, action: controlAction, identity };
+            controlBody = { action: controlAction, ...identity };
+          }
+        } catch {
+          return NextResponse.json({ error: '审批计划已变化或审批参数无效' }, { status: 409 });
+        }
       }
+      if (pending && !isDeepStrictEqual(previousHandoff, handoff)) return pendingWorkflowSkillApprovalResponse(executionId, 409);
+      const leaseOwner = 'workflow-approval:' + randomUUID();
+      const lease = await claimCloudTaskLease(executionId, leaseOwner, 120_000);
       let leaseTransferred = false;
       try {
-      const internalHeaders = await getInternalRequestHeaders(
-        auth.userId, auth.userRole === 'admin' ? 'admin' : 'user', auth.user.productType,
-      );
-      const controlBody: Record<string, unknown> = { action: controlAction };
-      if (controlAction !== 'cancel') {
-        controlBody.revision = body.revision;
-        controlBody.generation = body.generation;
-        controlBody.planChecksum = body.planChecksum;
-      }
-      if (controlAction === 'revise') controlBody.revisionInstruction = body.revisionInstruction;
-      const submitUrl = `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/skill-runs`;
-      const response = await fetch(`${submitUrl}/${encodeURIComponent(runId)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', ...internalHeaders },
-        body: JSON.stringify(controlBody),
-      });
-      const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
-      if (!response.ok) {
-        return NextResponse.json(payload || { error: 'Workflow 审批失败' }, { status: response.status });
-      }
-      if (controlAction === 'cancel') {
-        exec.status = 'cancelled';
-        exec.completedAt = Date.now();
-        exec.results[body.nodeId] = { ...previous, status: 'failed', error: '用户取消任务' };
-        await persistWorkflowExecution(executionId, exec);
-        return NextResponse.json({ accepted: true, executionId, status: 'cancelled' });
-      }
-      exec.status = 'running';
-      exec.currentNodeId = body.nodeId;
-      await persistWorkflowExecution(executionId, exec);
-      leaseTransferred = true;
-      void observeWorkflowBackground(continueApprovedSkillWorkflow({
-        executionId, execState: exec, node, nodes: approvalNodes, connections: approvalConnections,
-        submitUrl, headers: { 'Content-Type': 'application/json', ...internalHeaders }, runId, leaseOwner,
-      }));
-      return NextResponse.json({ accepted: true, executionId, status: 'running' });
-      } finally {
-        if (!leaseTransferred) {
-          await drainWorkflowPersistence(exec);
-          await releaseCloudTaskLease(executionId, leaseOwner).catch(() => false);
+        if (!hasLiveWorkflowApprovalLease(lease, executionId, leaseOwner)) {
+          return NextResponse.json({ error: '该审批正在处理或租约已失效' }, { status: 409 });
         }
+        const internalHeaders = await getInternalRequestHeaders(actor.userId, actor.userRole, actor.userProductType);
+        const submitUrl = getInternalApiUrl('/api/skill-runs');
+        const headers = { 'Content-Type': 'application/json', ...internalHeaders };
+        if (pending && await hasWorkflowSkillApprovalReceipt(parent, target.state, handoff)) {
+          if (handoff.action === 'cancel' && !await confirmRecoveredWorkflowSkillCancellation(parent, target.state, handoff.runId)) {
+            return pendingWorkflowSkillApprovalResponse(executionId, 503);
+          }
+          const status = await completeWorkflowSkillApproval(parent, lease, handoff, target, submitUrl, headers);
+          if (!status) return pendingWorkflowSkillApprovalResponse(executionId, 503);
+          leaseTransferred = status === 'running';
+          return NextResponse.json({ accepted: true, executionId, status });
+        }
+        const prepared = await writeWorkflowSkillApprovalCheckpoint(parent, lease, {
+          ...parent.result, dispatchStopped: true, skillApprovalHandoff: handoff,
+        });
+        if (!prepared) return NextResponse.json({ error: 'WORKFLOW_EXECUTION_FENCE_LOST' }, { status: 409 });
+        executionCache.delete(executionId);
+        const remaining = lease.expiresAt - Date.now();
+        if (remaining <= 0) return pendingWorkflowSkillApprovalResponse(executionId, 503);
+
+        // Only explicit exact retries may resend. Child approval identities and cancel events are durable replay keys.
+        const response = await fetch(submitUrl + '/' + encodeURIComponent(target.runId), {
+          method: 'PATCH', headers, body: JSON.stringify(controlBody),
+          signal: AbortSignal.timeout(Math.min(30_000, remaining)),
+        });
+        const payload: unknown = await response.json().catch(() => null);
+        const rejected = response.ok && isRecord(payload) && payload.accepted === false;
+        if (rejected || [400, 401, 403, 404, 409, 422].includes(response.status)) {
+          if (pending || !await writeWorkflowSkillApprovalCheckpoint(prepared, lease, parent.result!)) {
+            return pendingWorkflowSkillApprovalResponse(executionId, 503);
+          }
+          return NextResponse.json({ accepted: false, executionId, status: 'paused', error: 'Workflow 审批未被子任务接受' },
+            { status: rejected ? 409 : response.status });
+        }
+        if (!response.ok || !isRecord(payload) || payload.accepted !== true
+          || (controlAction === 'cancel' && (!isRecord(payload.projection)
+            || payload.projection.runId !== target.runId || payload.projection.status !== 'cancelled'))) {
+          return pendingWorkflowSkillApprovalResponse(executionId, 503);
+        }
+        const status = await completeWorkflowSkillApproval(prepared, lease, handoff, target, submitUrl, headers);
+        if (!status) return pendingWorkflowSkillApprovalResponse(executionId, 503);
+        leaseTransferred = status === 'running';
+        return NextResponse.json({ accepted: true, executionId, status });
+      } catch {
+        return pendingWorkflowSkillApprovalResponse(executionId, 503);
+      } finally {
+        if (lease && !leaseTransferred) await releaseCloudTaskLease(executionId, leaseOwner).catch(() => false);
       }
     }
 
@@ -4132,6 +4433,10 @@ function parseApiOutput(nodeType: NodeType, data: Record<string, unknown>): Reco
   // 文本/分析结果
   if (data.text) output.text = data.text;
   if (data.prompt) output.prompt = data.prompt;
+  if (nodeType === 'ai-llm' && !output.text && Array.isArray(data.choices)) {
+    const content: unknown = data.choices[0]?.message?.content;
+    if (typeof content === 'string' && content.trim()) output.text = content;
+  }
   // optimize-prompt API 返回 { optimized: "..." } 格式
   if (data.optimized && !output.prompt) output.prompt = data.optimized;
   if (data.optimized && !output.text) output.text = data.optimized;

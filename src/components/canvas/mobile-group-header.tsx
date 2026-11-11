@@ -37,6 +37,62 @@ export function MobileGroupHeader({
   const headerRef = useRef<HTMLDivElement>(null);
   const { x, width: groupWidth, minX, minY, maxX, maxY } = bounds;
 
+  useLayoutEffect(() => {
+    const header = headerRef.current;
+    if (!header) return;
+    const doc = header.ownerDocument;
+    let tap: { button: HTMLButtonElement; id: number; x: number; y: number } | null = null;
+    const clearTap = () => { tap = null; };
+    const handleStart = (event: TouchEvent) => {
+      clearTap();
+      if (!event.isTrusted || event.touches.length !== 1 || event.changedTouches.length !== 1) return;
+      const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('button') : null;
+      if (!button || !header.contains(button) || button.matches(':disabled')) return;
+      const touch = event.changedTouches[0];
+      tap = { button, id: touch.identifier, x: touch.clientX, y: touch.clientY };
+    };
+    const clearMultiTouch = (event: TouchEvent) => { if (event.touches.length > 1) clearTap(); };
+    const handleMove = (event: TouchEvent) => {
+      if (!tap) return;
+      const touch = event.touches[0];
+      if (event.touches.length !== 1 || touch.identifier !== tap.id
+        || Math.hypot(touch.clientX - tap.x, touch.clientY - tap.y) >= 8) clearTap();
+    };
+    const handleEnd = (event: TouchEvent) => {
+      const start = tap;
+      clearTap();
+      if (!start || !event.isTrusted || !event.cancelable || event.defaultPrevented
+        || event.touches.length !== 0 || event.changedTouches.length !== 1) return;
+      const touch = event.changedTouches[0];
+      if (touch.identifier !== start.id || Math.hypot(touch.clientX - start.x, touch.clientY - start.y) >= 8
+        || !header.contains(start.button) || start.button.matches(':disabled')) return;
+      const hit = doc.elementFromPoint(touch.clientX, touch.clientY);
+      if (!hit || !start.button.contains(hit)) return;
+
+      // A tap immediately after a captured drag may receive no compatibility click.
+      event.preventDefault();
+      if (event.defaultPrevented) start.button.click();
+    };
+    doc.addEventListener('touchstart', clearMultiTouch, { capture: true, passive: true });
+    doc.addEventListener('visibilitychange', clearTap);
+    doc.defaultView?.addEventListener('blur', clearTap);
+    header.addEventListener('touchstart', handleStart, { passive: true });
+    header.addEventListener('touchmove', handleMove, { passive: true });
+    header.addEventListener('touchcancel', clearTap);
+    header.addEventListener('contextmenu', clearTap);
+    header.addEventListener('touchend', handleEnd, { passive: false });
+    return () => {
+      doc.removeEventListener('touchstart', clearMultiTouch, true);
+      doc.removeEventListener('visibilitychange', clearTap);
+      doc.defaultView?.removeEventListener('blur', clearTap);
+      header.removeEventListener('touchstart', handleStart);
+      header.removeEventListener('touchmove', handleMove);
+      header.removeEventListener('touchcancel', clearTap);
+      header.removeEventListener('contextmenu', clearTap);
+      header.removeEventListener('touchend', handleEnd);
+    };
+  }, [viewport]);
+
   useLayoutEffect((): (() => void) | undefined => {
     const header = headerRef.current;
     if (!header || !viewport || !surface) return undefined;

@@ -4,9 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { validateBinaryImage } from './binary-image-validation';
 import { readSafeBmpDimensions } from '@/lib/safe-image-input';
-import { BINARY_MEDIA_PIXEL_LIMIT, binaryExtensions } from './binary-media-contract';
+import { AssetVideoValidatorUnavailableError, BINARY_MEDIA_PIXEL_LIMIT, binaryExtensions } from './binary-media-contract';
+import { mp4UploadDiagnosticScope, type Mp4UploadDiagnosticTrace } from './mp4-upload-diagnostic';
 
-async function probe(args: string[], signal?: AbortSignal): Promise<{ stdout: string; stderr: string }> {
+async function probe(args: string[], signal?: AbortSignal, diagnostic?: Mp4UploadDiagnosticTrace): Promise<{ stdout: string; stderr: string }> {
   signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
     let failure: unknown;
@@ -16,12 +17,31 @@ async function probe(args: string[], signal?: AbortSignal): Promise<{ stdout: st
       timeout: 15_000, maxBuffer: 256 * 1024, windowsHide: true, killSignal: 'SIGKILL', encoding: 'utf8',
     }, (error, stdout, stderr) => { failure ??= error; output = { stdout, stderr }; });
     const abort = (): void => { failure ??= signal?.reason; child.kill('SIGKILL'); };
-    child.on('error', error => { failure ??= error; });
+    child.on('error', error => {
+      // A failed launch leaves pid unset, regardless of the OS error code.
+      if (child.pid === undefined && !signal?.aborted) {
+        failure = new AssetVideoValidatorUnavailableError();
+        if (diagnostic) {
+          const code = (error as NodeJS.ErrnoException).code;
+          const reason = code === 'ENOENT' ? 'launch_not_found'
+            : code === 'EACCES' || code === 'ENOEXEC' ? 'launch_not_executable' : 'launch_failed';
+          diagnostic.current = { phase: 'ffprobe', error: reason };
+        }
+      } else {
+        failure ??= error;
+      }
+    });
     signal?.addEventListener('abort', abort, { once: true });
     if (signal?.aborted) abort();
-    child.once('close', () => {
+    child.once('close', (code, terminationSignal) => {
       signal?.removeEventListener('abort', abort);
-      if (failure) reject(failure); else resolve(output);
+      if (!failure) { resolve(output); return; }
+      if (diagnostic && !(failure instanceof AssetVideoValidatorUnavailableError) && !signal?.aborted) {
+        diagnostic.current = typeof code === 'number' && code > 0 && code <= 255
+          ? { phase: 'ffprobe', error: 'exit_nonzero', exitCode: code }
+          : { phase: 'ffprobe', error: terminationSignal ? 'terminated' : 'execution_failed' };
+      }
+      reject(failure);
     });
   });
 }
@@ -182,6 +202,8 @@ export async function inspectNewBinaryMedia(bytes: Buffer, mimeType: string, sig
     await validateBinaryImage(bytes, mimeType, signal);
     return undefined;
   }
+  const diagnostic = mimeType === 'video/mp4' ? mp4UploadDiagnosticScope.getStore() : undefined;
+  if (diagnostic) diagnostic.current = { phase: 'mp4_structure' };
   if (mimeType === 'video/webm') validateWebm(bytes, budget);
   else {
     const top = boxes(bytes, budget, 0, bytes.length, true);
@@ -191,28 +213,35 @@ export async function inspectNewBinaryMedia(bytes: Buffer, mimeType: string, sig
     if (!top.some(box => box.type === 'moov') || !top.some(box => box.type === 'mdat' && box.end > box.start)) invalid();
     validateMovReferences(bytes, top, budget);
   }
+  if (diagnostic) diagnostic.current = { phase: 'probe_input' };
   const directory = await mkdtemp(join(tmpdir(), 'wujie-media-validate-'));
   const filename = join(directory, `input.${binaryExtensions(mimeType)?.[0]}`);
+  let verified: VerifiedMediaDimensions;
   try {
     await writeFile(filename, bytes, { flag: 'wx', signal });
+    if (diagnostic) diagnostic.current = { phase: 'ffprobe', error: 'execution_failed' };
     const { stdout, stderr } = await probe([
       '-v', 'error', '-max_alloc', '67108864', '-threads', '1',
       '-protocol_whitelist', 'file', '-format_whitelist', 'mov,matroska,webm',
       ...(mimeType === 'video/webm' ? [] : ['-enable_drefs', '0', '-use_absolute_path', '0']),
       '-count_packets', '-show_entries', 'stream=codec_type,width,height,nb_read_packets:format=format_name',
       '-of', 'json', filename,
-    ], signal);
+    ], signal, diagnostic);
+    if (diagnostic) diagnostic.current = { phase: 'ffprobe', error: 'result_rejected' };
     if (stderr.trim()) invalid();
     const result = JSON.parse(stdout) as { streams?: Array<{ codec_type?: string; width?: number; height?: number; nb_read_packets?: string }>; format?: { format_name?: string } };
     const stream = result.streams?.find(item => item.codec_type === 'video' && Number(item.nb_read_packets) > 0);
     if (!stream || !(mimeType === 'video/webm' ? result.format?.format_name?.includes('webm') : result.format?.format_name?.includes('mov'))) invalid();
     dimensions(stream.width ?? 0, stream.height ?? 0);
     signal?.throwIfAborted();
-    return { width: stream.width!, height: stream.height! };
+    verified = { width: stream.width!, height: stream.height! };
+    if (diagnostic) diagnostic.current = { phase: 'probe_input' };
   } finally {
     await rm(filename, { force: true });
     await rmdir(directory);
   }
+  if (diagnostic) diagnostic.current = { phase: 'import' };
+  return verified;
 }
 
 /** Preserve the validation-only API for recovery and existing callers. */

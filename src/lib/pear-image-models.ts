@@ -54,5 +54,6 @@ export const PEAR_IMAGE_MODEL_SPECS: Readonly<Record<string, PearImageModelSpec>
 };
 
 export function getPearImageModelSpec(modelId: string): PearImageModelSpec | undefined {
-  return PEAR_IMAGE_MODEL_SPECS[modelId.trim().toLowerCase()];
+  const id = modelId.trim().toLowerCase();
+  return Object.hasOwn(PEAR_IMAGE_MODEL_SPECS, id) ? PEAR_IMAGE_MODEL_SPECS[id] : undefined;
 }

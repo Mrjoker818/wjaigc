@@ -2,12 +2,13 @@
  * 流程E：业务模块遍历 E2E 测试
  * 覆盖: 每个菜单模块能否打开 / 是否有JS异常 / 默认状态
  */
+import { requireTestCredential } from '../helpers/e2e-credentials';
 import { test, expect } from '@playwright/test';
 import { collectBrowserEvidence, saveBrowserEvidence } from '../helpers/evidence';
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:5000';
-const USERNAME = process.env.E2E_TEST_USERNAME || 'Mr.joker';
-const PASSWORD = process.env.E2E_TEST_PASSWORD || 'Wujie#2026Reset';
+const USERNAME = requireTestCredential('E2E_TEST_USERNAME');
+const PASSWORD = requireTestCredential('E2E_TEST_PASSWORD');
 
 // 已知可容忍的控制台错误模式
 const TOLERABLE_ERRORS = [

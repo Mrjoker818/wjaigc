@@ -4,15 +4,17 @@ import { useEffect, useRef, useState, type ReactElement } from "react";
 import { Check, Copy, Link2, Loader2, Share2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { expectedActorHeaders } from "@/lib/expected-actor-header";
 
 interface ShareDialogProps {
+  userId: string;
   conversationId: string;
   conversationTitle: string;
   messages: Array<{ id: string; role: string; content: string; images?: string[]; timestamp?: number | string }>;
   onClose: () => void;
 }
 
-export function ShareDialog({ conversationId, conversationTitle, messages, onClose }: ShareDialogProps): ReactElement {
+export function ShareDialog({ userId, conversationId, conversationTitle, messages, onClose }: ShareDialogProps): ReactElement {
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [isCopying, setIsCopying] = useState(false);
@@ -32,21 +34,36 @@ export function ShareDialog({ conversationId, conversationTitle, messages, onClo
     setIsCreating(true);
     setError("");
     try {
+      const key = JSON.stringify(["simple-chat-share", userId, conversationId]);
+      const pendingOperation = sessionStorage.getItem(key);
+      const operation = pendingOperation ?? crypto.randomUUID();
+      if (!pendingOperation) sessionStorage.setItem(key, operation);
       const res = await fetch("/api/simple-chat/share", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": operation,
+          ...expectedActorHeaders(userId),
+        },
         body: JSON.stringify({ conversationId, title: conversationTitle, messages: shareableMessages }),
       });
       const value: unknown = await res.json();
       if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("分享返回结果无效，请先核对创建结果。");
       const data = value as Record<string, unknown>;
-      if (!res.ok) throw new Error(typeof data.error === "string" && data.error ? data.error : "创建分享失败");
-      if (typeof data.shareId !== "string" || !/^[0-9a-f]{16}$/.test(data.shareId) || data.shareUrl !== "/shared/" + data.shareId) {
-        throw new Error("分享返回的链接无效，请先核对创建结果，不要重复创建。");
+      if (!res.ok) {
+        if (res.status === 410 && sessionStorage.getItem(key) === operation) sessionStorage.removeItem(key);
+        throw new Error(typeof data.error === "string" && data.error ? data.error : "创建分享失败");
       }
-      if (mounted.current) setShareUrl(window.location.origin + data.shareUrl);
+      if (typeof data.shareId !== "string" || !/^[0-9a-f]{16}$/.test(data.shareId) || data.shareUrl !== "/shared/" + data.shareId) {
+        throw new Error("分享返回的链接无效。再次点击创建可找回原链接。");
+      }
+      if (mounted.current) {
+        if (sessionStorage.getItem(key) === operation) sessionStorage.removeItem(key);
+        setShareUrl(window.location.origin + data.shareUrl);
+      }
     } catch (err) {
       if (mounted.current) {
-        const message = err instanceof SyntaxError ? "分享返回格式异常，创建结果未确认，请勿重复创建。" : err instanceof Error ? err.message : "创建分享失败";
+        const message = err instanceof SyntaxError ? "分享返回格式异常。再次点击创建可找回原链接。" : err instanceof Error ? err.message : "创建分享失败";
         setError(message);
         toast.error(message);
       }

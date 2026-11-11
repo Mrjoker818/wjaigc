@@ -13,6 +13,7 @@ import {
   getCloudTaskForUser,
   refundCloudTaskCredits,
   terminateCloudTaskAndRefund,
+  updateCloudTask,
 } from '@/lib/cloud-task-storage';
 import { errorResponse, getRequestId } from '@/lib/request-id';
 import { inferTaskErrorSource } from '@/lib/task-core/task-error';
@@ -62,6 +63,23 @@ export async function POST(request: NextRequest) {
     }
     if (sketchCandidate?.type === 'sketch-to-code' || taskId.startsWith('sketch_')) {
       return cancelSketchTask(body, sketchCandidate, user.id, requestId);
+    }
+    if (sketchCandidate?.type === 'display3d') {
+      if (sketchCandidate.userId !== user.id && user.role !== 'admin') {
+        return NextResponse.json({ success: false, error: '任务不存在或无权取消' }, { status: 404 });
+      }
+      if (sketchCandidate.status !== 'cancelled' && !await updateCloudTask(taskId, {
+        status: 'cancelled', progress: 0, expectedStatuses: ['queued', 'pending', 'processing'],
+      })) {
+        const current = await getCloudTaskById(taskId);
+        if (current?.status !== 'cancelled') {
+          return NextResponse.json({ success: false, error: '任务状态已变化，无法取消', status: current?.status }, { status: 409 });
+        }
+      }
+      cancelTask(taskId);
+      updateTaskProgress(taskId, { status: 'cancelled', progress: 0 });
+      return NextResponse.json({ success: true, message: '任务取消请求已发送',
+        task: { taskId, type: 'display3d', status: 'cancelled', progress: 0 } });
     }
 
     // 检查任务是否存在于注册中心

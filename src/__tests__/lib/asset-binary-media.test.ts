@@ -21,6 +21,7 @@ vi.mock('@/lib/asset-core/cleanup-outbox', () => ({
 import { persistAssetBytes, recoverExportAssetBytes, validateAssetBinaryFormat } from '@/lib/asset-core/binary-persistence';
 import { GET } from '@/app/api/serve-upload/[...path]/route';
 import { validateNewBinaryMedia } from '@/lib/asset-core/binary-media-validation';
+import { mediaImportFailure } from '@/lib/collaboration/document-media-request';
 
 function box(type: string, payload: Buffer): Buffer {
   const header = Buffer.alloc(8); header.writeUInt32BE(8 + payload.length); header.write(type, 4);
@@ -112,6 +113,21 @@ describe('Task8B2a binary media', () => {
     const file = await persistAssetBytes({ bytes, filename: `source-size.${extension}`, mimeType: `video/${extension}` });
     expect(file).toMatchObject({ width: 32, height: 24, byteSize: bytes.length });
     expect(await readFile(join(state.root, 'exports', file.url.split('/').at(-1)!))).toEqual(bytes);
+  });
+
+  it('reports missing ffprobe as a server dependency failure for a valid MP4', async () => {
+    const bytes = await video('mp4');
+    const emptyPath = join(state.root, 'empty-path');
+    await mkdir(emptyPath);
+    vi.stubEnv('PATH', emptyPath);
+    try {
+      const failure = await validateAssetBinaryFormat(bytes, 'video/mp4').catch((error: unknown) => error);
+      const response = mediaImportFailure(failure);
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ success: false, code: 'DOCUMENT_VIDEO_VALIDATOR_UNAVAILABLE' });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('persists verified PNG pixels independently of any canvas display size', async () => {

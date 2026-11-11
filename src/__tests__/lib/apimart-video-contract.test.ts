@@ -131,6 +131,7 @@ describe('APIMart per-model submit fields', () => {
     const submitted = body('gemini-omni-flash-preview', { duration: 10, aspectRatio: '9:16' });
     expect(submitted).not.toHaveProperty('duration');
     expect(submitted.aspect_ratio).toBe('9:16');
+    expect(() => body('gemini-omni-flash-preview', { duration: 5 })).toThrow(/duration/);
   });
 
   it('polls the task endpoint with language=zh', () => {

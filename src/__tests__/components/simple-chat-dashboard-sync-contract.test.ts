@@ -8,6 +8,7 @@ import { resolve } from 'node:path';
 
 import type { SimpleChatProject } from '@/components/simple-chat/simple-chat-types';
 import * as syncClient from '@/lib/simple-chat-sync-client';
+import { readDashboardProjects } from '@/lib/simple-chat-dashboard-read';
 import type { SimpleChatEnvelopeStore } from '@/lib/simple-chat-sync-storage';
 import type { User } from '@/lib/user-types';
 
@@ -40,7 +41,7 @@ describe('simple chat dashboard synchronization contract', () => {
   it('prefers a validated server projection and returns a clone without reading or writing IDB', async () => {
     const remote = [project('remote')];
     const store = storeWith([project('local')]);
-    const fetchImpl = vi.fn(async () => Response.json({ success: true, value: remote, syncRevision: 4 }));
+    const fetchImpl = vi.fn(async () => Response.json({ success: true, userId: 'user-a', value: remote, syncRevision: 4 }));
 
     const loaded = await syncClient.loadSimpleChatDashboardProjects({ userId: 'user-a', store, fetchImpl });
     loaded[0].name = 'mutated';
@@ -49,7 +50,7 @@ describe('simple chat dashboard synchronization contract', () => {
     expect(loaded.map(item => item.id)).toEqual(['remote']);
     expect(fetchImpl).toHaveBeenCalledWith(
       '/api/user-data/sync?key=chat_simple_projects',
-      expect.objectContaining({ method: 'GET', credentials: 'include' }),
+      expect.objectContaining({ method: 'GET', credentials: 'include', headers: { 'x-wujie-expected-actor-id': 'user-a' } }),
     );
     expect(store.get).not.toHaveBeenCalled();
     expect(store.put).not.toHaveBeenCalled();
@@ -59,7 +60,7 @@ describe('simple chat dashboard synchronization contract', () => {
     ['network failure', () => Promise.reject(new Error('offline'))],
     ['rate limit', () => Promise.resolve(new Response('{}', { status: 429 }))],
     ['server failure', () => Promise.resolve(new Response('{}', { status: 503 }))],
-    ['invalid response', () => Promise.resolve(Response.json({ success: true, value: 'bad' }))],
+    ['invalid response', () => Promise.resolve(Response.json({ success: true, userId: 'user-a', value: 'bad' }))],
   ])('falls back to only the current user IDB envelope after %s', async (_name, response) => {
     const local = [project('local')];
     const store = storeWith(local);
@@ -73,6 +74,15 @@ describe('simple chat dashboard synchronization contract', () => {
     expect(store.get).toHaveBeenCalledWith('user-a');
     expect(store.put).not.toHaveBeenCalled();
     expect(store.delete).not.toHaveBeenCalled();
+  });
+
+  it.each(['user-b', undefined])('fails closed for a 200 projection with owner %s', async userId => {
+    const store = storeWith([project('local')]);
+    const fetchImpl = vi.fn(async () => Response.json({ success: true, userId, value: [project('private')] }));
+    await expect(readDashboardProjects({ userId: 'user-a', store, fetchImpl })).resolves.toEqual({
+      kind: 'auth', projects: [],
+    });
+    expect(store.get).not.toHaveBeenCalled();
   });
 
   it.each([401, 403])('does not read IDB after an authorization response (%s)', async status => {

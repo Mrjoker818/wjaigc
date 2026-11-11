@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useId } from 'react';
-import { Play, Pause, Volume2, VolumeX, RotateCcw, Download, Sparkles, X, Film, Clock, Wand2, Loader2 } from 'lucide-react';
+import React, { useState, useRef, useLayoutEffect, useId } from 'react';
+import { Play, Pause, Volume2, VolumeX, RotateCcw, Sparkles, X, Film, Clock, Wand2, Loader2 } from 'lucide-react';
+import { useModalFocus } from './canvas/use-modal-focus';
 
 interface VideoEditPanelProps {
   /** 是否打开 */
@@ -18,7 +19,7 @@ interface VideoEditPanelProps {
   themeStyle?: 'gold' | 'monochrome';
   /** 关闭回调 */
   onClose: () => void;
-  /** 编辑提交回调 */
+  /** 提交受理后完成，失败时抛出错误，由当前面板决定是否关闭。 */
   onEdit: (params: {
     videoUrl: string;
     thumbnailUrl?: string;
@@ -26,23 +27,27 @@ interface VideoEditPanelProps {
     duration?: number;
     model?: string;
     providerId?: string;
-  }) => void;
-  /** 延长提交回调 */
+  }) => void | Promise<void>;
+  /** 提交受理后完成，失败时抛出错误，由当前面板决定是否关闭。 */
   onExtend?: (params: {
     videoUrl: string;
     prompt?: string;
     duration?: number;
     model?: string;
     providerId?: string;
-  }) => void;
+  }) => void | Promise<void>;
   /** 当前选中的视频模型 */
   selectedVideoModel?: string;
   /** 当前选中的视频提供商ID */
   selectedVideoProviderId?: string;
 }
 
-export function VideoEditPanel({
-  isOpen,
+export function VideoEditPanel({ isOpen, ...props }: VideoEditPanelProps) {
+  if (!isOpen) return null;
+  return <VideoEditSession key={JSON.stringify([props.videoUrl, props.initialTab ?? 'edit'])} {...props} />;
+}
+
+function VideoEditSession({
   videoUrl,
   thumbnailUrl,
   originalPrompt = '',
@@ -53,7 +58,7 @@ export function VideoEditPanel({
   onExtend,
   selectedVideoModel,
   selectedVideoProviderId,
-}: VideoEditPanelProps) {
+}: Omit<VideoEditPanelProps, 'isOpen'>) {
   const [editPrompt, setEditPrompt] = useState('');
   const [extendPrompt, setExtendPrompt] = useState('');
   const [activeTab, setActiveTab] = useState<'edit' | 'extend'>(initialTab);
@@ -61,111 +66,85 @@ export function VideoEditPanel({
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<{ tab: 'edit' | 'extend'; message: string } | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const active = useRef(false);
+  const pending = useRef(false);
   const isDark = themeStyle === 'gold';
   const fieldId = useId();
 
-  useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    if (isOpen) window.addEventListener('keydown', handleEsc);
-    return () => window.removeEventListener('keydown', handleEsc);
-  }, [isOpen, onClose]);
-
-  useEffect(() => {
-    if (!isOpen) {
-      setEditPrompt('');
-      setExtendPrompt('');
-      setActiveTab('edit');
-      setIsPlaying(false);
-      setIsSubmitting(false);
-      setSubmitError(null);
-    } else {
-      setActiveTab(initialTab);
-    }
-  }, [isOpen, initialTab]);
-
-  // 同步 video 元素真实状态（防止外部控制/快捷键导致状态不一致）
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v || !isOpen) return;
-    const syncPlay = () => setIsPlaying(!v.paused);
-    const syncMute = () => setIsMuted(v.muted);
-    v.addEventListener('play', syncPlay);
-    v.addEventListener('pause', syncPlay);
-    v.addEventListener('ended', syncPlay);
-    v.addEventListener('volumechange', syncMute);
-    return () => {
-      v.removeEventListener('play', syncPlay);
-      v.removeEventListener('pause', syncPlay);
-      v.removeEventListener('ended', syncPlay);
-      v.removeEventListener('volumechange', syncMute);
-    };
-  }, [isOpen, videoUrl]);
+  const handleClose = () => {
+    active.current = false;
+    onClose();
+  };
+  useModalFocus(dialogRef, closeRef, handleClose);
+  useLayoutEffect(() => {
+    active.current = true;
+    return () => { active.current = false; };
+  }, []);
 
   const togglePlay = () => {
-    if (!videoRef.current) return;
-    if (isPlaying) {
-      videoRef.current.pause();
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) {
+      void video.play().catch(() => {});
     } else {
-      videoRef.current.play();
+      video.pause();
     }
-    setIsPlaying(!isPlaying);
   };
 
   const toggleMute = () => {
-    if (videoRef.current) {
-      videoRef.current.muted = !isMuted;
-    }
-    setIsMuted(!isMuted);
+    const video = videoRef.current;
+    if (!video) return;
+    video.muted = !video.muted;
+    setIsMuted(video.muted);
   };
 
-  const handleSubmitEdit = async () => {
-    if (!editPrompt.trim() || isSubmitting) return;
+  const submit = async (tab: 'edit' | 'extend', request: () => void | Promise<void>) => {
+    if (!active.current || pending.current) return;
+    pending.current = true;
     setIsSubmitting(true);
     setSubmitError(null);
     try {
-      await onEdit({
-        videoUrl,
-        thumbnailUrl: thumbnailUrl || undefined,
-        prompt: editPrompt.trim(),
-        model: selectedVideoModel,
-        providerId: selectedVideoProviderId,
-      });
+      await request();
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : '提交失败');
+      if (active.current) setSubmitError({ tab, message: err instanceof Error ? err.message : '提交失败' });
+      return;
     } finally {
-      setIsSubmitting(false);
+      pending.current = false;
+      if (active.current) setIsSubmitting(false);
     }
+    if (active.current) handleClose();
   };
 
-  const handleSubmitExtend = async () => {
-    if (!onExtend || isSubmitting) return;
-    setIsSubmitting(true);
-    setSubmitError(null);
-    try {
-      await onExtend({
-        videoUrl,
-        prompt: extendPrompt.trim() || undefined,
-        duration: extendDuration,
-        model: selectedVideoModel,
-        providerId: selectedVideoProviderId,
-      });
-    } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : '提交失败');
-    } finally {
-      setIsSubmitting(false);
-    }
+  const handleSubmitEdit = () => {
+    if (!editPrompt.trim()) return;
+    void submit('edit', () => onEdit({
+      videoUrl,
+      thumbnailUrl: thumbnailUrl || undefined,
+      prompt: editPrompt.trim(),
+      model: selectedVideoModel,
+      providerId: selectedVideoProviderId,
+    }));
   };
 
-  if (!isOpen) return null;
+  const handleSubmitExtend = () => {
+    if (!onExtend) return;
+    void submit('extend', () => onExtend({
+      videoUrl,
+      prompt: extendPrompt.trim() || undefined,
+      duration: extendDuration,
+      model: selectedVideoModel,
+      providerId: selectedVideoProviderId,
+    }));
+  };
 
   return (
-    <div className={`fixed inset-0 z-[250] flex items-center justify-center ${isDark ? 'bg-black/70' : 'bg-black/50'}`}
-      role="dialog" aria-modal="true" aria-label="视频编辑" data-modal="video-edit"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div ref={dialogRef} className={`fixed inset-0 z-[250] flex items-center justify-center ${isDark ? 'bg-black/70' : 'bg-black/50'}`}
+      role="dialog" aria-modal="true" aria-label="视频编辑" data-modal="video-edit" tabIndex={-1}
+      onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}>
       <div
         className={`relative w-[min(560px,calc(100vw-1rem))] max-h-[calc(100dvh-1rem)] min-h-0 flex flex-col rounded-2xl shadow-2xl [&_button]:inline-flex [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:shrink-0 [&_button]:items-center [&_button]:justify-center [&_button]:whitespace-nowrap ${isDark ? 'bg-[#1a1a1a] border border-[#2a2a2a]' : 'bg-white border border-gray-200'}`}
       >
@@ -175,7 +154,7 @@ export function VideoEditPanel({
             <Film className={`w-5 h-5 ${isDark ? 'text-[#d4af37]' : 'text-blue-500'}`} />
             <h2 className={`text-base font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>视频编辑</h2>
           </div>
-          <button onClick={onClose} aria-label="关闭视频编辑" className={`p-1.5 rounded-lg transition-colors ${isDark ? 'text-gray-400 hover:text-white hover:bg-[#2a2a2a]' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'}`}>
+          <button ref={closeRef} type="button" onClick={handleClose} aria-label="关闭视频编辑" className={`p-1.5 rounded-lg transition-colors ${isDark ? 'text-gray-400 hover:text-white hover:bg-[#2a2a2a]' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'}`}>
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -194,6 +173,7 @@ export function VideoEditPanel({
                 onPlay={() => setIsPlaying(true)}
                 onPause={() => setIsPlaying(false)}
                 onEnded={() => setIsPlaying(false)}
+                onVolumeChange={event => setIsMuted(event.currentTarget.muted)}
               />
               <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3 flex items-center gap-3">
                 <button onClick={togglePlay} aria-label={isPlaying ? '暂停' : '播放'} className="text-white hover:text-[#d4af37] transition-colors">
@@ -261,8 +241,8 @@ export function VideoEditPanel({
                   原始描述：{originalPrompt}
                 </div>
               )}
-              {submitError && (
-                <div className="text-xs px-3 py-2 rounded-lg bg-red-500/10 text-red-400 border border-red-500/20">{submitError}</div>
+              {submitError?.tab === 'edit' && (
+                <div role="alert" className="text-xs px-3 py-2 rounded-lg bg-red-500/10 text-red-400 border border-red-500/20">{submitError.message}</div>
               )}
               <button
                 onClick={handleSubmitEdit}
@@ -315,8 +295,8 @@ export function VideoEditPanel({
               </div>
               {onExtend && (
                 <>
-                  {submitError && (
-                    <div className="text-xs px-3 py-2 rounded-lg bg-red-500/10 text-red-400 border border-red-500/20">{submitError}</div>
+                  {submitError?.tab === 'extend' && (
+                    <div role="alert" className="text-xs px-3 py-2 rounded-lg bg-red-500/10 text-red-400 border border-red-500/20">{submitError.message}</div>
                   )}
                   <button
                     onClick={handleSubmitExtend}

@@ -267,6 +267,12 @@ describe('document canvas file upload', () => {
       projectId: 'project-a', idempotencyKey: 'intent-a', transform })).rejects.toMatchObject({ code });
   });
 
+  it('distinguishes an unavailable video validator from a busy upload', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ success: false, code: 'DOCUMENT_VIDEO_VALIDATOR_UNAVAILABLE' }, { status: 503 })));
+    await expect(uploadDocumentCanvasFile({ file: new File(['video'], 'synthetic.mp4', { type: 'video/mp4' }),
+      projectId: 'project-a', idempotencyKey: 'intent-video', transform })).rejects.toMatchObject({ code: 'video-validator-unavailable' });
+  });
+
   it('keeps the replay key when media refresh fails and clears it only after confirmation', async () => {
     const file = new File(['png'], 'a.png', { type: 'image/png', lastModified: 123 });
     const firstKey = await getDocumentCanvasUploadIntent('project-a', file);

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useLayoutEffect } from 'react';
 import { X, Sparkles, Send, Merge, ChevronDown, ChevronUp, RotateCcw, Check } from 'lucide-react';
 
 /* ─── 方程式字段定义 ─── */
@@ -63,11 +63,34 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
     const [isOptimizing, setIsOptimizing] = useState(false);
     const [collapsedFields, setCollapsedFields] = useState<Record<string, boolean>>({});
     const resultRef = useRef<HTMLTextAreaElement>(null);
+    const optimizationRef = useRef<AbortController | null>(null);
+
+    const invalidateOptimization = useCallback(() => {
+        const request = optimizationRef.current;
+        optimizationRef.current = null;
+        request?.abort();
+    }, []);
+
+    const stopOptimization = useCallback(() => {
+        invalidateOptimization();
+        setIsOptimizing(false);
+    }, [invalidateOptimization]);
+
+    useLayoutEffect(() => {
+        if (!open) setIsOptimizing(false);
+        return invalidateOptimization;
+    }, [open, invalidateOptimization]);
+
+    const handleClose = useCallback(() => {
+        stopOptimization();
+        onClose();
+    }, [stopOptimization, onClose]);
 
     // 更新字段值
     const updateField = useCallback((key: string, value: string) => {
+        stopOptimization();
         setFields(prev => ({ ...prev, [key]: value }));
-    }, []);
+    }, [stopOptimization]);
 
     // 切换字段折叠
     const toggleCollapse = useCallback((key: string) => {
@@ -76,26 +99,31 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
 
     // 合成
     const handleSynthesize = useCallback(() => {
+        stopOptimization();
         const text = synthesize(fields);
         setResultText(text);
         setOriginalText(text);
         setOptimizedText('');
         setUseOptimized(false);
-    }, [fields]);
+    }, [fields, stopOptimization]);
 
     // 一键优化
     const handleOptimize = useCallback(async () => {
+        if (!open || optimizationRef.current) return;
         if (!resultText.trim()) {
             handleSynthesize();
         }
         const textToOptimize = resultText.trim() || synthesize(fields);
         if (!textToOptimize.trim()) return;
 
+        const request = new AbortController();
+        optimizationRef.current = request;
         setIsOptimizing(true);
         try {
             const res = await fetch('/api/optimize-prompt', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                signal: request.signal,
                 body: JSON.stringify({
                     prompt: textToOptimize,
                     model: chatModel || '',
@@ -111,6 +139,7 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
                 }),
             });
             const data = await res.json();
+            if (optimizationRef.current !== request) return;
             if (data.success && data.optimized) {
                 // 清理思考过程，只保留优化后的关键词
                 let cleaned = data.optimized.trim();
@@ -127,29 +156,34 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
                 alert(data.error || '优化失败，请重试');
             }
         } catch (err) {
+            if (optimizationRef.current !== request) return;
             console.error('Optimize error:', err);
             alert('优化请求失败，请重试');
         } finally {
-            setIsOptimizing(false);
+            if (optimizationRef.current === request) {
+                optimizationRef.current = null;
+                setIsOptimizing(false);
+            }
         }
-    }, [resultText, fields, chatModel, handleSynthesize]);
+    }, [open, resultText, fields, chatModel, handleSynthesize]);
 
     // 发送提示词
     const handleSend = useCallback(() => {
         const finalText = useOptimized && optimizedText ? optimizedText : (resultText || synthesize(fields));
         if (!finalText.trim()) return;
         onSendToPrompt(finalText.trim());
-        onClose();
-    }, [useOptimized, optimizedText, resultText, fields, onSendToPrompt, onClose, synthesize]);
+        handleClose();
+    }, [useOptimized, optimizedText, resultText, fields, onSendToPrompt, handleClose]);
 
     // 重置
     const handleReset = useCallback(() => {
+        stopOptimization();
         setFields({});
         setResultText('');
         setOriginalText('');
         setOptimizedText('');
         setUseOptimized(false);
-    }, []);
+    }, [stopOptimization]);
 
     if (!open) return null;
 
@@ -170,7 +204,7 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
         <div
             className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
             style={{ background: overlayBg }}
-            onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+            onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}
         >
             <div
                 className="relative flex flex-col rounded-2xl overflow-hidden shadow-2xl"
@@ -191,7 +225,7 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
                         </span>
                     </div>
                     <button
-                        onClick={onClose}
+                        onClick={handleClose}
                         aria-label="关闭提示词方程式"
                         className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg transition-colors hover:opacity-80"
                         style={{ color: textSecondary }}
@@ -358,6 +392,7 @@ export function PromptEquation({ open, onClose, onSendToPrompt, chatModel, isMon
                                 aria-label="合成结果"
                                 value={useOptimized && optimizedText ? optimizedText : resultText}
                                 onChange={(e) => {
+                                    stopOptimization();
                                     if (useOptimized && optimizedText) {
                                         setOptimizedText(e.target.value);
                                     } else {

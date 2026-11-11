@@ -1,9 +1,10 @@
 import { createHmac, randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import { join, resolve } from 'node:path';
 
-import { describe, expect, it, vi } from 'vitest';
+import { NextRequest } from 'next/server';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   countLegacyCredentialUsers,
@@ -17,8 +18,13 @@ import {
   type AuthUserProfileFields,
 } from '@/lib/auth/auth-repository';
 import { refreshAuthJsonFileAtomic } from '@/lib/auth/auth-persistence';
+import {
+  createLegacyPasswordHash,
+  createScryptCredential,
+  verifyScryptCredential,
+} from '@/lib/auth/auth-password';
 import { deriveAuthSecretKid, type AuthSecretRingV1 } from '@/lib/auth/auth-secret-ring';
-import { closePool } from '@/lib/db-client';
+import { closePool, getPool } from '@/lib/db-client';
 import { dbUpsertUser, dbWriteUsers, migrateFileDataToDb } from '@/lib/db-storage';
 import {
   type QueryFn,
@@ -954,6 +960,256 @@ describe('V5.8.8 authentication repository on real isolated PostgreSQL', () => {
         ['auth_secret_ring_v1'],
       );
       expect(rawAfter.rows).toEqual(rawBefore.rows);
+    });
+  });
+});
+
+describe('deployment database-only authentication', () => {
+  const bootstrapName = 'deployment-bootstrap-admin';
+  const bootstrapPassword = 'fixture-bootstrap-password';
+  const storedPassword = 'fixture-stored-password';
+  const ring: AuthSecretRingV1 = {
+    version: 1,
+    active: { kid: deriveAuthSecretKid(configuredSecret), secret: configuredSecret, activatedAt: now },
+    previous: {
+      kid: deriveAuthSecretKid(legacySecret), secret: legacySecret,
+      activatedAt: now - 1_000, retiredAt: now,
+    },
+    updatedAt: now,
+  };
+  const configurationError = {
+    success: false,
+    code: 'AUTH_CONFIGURATION_UNAVAILABLE',
+    error: 'Authentication configuration is unavailable.',
+    retryable: true,
+  };
+  let dataRoot: string;
+
+  beforeEach(async () => {
+    dataRoot = await mkdtemp(join(os.tmpdir(), 'wujie-deployed-auth-'));
+    vi.stubEnv('COZE_PROJECT_ENV', 'PROD');
+    vi.stubEnv('WUJIE_DEPLOYMENT_DB_ONLY', '1');
+    vi.stubEnv('WUJIE_AUTH_PERSISTENCE_MODE', 'DB_ONLY');
+    vi.stubEnv('WUJIE_DATA_DIR', dataRoot);
+    vi.stubEnv('WUJIE_ADMIN_USERNAME', bootstrapName);
+    vi.stubEnv('WUJIE_ADMIN_PASSWORD', undefined);
+    vi.stubEnv('WUJIE_AUTH_SECRET', undefined);
+    vi.stubEnv('NEXTAUTH_SECRET', undefined);
+    vi.resetModules();
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await rm(dataRoot, { recursive: true, force: true });
+  });
+
+  function loginRequest(name: string, password: string, profile?: Record<string, unknown>): NextRequest {
+    return new NextRequest('http://localhost/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name, password, productType: 'canvas', profile }),
+    });
+  }
+
+  async function storeRing(query: QueryFn): Promise<void> {
+    await query(
+      'INSERT INTO wujie_system_settings(key, value, updated_at) VALUES ($1, $2::jsonb, $3)',
+      ['auth_secret_ring_v1', JSON.stringify(ring), now],
+    );
+  }
+
+  postgresIt('signs in a restored admin with the stored ring and no bootstrap env', async () => {
+    await withAuthPostgres('deployed_auth_restored_admin', async ({ query }) => {
+      await createAuthTables(query);
+      await storeRing(query);
+      const storedCredential = await createScryptCredential(storedPassword);
+      await query(
+        `INSERT INTO wujie_users (id, name, password_hash, credential_hash, role, created_at, updated_at)
+         VALUES ('admin_mr_joker', 'Restored Admin', '', $1, 'admin', $2, $2)`,
+        [storedCredential, now],
+      );
+      const { POST } = await import('@/app/api/auth/login/route');
+      const { getProductionAuthConfigurationIssues, getSessionUser, listManagedUsersWithClient } =
+        await import('@/lib/server-auth');
+
+      const response = await POST(loginRequest('Restored Admin', storedPassword));
+      expect(response.status).toBe(200);
+      const sessionRequest = new NextRequest('http://localhost/api/auth/me', {
+        headers: { cookie: `wujie_session=${response.cookies.get('wujie_session')?.value}` },
+      });
+      await expect(getSessionUser(sessionRequest)).resolves.toMatchObject({
+        id: 'admin_mr_joker', name: 'Restored Admin', role: 'admin', productType: 'canvas,chat',
+      });
+      expect(getProductionAuthConfigurationIssues()).toEqual([]);
+
+      await query(
+        `INSERT INTO wujie_users (id, name, password_hash, credential_hash, product_type, api_permissions, created_at, updated_at)
+         VALUES ('ordinary-user', $1, '', $2, 'canvas', '{"chat":false}'::jsonb, $3, $3)`,
+        [bootstrapName, storedCredential, now],
+      );
+      const email = 'fixture-updated@example.test';
+      const ordinaryLogin = await POST(loginRequest(bootstrapName, storedPassword, {
+        email, role: 'admin', status: 'disabled', apiPermissions: { chat: true },
+      }));
+      expect(ordinaryLogin.status).toBe(200);
+      await expect(ordinaryLogin.json()).resolves.toMatchObject({ user: {
+        id: 'ordinary-user', role: 'user', status: 'active', email, apiPermissions: { chat: false },
+      } });
+      const client = await getPool().connect();
+      try {
+        expect(await listManagedUsersWithClient(client)).toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            id: 'ordinary-user', role: 'user', status: 'active', email,
+            apiPermissions: expect.objectContaining({ chat: false }),
+          }),
+        ]));
+      } finally {
+        client.release();
+      }
+      expect((await query('SELECT value, updated_at FROM wujie_system_settings')).rows)
+        .toEqual([{ value: ring, updated_at: String(now) }]);
+    });
+  });
+
+  postgresIt('migrates a stored legacy password and honors an explicit signing-ring rotation', async () => {
+    await withAuthPostgres('deployed_auth_legacy', async ({ query }) => {
+      await createAuthTables(query);
+      await storeRing(query);
+      vi.stubEnv('WUJIE_AUTH_PERSISTENCE_MODE', 'DB_PLUS_FILE');
+      const passwordHash = createLegacyPasswordHash(storedPassword, legacySecret);
+      await query(
+        `INSERT INTO wujie_users (id, name, password_hash, role, product_type, created_at, updated_at)
+         VALUES ('legacy-admin', $1, $2, 'admin', 'canvas', $3, $3)`,
+        [bootstrapName, passwordHash, now],
+      );
+      const { POST } = await import('@/app/api/auth/login/route');
+      expect((await POST(loginRequest(bootstrapName, storedPassword))).status).toBe(200);
+      const { rows } = await query<{ password_hash: string; credential_hash: string }>(
+        "SELECT password_hash, credential_hash FROM wujie_users WHERE id = 'legacy-admin'",
+      );
+      expect(rows[0].password_hash).toBe(passwordHash);
+      await expect(verifyScryptCredential(storedPassword, rows[0].credential_hash)).resolves.toBe(true);
+      expect((await query('SELECT value, updated_at FROM wujie_system_settings')).rows)
+        .toEqual([{ value: ring, updated_at: String(now) }]);
+
+      const rotatedSecret = 'fixture-rotation-auth-secret-0123456789abcdef';
+      vi.stubEnv('WUJIE_AUTH_SECRET', rotatedSecret);
+      vi.resetModules();
+      const { POST: rotatedLogin } = await import('@/app/api/auth/login/route');
+      expect((await rotatedLogin(loginRequest(bootstrapName, storedPassword))).status).toBe(200);
+      await expect(readDatabaseSecretRing()).resolves.toMatchObject({
+        active: { kid: deriveAuthSecretKid(rotatedSecret), secret: rotatedSecret },
+        previous: { kid: ring.active.kid, secret: ring.active.secret },
+      });
+      await expect(readdir(dataRoot)).resolves.toEqual([]);
+    });
+  });
+
+  postgresIt('requires an explicit bootstrap password when the database is empty', async () => {
+    await withAuthPostgres('deployed_auth_missing_bootstrap', async ({ query }) => {
+      await createAuthTables(query);
+      const { POST } = await import('@/app/api/auth/login/route');
+      const response = await POST(loginRequest(bootstrapName, bootstrapPassword));
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toEqual(configurationError);
+      expect((await query('SELECT id FROM wujie_users')).rows).toEqual([]);
+      expect((await query('SELECT key FROM wujie_system_settings')).rows).toEqual([]);
+    });
+  });
+
+  it('requires a database when deployment mode is enabled with a file-only setting', async () => {
+    vi.stubEnv('DATABASE_URL', undefined);
+    vi.stubEnv('PGDATABASE_URL', undefined);
+    vi.stubEnv('WUJIE_AUTH_PERSISTENCE_MODE', 'FILE_ONLY');
+    vi.stubEnv('WUJIE_ADMIN_PASSWORD', bootstrapPassword);
+    vi.stubEnv('WUJIE_AUTH_SECRET', configuredSecret);
+    const { POST } = await import('@/app/api/auth/login/route');
+    const response = await POST(loginRequest(bootstrapName, bootstrapPassword));
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual(configurationError);
+    await expect(readdir(dataRoot)).resolves.toEqual([]);
+  });
+
+  postgresIt('bootstraps one admin and rejects the bootstrap password after a password change', async () => {
+    await withAuthPostgres('deployed_auth_bootstrap', async ({ query }) => {
+      await createAuthTables(query);
+      vi.stubEnv('WUJIE_ADMIN_PASSWORD', bootstrapPassword);
+      const { POST } = await import('@/app/api/auth/login/route');
+      const responses = await Promise.all(Array.from({ length: 3 }, () => (
+        POST(loginRequest(bootstrapName, bootstrapPassword))
+      )));
+      expect(responses.map(response => response.status)).toEqual([200, 200, 200]);
+      const users = await query<{ id: string; name: string; role: string; credential_hash: string }>(
+        'SELECT id, name, role, credential_hash FROM wujie_users',
+      );
+      expect(users.rows).toEqual([expect.objectContaining({ name: bootstrapName, role: 'admin' })]);
+      await expect(verifyScryptCredential(bootstrapPassword, users.rows[0].credential_hash)).resolves.toBe(true);
+      const persistedRing = await readDatabaseSecretRing();
+      expect(persistedRing?.active.secret).toHaveLength(64);
+
+      vi.resetModules();
+      const { getSessionUser, updateManagedUser } = await import('@/lib/server-auth');
+      const sessionRequest = new NextRequest('http://localhost/api/auth/me', {
+        headers: { cookie: `wujie_session=${responses[0].cookies.get('wujie_session')?.value}` },
+      });
+      await expect(getSessionUser(sessionRequest)).resolves.toMatchObject({ id: users.rows[0].id });
+      await updateManagedUser(users.rows[0].id, { password: storedPassword });
+      const changed = (await query('SELECT * FROM wujie_users')).rows;
+      const { POST: restartedLogin } = await import('@/app/api/auth/login/route');
+      expect((await restartedLogin(loginRequest(bootstrapName, bootstrapPassword))).status).toBe(401);
+      expect((await restartedLogin(loginRequest(bootstrapName, storedPassword))).status).toBe(200);
+      expect((await query('SELECT * FROM wujie_users')).rows).toEqual(changed);
+      await expect(readDatabaseSecretRing()).resolves.toEqual(persistedRing);
+    });
+  });
+
+  postgresIt('keeps bootstrap closed after a restart with all users removed', async () => {
+    await withAuthPostgres('deployed_auth_bootstrap_once', async ({ query }) => {
+      await createAuthTables(query);
+      vi.stubEnv('WUJIE_ADMIN_PASSWORD', bootstrapPassword);
+      const { POST } = await import('@/app/api/auth/login/route');
+      expect((await POST(loginRequest(bootstrapName, bootstrapPassword))).status).toBe(200);
+
+      await query('DELETE FROM wujie_users');
+      vi.resetModules();
+      const { POST: restartedLogin } = await import('@/app/api/auth/login/route');
+      expect((await restartedLogin(loginRequest(bootstrapName, bootstrapPassword))).status).toBe(401);
+      expect((await query('SELECT id FROM wujie_users')).rows).toEqual([]);
+    });
+  });
+
+  postgresIt('re-reads a competing insert that wins the empty database bootstrap', async () => {
+    await withAuthPostgres('deployed_auth_bootstrap_race', async ({ query }) => {
+      await createAuthTables(query);
+      await storeRing(query);
+      vi.stubEnv('WUJIE_ADMIN_PASSWORD', bootstrapPassword);
+      const storedCredential = await createScryptCredential(storedPassword);
+      const { POST } = await import('@/app/api/auth/login/route');
+      await query('BEGIN');
+      await query('LOCK TABLE wujie_users IN SHARE ROW EXCLUSIVE MODE');
+      await query(
+        `INSERT INTO wujie_users (id, name, password_hash, credential_hash, role, product_type, created_at, updated_at)
+         VALUES ('race-winner', $1, '', $2, 'admin', 'canvas', $3, $3)`,
+        [bootstrapName, storedCredential, now],
+      );
+
+      const losingLogin = POST(loginRequest(bootstrapName, bootstrapPassword));
+      try {
+        await vi.waitFor(async () => {
+          const { rows } = await query<{ blocked: boolean }>(`
+            SELECT EXISTS (SELECT 1 FROM pg_locks
+              WHERE relation = 'wujie_users'::regclass AND NOT granted) AS blocked
+          `);
+          expect(rows[0].blocked).toBe(true);
+        }, { timeout: 4_000 });
+      } finally {
+        await query('COMMIT');
+        await losingLogin;
+      }
+      expect((await losingLogin).status).toBe(401);
+      expect((await query('SELECT id, role, credential_hash FROM wujie_users')).rows)
+        .toEqual([{ id: 'race-winner', role: 'admin', credential_hash: storedCredential }]);
+      expect((await POST(loginRequest(bootstrapName, storedPassword))).status).toBe(200);
     });
   });
 });

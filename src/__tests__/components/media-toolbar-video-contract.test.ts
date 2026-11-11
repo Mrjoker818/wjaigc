@@ -40,7 +40,21 @@ describe('media toolbar video contracts', () => {
   });
 
   it('passes the selected frame limit to both uniform and FPS extraction modes', () => {
-    expect(canvasSource).toContain("frameCount: videoExtractFrameCount");
+    expect(canvasSource).toContain('handleVideoExtractFrames(img, videoExtractMode, videoExtractFrameCount)');
+    const extract = canvasSource.slice(canvasSource.indexOf('const handleVideoExtractFrames = useCallback'),
+      canvasSource.indexOf('// 720全景图生成'));
+    expect(extract).toContain("action: 'extract-frames', videoUrl: img.videoUrl, mode, frameCount: count, fps: 1");
+  });
+
+  it('routes specified-time extraction through the video panel', () => {
+    expect(canvasSource).toContain("label: '提取帧', action: () => openVideoExtractPanel(selectedImageData, 'single')");
+    expect(canvasSource).not.toContain("prompt('输入提取时间点（秒）'");
+    const panel = canvasSource.slice(canvasSource.indexOf('VIDEO EXTRACT FRAMES PANEL'),
+      canvasSource.indexOf('VIDEO EXTRACT FRAMES PANEL') + 8000);
+    expect(panel).toContain('提取时间点（秒）');
+    expect(panel).toContain('inputMode="decimal"');
+    expect(panel).toContain('step="any"');
+    expect(canvasSource).toContain("handleVideoExtractFrames(img, 'single', 1, timestamp)");
   });
 
   it('keeps GIF conversion and compression reachable from the video floating toolbar', () => {

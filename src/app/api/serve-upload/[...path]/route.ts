@@ -30,10 +30,18 @@ export async function GET(
         return NextResponse.json({ error: 'File not found' }, { status: 404 });
       }
       try {
-        const { readGeneratedAudio } = await import('@/lib/generated-audio-storage');
-        const audio = await readGeneratedAudio(pathParts[1], _request.signal);
+        const { isPrivateGeneratedAudioFilename, readGeneratedAudio } = await import('@/lib/generated-audio-storage');
+        const privateAudio = isPrivateGeneratedAudioFilename(pathParts[1]);
+        let ownerId: string | undefined;
+        if (privateAudio) {
+          const { requireApiAuthOrReject } = await import('@/lib/api-auth');
+          const auth = await requireApiAuthOrReject(_request);
+          if (auth instanceof NextResponse) return auth;
+          ownerId = auth.userId;
+        }
+        const audio = await readGeneratedAudio(pathParts[1], _request.signal, ownerId);
         if (!audio) return NextResponse.json({ error: 'File not found' }, { status: 404 });
-        return generatedAudioResponse(_request, audio.buffer, audio.mimeType);
+        return generatedAudioResponse(_request, audio.buffer, audio.mimeType, privateAudio);
       } catch {
         return NextResponse.json({ error: 'File not found' }, { status: 404 });
       }
@@ -220,11 +228,11 @@ export async function GET(
   }
 }
 
-function generatedAudioResponse(request: Request, bytes: Buffer, mimeType: string): NextResponse {
+function generatedAudioResponse(request: Request, bytes: Buffer, mimeType: string, privateAudio: boolean): NextResponse {
   const range = request.headers.get('range');
   const headers: Record<string, string> = {
     'Content-Type': mimeType, 'X-Content-Type-Options': 'nosniff',
-    'Accept-Ranges': 'bytes', 'Cache-Control': 'public, max-age=86400',
+    'Accept-Ranges': 'bytes', 'Cache-Control': privateAudio ? 'private, no-store' : 'public, max-age=86400',
   };
   let start = 0, end = bytes.length - 1;
   if (range !== null) {

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef, useState } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import type { DesignLayer } from '@/lib/psd-export';
 
 interface LayerRowProps {
@@ -30,11 +30,21 @@ export function LayerRow({ layer, isSelected, onSelect, onToggleVisibility, onTo
   const [isRenaming, setIsRenaming] = useState(false);
   const [tempName, setTempName] = useState(layer.name);
   const inputRef = useRef<HTMLInputElement>(null);
+  const nameRef = useRef<HTMLButtonElement>(null);
+  const restoreNameFocus = useRef(false);
 
-  const handleDoubleClick = () => {
+  useLayoutEffect(() => {
+    if (isRenaming) {
+      inputRef.current?.focus();
+    } else if (restoreNameFocus.current) {
+      restoreNameFocus.current = false;
+      nameRef.current?.focus({ preventScroll: true });
+    }
+  }, [isRenaming]);
+
+  const startRename = () => {
     setTempName(layer.name);
     setIsRenaming(true);
-    setTimeout(() => inputRef.current?.focus(), 0);
   };
 
   const handleRenameSubmit = () => {
@@ -48,7 +58,10 @@ export function LayerRow({ layer, isSelected, onSelect, onToggleVisibility, onTo
       data-layer-row={layer.id}
       data-layer-selected={isSelected ? 'true' : 'false'}
       onClick={onSelect}
-      onDoubleClick={handleDoubleClick}
+      onDoubleClick={event => {
+        if (event.target instanceof Element && event.target.closest('[data-layer-action], input')) return;
+        startRename();
+      }}
       className={`flex items-center gap-1.5 px-2 py-1.5 cursor-pointer text-white transition-colors group ${
         isSelected ? 'bg-amber-500/15 border-l-2 border-amber-500' : 'hover:bg-neutral-800 border-l-2 border-transparent'
       } ${!layer.visible ? 'opacity-50' : ''}`}
@@ -60,21 +73,38 @@ export function LayerRow({ layer, isSelected, onSelect, onToggleVisibility, onTo
       {isRenaming ? (
         <input
           ref={inputRef}
+          aria-label="重命名图层"
           value={tempName}
           onChange={(e) => setTempName(e.target.value)}
           onBlur={handleRenameSubmit}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') handleRenameSubmit();
-            if (e.key === 'Escape') setIsRenaming(false);
             e.stopPropagation();
+            if (e.nativeEvent.isComposing || (e.key !== 'Enter' && e.key !== 'Escape')) return;
+            e.preventDefault();
+            restoreNameFocus.current = true;
+            if (e.key === 'Enter') handleRenameSubmit();
+            else setIsRenaming(false);
           }}
           className="flex-1 bg-neutral-700 text-white text-xs px-1 py-0.5 rounded outline-none min-w-0"
           onClick={(e) => e.stopPropagation()}
         />
       ) : (
-        <span className="flex-1 text-xs text-white truncate min-w-0">
+        <button
+          ref={nameRef}
+          type="button"
+          aria-pressed={isSelected}
+          aria-keyshortcuts="F2"
+          onClick={event => { event.stopPropagation(); onSelect(); }}
+          onKeyDown={event => {
+            if (event.key !== 'F2' || event.nativeEvent.isComposing) return;
+            event.preventDefault();
+            event.stopPropagation();
+            startRename();
+          }}
+          className="min-w-0 flex-1 self-stretch truncate rounded text-left text-xs text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-400"
+        >
           {layer.name}
-        </span>
+        </button>
       )}
 
       <button

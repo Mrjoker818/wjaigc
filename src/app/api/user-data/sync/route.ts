@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/server-auth';
+import { readExpectedActor } from '@/lib/expected-actor-header';
 import { dbGetUserData, dbSetUserData } from '@/lib/db-storage';
 import { execSql } from '@/lib/db-client';
 import { persistResultImage } from '@/lib/persist-result-image';
@@ -484,6 +485,11 @@ export async function GET(request: NextRequest) {
     }
 
     if (key === SIMPLE_CHAT_PROJECTS_KEY) {
+      const expectedActor = readExpectedActor(request.headers);
+      if (expectedActor.status === 'invalid'
+        || (expectedActor.status === 'present' && expectedActor.actorId !== sessionUser.id)) {
+        return NextResponse.json({ success: false, error: 'Session account changed' }, { status: 409 });
+      }
       const startedAt = Date.now();
       const requestId = getRequestId(request);
       let snapshot;
@@ -525,6 +531,7 @@ export async function GET(request: NextRequest) {
         key,
         value: snapshot.projects,
         syncRevision: snapshot.revision,
+        ...(expectedActor.status === 'present' ? { userId: sessionUser.id } : {}),
       }), requestId);
     }
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect, useId, type PointerEvent } from 'react';
+import { useState, useRef, useCallback, useEffect, useLayoutEffect, useId, type PointerEvent } from 'react';
 import { X, Settings, Sparkles, Square, GripVertical, Minus, Maximize2 } from 'lucide-react';
 
 /* ================================================================
@@ -93,7 +93,18 @@ interface BrandIpTaskSnapshot {
   error?: string;
 }
 
+interface BrandIpProjectScope {
+  projectId: string | null;
+  controller: AbortController;
+  opening: boolean;
+  assetsVersion: number;
+}
+
 const BRAND_TASK_TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled', 'timeout']);
+const DEFAULT_ADVANCED: BrandIpAdvancedSettings = {
+  role: '长期代言人', count: '1', vibe: '温暖亲和', constraints: '后期需支持PVC公仔生产',
+  forbidden: '不得模仿具体艺术家', autoRisk: true, autoApp: true, structFirst: false,
+};
 
 /* ── Constants ──────────────────────────────────────────────────── */
 const STAGES = [
@@ -154,6 +165,7 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
   const [project, setProject] = useState<BrandIpProject | null>(null);
   const [projects, setProjects] = useState<BrandIpProject[]>([]);
   const [showProjectList, setShowProjectList] = useState(false);
+  const [openingProject, setOpeningProject] = useState(false);
 
   // Brief form
   const [workflowPath, setWorkflowPath] = useState(0);
@@ -181,14 +193,14 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
   const [toast, setToast] = useState<{ show: boolean; msg: string }>({ show: false, msg: '' });
 
   // Advanced settings
-  const [advRole, setAdvRole] = useState('长期代言人');
-  const [advCount, setAdvCount] = useState('1');
-  const [advVibe, setAdvVibe] = useState('温暖亲和');
-  const [advConstraints, setAdvConstraints] = useState('后期需支持PVC公仔生产');
-  const [advForbidden, setAdvForbidden] = useState('不得模仿具体艺术家');
-  const [advAutoRisk, setAdvAutoRisk] = useState(true);
-  const [advAutoApp, setAdvAutoApp] = useState(true);
-  const [advStructFirst, setAdvStructFirst] = useState(false);
+  const [advRole, setAdvRole] = useState(DEFAULT_ADVANCED.role);
+  const [advCount, setAdvCount] = useState(DEFAULT_ADVANCED.count);
+  const [advVibe, setAdvVibe] = useState(DEFAULT_ADVANCED.vibe);
+  const [advConstraints, setAdvConstraints] = useState(DEFAULT_ADVANCED.constraints);
+  const [advForbidden, setAdvForbidden] = useState(DEFAULT_ADVANCED.forbidden);
+  const [advAutoRisk, setAdvAutoRisk] = useState(DEFAULT_ADVANCED.autoRisk);
+  const [advAutoApp, setAdvAutoApp] = useState(DEFAULT_ADVANCED.autoApp);
+  const [advStructFirst, setAdvStructFirst] = useState(DEFAULT_ADVANCED.structFirst);
 
   // Assets state
   const [assets, setAssets] = useState<BrandIpAsset[]>([]);
@@ -210,45 +222,73 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
   const shellRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ offsetX: number; offsetY: number } | null>(null);
   const hasInitializedWindowPositionRef = useRef(false);
-  const isMountedRef = useRef(true);
+  const projectScopeRef = useRef<BrandIpProjectScope | null>(null);
+  const projectListVersionRef = useRef(0);
+  const toastTimerRef = useRef<number | null>(null);
   const taskPollingRef = useRef<number | null>(null);
-  const trackingTaskIdRef = useRef<string | null>(null);
+  const taskVersionRef = useRef(0);
+  const submittingAssetRef = useRef<number | null>(null);
   const [windowPosition, setWindowPosition] = useState({ x: 0, y: 0 });
 
   /* ── Toast helper ──────────────────────────────────────────────── */
   const showToast = useCallback((msg: string) => {
+    if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
     setToast({ show: true, msg });
-    setTimeout(() => setToast({ show: false, msg: '' }), 2500);
+    toastTimerRef.current = window.setTimeout(() => {
+      toastTimerRef.current = null;
+      setToast({ show: false, msg: '' });
+    }, 2500);
   }, []);
 
-  const loadAssets = useCallback(async (projectId: string) => {
-    const res = await fetch(`/api/brand-ip/assets?projectId=${encodeURIComponent(projectId)}`);
+  const isCurrentProject = useCallback((scope: BrandIpProjectScope) => projectScopeRef.current === scope, []);
+
+  const startProjectScope = useCallback((projectId: string | null, opening = false) => {
+    const previous = projectScopeRef.current;
+    const scope: BrandIpProjectScope = { projectId, opening, controller: new AbortController(), assetsVersion: 0 };
+    projectScopeRef.current = scope;
+    previous?.controller.abort();
+    return scope;
+  }, []);
+
+  const getOpenScope = useCallback((projectId: string | null) => {
+    const scope = projectScopeRef.current;
+    return scope && !scope.opening && scope.projectId === projectId ? scope : null;
+  }, []);
+
+  const loadAssets = useCallback(async (scope: BrandIpProjectScope) => {
+    if (!scope.projectId || !isCurrentProject(scope)) return;
+    const version = ++scope.assetsVersion;
+    const res = await fetch(`/api/brand-ip/assets?projectId=${encodeURIComponent(scope.projectId)}`, { signal: scope.controller.signal });
+    if (!isCurrentProject(scope) || version !== scope.assetsVersion) return;
     if (!res.ok) throw new Error('assets_load_failed');
     const data = await res.json() as { assets?: BrandIpAsset[] };
-    setAssets(data.assets ?? []);
-  }, []);
+    if (isCurrentProject(scope) && version === scope.assetsVersion) setAssets(data.assets ?? []);
+  }, [isCurrentProject]);
 
   const stopTrackingAssetTask = useCallback((): void => {
+    taskVersionRef.current += 1;
     if (taskPollingRef.current !== null) {
       window.clearTimeout(taskPollingRef.current);
       taskPollingRef.current = null;
     }
-    trackingTaskIdRef.current = null;
   }, []);
 
-  const trackAssetTask = useCallback((taskId: string, projectId: string): void => {
+  const trackAssetTask = useCallback((taskId: string, scope: BrandIpProjectScope): void => {
+    if (!isCurrentProject(scope)) return;
     stopTrackingAssetTask();
-    trackingTaskIdRef.current = taskId;
+    const version = taskVersionRef.current;
+    const isTracking = () => isCurrentProject(scope) && taskVersionRef.current === version;
     setAssetTaskId(taskId);
     setGeneratingAsset(true);
 
     let attempts = 0;
     const poll = async (): Promise<void> => {
-      if (!isMountedRef.current || trackingTaskIdRef.current !== taskId) return;
+      if (!isTracking()) return;
       try {
-        const response = await fetch(`/api/brand-ip/tasks?taskId=${encodeURIComponent(taskId)}`);
+        const response = await fetch(`/api/brand-ip/tasks?taskId=${encodeURIComponent(taskId)}`, { signal: scope.controller.signal });
         if (!response.ok) throw new Error('task_load_failed');
         const data = await response.json() as { task?: BrandIpTaskSnapshot };
+        if (!isTracking()) return;
         const task = data.task;
         if (!task) throw new Error('task_missing');
 
@@ -256,11 +296,17 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
         setAssetLabel(task.label ?? '正在生成资产');
         if (task.status && BRAND_TASK_TERMINAL_STATUSES.has(task.status)) {
           stopTrackingAssetTask();
+          const terminalVersion = taskVersionRef.current;
           setGeneratingAsset(false);
           setAssetTaskId(null);
           if (task.status === 'completed') {
-            await loadAssets(projectId);
-            showToast('资产生成完成');
+            const isLatest = () => isCurrentProject(scope) && taskVersionRef.current === terminalVersion;
+            try {
+              await loadAssets(scope);
+              if (isLatest()) showToast('资产生成完成');
+            } catch {
+              if (isLatest()) showToast('资产已生成，请重新打开项目刷新列表');
+            }
           } else if (task.status === 'timeout') {
             showToast(task.error ?? '任务处理超时，请稍后检查项目资产');
           } else {
@@ -271,12 +317,17 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
 
         attempts += 1;
         if (attempts >= 100) {
+          stopTrackingAssetTask();
           setGeneratingAsset(false);
+          setAssetTaskId(null);
           setAssetLabel('任务仍在后台执行，可重新打开项目恢复追踪');
           return;
         }
       } catch {
+        if (!isTracking()) return;
+        stopTrackingAssetTask();
         setGeneratingAsset(false);
+        setAssetTaskId(null);
         setAssetLabel('任务连接暂时中断，可重新打开项目恢复追踪');
         return;
       }
@@ -285,29 +336,27 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
     };
 
     void poll();
-  }, [loadAssets, showToast, stopTrackingAssetTask]);
+  }, [isCurrentProject, loadAssets, showToast, stopTrackingAssetTask]);
 
-  const recoverProjectTask = useCallback(async (projectId: string): Promise<void> => {
+  const recoverProjectTask = useCallback(async (scope: BrandIpProjectScope): Promise<void> => {
+    if (!scope.projectId || !isCurrentProject(scope)) return;
+    const version = taskVersionRef.current;
     try {
-      const response = await fetch(`/api/brand-ip/tasks?projectId=${encodeURIComponent(projectId)}`);
+      const response = await fetch(`/api/brand-ip/tasks?projectId=${encodeURIComponent(scope.projectId)}`, { signal: scope.controller.signal });
       if (!response.ok) return;
       const data = await response.json() as { tasks?: Array<BrandIpTaskSnapshot & { taskId?: string; createdAt?: number }> };
+      if (!isCurrentProject(scope) || version !== taskVersionRef.current) return;
       const task = data.tasks?.[0];
       if (!task?.taskId) return;
       setAssetProgress(task.progress ?? 0);
       setAssetLabel(task.label ?? '已恢复后台生成任务');
-      trackAssetTask(task.taskId, projectId);
+      trackAssetTask(task.taskId, scope);
     } catch {
       // The task remains persisted and can be recovered on the next project open.
     }
-  }, [trackAssetTask]);
+  }, [isCurrentProject, trackAssetTask]);
 
-  const applyProject = useCallback(async (nextProject: BrandIpProject, shouldLoadAssets = true) => {
-    stopTrackingAssetTask();
-    setGeneratingAsset(false);
-    setAssetTaskId(null);
-    setAssetProgress(0);
-    setAssetLabel('');
+  const applyProject = useCallback((nextProject: BrandIpProject) => {
     setProject(nextProject);
     setBrandName(nextProject.brief.brandName ?? nextProject.name);
     setGoal(nextProject.brief.objective ?? '');
@@ -316,39 +365,60 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
     setWorkflowPath(nextProject.brief.workflowPath ?? 0);
     setSelectedCarriers(nextProject.brief.carriers ?? [0, 2]);
     setSmartMode(nextProject.brief.smartMode ?? true);
-    const advanced = nextProject.brief.advanced;
-    if (advanced) {
-      setAdvRole(advanced.role);
-      setAdvCount(advanced.count);
-      setAdvVibe(advanced.vibe);
-      setAdvConstraints(advanced.constraints);
-      setAdvForbidden(advanced.forbidden);
-      setAdvAutoRisk(advanced.autoRisk);
-      setAdvAutoApp(advanced.autoApp);
-      setAdvStructFirst(advanced.structFirst);
-    }
+    const advanced = nextProject.brief.advanced ?? DEFAULT_ADVANCED;
+    setAdvRole(advanced.role);
+    setAdvCount(advanced.count);
+    setAdvVibe(advanced.vibe);
+    setAdvConstraints(advanced.constraints);
+    setAdvForbidden(advanced.forbidden);
+    setAdvAutoRisk(advanced.autoRisk);
+    setAdvAutoApp(advanced.autoApp);
+    setAdvStructFirst(advanced.structFirst);
     setDirections(nextProject.directions ?? []);
     setSelectedDirection(nextProject.confirmedDirectionId ?? nextProject.directions?.[0]?.id ?? null);
     setConfirmedDirection(Boolean(nextProject.confirmedDirectionId));
     setActiveStage(STAGE_INDEX[nextProject.currentStage] ?? 0);
     setHasAnalyzed((nextProject.directions?.length ?? 0) > 0);
-    if (shouldLoadAssets) {
-      try {
-        await loadAssets(nextProject.id);
-      } catch {
-        setAssets([]);
-      }
-    }
-    await recoverProjectTask(nextProject.id);
-  }, [loadAssets, recoverProjectTask, stopTrackingAssetTask]);
+  }, []);
+
+  const refreshProjectMedia = useCallback((scope: BrandIpProjectScope) => {
+    void loadAssets(scope).catch(() => {});
+    void recoverProjectTask(scope);
+  }, [loadAssets, recoverProjectTask]);
 
   const loadProject = useCallback(async (projectId: string) => {
-    const res = await fetch(`/api/brand-ip/projects?projectId=${encodeURIComponent(projectId)}`);
-    if (!res.ok) throw new Error('project_load_failed');
-    const data = await res.json() as { project?: BrandIpProject };
-    if (!data.project) throw new Error('project_missing');
-    await applyProject(data.project);
-  }, [applyProject]);
+    const previousId = project?.id ?? null;
+    const scope = startProjectScope(projectId, true);
+    stopTrackingAssetTask();
+    setOpeningProject(true);
+    setGeneratingAsset(false);
+    setAssetTaskId(null);
+    setAssetProgress(0);
+    setAssetLabel('');
+    setIsAnalyzing(false);
+    setShowAdvanced(false);
+    setToast({ show: false, msg: '' });
+    try {
+      const res = await fetch(`/api/brand-ip/projects?projectId=${encodeURIComponent(projectId)}`, { signal: scope.controller.signal });
+      if (!res.ok) throw new Error('project_load_failed');
+      const data = await res.json() as { project?: BrandIpProject };
+      if (!isCurrentProject(scope)) return;
+      if (data.project?.id !== projectId) throw new Error('project_missing');
+      scope.opening = false;
+      setOpeningProject(false);
+      setAssets([]);
+      setStrategyText('');
+      setAnalysisProgress(0);
+      applyProject(data.project);
+      refreshProjectMedia(scope);
+    } catch {
+      if (!isCurrentProject(scope)) return;
+      setOpeningProject(false);
+      const previous = startProjectScope(previousId);
+      if (previousId) refreshProjectMedia(previous);
+      showToast('项目加载失败');
+    }
+  }, [applyProject, isCurrentProject, project?.id, refreshProjectMedia, showToast, startProjectScope, stopTrackingAssetTask]);
 
   const handleWindowPointerDown = useCallback((event: PointerEvent<HTMLDivElement>) => {
     if (window.innerWidth < 768) return;
@@ -382,27 +452,33 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
   }, []);
 
   /* ── Load projects on mount ────────────────────────────────────── */
-  const loadProjects = useCallback(async () => {
+  const loadProjects = useCallback(async (scope?: BrandIpProjectScope) => {
+    const version = ++projectListVersionRef.current;
     try {
-      const res = await fetch('/api/brand-ip/projects');
+      const res = await fetch('/api/brand-ip/projects', { signal: scope?.controller.signal });
       if (res.ok) {
         const data = await res.json();
-        setProjects(data.projects ?? []);
+        if (version === projectListVersionRef.current && projectScopeRef.current && (!scope || isCurrentProject(scope))) {
+          setProjects(data.projects ?? []);
+        }
       }
     } catch { /* ignore */ }
-  }, []);
+  }, [isCurrentProject]);
 
   useEffect(() => {
     void loadProjects();
   }, [loadProjects]);
 
-  useEffect(() => {
-    isMountedRef.current = true;
+  useLayoutEffect(() => {
+    startProjectScope(null);
     return () => {
-      isMountedRef.current = false;
+      const scope = projectScopeRef.current;
+      projectScopeRef.current = null;
+      scope?.controller.abort();
       stopTrackingAssetTask();
+      if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
     };
-  }, [stopTrackingAssetTask]);
+  }, [startProjectScope, stopTrackingAssetTask]);
 
   useEffect(() => {
     const loadModels = async (): Promise<void> => {
@@ -490,6 +566,8 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
 
   /* ── Create project & run strategy analysis ───────────────────── */
   const handleGenerate = useCallback(async () => {
+    const scope = getOpenScope(project?.id ?? null);
+    if (!scope || isAnalyzing) return;
     if (!brandName.trim()) {
       showToast('请输入品牌/项目名称');
       return;
@@ -500,6 +578,7 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
     setStrategyText('');
     setHasAnalyzed(false);
 
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     try {
       // Create project if none
       let proj = project;
@@ -507,6 +586,7 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
         const createRes = await fetch('/api/brand-ip/projects', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: scope.controller.signal,
           body: JSON.stringify({
             name: brandName,
             brief: {
@@ -520,23 +600,28 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
             },
           }),
         });
+        if (!isCurrentProject(scope)) return;
         if (!createRes.ok) {
           showToast('项目创建失败');
-          setIsAnalyzing(false);
           return;
         }
-        const createData = await createRes.json();
-        proj = createData.project as BrandIpProject;
-        await applyProject(proj, false);
-        setProjects(prev => [proj!, ...prev]);
+        const { project: created } = await createRes.json() as { project?: BrandIpProject };
+        if (!isCurrentProject(scope)) return;
+        if (!created?.id) throw new Error('project_missing');
+        proj = created;
+        scope.projectId = created.id;
+        applyProject(created);
+        setProjects(prev => [created, ...prev.filter(item => item.id !== created.id)]);
+        void loadProjects(scope);
       }
 
       // SSE strategy analysis
       const sseRes = await fetch('/api/brand-ip/strategy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: scope.controller.signal,
         body: JSON.stringify({
-          projectId: proj!.id,
+          projectId: proj.id,
           brief: { brandName, goal, audience, industry, workflowPath, carriers: selectedCarriers, smartMode },
           ...(selectedChatModel ? {
             model: selectedChatModel.model,
@@ -545,19 +630,20 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
         }),
       });
 
+      if (!isCurrentProject(scope)) return;
       if (!sseRes.ok || !sseRes.body) {
         showToast('策略分析请求失败');
-        setIsAnalyzing(false);
         return;
       }
 
-      const reader = sseRes.body.getReader();
+      reader = sseRes.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
       let progress = 0;
 
       while (true) {
         const { done, value } = await reader.read();
+        if (!isCurrentProject(scope)) return;
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
@@ -582,6 +668,7 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
                 } | undefined;
                 if (result) {
                   const nextBrief: BrandIpBrief = {
+                    ...proj.brief,
                     brandName,
                     objective: goal,
                     audience,
@@ -593,7 +680,7 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
                   setStrategyText(result.summary ?? '');
                   setDirections(result.directions ?? []);
                   setSelectedDirection(result.directions?.[0]?.id ?? null);
-                  setProject(prev => prev ? {
+                  setProject(prev => prev?.id === proj.id ? {
                     ...prev,
                     brief: nextBrief,
                     directions: result.directions ?? [],
@@ -604,49 +691,60 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
                   const saveRes = await fetch('/api/brand-ip/projects', {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
+                    signal: scope.controller.signal,
                     body: JSON.stringify({
-                      projectId: proj!.id,
+                      projectId: proj.id,
                       brief: nextBrief,
                       directions: result.directions ?? [],
                       immutableCore: result.immutableCore ?? [],
                       controlledVariables: result.controlledVariables ?? [],
                     }),
                   });
+                  if (!isCurrentProject(scope)) return;
                   if (saveRes.ok) {
                     const saved = await saveRes.json() as { project?: BrandIpProject };
-                    if (saved.project) await applyProject(saved.project, false);
+                    if (!isCurrentProject(scope)) return;
+                    if (saved.project?.id === proj.id) applyProject(saved.project);
                   }
                 }
                 setAnalysisProgress(95);
               } else if (evt.type === 'error') {
                 showToast(evt.message ?? '策略分析出错');
-                setIsAnalyzing(false);
                 return;
               } else if (evt.type === 'done') {
                 setAnalysisProgress(100);
                 setHasAnalyzed(true);
               }
-            } catch { /* skip */ }
+            } catch {
+              if (!isCurrentProject(scope)) return;
+            }
           }
         }
       }
 
-      setIsAnalyzing(false);
       setHasAnalyzed(true);
       showToast('策略分析完成');
     } catch {
-      showToast('网络错误，请重试');
-      setIsAnalyzing(false);
+      if (isCurrentProject(scope)) showToast('网络错误，请重试');
+    } finally {
+      if (reader) {
+        void reader.cancel().catch(() => {});
+        reader.releaseLock();
+      }
+      if (isCurrentProject(scope)) setIsAnalyzing(false);
     }
-  }, [applyProject, brandName, goal, audience, industry, workflowPath, selectedCarriers, smartMode, project, selectedChatModel, showToast]);
+  }, [applyProject, brandName, goal, audience, getOpenScope, industry, isAnalyzing, isCurrentProject, loadProjects, workflowPath, selectedCarriers, smartMode, project, selectedChatModel, showToast]);
 
   /* ── Confirm direction ─────────────────────────────────────────── */
   const handleConfirmDirection = useCallback(async () => {
     if (!selectedDirection || !project) return;
+    const scope = getOpenScope(project.id);
+    if (!scope) return;
     try {
       const res = await fetch('/api/brand-ip/projects', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
+        signal: scope.controller.signal,
         body: JSON.stringify({
           projectId: project.id,
           confirmedDirectionId: selectedDirection,
@@ -654,20 +752,23 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
       });
       if (!res.ok) throw new Error('confirm_failed');
       const data = await res.json() as { project?: BrandIpProject };
-      if (!data.project) throw new Error('project_missing');
-      await applyProject(data.project, false);
-      await loadProjects();
-      showToast('方向已锁定，进入视觉系统阶段');
+      if (!isCurrentProject(scope)) return;
+      if (data.project?.id !== project.id) throw new Error('project_missing');
+      applyProject(data.project);
+      await loadProjects(scope);
+      if (isCurrentProject(scope)) showToast('方向已锁定，进入视觉系统阶段');
     } catch {
-      showToast('确认失败，请重试');
+      if (isCurrentProject(scope)) showToast('确认失败，请重试');
     }
-  }, [applyProject, loadProjects, project, selectedDirection, showToast]);
+  }, [applyProject, getOpenScope, isCurrentProject, loadProjects, project, selectedDirection, showToast]);
 
   const handleSaveAdvanced = useCallback(async (): Promise<void> => {
     if (!project) {
       showToast('请先创建品牌 IP 项目后再保存设置');
       return;
     }
+    const scope = getOpenScope(project.id);
+    if (!scope) return;
 
     const advanced: BrandIpAdvancedSettings = {
       role: advRole,
@@ -685,35 +786,41 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
       const response = await fetch('/api/brand-ip/projects', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
+        signal: scope.controller.signal,
         body: JSON.stringify({ projectId: project.id, brief }),
       });
       const data = await response.json() as { project?: BrandIpProject; error?: string };
-      if (!response.ok || !data.project) throw new Error(data.error ?? 'advanced_save_failed');
-      await applyProject(data.project, false);
-      await loadProjects();
+      if (!isCurrentProject(scope)) return;
+      if (!response.ok || data.project?.id !== project.id) throw new Error(data.error ?? 'advanced_save_failed');
+      applyProject(data.project);
+      await loadProjects(scope);
+      if (!isCurrentProject(scope)) return;
       setShowAdvanced(false);
       showToast('高级设置已保存');
     } catch {
-      showToast('高级设置保存失败，请重试');
+      if (isCurrentProject(scope)) showToast('高级设置保存失败，请重试');
     }
-  }, [advAutoApp, advAutoRisk, advConstraints, advCount, advForbidden, advRole, advStructFirst, advVibe, applyProject, loadProjects, project, showToast]);
+  }, [advAutoApp, advAutoRisk, advConstraints, advCount, advForbidden, advRole, advStructFirst, advVibe, applyProject, getOpenScope, isCurrentProject, loadProjects, project, showToast]);
 
   const handleAssetAction = useCallback(async (assetId: string, action: 'favorite' | 'archive'): Promise<void> => {
     if (!project) return;
+    const scope = getOpenScope(project.id);
+    if (!scope) return;
     try {
       const response = await fetch('/api/brand-ip/assets', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
+        signal: scope.controller.signal,
         body: JSON.stringify({ projectId: project.id, assetId, action }),
       });
       const data = await response.json() as { error?: string };
       if (!response.ok) throw new Error(data.error ?? 'asset_action_failed');
-      await loadAssets(project.id);
-      showToast(action === 'favorite' ? '资产已收藏' : '资产已淘汰');
+      await loadAssets(scope);
+      if (isCurrentProject(scope)) showToast(action === 'favorite' ? '资产已收藏' : '资产已淘汰');
     } catch {
-      showToast(action === 'favorite' ? '收藏失败，请重试' : '淘汰失败，请重试');
+      if (isCurrentProject(scope)) showToast(action === 'favorite' ? '收藏失败，请重试' : '淘汰失败，请重试');
     }
-  }, [loadAssets, project, showToast]);
+  }, [getOpenScope, isCurrentProject, loadAssets, project, showToast]);
 
   /* ── Generate asset ────────────────────────────────────────────── */
   const handleGenerateAsset = useCallback(async (assetType: string): Promise<void> => {
@@ -721,14 +828,22 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
       showToast('请先确认角色方向');
       return;
     }
+    const scope = getOpenScope(project.id);
+    if (!scope || generatingAsset || submittingAssetRef.current === taskVersionRef.current) return;
+    stopTrackingAssetTask();
+    const version = taskVersionRef.current;
+    submittingAssetRef.current = version;
+    const isSubmitting = () => isCurrentProject(scope) && version === taskVersionRef.current;
     const direction = directions.find((item: BrandIpDirection) => item.id === selectedDirection);
     setGeneratingAsset(true);
+    setAssetTaskId(null);
     setAssetProgress(0);
     setAssetLabel('正在提交生成任务');
     try {
       const response = await fetch('/api/brand-ip/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: scope.controller.signal,
         body: JSON.stringify({
           projectId: project.id,
           assetType,
@@ -741,37 +856,48 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
         }),
       });
       const data = await response.json() as { taskId?: string; error?: string };
+      if (!isSubmitting()) return;
       if (!response.ok || !data.taskId) throw new Error(data.error ?? 'submit_failed');
       showToast('生成任务已提交');
-      trackAssetTask(data.taskId, project.id);
+      trackAssetTask(data.taskId, scope);
     } catch {
+      if (!isSubmitting()) return;
       setGeneratingAsset(false);
       setAssetLabel('提交失败，可调整后重试');
       showToast('生成任务提交失败，请稍后重试');
+    } finally {
+      if (submittingAssetRef.current === version) submittingAssetRef.current = null;
     }
-  }, [brandName, directions, project, selectedDirection, selectedImageModel, showToast, trackAssetTask]);
+  }, [brandName, directions, generatingAsset, getOpenScope, isCurrentProject, project, selectedDirection, selectedImageModel, showToast, stopTrackingAssetTask, trackAssetTask]);
 
   const handleCancelAssetTask = useCallback(async (): Promise<void> => {
     if (!assetTaskId || !project) return;
+    const scope = getOpenScope(project.id);
+    if (!scope) return;
+    const version = taskVersionRef.current;
+    const isCurrentTask = () => isCurrentProject(scope) && version === taskVersionRef.current;
     try {
       const response = await fetch('/api/cancel-task', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: scope.controller.signal,
         body: JSON.stringify({ taskId: assetTaskId }),
       });
+      if (!isCurrentTask()) return;
       if (!response.ok) throw new Error('cancel_failed');
       setGeneratingAsset(true);
       setAssetLabel('取消请求已发送，正在确认任务状态');
-      trackAssetTask(assetTaskId, project.id);
+      trackAssetTask(assetTaskId, scope);
     } catch {
-      showToast('取消请求未发送成功，请稍后重试');
+      if (isCurrentTask()) showToast('取消请求未发送成功，请稍后重试');
     }
-  }, [assetTaskId, project, showToast, trackAssetTask]);
+  }, [assetTaskId, getOpenScope, isCurrentProject, project, showToast, trackAssetTask]);
 
   /* ── Add asset to canvas ───────────────────────────────────────── */
   const handleAddToCanvas = useCallback((url: string) => {
+    if (!project || !getOpenScope(project.id)) return;
     onAddImages?.([url], { modelName: 'brand-ip', apiProvider: 'server' });
-  }, [onAddImages]);
+  }, [getOpenScope, onAddImages, project]);
 
   /* ── Display models ───────────────────────────────────────────── */
   const displayDirections = directions.map(toDisplayDirection);
@@ -870,10 +996,12 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
             {projects.map(p => (
               <button
                 key={p.id}
-                className="w-full text-left rounded-lg px-3 py-2 hover:bg-white/5 transition-colors"
+                type="button"
+                aria-current={project?.id === p.id ? 'true' : undefined}
+                className="w-full min-h-11 text-left rounded-lg px-3 py-2 hover:bg-white/5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px]"
                 onClick={() => {
                   setShowProjectList(false);
-                  void loadProject(p.id).catch(() => showToast('项目加载失败'));
+                  void loadProject(p.id);
                 }}
                 style={{ fontSize: 11, color: project?.id === p.id ? '#e0b85c' : '#c6c7ca' }}
               >
@@ -884,7 +1012,8 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
         )}
 
         {/* ═══ Body (scrollable) ═══ */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto" data-popup>
+        {openingProject && <p role="status" className="px-4 py-2 text-sm text-[#c6c7ca]">正在打开项目…</p>}
+        <div ref={scrollRef} className="flex-1 overflow-y-auto" data-popup inert={openingProject} aria-busy={openingProject}>
 
           {/* ═══ Product area ═══ */}
           <div className="bi-product" style={{ padding: '20px 24px 36px', maxWidth: 1600, margin: '0 auto' }}>
@@ -1316,20 +1445,23 @@ export default function BrandIpPanel({ onClose, onAddImages }: BrandIpPanelProps
                           <strong>{assetProgress}%</strong>
                         </div>
                         <div className="bi-progress-track"><i style={{ width: `${assetProgress}%` }} /></div>
-                        <button className="bi-secondary-button" onClick={handleCancelAssetTask}>取消生成</button>
+                        <button className="bi-secondary-button" disabled={!assetTaskId} onClick={handleCancelAssetTask}>取消生成</button>
                       </div>
                     )}
                     {assets.length > 0 && (
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 10 }}>
                         {assets.slice(0, 4).map(a => (
-                          <div
+                          <button
                             key={a.id}
+                            type="button"
+                            aria-label={`发送${a.assetType}到画布`}
+                            className="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px]"
                             style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', cursor: 'pointer' }}
                             onClick={() => handleAddToCanvas(a.imageUrl)}
                           >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img src={a.imageUrl} alt={a.assetType} style={{ width: '100%', height: 80, objectFit: 'cover' }} />
-                          </div>
+                          </button>
                         ))}
                       </div>
                     )}

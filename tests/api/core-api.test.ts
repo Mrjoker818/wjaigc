@@ -5,6 +5,7 @@
  * 使用真实HTTP请求，不Mock
  */
 
+import { requireTestCredential } from '../helpers/e2e-credentials';
 import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 interface ApiBody {
   success?: boolean;
@@ -18,8 +19,8 @@ interface ApiBody {
 }
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:5000';
-const TEST_USERNAME = process.env.E2E_TEST_USERNAME || 'Mr.joker';
-const TEST_PASSWORD = process.env.E2E_TEST_PASSWORD || 'Wujie#2026Reset';
+const TEST_USERNAME = requireTestCredential('E2E_TEST_USERNAME');
+const TEST_PASSWORD = requireTestCredential('E2E_TEST_PASSWORD');
 
 // 使用 node 内置 fetch (Node 18+)
 let sessionCookie: string | null = null;

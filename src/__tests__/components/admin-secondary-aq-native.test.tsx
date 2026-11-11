@@ -180,32 +180,32 @@ const CONNECTOR_BODIES={
 };
 const AUDIT_LOG={
   "id": "aq-log-one",
-  "createdAt": "2026-10-19T00:00:00.000Z",
+  "created_at": 1792368000000,
   "user_id": "aq-actor",
   "user_name": "AQ合成操作者",
   "action": "image_generate",
   "level": "error",
-  "resolutionStatus": "unresolved",
+  "resolution_status": "none",
   "detail": "AQ合成长详情_ABCDEFGHIJKLMNOPQRSTUVWXYZ_只用于移动排版",
-  "errorMessage": "AQ合成任务错误",
+  "error_message": "AQ合成任务错误",
   "target_type": "image",
   "target_id": "aq-image",
-  "providerId": "aq-provider",
+  "provider_id": "aq-provider",
   "model": "aq-image-model",
-  "duration": 1000,
-  "stackTrace": "AQ synthetic trace",
-  "requestData": {
+  "duration_ms": 1000,
+  "stack_trace": "AQ synthetic trace",
+  "request_data": {
     "prompt": "AQ synthetic only"
   }
 };
-const STATS={todayCount:3,weekCount:9,totalCount:21,errorCount:1,warnCount:1,unresolvedCount:1};
+const STATS={todayActions:3,totalActions:21,errorCount:1,levelBreakdown:{warn:1},unresolvedErrorCount:1};
 function base():Record<string,ReadReply>{return Object.fromEntries(Object.entries(BASE_BODIES).map(([url,body])=>[url,{count:1,body}]));}
 function extend(previous:Readonly<Record<string,ReadReply>>,url:string,count:number,body:unknown):Record<string,ReadReply>{return {...previous,[url]:{count,body}};}
 function auditPlan():NativePlan{
  const steps=[base()];let reads=steps[0];
  reads=extend(reads,'/api/admin/audit?limit=50&offset=0',1,{success:true,logs:[],total:0});
  reads=extend(reads,'/api/admin/audit?stats=true',1,{success:true,stats:STATS});
- const data={logs:[AUDIT_LOG],total:21,stats:STATS};
+ const data={success:true,logs:[AUDIT_LOG],total:21};
  reads=extend(reads,'/api/admin/op-log?page=1&limit=20',1,data);steps.push(reads);
  for(const [url,count,body] of [
  ['/api/admin/op-log?page=1&limit=20',2,data],
@@ -213,9 +213,13 @@ function auditPlan():NativePlan{
  ['/api/admin/op-log?page=1&limit=20&action=image_generate&level=error',1,data],
  ['/api/admin/op-log?page=1&limit=20&action=image_generate&level=error&userId=aq-actor',1,data],
  ['/api/admin/op-log?page=1&limit=20',3,data],
- ['/api/admin/op-log?page=2&limit=20',1,{logs:[{...AUDIT_LOG,id:'aq-log-two',errorMessage:'AQ第二页错误'}],total:21,stats:STATS}],
+ ['/api/admin/op-log?page=2&limit=20',1,{success:true,logs:[{...AUDIT_LOG,id:'aq-log-two',error_message:'AQ第二页错误'}],total:21}],
  ['/api/admin/op-log?page=1&limit=20',4,data],
- ] as const){reads=extend(reads,url,count,body);steps.push(reads);}
+ ] as const){
+  reads=extend(reads,url,count,body);
+  reads=extend(reads,'/api/admin/audit?stats=true',steps.length,{success:true,stats:STATS});
+  steps.push(reads);
+ }
  return {kind:'audit',steps};
 }
 function apiPlan(kind:'api-list'|'api-form'):NativePlan{
@@ -267,7 +271,7 @@ describe.each(MATRIX)('AQ secondary admin $theme $width x $height',entry=>{
   await withSession(entry,auditPlan(),async(s:Session):Promise<void>=>{
    await navigate(s,'操作日志','操作日志');
    const summary=main(s).locator('div.grid').filter({has:s.page.getByText('今日操作',{exact:true})});expect(await summary.count()).toBe(1);
-   for(const label of ['今日操作','本周操作','总记录','今日错误','今日警告','未处理'])await readable(s,summary.getByText(label,{exact:true}),true);
+   for(const label of ['今日操作','本周操作','总记录','累计错误','累计警告','未处理错误'])await readable(s,summary.getByText(label,{exact:true}),true);
    await reach(s,main(s).getByRole('button',{name:'刷新',exact:true}));
    const action=main(s).getByRole('combobox',{name:'操作类型筛选',exact:true});const level=main(s).getByRole('combobox',{name:'日志级别筛选',exact:true});
    const user=main(s).getByRole('textbox',{name:'用户ID筛选',exact:true});

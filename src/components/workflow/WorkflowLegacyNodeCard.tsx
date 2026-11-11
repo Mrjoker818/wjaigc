@@ -382,7 +382,7 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
   const llmInstruction = node.config?.llmInstruction as string ?? '';
   const llmSystemEnabled = node.config?.llmSystemEnabled as boolean ?? false;
   const llmSystemPrompt = node.config?.llmSystemPrompt as string ?? '';
-  const textContent = node.config?.textContent as string ?? '';
+  const textContent = String(node.config?.textContent || node.config?.text || '');
 
   // 提示词模板触发状态
   const [showTemplatePopup, setShowTemplatePopup] = useState(false);
@@ -805,7 +805,7 @@ export const WorkflowLegacyNodeCard = React.memo(function WorkflowLegacyNodeCard
                     <button className={`text-[8px] cursor-pointer ${llmSystemEnabled ? 'text-primary' : 'text-muted-foreground'}`} onClick={(e) => { e.stopPropagation(); onNodeFieldChange?.(node.id, 'llmSystemEnabled', !llmSystemEnabled); }}>
                       {llmSystemEnabled ? '●' : '○'} 系统提示
                     </button>
-                    <button className="ml-auto px-1.5 py-0.5 rounded text-[9px] font-medium cursor-pointer bg-primary text-white hover:opacity-80 flex items-center gap-0.5 disabled:opacity-50 disabled:cursor-not-allowed" onClick={(e) => { e.stopPropagation(); onLlmOptimize?.(node.id, String(node.config?.textContent || ''), llmModel, String(node.config?.llmSystemPrompt || ''), String(node.config?.llmInstruction || '')); }} disabled={isRunning || !!node.config?.llmOptimizing || !llmModel} title="运行 LLM 优化">
+                    <button className="ml-auto px-1.5 py-0.5 rounded text-[9px] font-medium cursor-pointer bg-primary text-white hover:opacity-80 flex items-center gap-0.5 disabled:opacity-50 disabled:cursor-not-allowed" onClick={(e) => { e.stopPropagation(); onLlmOptimize?.(node.id, textContent, llmModel, String(node.config?.llmSystemPrompt || ''), String(node.config?.llmInstruction || '')); }} disabled={isRunning || !!node.config?.llmOptimizing || !llmModel} title="运行 LLM 优化">
                       {node.config?.llmOptimizing ? <Loader2 size={9} className="animate-spin" /> : <Sparkles size={9} />} {node.config?.llmOptimizing ? '优化中...' : '优化'}
                     </button>
                   </div>

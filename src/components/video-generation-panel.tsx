@@ -373,6 +373,11 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
   const [resolution, setResolution] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string>('');
+  const canvasVideoSelectionRef = useRef({ url: selectedVideoUrl, handled: false });
+  const setManualVideoUrl = useCallback((url: string): void => {
+    canvasVideoSelectionRef.current.handled = true;
+    setVideoUrl(url);
+  }, []);
   const [extendDuration, setExtendDuration] = useState(5);
   const [panelMinimized, setPanelMinimized] = useState(false);
   const [genProgress, setGenProgress] = useState(0);
@@ -726,15 +731,17 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
   }, [selectedImageUrl, mode]);
 
   // 画布选中视频自动切到延长模式并设为源
+  const canExtendVideo = currentFeatures?.videoExtend ?? false;
   useEffect(() => {
-    if (selectedVideoUrl) {
-      if (currentFeatures?.videoExtend) {
-        setMode('video-extend');
-        setVideoUrl(selectedVideoUrl);
-      }
+    if (canvasVideoSelectionRef.current.url !== selectedVideoUrl) {
+      canvasVideoSelectionRef.current = { url: selectedVideoUrl, handled: false };
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedVideoUrl]);
+    if (!selectedVideoUrl || !canExtendVideo || canvasVideoSelectionRef.current.handled) return;
+
+    canvasVideoSelectionRef.current.handled = true;
+    setMode('video-extend');
+    setVideoUrl(selectedVideoUrl);
+  }, [selectedVideoUrl, canExtendVideo]);
 
   // 切换模型时重置不支持的参数
   useEffect(() => {
@@ -1867,14 +1874,14 @@ Rules:
         if (target === 'first') setFirstFrame(data.url);
         else if (target === 'last') setLastFrame(data.url);
         else if (target === 'video') {
-          setVideoUrl(data.url);
+          setManualVideoUrl(data.url);
         } else addTypedReference(data.url, 'style');
       } catch (err) {
         onError?.(err instanceof Error ? err.message : (isVideoTarget ? '视频上传失败' : '图片上传失败'));
       }
     };
     input.click();
-  }, [onError]);
+  }, [onError, setManualVideoUrl]);
 
   // === 主题颜色 ===
   const isGold = themeStyle === 'gold';
@@ -2393,14 +2400,14 @@ Rules:
                     <div className="relative group flex items-center gap-2 p-2.5 rounded-md" style={{ background: inputBg, border: `1px solid ${borderColor}` }}>
                       <Video className="w-5 h-5 shrink-0" style={{ color: accentColor }} />
                       <span className="text-xs truncate flex-1" style={{ color: subTextColor }}>{videoUrl.length > 60 ? videoUrl.substring(0, 60) + '...' : videoUrl}</span>
-                      <button onClick={() => setVideoUrl('')} aria-label="移除源视频" className="opacity-100 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover:opacity-100 focus-visible:opacity-100 w-11 h-11 [@media(hover:hover)_and_(pointer:fine)]:w-6 [@media(hover:hover)_and_(pointer:fine)]:h-6 shrink-0 rounded-full flex items-center justify-center text-red-400 cursor-pointer">×</button>
+                      <button onClick={() => setManualVideoUrl('')} aria-label="移除源视频" className="opacity-100 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 group-hover:opacity-100 focus-visible:opacity-100 w-11 h-11 [@media(hover:hover)_and_(pointer:fine)]:w-6 [@media(hover:hover)_and_(pointer:fine)]:h-6 shrink-0 rounded-full flex items-center justify-center text-red-400 cursor-pointer">×</button>
                     </div>
                   ) : (
                     <>
                       <input
                         type="text"
                         value={videoUrl}
-                        onChange={e => setVideoUrl(e.target.value)}
+                        onChange={e => setManualVideoUrl(e.target.value)}
                         placeholder="输入视频URL（画布选中视频会自动填充）"
                         className="w-full px-3 py-2 rounded-md text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
                         style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}` }}

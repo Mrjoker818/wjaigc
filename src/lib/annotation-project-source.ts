@@ -46,6 +46,23 @@ export async function findOwnedAnnotationSource(
   // There is no authoritative file-backed project reader here. Without PG,
   // retain the unavailable result and never query a cached/unconfigured pool.
   if (!isDatabaseConfigured()) return null;
+  const { readDocumentWorkspaceProject, DocumentWorkspaceReferenceError } = await import(
+    '@/lib/collaboration/document-workspace-reference'
+  );
+  try {
+    const document = await readDocumentWorkspaceProject(userId, projectId);
+    if (document) {
+      if (document.ownerId !== userId || document.projectId !== projectId) return null;
+      const matches = document.canvasImages.filter(image => image.id === imageId);
+      const image = matches[0];
+      if (matches.length !== 1 || image.mediaAvailability !== 'ready' || image.mediaType === 'video'
+        || image.videoUrl || image.threeDModelUrl || !image.url || !image.annotationVersionId) return null;
+      return { projectId, imageId, imageUrl: image.url, versionId: image.annotationVersionId };
+    }
+  } catch (error) {
+    if (error instanceof DocumentWorkspaceReferenceError && error.status === 403) return null;
+    throw error;
+  }
   const projects = normalizeProjects(await dbGetUserData(userId, 'projects'));
   const project = projects.find((candidate) =>
     String(candidate.id || '') === projectId

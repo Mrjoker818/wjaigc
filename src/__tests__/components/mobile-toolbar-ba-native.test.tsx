@@ -200,7 +200,7 @@ async function withSession(theme:Theme,width:number,height:number,options:Option
 
 const MATRIX=THEMES.flatMap(theme=>[[320,640],[390,844],[640,320]].map(([width,height])=>({theme,width,height})));
 interface MatrixEntry {theme:Theme;width:number;height:number}
-const TOOL_NAMES=['选择','平移','上传图片','缩小','放大','重置视图','命令面板','切换网格','显示连线','图层面板','版本历史','AI引擎设置','图像生成器','图转3D工厂','语言修图','Agent编排','视频生成','品牌电商','精修引擎','人物精修','字境大师','品牌工厂','品牌IP','Logo Pro','3D构图','包装Pro','展陈Pro','反向拆图Pro','草图创作','AI PSD','表情助手','六面体','ChatCanvas'];
+const TOOL_NAMES=['选择','平移','上传图片','缩小','放大','重置视图','撤销','重做','命令面板','切换网格','显示连线','图层面板','版本历史','AI引擎设置','图像生成器','图转3D工厂','语言修图','Agent编排','视频生成','品牌电商','精修引擎','人物精修','字境大师','品牌工厂','品牌IP','Logo Pro','3D构图','包装Pro','展陈Pro','反向拆图Pro','草图创作','AI PSD','表情助手','六面体','ChatCanvas'];
 let captureIndex=0;
 function bar(s:Session):Locator{return s.page.locator('[data-mobile-canvas-toolbar]');}
 function drawer(s:Session):Locator{return s.page.getByRole('dialog',{name:'全部工具',exact:true});}

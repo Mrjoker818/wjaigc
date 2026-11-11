@@ -16,9 +16,15 @@ vi.mock('@/lib/server-api-config', () => ({ getApiProviders: async () => [{
   id: 'qp-provider', name: 'QP synthetic provider', type: 'audio', isEnabled: true,
   baseUrl: 'https://qp.provider.invalid', apiKey: 'qp-not-a-real-key', selectedModels: ['qp-synthetic-tts'],
 }] }));
+vi.mock('@/lib/server-auth', () => ({
+  listManagedUsers: async (): Promise<never> => { throw new Error('QP_UNEXPECTED_INTERNAL_ACTOR_LOOKUP'); },
+}));
 vi.mock('@/lib/api-auth', () => ({
-  requireApiAuthOrReject: async (): Promise<NextResponse | { id: string }> =>
-    mocks.auth ? { id: 'qp-synthetic-actor' } : NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
+  requireApiAuthOrReject: async () => mocks.auth ? {
+    userId: 'qp-synthetic-actor',
+    source: 'cookie',
+    user: { id: 'qp-synthetic-actor', role: 'user', status: 'active', apiPermissions: { audio: true } },
+  } : NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
 }));
 vi.mock('os', async original => ({ ...await original<typeof import('os')>(), tmpdir: (): string => mocks.scratch }));
 vi.mock('@/lib/s3-storage', () => ({

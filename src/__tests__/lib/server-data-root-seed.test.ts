@@ -1,54 +1,51 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-
-import { seedBundledSystemFiles } from '@/lib/server-data-root';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 let workspace: string;
-let dataRoot: string;
-let seedDir: string;
 
 beforeEach(() => {
-  workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'wujie-seed-'));
-  dataRoot = path.join(workspace, 'data-root');
-  seedDir = path.join(workspace, 'deploy-seed', 'system');
-  fs.mkdirSync(seedDir, { recursive: true });
+  workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'wujie-deployment-data-'));
+  vi.stubEnv('COZE_WORKSPACE_PATH', workspace);
+  vi.stubEnv('WUJIE_DATA_DIR', '');
+  vi.stubEnv('WUJIE_DEPLOYMENT_DB_ONLY', '1');
+  vi.resetModules();
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   fs.rmSync(workspace, { recursive: true, force: true });
 });
 
-describe('seedBundledSystemFiles', () => {
-  it('copies bundled seed files into the data root system dir', () => {
-    fs.writeFileSync(path.join(seedDir, 'users.json'), '{"users":[],"updatedAt":1}');
-    fs.writeFileSync(path.join(seedDir, 'api-providers.json'), '[]');
-
-    seedBundledSystemFiles(dataRoot, seedDir);
-
-    const targetDir = path.join(dataRoot, 'system');
-    expect(fs.readFileSync(path.join(targetDir, 'users.json'), 'utf8')).toBe('{"users":[],"updatedAt":1}');
-    expect(fs.readFileSync(path.join(targetDir, 'api-providers.json'), 'utf8')).toBe('[]');
+it('does not copy a historical bundle into the runtime filesystem fallback', async () => {
+  const seedDir = path.join(workspace, 'deploy-seed', 'system');
+  fs.mkdirSync(seedDir, { recursive: true });
+  for (const name of ['users.json', 'api-providers.json']) {
+    fs.writeFileSync(path.join(seedDir, name), 'synthetic legacy credential');
+  }
+  const mkdir = fs.mkdirSync;
+  vi.spyOn(fs, 'mkdirSync').mockImplementation((directory, options) => {
+    if (String(directory) === '/space/wujie-data') throw Object.assign(new Error('No mounted volume'), { code: 'EACCES' });
+    return mkdir(directory, options);
   });
 
-  it('never overwrites an existing data-root file', () => {
-    const targetDir = path.join(dataRoot, 'system');
-    fs.mkdirSync(targetDir, { recursive: true });
-    fs.writeFileSync(path.join(targetDir, 'users.json'), '{"existing":true}');
+  const { getServerDataRoot } = await import('@/lib/server-data-root');
+  const root = getServerDataRoot();
+  expect(root).toBe(path.join(workspace, 'data'));
+  expect(fs.existsSync(path.join(root, 'system'))).toBe(false);
+});
 
-    fs.writeFileSync(path.join(seedDir, 'users.json'), '{"users":[],"updatedAt":1}');
-    fs.writeFileSync(path.join(seedDir, 'api-providers.json'), '[]');
+it('keeps non-credential system settings when copying existing local data', async () => {
+  const local = path.join(workspace, 'data');
+  const persistent = path.join(workspace, 'durable');
+  fs.mkdirSync(path.join(local, 'system'), { recursive: true });
+  for (const name of ['users.json', 'api-providers.json', 'auth-secret', 'settings.json']) {
+    fs.writeFileSync(path.join(local, 'system', name), 'synthetic local file');
+  }
 
-    seedBundledSystemFiles(dataRoot, seedDir);
-
-    expect(fs.readFileSync(path.join(targetDir, 'users.json'), 'utf8')).toBe('{"existing":true}');
-    expect(fs.existsSync(path.join(targetDir, 'api-providers.json'))).toBe(true);
-  });
-
-  it('is a no-op when the bundled seed directory is absent', () => {
-    seedBundledSystemFiles(dataRoot, path.join(workspace, 'deploy-seed-missing', 'system'));
-    expect(fs.existsSync(path.join(dataRoot, 'system'))).toBe(false);
-  });
+  const { migrateLocalDataIfNeeded } = await import('@/lib/server-data-root');
+  migrateLocalDataIfNeeded(local, persistent);
+  expect(fs.readdirSync(path.join(persistent, 'system'))).toEqual(['settings.json']);
 });

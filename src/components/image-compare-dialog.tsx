@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { X, Columns2, SplitSquareHorizontal, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Move } from 'lucide-react';
+import { useModalFocus } from './canvas/use-modal-focus';
 
 interface ImageCompareDialogProps {
   /** 左侧图片（对比前/A图） */
@@ -31,8 +32,10 @@ export function ImageCompareDialog({
   const panStartRef = useRef({ x: 0, y: 0, ox: 0, oy: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
   const touchOwnerRef = useRef<{ pointerId: number; kind: 'slider' | 'pan'; target: HTMLDivElement } | null>(null);
   const closeTouchRef = useRef<{ id: number; x: number; y: number; invalid: boolean } | null>(null);
+  useModalFocus(dialogRef, closeRef, onClose);
 
   useEffect(() => {
     const invalidateMulti = (event: TouchEvent): void => {
@@ -91,15 +94,10 @@ export function ImageCompareDialog({
     }
   }, []);
 
-  useEffect(() => {
-    const previous = document.activeElement;
-    dialogRef.current?.focus();
-    return () => {
-      const owner = touchOwnerRef.current;
-      touchOwnerRef.current = null;
-      if (owner?.target.hasPointerCapture(owner.pointerId)) owner.target.releasePointerCapture(owner.pointerId);
-      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
-    };
+  useEffect(() => () => {
+    const owner = touchOwnerRef.current;
+    touchOwnerRef.current = null;
+    if (owner?.target.hasPointerCapture(owner.pointerId)) owner.target.releasePointerCapture(owner.pointerId);
   }, []);
 
   useEffect(() => {
@@ -180,21 +178,21 @@ export function ImageCompareDialog({
     }
   }, [zoomPercent]);
 
-  // Keyboard: ESC to close, 1/2 switch mode, +/- zoom
-  useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      // Only handle if focus is inside the dialog
-      if (dialogRef.current && !dialogRef.current.contains(e.target as Node)) return;
-      if (e.key === 'Escape') { e.stopPropagation(); onClose(); return; }
-      if (e.key === '1') { e.stopPropagation(); setMode('slider'); }
-      if (e.key === '2') { e.stopPropagation(); setMode('sideBySide'); }
-      if (e.key === '+' || e.key === '=') { e.stopPropagation(); setZoomPercent(prev => Math.min(500, prev + 10)); }
-      if (e.key === '-' || e.key === '_') { e.stopPropagation(); setZoomPercent(prev => Math.max(10, prev - 10)); }
-      if (e.key === '0') { e.stopPropagation(); setZoomPercent(100); }
-    };
-    window.addEventListener('keydown', handleKey, true);
-    return () => window.removeEventListener('keydown', handleKey, true);
-  }, [onClose]);
+  const handleShortcuts = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.defaultPrevented || event.nativeEvent.isComposing || event.ctrlKey || event.altKey || event.metaKey) return;
+    switch (event.key) {
+      case '1': setMode('slider'); break;
+      case '2': setMode('sideBySide'); break;
+      case '+':
+      case '=': setZoomPercent(previous => Math.min(500, previous + 10)); break;
+      case '-':
+      case '_': setZoomPercent(previous => Math.max(10, previous - 10)); break;
+      case '0': setZoomPercent(100); break;
+      default: return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+  };
 
   // Zoom handler
   const handleZoomChange = useCallback((value: number) => {
@@ -232,6 +230,7 @@ export function ImageCompareDialog({
         aria-modal="true"
         aria-label="图片对比"
         tabIndex={-1}
+        onKeyDown={handleShortcuts}
         className={`relative rounded-2xl border shadow-2xl overflow-hidden flex flex-col ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#333]'}`}
         style={{ width: 'min(1200px, calc(100vw - max(8px, env(safe-area-inset-left, 0px)) - max(8px, env(safe-area-inset-right, 0px))))', height: 'min(900px, calc(100dvh - max(8px, env(safe-area-inset-top, 0px)) - max(8px, env(safe-area-inset-bottom, 0px))))' }}
         onClick={(e) => e.stopPropagation()}
@@ -268,6 +267,8 @@ export function ImageCompareDialog({
 
           <div className="flex items-center gap-2">
             <button
+              ref={closeRef}
+              type="button"
               onTouchStart={event => {
                 if (closeTouchRef.current && event.touches.length > 1) { closeTouchRef.current.invalid = true; return; }
                 if (!event.isTrusted || event.touches.length !== 1 || event.changedTouches.length !== 1) { closeTouchRef.current = null; return; }

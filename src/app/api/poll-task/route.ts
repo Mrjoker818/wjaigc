@@ -528,6 +528,21 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
       }
       return pollSketchTask(body, persistedSketchCandidate, sessionUser.id, requestId);
     }
+    if (persistedSketchCandidate?.type === 'display3d') {
+      const ownerId = persistedSketchCandidate.userId;
+      if (!sessionUser || (sessionUser.id !== ownerId && sessionUser.role !== 'admin')) {
+        return NextResponse.json({ success: false, status: 'error', error: '任务不存在', retryable: false }, { status: 404 });
+      }
+      const { display3DTaskResponse, pollDisplay3DTask } = await import('@/lib/display3d-generation-task');
+      try {
+        const task = await pollDisplay3DTask(taskId, ownerId, request.signal);
+        if (task) return NextResponse.json(display3DTaskResponse(task));
+        return NextResponse.json({ success: false, status: 'error', error: '任务不存在', retryable: false }, { status: 404 });
+      } catch {
+        return NextResponse.json({ success: false, status: 'processing', taskId, code: 'DISPLAY3D_OUTCOME_UNCONFIRMED',
+          requiresReconciliation: true, retryable: false }, { status: 503 });
+      }
+    }
     if (taskId.startsWith('sketch_')) return sketchRejected(404, 'SKETCH_TASK_UNAVAILABLE');
     if (taskId.startsWith('skimg_')) return sketchRejected(404, 'SKETCH_IMAGE_TASK_UNAVAILABLE');
     let model = typeof rawModel === 'string' ? rawModel : (rawModel as Record<string, unknown>)?.model as string || String(rawModel || '');
@@ -1555,6 +1570,9 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
 
     // ★ 检查 task-registry 中的任务
     let registryTask = getTaskInfo(taskId);
+    if (!registryTask && taskId.startsWith('d3d_') && !taskId.startsWith('d3d_dec_')) {
+      return NextResponse.json({ success: false, status: 'error', error: '任务不存在', retryable: false }, { status: 404 });
+    }
     if (
       registryTask
       && sessionUser
@@ -2357,6 +2375,12 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
       if (registryTask.status === 'failed') {
         // ★ 释放队列槽位
         releaseQueueSlot(taskId);
+        if ((registryTask.type === 'venue-analyze' || registryTask.type === 'venue-proposals')
+          && (registryTask.result as Record<string, unknown> | undefined)?.venueSubmissionUnconfirmed === true) {
+          return NextResponse.json({ success: false, status: 'failed', taskId,
+            code: 'VENUE_SUBMISSION_UNCONFIRMED', requiresReconciliation: true, retryable: false,
+            error: registryTask.error }, { status: 200 });
+        }
         return NextResponse.json(withGenerationSlotMetadata({
           success: false,
           status: 'failed',
@@ -2483,10 +2507,11 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
         try {
           const {
             buildVideoPollRequest,
+            fetchPearVideoPoll,
             parseVideoPollResponse,
           } = await import('@/lib/video-api');
 
-          const pollReq = buildVideoPollRequest(
+          const pollReq = videoProfile === 'pearapi-video' ? null : buildVideoPollRequest(
             (videoProfile || 'rest-generic') as import('@/lib/video-api').VideoCompatProfile,
             vBaseUrl,
             vApiKey || '',
@@ -2494,17 +2519,17 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
             videoAdvancedParams,
           );
 
-          console.log(`[poll-task/video] Polling: url=${pollReq.url}, method=${pollReq.method}`);
+          if (pollReq) console.log(`[poll-task/video] Polling: url=${pollReq.url}, method=${pollReq.method}`);
 
-          let pollResp = await fetch(pollReq.url, {
+          let pollResp = pollReq ? await fetch(pollReq.url, {
             method: pollReq.method,
             headers: pollReq.headers,
             signal: AbortSignal.timeout(30000),
-          });
+          }) : await fetchPearVideoPoll(vBaseUrl, vApiKey, thirdPartyTaskId);
 
           // Poll endpoint fallback: if current endpoint returns 404/422, try alternative paths
           // Common pattern: /v1/tasks/{id} 404 → try /v1/images/generations/{id}
-          if (pollResp.status === 404 && videoProfile === 'rest-generic') {
+          if (pollReq && pollResp.status === 404 && videoProfile === 'rest-generic') {
             const altUrl = pollReq.url.includes('/v1/tasks/')
               ? pollReq.url.replace('/v1/tasks/', '/v1/images/generations/')
               : pollReq.url.includes('/v1/images/generations/')

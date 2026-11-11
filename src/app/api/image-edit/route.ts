@@ -66,6 +66,8 @@ import { executeOverlapTileUpscale } from '@/lib/upscale-tile-executor';
 import { buildDisplayDecomposePrompt, buildDisplayDecomposeRequestBody, normalizeDisplayDecomposeRatio } from '@/lib/display-decompose';
 import { compositeMaskedEdit } from '@/lib/image-tools/masked-edit-composite';
 import { evaluateRemoveBgOutput } from '@/lib/image-tools/remove-bg-quality';
+import { eraseWithLama, isLocalEraseConfigured, LOCAL_ERASE_MODEL } from '@/lib/image-tools/local-erase-client';
+import { generateRembgMask, isRembgConfigured, LOCAL_REMBG_MODEL } from '@/lib/image-tools/rembg-client';
 import { resolveLayerSourceImage } from '@/lib/layer-decomposition/source-image';
 import {
   submitDedicatedRemoveBg,
@@ -836,10 +838,25 @@ export async function POST(request: NextRequest) {
         user: authResult.user, source: authResult.source,
       });
     } catch (error) {
-      if (error instanceof ImageEditModelPlanError) {
+      if (!(error instanceof ImageEditModelPlanError)) throw error;
+      const autoLocalEligible = error.code === 'IMAGE_EDIT_MODEL_UNAVAILABLE'
+        && enginePref === 'auto'
+        && body.model === undefined && body.providerId === undefined && body.upscaleModel === undefined
+        && !body.enableQualityEnhance;
+      let localModel: string | undefined;
+      if (autoLocalEligible) {
+        if (isRemoveBackgroundAction && await isRembgConfigured()) localModel = LOCAL_REMBG_MODEL;
+        if (action === 'inpaint' && editMode === 'erase' && await isLocalEraseConfigured()) {
+          localModel = LOCAL_ERASE_MODEL;
+        }
+      }
+      if (!localModel) {
         return NextResponse.json({ success: false, code: error.code, error: error.message }, { status: error.status });
       }
-      throw error;
+      modelPlan = {
+        requestedModelId: localModel, requestedProviderId: '', explicit: false,
+        candidates: [], dedicatedRemoveBgCandidates: [], visionCandidates: [],
+      };
     }
     const modelStr = modelPlan.requestedModelId;
     const effectiveProviderId = modelPlan.requestedProviderId;
@@ -2839,7 +2856,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (isRemoveBackgroundAction) {
-      // 本地 rembg CPU 去背景已随本地模型移除，统一走云端 AI 模型。
+      // 已配置的云端去背景优先。
       const bgSize = aspectRatio ? findClosestAspectRatio(aspectRatio) : '1:1';
       const imageBase64ForBg = await resolveImageToBase64(imageUrl).catch(() => null);
 
@@ -3001,6 +3018,22 @@ export async function POST(request: NextRequest) {
         }, { status: 502 });
       }
 
+      if (await isRembgConfigured()) {
+        try {
+          const source = preparedLocalImage ?? await fetchImageBuffer(imageUrl, { maxBytes: 20 * 1024 * 1024 });
+          const local = await generateRembgMask(source);
+          const persisted = local && await postProcessLocalRemoveBG(
+            local.rgba.toString('base64'), local.mask.toString('base64'), source,
+          );
+          if (persisted) {
+            return NextResponse.json({ success: true, ...persisted, action,
+              engine: 'local-rembg', usedModel: LOCAL_REMBG_MODEL });
+          }
+        } catch {
+          console.warn('[remove_background] Local rembg fallback failed');
+        }
+      }
+
       // ─── 所有路径均失败 → 本地透明化兜底（秒级完成） ───
       try {
         const sourceBuffer = await fetchImageBuffer(imageUrl);
@@ -3158,7 +3191,7 @@ export async function POST(request: NextRequest) {
         if (!await renewCloudTaskLease(localTaskId, leaseOwner, leaseMs)) return inpaintPending();
         const result = {
           imageUrl: persisted.url, checksum: persisted.checksum, engine,
-          providerId: actualProviderId || admitted.task.providerId,
+          providerId: actualProviderId ?? admitted.task.providerId,
           usedModel: actualModelId || admitted.task.model,
         };
         let completed: boolean;
@@ -3389,6 +3422,11 @@ export async function POST(request: NextRequest) {
             if (await hasUncertainInpaintSubmission()) return inpaintPending();
             console.warn(`[inpaint] AI erase failed, falling back to local BFS:`, aiErr instanceof Error ? aiErr.message : aiErr);
           }
+        }
+
+        if (engineMode === 'auto') {
+          const neural = await eraseWithLama(imageBuffer, eraseBinaryMaskBuffer, origW, origH);
+          if (neural) return await completeInpaint(neural, 'local-iopaint', undefined, '', LOCAL_ERASE_MODEL);
         }
 
         // AI 模型不可用或失败时，降级到本地 BFS 边界扩散

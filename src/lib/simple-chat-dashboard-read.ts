@@ -13,7 +13,7 @@ export async function readDashboardProjects(options: DashboardReadOptions): Prom
   let closed = false;
   let status: number | undefined;
   let local: 'none' | 'valid' | 'invalid' | 'failed' = 'none';
-  let hint: 'available' | 'local' | 'unavailable' | 'identity' | undefined;
+  let identityMismatch = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let cancel!: () => void;
   const stopped = new Promise<DashboardReadResult>(resolve => {
@@ -39,14 +39,13 @@ export async function readDashboardProjects(options: DashboardReadOptions): Prom
     if (String(input).includes('chat_simple_projects') || String(input).includes('/api/simple-chat/actor-bound-sync-v1')) status = response.status;
     return response;
   };
-  // Newer identity-bound loader accepts onStatus; the mainline array API ignores it.
   const loaderOptions = { userId: options.userId, store, fetchImpl: observedFetch,
-    onStatus: (value: 'available' | 'local' | 'unavailable' | 'identity') => { hint = value; } };
+    onStatus: () => { identityMismatch = true; } };
   const operation = (options.loader ?? loadSimpleChatDashboardProjects)(loaderOptions).then((projects): DashboardReadResult => {
-    if (hint === 'identity' || status === 401 || status === 403 || status === 409) return { kind: 'auth', projects: [] };
+    if (identityMismatch || status === 401 || status === 403 || status === 409) return { kind: 'auth', projects: [] };
     if (local === 'failed') return { kind: 'storage', projects: [] };
     if (local === 'valid') return { kind: 'local', projects };
-    if (local === 'invalid' || hint === 'unavailable' || (status !== undefined && (status < 200 || status >= 300))) return { kind: 'unavailable', projects: [] };
+    if (local === 'invalid' || (status !== undefined && (status < 200 || status >= 300))) return { kind: 'unavailable', projects: [] };
     return { kind: 'available', projects };
   }).catch((): DashboardReadResult => ({ kind: 'unavailable', projects: [] }));
   try { return await Promise.race([operation, stopped]); }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getApiProviders } from '@/lib/server-api-config';
-import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { configuredPaidProviderBaseUrl } from '@/lib/paid-provider-submit';
+import { submitVenueCompletion } from '@/lib/activity-venue-submission';
 import { getSessionUser } from '@/lib/server-auth';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { selectActivityVenueModel } from '@/lib/activity-venue-model';
@@ -49,6 +50,7 @@ export async function POST(request: NextRequest) {
     const selection = selectActivityVenueModel(providers, sessionUser, providerId, model);
     if (!selection.ok) return NextResponse.json({ error: selection.error }, { status: selection.status });
     const { provider, modelId: selectedModel } = selection;
+    const baseUrl = configuredPaidProviderBaseUrl(provider.baseUrl);
 
     const taskId = `venue_analyze_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     registerTask(taskId, 'venue-analyze', `场馆分析`, sessionUser?.id);
@@ -81,16 +83,9 @@ export async function POST(request: NextRequest) {
   "designNotes": "整体空间开放，适合大型展陈装置"
 }`;
 
-        let apiBase = provider.baseUrl.replace(/\/+$/, '');
-        if (apiBase.endsWith('/v1')) apiBase = apiBase.slice(0, -3);
-
-        const response = await fetchWithV1Retry(apiBase, '/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${provider.apiKey}`,
-          },
-          body: JSON.stringify({
+        const content = await submitVenueCompletion({
+          taskId, baseUrl, apiKey: provider.apiKey,
+          body: {
             model: selectedModel,
             messages: [
               { role: 'system', content: systemPrompt },
@@ -103,28 +98,20 @@ export async function POST(request: NextRequest) {
               },
             ],
             max_tokens: 2048,
-          }),
+          },
         });
-
-        if (!response.ok) {
-          const errText = await response.text();
-          updateTaskProgress(taskId, { status: 'failed', error: `视觉分析失败: ${response.status} ${errText.slice(0, 200)}` });
-          return;
-        }
-
-        const apiResp = await response.json();
-        const content = apiResp.choices?.[0]?.message?.content || '';
+        if (content === undefined) return;
 
         let parsed: unknown;
         try {
-          const jsonMatch = typeof content === 'string' ? content.match(/\{[\s\S]*\}/) : null;
+          const jsonMatch = content.match(/\{[\s\S]*\}/);
           if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
         } catch {
           // Invalid provider content is handled below.
         }
         const analysis = venueAnalysisSchema.safeParse(parsed);
         if (!analysis.success) {
-          updateTaskProgress(taskId, { status: 'failed', error: '场馆分析结果格式无效，请查看任务状态' });
+          updateTaskProgress(taskId, { status: 'failed', error: `场馆分析结果格式无效（任务 ${taskId}），请先核实供应商费用` });
           return;
         }
 
@@ -133,10 +120,10 @@ export async function POST(request: NextRequest) {
           progress: 100,
           result: { analysis: analysis.data, type: 'venue-analyze' },
         });
-      } catch (err) {
+      } catch {
         updateTaskProgress(taskId, {
           status: 'failed',
-          error: err instanceof Error ? err.message : '场馆分析失败',
+          error: `场馆分析未能完成（任务 ${taskId}），请核实任务状态`,
         });
       }
     })();

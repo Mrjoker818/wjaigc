@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 interface MultiAngleSpherePreviewProps {
   imageUrl: string;
@@ -18,47 +18,36 @@ export function MultiAngleSpherePreview({
   isMonochrome,
 }: MultiAngleSpherePreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [imageRevision, setImageRevision] = useState(0);
-  const imgDataRef = useRef<ImageData | null>(null);
-  const imgLoadingRef = useRef(false);
+  const [texture, setTexture] = useState<{ url: string; pixels: ImageData } | null>(null);
 
-  useEffect(() => {
-    if (imgLoadingRef.current) return;
-    imgLoadingRef.current = true;
-    imgDataRef.current = null;
+  useLayoutEffect(() => {
+    setTexture(null);
+    if (!imageUrl) return;
+    let active = true;
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
+      if (!active || img.naturalWidth === 0 || img.naturalHeight === 0) return;
       const maxDim = 256;
-      const scale = Math.min(maxDim / img.width, maxDim / img.height, 1);
-      const width = Math.floor(img.width * scale);
-      const height = Math.floor(img.height * scale);
+      const scale = Math.min(maxDim / img.naturalWidth, maxDim / img.naturalHeight, 1);
+      const width = Math.max(1, Math.floor(img.naturalWidth * scale));
+      const height = Math.max(1, Math.floor(img.naturalHeight * scale));
       const offscreen = document.createElement('canvas');
       offscreen.width = width;
       offscreen.height = height;
       const context = offscreen.getContext('2d');
-      if (!context) {
-        imgLoadingRef.current = false;
-        return;
-      }
-      context.drawImage(img, 0, 0, width, height);
+      if (!context) return;
       try {
-        imgDataRef.current = context.getImageData(0, 0, width, height);
+        context.drawImage(img, 0, 0, width, height);
+        setTexture({ url: imageUrl, pixels: context.getImageData(0, 0, width, height) });
       } catch {
-        imgDataRef.current = null;
+        setTexture(null);
       }
-      imgLoadingRef.current = false;
-      setImageRevision(revision => revision + 1);
-    };
-    img.onerror = () => {
-      imgLoadingRef.current = false;
     };
     img.src = imageUrl;
     return () => {
+      active = false;
       img.onload = null;
-      img.onerror = null;
-      img.src = '';
-      imgLoadingRef.current = false;
     };
   }, [imageUrl]);
 
@@ -70,16 +59,14 @@ export function MultiAngleSpherePreview({
 
     const width = canvas.width;
     const height = canvas.height;
-    const radius = Math.min(width, height) * 0.38;
+    const radius = Math.min(width, height) * (zoom === 0 ? 0.47 : zoom === 2 ? 0.29 : 0.38);
     context.clearRect(0, 0, width, height);
     context.fillStyle = isMonochrome ? '#f9fafb' : '#0d0d0d';
     context.fillRect(0, 0, width, height);
 
-    const imageData = imgDataRef.current;
+    const imageData = texture?.url === imageUrl ? texture.pixels : null;
     const yaw = (rotation / 90) * Math.PI * 0.5;
     const pitch = -(tilt / 90) * Math.PI * 0.5;
-    const cameraDistance = 2.5 / (zoom === 0 ? 0.7 : zoom === 2 ? 1.5 : 1.0);
-    void cameraDistance;
 
     if (!imageData) {
       context.beginPath();
@@ -183,7 +170,7 @@ export function MultiAngleSpherePreview({
     context.strokeStyle = 'rgba(212,175,55,0.2)';
     context.lineWidth = 1;
     context.stroke();
-  }, [imageUrl, rotation, tilt, zoom, isMonochrome, imageRevision]);
+  }, [imageUrl, rotation, tilt, zoom, isMonochrome, texture]);
 
   return (
     <div className="w-full h-full flex items-center justify-center relative">

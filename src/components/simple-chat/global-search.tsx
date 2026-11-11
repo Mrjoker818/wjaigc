@@ -14,7 +14,7 @@ interface SearchResult {
 interface GlobalSearchProps {
   conversations: Array<{ id: string; title: string; messages: Array<{ id: string; role: "user" | "assistant"; content: string }> }>;
   onClose: () => void;
-  onNavigate: (conversationId: string, messageId?: string) => void;
+  onNavigate: (conversationId: string, messageId: string) => void;
 }
 
 export function GlobalSearch({ conversations, onClose, onNavigate }: GlobalSearchProps): ReactElement {

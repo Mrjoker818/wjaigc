@@ -6,6 +6,13 @@ export const BINARY_MEDIA_PIXEL_LIMIT = 100_000_000;
 export const EXPORT_FILENAME = /^([a-f0-9]{16})-[A-Za-z0-9._-]+\.(png|jpe?g|webp|gif|avif|bmp|mp4|webm|mov|m4v|json|zip)$/u;
 export const EXPORT_KEY = /^exports\/[a-f0-9]{16}-[A-Za-z0-9._-]+\.(?:png|jpe?g|webp|gif|avif|bmp|mp4|webm|mov|m4v|json|zip)$/u;
 
+export class AssetVideoValidatorUnavailableError extends Error {
+  constructor() {
+    super('ASSET_VIDEO_VALIDATOR_UNAVAILABLE');
+    this.name = 'AssetVideoValidatorUnavailableError';
+  }
+}
+
 const MIME_EXTENSIONS: Readonly<Record<string, readonly string[]>> = {
   'image/png': ['png'], 'image/jpeg': ['jpeg', 'jpg'], 'image/webp': ['webp'],
   'image/gif': ['gif'], 'image/avif': ['avif'], 'image/bmp': ['bmp'],

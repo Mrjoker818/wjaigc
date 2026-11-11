@@ -4,7 +4,9 @@
  * 所有视频 API 统一采用"异步提交 + 轮询结果"模式
  */
 
-import { getPearVideoModelSpec } from './pear-video-models';
+import { PEAR_VIDEO_DEFAULT_DURATIONS, getPearVideoModelSpec, type PearVideoGenerationMode } from './pear-video-models';
+import { assertSafeProviderUrl } from './poisoned-api-host';
+import { ModelCapabilityError } from './task-core/model-capability-contract';
 
 // ==================== Types ====================
 
@@ -152,6 +154,8 @@ function secondsRange(start: number, end: number): number[] {
 }
 
 const SEEDANCE_APIMART_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'];
+const APIMART_OMNI_MODEL = 'gemini-omni-flash-preview';
+const APIMART_OMNI_NOMINAL_DURATION = 10;
 
 export const VIDEO_MODEL_REGISTRY: Record<string, VideoModelInfo> = {
   // === 国内模型 ===
@@ -357,10 +361,10 @@ export const VIDEO_MODEL_REGISTRY: Record<string, VideoModelInfo> = {
     // 比例字段为 size；6~15 秒；480p/720p；image_urls 最多 7 张
     features: { firstLastFrame: false, multiReference: true, audio: false, characterConsistency: false, videoEdit: false, videoExtend: false, cameraControl: false, motionBrush: false, multiShot: false, maxDuration: 15, durations: secondsRange(6, 15), ratios: ['16:9','9:16','1:1','3:2','2:3'], resolutions: ['480p','720p'], maxReferenceImages: 7, region: 'global' },
   },
-  'gemini-omni-flash-preview': {
+  [APIMART_OMNI_MODEL]: {
     profile: 'apimart-video', name: 'Gemini Omni Flash (APImart)', short: 'OmniFlash', provider: 'Google/APImart',
     // 无 duration 参数（输出 3~10 秒，不发送）；仅 720p；image_urls 最多 16 张；输出自带音频
-    features: { firstLastFrame: false, multiReference: true, audio: false, characterConsistency: false, videoEdit: false, videoExtend: false, cameraControl: false, motionBrush: false, multiShot: false, maxDuration: 10, durations: [10], ratios: ['16:9','9:16'], resolutions: ['720p'], maxReferenceImages: 16, region: 'global' },
+    features: { firstLastFrame: false, multiReference: true, audio: false, characterConsistency: false, videoEdit: false, videoExtend: false, cameraControl: false, motionBrush: false, multiShot: false, maxDuration: APIMART_OMNI_NOMINAL_DURATION, durations: [APIMART_OMNI_NOMINAL_DURATION], ratios: ['16:9','9:16'], resolutions: ['720p'], maxReferenceImages: 16, region: 'global' },
   },
   // ==== AI Link 视频模型 ====
   'kling-v3': {
@@ -385,8 +389,8 @@ export const VIDEO_MODEL_REGISTRY: Record<string, VideoModelInfo> = {
   },
   'doubao-seedance-2-0-mini-260615': {
     profile: 'pearapi-video', name: 'Seedance 2.0 Mini (PearAPI)', short: 'SD2.0M', provider: 'ByteDance/PearAPI',
-    // PearAPI 文档（api-533519667）：时长 4-15 整数秒，比例 16:9/9:16/1:1/4:3/3:4，清晰度 720P。
-    features: { firstLastFrame: true, multiReference: true, videoEdit: true, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 15, durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['720p'], region: 'global' },
+    // PearAPI Mini is documented at https://pearapi.apifox.cn/api-533519671.md.
+    features: { firstLastFrame: false, multiReference: true, imageToVideo: true, videoEdit: false, videoExtend: false, audio: false, cameraControl: false, motionBrush: false, characterConsistency: false, multiShot: false, maxDuration: 15, durations: secondsRange(4, 15), ratios: ['1:1','4:3','3:4','16:9','9:16'], resolutions: ['720p'], maxReferenceImages: 10, region: 'global' },
   },
   'happyhorse-1.0': {
     profile: 'ai-link', name: 'HappyHorse 1.0 (AI Link)', short: 'HH1.0', provider: 'HappyHorse/AI-Link',
@@ -401,7 +405,7 @@ export const VIDEO_MODEL_REGISTRY: Record<string, VideoModelInfo> = {
 export function getVideoModelInfo(modelId: string): VideoModelInfo | null {
   if (!modelId) return null;
   // Exact match
-  if (VIDEO_MODEL_REGISTRY[modelId]) return VIDEO_MODEL_REGISTRY[modelId];
+  if (Object.hasOwn(VIDEO_MODEL_REGISTRY, modelId)) return VIDEO_MODEL_REGISTRY[modelId];
   // Case-insensitive partial match
   const lower = modelId.toLowerCase();
   for (const [key, info] of Object.entries(VIDEO_MODEL_REGISTRY)) {
@@ -556,6 +560,26 @@ function ensureBaseUrl(url: string): string {
 }
 
 // ==================== Protocol Adapters ====================
+
+function videoCapabilityMismatch(modelId: string, field: string, received: unknown, allowed: readonly unknown[] = []) {
+  return new ModelCapabilityError('MODEL_CAPABILITY_MISMATCH', `所选视频模型不支持当前参数：${field}`, {
+    modelId, field, received, allowed,
+  });
+}
+
+/** Resolve provider-specific seconds before admission. APIMart Omni has a nominal duration only. */
+export function resolveVideoSubmitDuration(profile: VideoCompatProfile, model: string, requested: unknown): number | undefined {
+  const allowed = profile === 'pearapi-video'
+    ? getPearVideoModelSpec(model)?.durations ?? PEAR_VIDEO_DEFAULT_DURATIONS
+    : profile === 'apimart-video' && model.toLowerCase() === APIMART_OMNI_MODEL
+      ? [APIMART_OMNI_NOMINAL_DURATION]
+      : undefined;
+  if (!allowed) return undefined;
+  if (requested === undefined) return allowed.includes(5) ? 5 : allowed[0];
+  const seconds = typeof requested === 'number' || typeof requested === 'string' ? Number(requested) : NaN;
+  if (!allowed.includes(seconds)) throw videoCapabilityMismatch(model, 'duration', requested, allowed);
+  return seconds;
+}
 
 /**
  * Build the submit request for a video generation task.
@@ -777,7 +801,7 @@ export function buildVideoPollRequest(
       };
     case 'pearapi-video':
       return {
-        url: `${cleanBaseUrl}/v1/videos/tasks/${taskId}`,
+        url: buildPearVideoPollUrl(baseUrl, taskId, '/v1/videos/tasks'),
         headers: { 'Authorization': `Bearer ${apiKey}` },
         method: 'GET',
       };
@@ -820,6 +844,46 @@ export function buildVideoPollRequest(
       };
     }
   }
+}
+
+function buildPearVideoPollUrl(baseUrl: string, taskId: string, path: '/v1/videos/tasks' | '/v1/video/generations'): string {
+  const url = new URL(ensureBaseUrl(baseUrl));
+  if (url.search || url.hash || url.username || url.password) throw new Error('Invalid Pear video base URL');
+  if (!taskId || taskId === '.' || taskId === '..') throw new Error('Invalid Pear video task ID');
+  url.pathname = `${url.pathname.replace(/\/+$/, '')}${path}/${encodeURIComponent(taskId)}`;
+  return url.href;
+}
+
+async function isPearPollEndpointMismatch(response: Response, requestUrl: string): Promise<boolean> {
+  if (response.status === 405) return true;
+  if (response.status !== 404) return false;
+
+  // Pear also returns 404 for a missing task or a task owned by a different account.
+  const body = (await response.clone().text().catch(() => '')).trim();
+  const cannotGet = `Cannot GET ${new URL(requestUrl).pathname}`;
+  if (body === cannotGet || body.includes(`<pre>${cannotGet}</pre>`)) return true;
+
+  let message = body;
+  try {
+    const data: unknown = JSON.parse(body);
+    const code = getApiString(data, 'error', 'code') || getApiString(data, 'code');
+    if (code) return /^(route_not_found|endpoint_not_found|unsupported_endpoint)$/i.test(code.trim());
+    message = getApiString(data, 'error', 'message') || getApiString(data, 'error') || getApiString(data, 'message') || getApiString(data) || '';
+  } catch { /* A gateway may return plain text for an unknown route. */ }
+  return /^(route not found|endpoint not found|unsupported endpoint|endpoint not supported)[.!]?$/i.test(message.trim());
+}
+
+export async function fetchPearVideoPoll(baseUrl: string, apiKey: string, taskId: string, fetcher: typeof fetch = fetch): Promise<Response> {
+  const request = buildVideoPollRequest('pearapi-video', baseUrl, apiKey, taskId);
+  assertSafeProviderUrl(request.url);
+  const init: RequestInit = {
+    method: request.method, headers: request.headers, redirect: 'error', signal: AbortSignal.timeout(30000),
+  };
+  const response = await fetcher(request.url, init);
+  if (!await isPearPollEndpointMismatch(response, request.url)) return response;
+
+  // Compatibility GET used before 82559190. https://pearapi.apifox.cn/api-533519663.md
+  return fetcher(buildPearVideoPollUrl(baseUrl, taskId, '/v1/video/generations'), init);
 }
 
 /**
@@ -1232,6 +1296,7 @@ function getApiMartVideoSpec(modelId: string): ApiMartVideoSpec {
 function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
   const cleanBase = ensureBaseUrl(baseUrl);
   const spec = getApiMartVideoSpec(params.model);
+  if (!spec.sendsDuration) resolveVideoSubmitDuration('apimart-video', params.model, params.duration);
   const referenceImages = params.referenceImages || [];
   const lowerModel = params.model.toLowerCase();
 
@@ -1347,41 +1412,76 @@ function parseApiMartVideoPoll(data: unknown): VideoTaskPollResult {
   return { status: 'pending', progress: getApiNumber(item, 'progress') ?? 10 };
 }
 
-/** Build PearAPI video submit request.
- * POST /v1/videos/generations
- * Body: {model, prompt, n, size, aspect_ratio, task_type:'async', image/images, duration}
- * Async response: {id, status:'queued', model}
- * Sync response: {created, data:[{url}]}
- */
-function buildPearApiVideoSubmit(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
-  const cleanBase = ensureBaseUrl(baseUrl);
-  const refImages: string[] = [];
-  if (params.imageUrl) refImages.push(params.imageUrl);
-  if (params.lastFrameImageUrl) refImages.push(params.lastFrameImageUrl);
-  if (params.referenceImages?.length) refImages.push(...params.referenceImages);
-
-  // PearAPI 官方文档（pearapi.apifox.cn）：generation_mode 省略时按素材自动判断，
-  // 多素材时建议明确填写：仅文字 text2video；单图 image2video；多参考素材 reference2video；
-  // 视频编辑 video2video。
-  let generationMode = 'text2video';
-  if (params.videoUrl) {
-    generationMode = 'video2video';
-  } else if (refImages.length > 1) {
-    generationMode = 'reference2video';
-  } else if (refImages.length === 1) {
-    generationMode = 'image2video';
+/** Shared by admission and serialization so the submitted mode retains its requested materials. */
+export function resolvePearVideoMaterials(input: {
+  model: string;
+  imageUrl?: unknown;
+  lastFrameImageUrl?: unknown;
+  referenceImages?: unknown;
+  characterReferences?: unknown;
+  videoUrl?: unknown;
+  mode?: unknown;
+  action?: unknown;
+}) {
+  const spec = getPearVideoModelSpec(input.model);
+  const mismatch = (field: string, received: unknown, allowed?: unknown[]) => (
+    videoCapabilityMismatch(input.model, field, received, allowed)
+  );
+  if ((typeof input.lastFrameImageUrl === 'string' ? input.lastFrameImageUrl.trim() : input.lastFrameImageUrl != null)
+    || input.mode === 'image2video-firstlast' || input.mode === 'image2video_both') {
+    throw mismatch('operation', 'first-last-frame');
+  }
+  const characterCount = Array.isArray(input.characterReferences) ? input.characterReferences.length : undefined;
+  if (input.characterReferences != null && characterCount !== 0) {
+    throw mismatch('characterReferences', characterCount ?? 'invalid', [0]);
   }
 
-  // duration 与 seconds 等效，整数秒；按模型文档取最近的可选时长（未收录的模型沿用 4–15）
+  if (input.imageUrl != null && typeof input.imageUrl !== 'string') throw mismatch('referenceImages', 'invalid');
+  if (input.videoUrl != null && typeof input.videoUrl !== 'string') throw mismatch('videoUrl', 'invalid');
+  const imageUrl = input.imageUrl?.trim() || undefined;
+  const videoUrl = input.videoUrl?.trim() || undefined;
+  const suppliedRefs = input.referenceImages ?? [];
+  if (!Array.isArray(suppliedRefs) || !suppliedRefs.every((url): url is string => typeof url === 'string' && Boolean(url.trim()))) {
+    throw mismatch('referenceImages', 'invalid');
+  }
+  const referenceImages = suppliedRefs.map(url => url.trim());
+  const usesReferences = referenceImages.length > 0 || input.mode === 'image2video-ref';
+  if ((imageUrl && usesReferences) || (videoUrl && (imageUrl || usesReferences))) {
+    throw mismatch('operation', 'mixed-reference-roles');
+  }
+  if (input.action === 'extend') throw mismatch('operation', 'video-extend');
+  if ((input.action === 'edit' || input.mode === 'video2video') && !videoUrl) {
+    throw mismatch('operation', 'video2video-without-source');
+  }
+  if (input.mode === 'image2video-first' && !imageUrl) throw mismatch('referenceImages', 0, [1]);
+
+  let generationMode: PearVideoGenerationMode = 'text2video';
+  if (videoUrl) generationMode = 'video2video';
+  else if (usesReferences) generationMode = 'reference2video';
+  else if (imageUrl) generationMode = 'image2video';
+
+  if (spec && (!spec.modes.includes(generationMode)
+    || (videoUrl && spec.maxVideos === 0) || (imageUrl && spec.maxImages === 0))) {
+    throw mismatch('operation', generationMode, spec.modes);
+  }
+  if (generationMode === 'reference2video') {
+    const min = spec?.minReferenceImages ?? 2;
+    const max = spec?.maxImages ?? 10;
+    const count = referenceImages.length;
+    if (count < min || count > max || new Set(referenceImages).size !== count) {
+      throw mismatch('referenceImages', count, secondsRange(min, max));
+    }
+  }
+  return { generationMode, imageUrl, referenceImages, videoUrl };
+}
+
+/** Build PearAPI's POST /v1/videos/generations request. */
+function buildPearApiVideoSubmit(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
+  const cleanBase = ensureBaseUrl(baseUrl);
+  const { generationMode, imageUrl, referenceImages, videoUrl } = resolvePearVideoMaterials(params);
+  const images = imageUrl ? [imageUrl] : referenceImages;
   const spec = getPearVideoModelSpec(params.model);
-  const requestedDuration = params.duration != null ? Math.floor(params.duration) : undefined;
-  const pearDuration = requestedDuration != null
-    ? spec
-      ? spec.durations.reduce((nearest, value) => (
-        Math.abs(value - requestedDuration) < Math.abs(nearest - requestedDuration) ? value : nearest
-      ), spec.durations[0])
-      : Math.min(15, Math.max(4, Math.floor(requestedDuration)))
-    : undefined;
+  const duration = resolveVideoSubmitDuration('pearapi-video', params.model, params.duration);
   // 清晰度仅接受文档枚举（大写 P，如 720P/768P/1080P/2K）
   const rawResolution = getApiString(params.advancedParams, 'resolution')?.toUpperCase();
   const allowedResolutions = spec?.resolutions ?? ['720P', '480P'];
@@ -1394,18 +1494,21 @@ function buildPearApiVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
     prompt: params.prompt,
     generation_mode: generationMode,
     aspect_ratio: pearRatio,
-    ...(pearDuration !== undefined ? { duration: pearDuration } : {}),
+    duration,
     ...(pearResolution ? { resolution: pearResolution } : {}),
     ...(params.negativePrompt ? { negative_prompt: params.negativePrompt } : {}),
     ...(params.seed !== undefined ? { seed: params.seed } : {}),
   };
 
-  // PearAPI 统一参考素材写法 reference_contents: [{type, media_url, name?}]，数量按模型上限
-  const references = [
-    ...refImages.slice(0, spec?.maxImages ?? 10).map(url => ({ type: 'image', media_url: url })),
-    ...(params.videoUrl && (spec?.maxVideos ?? 1) > 0 ? [{ type: 'video', media_url: params.videoUrl }] : []),
-  ];
-  if (references.length > 0) body.reference_contents = references;
+  if (spec?.referenceArrays) {
+    if (images.length > 0) body.images = images;
+    if (videoUrl) body.videos = [videoUrl];
+  } else if (images.length > 0 || videoUrl) {
+    body.reference_contents = [
+      ...images.map(media_url => ({ type: 'image', media_url })),
+      ...(videoUrl ? [{ type: 'video', media_url: videoUrl }] : []),
+    ];
+  }
 
   return {
     url: `${cleanBase}/v1/videos/generations`,

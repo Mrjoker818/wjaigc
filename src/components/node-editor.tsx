@@ -1,5 +1,8 @@
 'use client';
 
+import { createWorkflowFromPreset, WORKFLOW_PRESETS, type WorkflowPreset } from '@/lib/workflow-presets';
+import { importWorkflowFile, isWorkflowGraph } from '@/lib/workflow-file';
+
 import NextImage from 'next/image';
 import React, { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo, useReducer } from 'react';
 import {
@@ -8,7 +11,7 @@ import {
   PORT_COLORS, NodePort, PortType, PropertyField,
   createWorkflowNode, createConnection, createEmptyWorkflow,
   getNodePropertyFields, getNodeCategory, NODE_TEMPLATES, getWorkflowNodeTemplates,
-  canConnectPorts, autoLayoutWorkflow, parseComfyUIWorkflow, isImageGeneratingNode, getOutputNodeSize,
+  canConnectPorts, autoLayoutWorkflow, isImageGeneratingNode, getOutputNodeSize,
   mergeWorkflowNodeUpdate, resolveWorkflowOutputAssetReference, type WorkspaceAssetReference,
   configureWorkflowSkillNodePorts,
   updateWorkflowSkillModelBinding, workflowModelSupportsSkillRole,
@@ -170,6 +173,20 @@ function unavailableSketchModel(nodes: readonly WorkflowNode[], catalog: Readonl
   });
 }
 type SketchExecutionView = { status: string; output?: Record<string, unknown>; error?: string };
+function isWorkflowSkillPauseResult(value: unknown): value is Record<string, SketchExecutionView> {
+  const results = workflowImageRetryRecord(value);
+  if (!results) return false;
+  let hasWaitingRun = false;
+  for (const item of Object.values(results)) {
+    const result = workflowImageRetryRecord(item);
+    if (!result || typeof result.status !== 'string'
+      || (result.error !== undefined && typeof result.error !== 'string')) return false;
+    const output = workflowImageRetryRecord(result.output);
+    if (result.output !== undefined && !output) return false;
+    hasWaitingRun ||= result.status === 'waiting-approval' && typeof output?.runId === 'string' && output.runId.length > 0;
+  }
+  return hasWaitingRun;
+}
 function safeSketchExecutionResults(results: Record<string, SketchExecutionView>, nodes: readonly WorkflowNode[]): Record<string, SketchExecutionView> {
   const ids = new Set(sketchNodes(nodes).map(node => node.id));
   const imageIds = new Set(sketchNodes(nodes).filter(node => node.type === 'ai-sketch-to-image').map(node => node.id));
@@ -379,439 +396,6 @@ function mergeExecutionLogs(
     }),
   ];
 }
-
-// ==================== 工作流预设模板 ====================
-
-interface WorkflowPreset {
-  id: string;
-  name: string;
-  description: string;
-  icon: string;
-  tags: string[];
-  nodes: { type: NodeType; label: string; config?: Record<string, unknown> }[];
-  connections: { from: number; to: number; fromPort: string; toPort: string; type: PortType }[];
-}
-
-const WORKFLOW_PRESETS: WorkflowPreset[] = [
-  {
-    id: 'txt2img',
-    name: '文生图',
-    description: '文本提示词生成图片',
-    icon: 'Wand2',
-    tags: ['基础', '生成'],
-    nodes: [
-      { type: 'input-text', label: '创意描述' },
-      { type: 'ai-generate', label: '图像生成' },
-      { type: 'output-image', label: '输出结果' },
-    ],
-    connections: [
-      { from: 0, to: 1, fromPort: 'out-prompt', toPort: 'in-prompt', type: 'prompt' },
-      { from: 1, to: 2, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-    ],
-  },
-  {
-    id: 'img2img',
-    name: '图生图',
-    description: '参考图片生成新图',
-    icon: 'Palette',
-    tags: ['基础', '转换'],
-    nodes: [
-      { type: 'input-image', label: '参考图' },
-      { type: 'input-text', label: '风格描述' },
-      { type: 'ai-style-transfer', label: '风格转换', config: { strength: 60 } },
-      { type: 'output-image', label: '输出结果' },
-    ],
-    connections: [
-      { from: 0, to: 2, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 1, to: 2, fromPort: 'out-prompt', toPort: 'in-prompt', type: 'prompt' },
-      { from: 2, to: 3, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-    ],
-  },
-  {
-    id: 'removebg-upscale',
-    name: '抠图+高清放大',
-    description: '去背景后超分辨率放大',
-    icon: 'Scissors',
-    tags: ['修图', '放大'],
-    nodes: [
-      { type: 'input-image', label: '原始图片' },
-      { type: 'ai-removebg', label: '移除背景', config: { model: 'birefnet-general-lite' } },
-      { type: 'ai-upscale', label: '无损放大', config: { scale: '2' } },
-      { type: 'output-export', label: '导出PNG', config: { format: 'png' } },
-    ],
-    connections: [
-      { from: 0, to: 1, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 1, to: 2, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 2, to: 3, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-    ],
-  },
-  {
-    id: 'font-design',
-    name: '字境大师',
-    description: 'AI字体设计生成',
-    icon: 'Type',
-    tags: ['字体', '设计'],
-    nodes: [
-      { type: 'input-text', label: '文字内容', config: { text: '无界AI' } },
-      { type: 'ai-font-design', label: '字境大师', config: { styleCategory: 'calligraphy', scene: 'logo' } },
-      { type: 'output-image', label: '字体图' },
-    ],
-    connections: [
-      { from: 0, to: 1, fromPort: 'out-prompt', toPort: 'in-prompt', type: 'prompt' },
-      { from: 1, to: 2, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-    ],
-  },
-  {
-    id: 'refine-engine',
-    name: '精修引擎',
-    description: '产品商业级精修流程',
-    icon: 'Sparkles',
-    tags: ['修图', '商业'],
-    nodes: [
-      { type: 'input-image', label: '产品原图' },
-      { type: 'input-text', label: '精修需求', config: { text: '专业产品摄影，影棚灯光，纯白背景' } },
-      { type: 'ai-refine-engine', label: '精修引擎', config: { category: 'electronics', lighting: 'studio', background: 'white' } },
-      { type: 'ai-upscale', label: '高清放大', config: { scale: '2' } },
-      { type: 'output-export', label: '导出结果' },
-    ],
-    connections: [
-      { from: 0, to: 2, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 1, to: 2, fromPort: 'out-prompt', toPort: 'in-prompt', type: 'prompt' },
-      { from: 2, to: 3, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 3, to: 4, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-    ],
-  },
-  {
-    id: 'brand-ecommerce',
-    name: '品牌电商',
-    description: '电商视觉内容生成',
-    icon: 'ShoppingBag',
-    tags: ['电商', '品牌'],
-    nodes: [
-      { type: 'input-image', label: '商品图' },
-      { type: 'input-text', label: '品牌描述' },
-      { type: 'ai-brand-ecommerce', label: '品牌电商', config: { templateType: 'product-scene', brandStyle: 'minimal' } },
-      { type: 'output-image', label: '电商主图' },
-    ],
-    connections: [
-      { from: 0, to: 2, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 1, to: 2, fromPort: 'out-prompt', toPort: 'in-prompt', type: 'prompt' },
-      { from: 2, to: 3, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-    ],
-  },
-  {
-    id: 'segment-psd',
-    name: '元素分层+PSD',
-    description: '智能分层并导出PSD',
-    icon: 'Layers',
-    tags: ['分层', 'PSD'],
-    nodes: [
-      { type: 'input-image', label: '原始图片' },
-      { type: 'ai-segment', label: '元素分层', config: { exportFormat: 'psd-pro' } },
-      { type: 'output-export', label: '导出PSD', config: { format: 'psd', quality: 'pro' } },
-    ],
-    connections: [
-      { from: 0, to: 1, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 1, to: 2, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-    ],
-  },
-  {
-    id: 'multi-angle',
-    name: '多角度生成',
-    description: '生成多视角图片',
-    icon: 'Rotate3d',
-    tags: ['生成', '多视角'],
-    nodes: [
-      { type: 'input-image', label: '参考图' },
-      { type: 'input-text', label: '描述' },
-      { type: 'ai-multi-angle', label: '多角度', config: { angles: 'quad', characterRef: true } },
-      { type: 'output-image', label: '结果' },
-    ],
-    connections: [
-      { from: 0, to: 2, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 1, to: 2, fromPort: 'out-prompt', toPort: 'in-prompt', type: 'prompt' },
-      { from: 2, to: 3, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-    ],
-  },
-  {
-    id: 'analyze-refine',
-    name: '分析→优化循环',
-    description: 'AI分析图片后自动优化',
-    icon: 'ScanSearch',
-    tags: ['分析', '优化'],
-    nodes: [
-      { type: 'input-image', label: '输入图片' },
-      { type: 'ai-analyze', label: 'AI分析', config: { analysisType: 'describe' } },
-      { type: 'ai-retouch', label: 'AI修图' },
-      { type: 'output-image', label: '优化结果' },
-    ],
-    connections: [
-      { from: 0, to: 1, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 0, to: 2, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 1, to: 2, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 2, to: 3, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-    ],
-  },
-  {
-    id: 'full-pipeline',
-    name: '完整处理流水线',
-    description: '去背景→修图→放大→导出',
-    icon: 'Zap',
-    tags: ['流水线', '完整'],
-    nodes: [
-      { type: 'input-image', label: '原始图片' },
-      { type: 'input-text', label: '修图指令' },
-      { type: 'ai-removebg', label: '移除背景', config: { model: 'birefnet-general-lite' } },
-      { type: 'ai-retouch', label: 'AI修图' },
-      { type: 'ai-upscale', label: '无损放大', config: { scale: '2' } },
-      { type: 'output-export', label: '导出', config: { format: 'png' } },
-    ],
-    connections: [
-      { from: 0, to: 2, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 0, to: 3, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 1, to: 3, fromPort: 'out-prompt', toPort: 'in-prompt', type: 'prompt' },
-      { from: 2, to: 4, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 3, to: 4, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 4, to: 5, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-    ],
-  },
-  // ─── P1-1 新增模板 ───
-  {
-    id: 'ecom-product-grid',
-    name: '电商主图6宫格',
-    description: '产品参考图 + LLM策划 → 6张不同场景电商主图',
-    icon: 'LayoutGrid',
-    tags: ['电商', '批量'],
-    nodes: [
-      { type: 'input-image', label: '产品图' },
-      { type: 'ai-llm', label: '文案策划', config: { systemPrompt: '你是电商视觉策划专家，为产品生成6个不同卖点场景的图片描述', temperature: 0.7 } },
-      { type: 'ai-generate', label: '主图1-场景1' },
-      { type: 'ai-generate', label: '主图2-场景2' },
-      { type: 'ai-generate', label: '主图3-场景3' },
-      { type: 'ai-generate', label: '主图4-场景4' },
-      { type: 'ai-generate', label: '主图5-场景5' },
-      { type: 'ai-generate', label: '主图6-场景6' },
-      { type: 'output-image-group', label: '6宫格结果' },
-    ],
-    connections: [
-      { from: 0, to: 2, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 0, to: 3, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 0, to: 4, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 0, to: 5, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 0, to: 6, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 0, to: 7, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 1, to: 2, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 1, to: 3, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 1, to: 4, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 1, to: 5, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 1, to: 6, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 1, to: 7, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 2, to: 8, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 3, to: 8, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 4, to: 8, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 5, to: 8, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 6, to: 8, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 7, to: 8, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-    ],
-  },
-  {
-    id: 'ecom-video-storyboard',
-    name: '电商广告7段分镜',
-    description: '7段分镜 → 生成视频 → 配音 → 合成广告片',
-    icon: 'Clapperboard',
-    tags: ['视频', '电商'],
-    nodes: [
-      { type: 'input-text', label: '产品卖点', config: { text: '产品核心卖点，7段分镜广告' } },
-      { type: 'ai-llm', label: '分镜脚本', config: { systemPrompt: '你是短视频导演，将产品卖点拆为7段分镜脚本，每段5秒', temperature: 0.8 } },
-      { type: 'ai-video-generate', label: '开场钩子', config: { duration: 5 } },
-      { type: 'ai-video-generate', label: '痛点场景', config: { duration: 5 } },
-      { type: 'ai-video-generate', label: '产品出场', config: { duration: 5 } },
-      { type: 'ai-video-generate', label: '功能演示', config: { duration: 5 } },
-      { type: 'ai-video-generate', label: '效果对比', config: { duration: 5 } },
-      { type: 'ai-video-generate', label: '信任背书', config: { duration: 5 } },
-      { type: 'ai-video-generate', label: '行动召唤', config: { duration: 5 } },
-      { type: 'ai-audio', label: '旁白配音', config: { voice: 'female-calm', speed: 1.0 } },
-      { type: 'video-concat', label: '视频拼接' },
-      { type: 'video-compose', label: '音视频合成' },
-      { type: 'output-video', label: '广告成片' },
-    ],
-    connections: [
-      { from: 0, to: 1, fromPort: 'out-prompt', toPort: 'in-prompt', type: 'prompt' },
-      { from: 1, to: 2, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 1, to: 3, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 1, to: 4, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 1, to: 5, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 1, to: 6, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 1, to: 7, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 1, to: 8, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 2, to: 10, fromPort: 'out-video', toPort: 'in-video', type: 'video' },
-      { from: 3, to: 10, fromPort: 'out-video', toPort: 'in-video', type: 'video' },
-      { from: 4, to: 10, fromPort: 'out-video', toPort: 'in-video', type: 'video' },
-      { from: 5, to: 10, fromPort: 'out-video', toPort: 'in-video', type: 'video' },
-      { from: 6, to: 10, fromPort: 'out-video', toPort: 'in-video', type: 'video' },
-      { from: 7, to: 10, fromPort: 'out-video', toPort: 'in-video', type: 'video' },
-      { from: 8, to: 10, fromPort: 'out-video', toPort: 'in-video', type: 'video' },
-      { from: 1, to: 9, fromPort: 'out-text', toPort: 'in-text', type: 'prompt' },
-      { from: 10, to: 11, fromPort: 'out-video', toPort: 'in-video', type: 'video' },
-      { from: 9, to: 11, fromPort: 'out-audio', toPort: 'in-audio', type: 'audio' },
-      { from: 11, to: 12, fromPort: 'out-video', toPort: 'in-video', type: 'video' },
-    ],
-  },
-  {
-    id: 'social-9grid',
-    name: '社交媒体9宫格',
-    description: '产品/主题图 → LLM策划 → 9张社交媒体配图',
-    icon: 'Grid3X3',
-    tags: ['社媒', '批量'],
-    nodes: [
-      { type: 'input-image', label: '主题图' },
-      { type: 'input-text', label: '主题描述', config: { text: '新品发布，社交媒体宣传' } },
-      { type: 'ai-llm', label: '内容策划', config: { systemPrompt: '你是社交媒体运营专家，生成9张配图的不同角度描述', temperature: 0.7 } },
-      { type: 'ai-generate', label: '图1' },
-      { type: 'ai-generate', label: '图2' },
-      { type: 'ai-generate', label: '图3' },
-      { type: 'ai-generate', label: '图4' },
-      { type: 'ai-generate', label: '图5' },
-      { type: 'ai-generate', label: '图6' },
-      { type: 'ai-generate', label: '图7' },
-      { type: 'ai-generate', label: '图8' },
-      { type: 'ai-generate', label: '图9' },
-      { type: 'output-image-group', label: '9宫格' },
-    ],
-    connections: [
-      { from: 0, to: 2, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 1, to: 2, fromPort: 'out-prompt', toPort: 'in-prompt', type: 'prompt' },
-      { from: 2, to: 3, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 2, to: 4, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 2, to: 5, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 2, to: 6, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 2, to: 7, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 2, to: 8, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 2, to: 9, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 2, to: 10, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 2, to: 11, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 0, to: 3, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 0, to: 4, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 0, to: 5, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 0, to: 6, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 0, to: 7, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 0, to: 8, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 0, to: 9, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 0, to: 10, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 0, to: 11, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 3, to: 12, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 4, to: 12, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 5, to: 12, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 6, to: 12, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 7, to: 12, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 8, to: 12, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 9, to: 12, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 10, to: 12, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 11, to: 12, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-    ],
-  },
-  {
-    id: 'brand-vi',
-    name: '品牌VI应用',
-    description: 'Logo + 品牌DNA → 名片/海报/包装等VI应用',
-    icon: 'Shapes',
-    tags: ['品牌', 'VI'],
-    nodes: [
-      { type: 'input-image', label: 'Logo' },
-      { type: 'input-text', label: '品牌调性', config: { text: '高端简约现代风格' } },
-      { type: 'ai-generate', label: '名片设计', config: { aspectRatio: '3:2' } },
-      { type: 'ai-generate', label: '海报设计', config: { aspectRatio: '3:4' } },
-      { type: 'ai-generate', label: '包装设计', config: { aspectRatio: '1:1' } },
-      { type: 'ai-generate', label: '社交媒体头像', config: { aspectRatio: '1:1' } },
-      { type: 'output-image-group', label: 'VI套件' },
-    ],
-    connections: [
-      { from: 0, to: 2, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 0, to: 3, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 0, to: 4, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 0, to: 5, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 1, to: 2, fromPort: 'out-prompt', toPort: 'in-prompt', type: 'prompt' },
-      { from: 1, to: 3, fromPort: 'out-prompt', toPort: 'in-prompt', type: 'prompt' },
-      { from: 1, to: 4, fromPort: 'out-prompt', toPort: 'in-prompt', type: 'prompt' },
-      { from: 1, to: 5, fromPort: 'out-prompt', toPort: 'in-prompt', type: 'prompt' },
-      { from: 2, to: 6, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 3, to: 6, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 4, to: 6, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 5, to: 6, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-    ],
-  },
-  {
-    id: 'storyboard-comic',
-    name: '故事板分镜',
-    description: '故事描述 → LLM拆分 → 多格漫画/故事板',
-    icon: 'BookOpen',
-    tags: ['漫画', '分镜'],
-    nodes: [
-      { type: 'input-text', label: '故事大纲', config: { text: '一个简短的故事，分4格漫画表现' } },
-      { type: 'ai-llm', label: '分镜脚本', config: { systemPrompt: '你是漫画分镜师，将故事拆为4个分镜描述', temperature: 0.8 } },
-      { type: 'ai-generate', label: '格1-开场', config: { aspectRatio: '4:3' } },
-      { type: 'ai-generate', label: '格2-发展', config: { aspectRatio: '4:3' } },
-      { type: 'ai-generate', label: '格3-高潮', config: { aspectRatio: '4:3' } },
-      { type: 'ai-generate', label: '格4-结局', config: { aspectRatio: '4:3' } },
-      { type: 'output-image-group', label: '故事板' },
-    ],
-    connections: [
-      { from: 0, to: 1, fromPort: 'out-prompt', toPort: 'in-prompt', type: 'prompt' },
-      { from: 1, to: 2, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 1, to: 3, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 1, to: 4, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 1, to: 5, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 2, to: 6, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 3, to: 6, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 4, to: 6, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 5, to: 6, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-    ],
-  },
-  {
-    id: 'magic-brush',
-    name: '神奇画笔',
-    description: '草图 → AI识别 → 高清重绘',
-    icon: 'Paintbrush',
-    tags: ['草图', '重绘'],
-    nodes: [
-      { type: 'input-image', label: '草图' },
-      { type: 'ai-analyze', label: 'AI识别', config: { analysisType: 'describe' } },
-      { type: 'ai-generate', label: '高清重绘', config: { quality: '4K' } },
-      { type: 'ai-upscale', label: '无损放大', config: { scale: '2' } },
-      { type: 'output-image', label: '成品' },
-    ],
-    connections: [
-      { from: 0, to: 1, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 0, to: 2, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 1, to: 2, fromPort: 'out-text', toPort: 'in-prompt', type: 'prompt' },
-      { from: 2, to: 3, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 3, to: 4, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-    ],
-  },
-  {
-    id: 'img2video-with-audio',
-    name: '图生视频+配音',
-    description: '图片 → 生成视频 → AI配音 → 合成',
-    icon: 'Video',
-    tags: ['视频', '配音'],
-    nodes: [
-      { type: 'input-image', label: '首帧图片' },
-      { type: 'input-text', label: '视频描述', config: { text: '镜头缓慢推进，电影质感' } },
-      { type: 'ai-video-i2v', label: '图生视频', config: { duration: 5 } },
-      { type: 'ai-audio', label: 'AI配音', config: { voice: 'male-professional', speed: 1.0 } },
-      { type: 'video-compose', label: '音视频合成' },
-      { type: 'output-video', label: '成片' },
-    ],
-    connections: [
-      { from: 0, to: 2, fromPort: 'out-image', toPort: 'in-image', type: 'image' },
-      { from: 1, to: 2, fromPort: 'out-prompt', toPort: 'in-prompt', type: 'prompt' },
-      { from: 1, to: 3, fromPort: 'out-prompt', toPort: 'in-text', type: 'prompt' },
-      { from: 2, to: 4, fromPort: 'out-video', toPort: 'in-video', type: 'video' },
-      { from: 3, to: 4, fromPort: 'out-audio', toPort: 'in-audio', type: 'audio' },
-      { from: 4, to: 5, fromPort: 'out-video', toPort: 'in-video', type: 'video' },
-    ],
-  },
-];
 
 // ==================== 主组件 ====================
 
@@ -1256,6 +840,8 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
   useEffect(() => { setPendingPreset(null); }, [projectId, userId, wf.id]);
   const [searchQuery, setSearchQuery] = useState('');
   const [executionId, setExecutionId] = useState<string | null>(null);
+  const executionIdRef = useRef(executionId);
+  executionIdRef.current = executionId;
   const [execStatus, setExecStatus] = useState<'idle' | 'running' | 'paused' | 'completed' | 'failed'>('idle');
   const [executionNodeIds, setExecutionNodeIds] = useState<string[]>([]);
   const executionNodeIdsRef = useRef(executionNodeIds);
@@ -1477,7 +1063,12 @@ export default function NodeEditor({ taskModelCatalog = [], taskModelOptions = [
             localStorage.setItem(WORKFLOW_EXEC_STATE_KEY, JSON.stringify({ ...state, execStatus: restoredStatus,
               execResults: safeResults, execLogs: restoredLogs, ...(retryView ? { imageRetry: retryView } : {}) }));
           }
-          if (state.execStatus === 'running' && !retryView) localStorage.removeItem(WORKFLOW_EXEC_STATE_KEY);
+          // The approval request can return before its child finishes. Keep
+          // this receipt until a terminal status even across multiple reloads.
+          if (state.execStatus === 'running' && !retryView && !Object.values(safeResults).some(result =>
+            result.status === 'waiting-approval' && typeof result.output?.runId === 'string')) {
+            localStorage.removeItem(WORKFLOW_EXEC_STATE_KEY);
+          }
         }
       }
     } catch {}
@@ -2978,6 +2569,10 @@ ${contextInfo}
     const sourceChanged = current?.type === 'input-image' && typeof updates.config?.source === 'string'
       && updates.config.source !== current.config.source;
     let applied = updates;
+    if (current?.type === 'input-text' && updates.config) {
+      const text = typeof updates.config.textContent === 'string' ? updates.config.textContent : updates.config.text;
+      if (typeof text === 'string') applied = { ...updates, config: { ...updates.config, text, textContent: text } };
+    }
     if (sourceChanged) {
       const config = { ...current.config, ...updates.config };
       const insertion = materialInsertionTransactionsRef.current.get(nodeId);
@@ -3026,7 +2621,7 @@ ${contextInfo}
   const handleLlmOptimize = useCallback(async (nodeId: string, _prompt: string, model: string, systemPrompt: string, instruction: string) => {
     const node = wf.nodes.find(n => n.id === nodeId);
     if (!node) return;
-    const currentText = String(node.config?.textContent || node.config?.promptText || '');
+    const currentText = String(node.config?.textContent || node.config?.text || node.config?.promptText || '');
     if (!currentText.trim()) return; // 空文本不优化
     handleNodeUpdate(nodeId, { config: { ...node.config, llmOptimizing: true } });
     try {
@@ -3246,7 +2841,7 @@ ${contextInfo}
   const handleNodeFieldChange = useCallback((nodeId: string, field: string, value: unknown) => {
     const node = wf.nodes.find(n => n.id === nodeId);
     if (!node) return;
-    handleNodeUpdate(nodeId, { config: { ...node.config, [field]: value } });
+    handleNodeUpdate(nodeId, { config: { [field]: value } });
     // 当生图节点修改画面比例时，同步调整自动创建的输出图片节点尺寸
     if (field === 'aspectRatio' && isImageGeneratingNode(node.type)) {
       const outSize = getOutputNodeSize(value as string | undefined);
@@ -4109,9 +3704,13 @@ ${contextInfo}
     identity?: SkillApprovalIdentity,
     revisionInstruction?: string,
   ): Promise<boolean> => {
+    const epoch = imageRetryEpochRef.current;
+    const current = (): boolean => executionViewScopeRef.current === executionViewScope
+      && imageRetryEpochRef.current === epoch && executionIdRef.current === executionId;
+    if (!current()) return false;
     const body: Record<string, unknown> = executionId
       ? {
-          action: 'approve-skill', controlAction: action, executionId, nodeId,
+          action: 'approve-skill', controlAction: action, executionId, nodeId, runId, projectId, workflowId: wf.id,
           nodes: wf.nodes, connections: wf.connections,
         }
       : { action };
@@ -4124,27 +3723,37 @@ ${contextInfo}
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    const payload = await response.json().catch(() => null) as { accepted?: unknown; error?: unknown } | null;
+    const payload = await response.json().catch(() => null) as {
+      accepted?: unknown; error?: unknown; approvalPending?: unknown; executionId?: unknown;
+    } | null;
+    if (!current()) return false;
     if (!response.ok) {
+      if (executionId && payload?.approvalPending === true) {
+        throw new Error('审批结果待核对，重新打开工作流可继续。');
+      }
       throw new Error(typeof payload?.error === 'string' ? payload.error : '视频脚本操作失败');
     }
+    if (executionId && (payload?.executionId !== executionId || payload.accepted !== true)) return false;
     if (action === 'cancel') {
       setExecResults(previous => ({ ...previous, [nodeId]: {
         status: 'cancelled', output: { runId, status: 'cancelled' },
       } }));
       if (executionId) {
         setExecStatus('idle');
-        localStorage.removeItem(WORKFLOW_EXEC_STATE_KEY);
+        setExecutionId(null);
+        try { localStorage.removeItem(WORKFLOW_EXEC_STATE_KEY); } catch { /* The cancellation is already durable. */ }
       }
     } else if (executionId) {
       setExecStatus('running');
-      localStorage.setItem(WORKFLOW_EXEC_STATE_KEY, JSON.stringify({
-        executionId,
-        execStatus: 'running',
-        execResults,
-        execLogs: execLogsRef.current,
-        nodeIds: executionNodeIds.length > 0 ? executionNodeIds : Object.keys(execResults),
-      }));
+      try {
+        localStorage.setItem(WORKFLOW_EXEC_STATE_KEY, JSON.stringify({
+          executionId,
+          execStatus: 'running',
+          execResults,
+          execLogs: execLogsRef.current,
+          nodeIds: executionNodeIds.length > 0 ? executionNodeIds : Object.keys(execResults),
+        }));
+      } catch { /* Keep observing the server result when local storage is unavailable. */ }
     } else {
       setExecResults(previous => ({ ...previous, [nodeId]: {
         status: 'running', output: { runId, status: 'running' },
@@ -4152,7 +3761,55 @@ ${contextInfo}
       setSkillObservationRevision(value => value + 1);
     }
     return payload?.accepted !== false;
-  }, [WORKFLOW_EXEC_STATE_KEY, execResults, executionId, executionNodeIds, wf.connections, wf.nodes]);
+  }, [WORKFLOW_EXEC_STATE_KEY, execResults, executionId, executionNodeIds, executionViewScope, projectId, wf.id, wf.connections, wf.nodes]);
+
+  // A paused editor is restored from browser storage. The child may already
+  // have accepted approval even though the parent acknowledgement never arrived.
+  const pausedSkillApproval = execStatus === 'paused' && Object.values(execResults).some(result =>
+    result.status === 'waiting-approval' && typeof result.output?.runId === 'string' && result.output.runId.length > 0);
+  useEffect(() => {
+    if (!pausedSkillApproval || !executionId || !userId || !projectId || imageRetryViewRef.current) return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let attempts = 0;
+    const current = (): boolean => !controller.signal.aborted && executionViewScopeRef.current === executionViewScope
+      && executionIdRef.current === executionId;
+    const retry = (): void => {
+      // An interrupted server can still hold the approval lease for two minutes.
+      if (current() && attempts < 70) timer = setTimeout(() => void reconcile(), 2_000);
+    };
+    const reconcile = async (): Promise<void> => {
+      attempts++;
+      try {
+        const response = await fetch('/api/workflow/execute', {
+          method: 'POST',
+          signal: controller.signal,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'status', executionId, projectId, workflowId: wf.id }),
+        });
+        const result = workflowImageRetryRecord(await response.json());
+        if (!current()) return;
+        if (response.status >= 500) { retry(); return; }
+        if (!response.ok || result?.executionId !== executionId) return;
+        if (result.approvalPending === true) { retry(); return; }
+        if (result.status === 'running' || result.status === 'completed' || result.status === 'failed') {
+          // Use the usual execution observer to display and publish terminal output.
+          setExecStatus('running');
+        } else if (result.status === 'cancelled') {
+          setExecResults({});
+          setExecStatus('idle');
+          setExecutionId(null);
+          try { localStorage.removeItem(WORKFLOW_EXEC_STATE_KEY); } catch { /* Rendering the durable outcome still succeeds. */ }
+        } else if (result.status === 'paused' && isWorkflowSkillPauseResult(result.results)) {
+          setExecResults(safeSketchExecutionResults(result.results, wfRef.current.nodes));
+        }
+      } catch {
+        retry();
+      }
+    };
+    void reconcile();
+    return () => { controller.abort(); if (timer !== undefined) clearTimeout(timer); };
+  }, [pausedSkillApproval, executionId, executionViewScope, projectId, userId, wf.id, WORKFLOW_EXEC_STATE_KEY]);
 
   // 轮询执行状态
   useEffect(() => {
@@ -4197,6 +3854,13 @@ ${contextInfo}
             });
             return changed ? { ...current, nodes } : current;
           });
+        }
+        if (data.status === 'cancelled' && data.executionId === executionId) {
+          setExecResults(data.results || {});
+          setExecStatus('idle');
+          setExecutionId(null);
+          try { localStorage.removeItem(WORKFLOW_EXEC_STATE_KEY); } catch { /* Rendering the durable outcome still succeeds. */ }
+          return;
         }
         if (data.status === 'paused') {
           setExecStatus('paused');
@@ -4551,34 +4215,7 @@ ${contextInfo}
   // ─── 加载预设模板 ───
 
   const handleLoadPreset = useCallback((preset: WorkflowPreset) => {
-        const newWf = createEmptyWorkflow(preset.name);
-        newWf.description = preset.description;
-
-        // 创建节点
-        const createdNodes = preset.nodes.map((n, i) => {
-          const node = createWorkflowNode(n.type, 80 + i * 280, 200, n.label);
-          if (n.config) node.config = { ...node.config, ...n.config };
-          return node;
-        });
-        newWf.nodes = createdNodes;
-
-        // 创建连线
-        for (const c of preset.connections) {
-          const fromNode = createdNodes[c.from];
-          const toNode = createdNodes[c.to];
-          if (!fromNode || !toNode) continue;
-          const fromPort = fromNode.ports.find(p => p.id === c.fromPort && p.direction === 'out')
-            || fromNode.ports.find(p => p.direction === 'out');
-          const toPort = toNode.ports.find(p => p.id === c.toPort && p.direction === 'in')
-            || toNode.ports.find(p => p.direction === 'in');
-          if (fromPort && toPort) {
-            newWf.connections.push(createConnection(fromNode.id, fromPort.id, toNode.id, toPort.id, c.type));
-          }
-        }
-
-        // 自动布局
-        const layouted = autoLayoutWorkflow(newWf);
-        updateWorkflow(layouted);
+        updateWorkflow(createWorkflowFromPreset(preset));
         setSelectedNodeIds(new Set());
         setSidebarTab('nodes');
         closeDirectoryOnMobile();
@@ -4933,9 +4570,21 @@ ${contextInfo}
                 if (!file) return;
                 try {
                   const text = await file.text();
-                  const result = parseComfyUIWorkflow(text);
-                  if (!result || result.nodes.length === 0) { alert('未能识别有效的ComfyUI工作流节点'); return; }
-                  updateWorkflow(prev => ({ ...prev, nodes: [...prev.nodes, ...result.nodes], connections: [...prev.connections, ...result.connections] }));
+                  const result = importWorkflowFile(text);
+                  if (!result || result.nodes.length === 0) { alert('未能识别有效的工作流节点或连线'); return; }
+                  const current = wfRef.current;
+                  const nodeIds = new Set(current.nodes.map(node => node.id));
+                  const connectionIds = new Set(current.connections.map(connection => connection.id));
+                  if (result.nodes.some(node => nodeIds.has(node.id))
+                    || result.connections.some(connection => connectionIds.has(connection.id))) {
+                    alert('导入的节点或连线与当前工作流 ID 重复');
+                    return;
+                  }
+                  updateWorkflow({
+                    ...current,
+                    nodes: [...current.nodes, ...result.nodes],
+                    connections: [...current.connections, ...result.connections],
+                  });
                 } catch (err) { alert('导入失败: ' + (err instanceof Error ? err.message : '无效的JSON文件')); }
               };
               input.click();
@@ -5966,22 +5615,7 @@ ${contextInfo}
                       setJsonEditorError('工作流结构错误：nodes 和 connections 必须为数组。');
                       return;
                     }
-                    const isRecord = (value: unknown): value is Record<string, unknown> =>
-                      value !== null && typeof value === 'object' && !Array.isArray(value);
-                    const hasStrings = (value: Record<string, unknown>, keys: readonly string[]): boolean =>
-                      keys.every(key => typeof value[key] === 'string');
-                    const hasNodeShape = (value: unknown): boolean =>
-                      isRecord(value) && hasStrings(value, ['id', 'type', 'label'])
-                      && [value.x, value.y, value.width, value.height].every(
-                        (number: unknown): boolean => typeof number === 'number' && Number.isFinite(number))
-                      && isRecord(value.config) && Array.isArray(value.ports)
-                      && value.ports.every((port: unknown): boolean =>
-                        isRecord(port) && hasStrings(port, ['id', 'label', 'type'])
-                        && (port.direction === 'in' || port.direction === 'out'));
-                    const hasConnectionShape = (value: unknown): boolean =>
-                      isRecord(value) && hasStrings(value,
-                        ['id', 'fromNodeId', 'fromPortId', 'toNodeId', 'toPortId', 'type']);
-                    if (!parsed.nodes.every(hasNodeShape) || !parsed.connections.every(hasConnectionShape)) {
+                    if (!isWorkflowGraph(parsed)) {
                       setJsonEditorError('节点、端口、配置或连线的数据类型不正确，请检查后重试。');
                       return;
                     }
@@ -6109,7 +5743,9 @@ function PropertyPanel({ node, models, modelCatalogIndex, modelsLoading, workflo
   };
 
   const renderField = (field: PropertyField, fieldIndex: number) => {
-    const externalValue = node.config?.[field.key] ?? (node as unknown as Record<string, unknown>)[field.key] ?? field.defaultValue ?? '';
+    const externalValue = node.type === 'input-text' && field.key === 'text'
+      ? node.config?.textContent || node.config?.text || ''
+      : node.config?.[field.key] ?? (node as unknown as Record<string, unknown>)[field.key] ?? field.defaultValue ?? '';
     const serializedExternalValue = (
       externalValue
       && typeof externalValue === 'object'

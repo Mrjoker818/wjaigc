@@ -8,7 +8,7 @@ import {AssetService,AssetServiceError,type CreateVersionWithPlacementInput} fro
 import {createAssetStorageTransaction,type AssetStorage,type AssetStorageTransaction} from '@/lib/asset-core/storage';
 import {readManagedAssetVersionBytes} from '@/lib/asset-core/managed-media-read';
 import type {WorkflowImageGridCell} from './workflow-image-actions';
-import {workflowImageGridPreparationIdentity,assertWorkflowImageGridPreparationInTransaction,
+import {workflowImageGridPreparationIdentity,assertWorkflowImageGridPreparationInTransaction,workflowImagePublishedMediaMatches,
   type WorkflowImageGridPreparationIdentity,type PreparedWorkflowImageGrid,type WorkflowImageGridPublication} from './workflow-image-preparation';
 import {createWorkflowImageAssetBatch} from './workflow-image-batch';
 export interface WorkflowImageGridPublicationValue {projectId:string;workspaceId:string;operationId:string;parentVersionId:string;tiles:Array<{nodeId:string;cell:WorkflowImageGridCell;reference:RegisteredWorkspaceAssetReference}>}
@@ -110,9 +110,7 @@ function retained(identity:WorkflowImageGridPreparationIdentity,snapshot:ReplayS
 async function verifyMedia(snapshot:ReplaySnapshot,signal:AbortSignal,read:typeof readManagedAssetVersionBytes):Promise<void> {
   // Outside a DB transaction, still inside the preparation's single full IO job.
   for(const version of [...(snapshot.legacyParent?[snapshot.legacyParent]:[]),...snapshot.versions]){
-    signal.throwIfAborted();const media=await read(version,'image',{maxBytes:32*1024*1024,signal});signal.throwIfAborted();
-    if(media.mimeType!==version.file.mimeType||media.bytes.length!==version.file.byteSize||media.totalBytes!==media.bytes.length
-      ||createHash('sha256').update(media.bytes).digest('hex')!==version.file.checksum)placementConflict();
+    if(!await workflowImagePublishedMediaMatches(version,signal,read))placementConflict();
   }
 }
 /** Personal asset publication only. The document dispatcher must use canonical

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Copy, Download, X, ZoomIn, ZoomOut } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { getSafeRasterImageExtension, inferSafeRasterImageType } from "@/lib/media-validation";
 
 interface ImageLightboxProps {
   images: string[];
@@ -53,10 +54,15 @@ export function ImageLightbox({ images, initialIndex, onClose }: ImageLightboxPr
       const res = await fetch(url);
       if (!res.ok) throw new Error("IMAGE_DOWNLOAD_FAILED");
       const blob = await res.blob();
+      const signature = new Uint8Array(await blob.slice(0, 32).arrayBuffer());
+      const extension = inferSafeRasterImageType(signature)?.extension
+        ?? getSafeRasterImageExtension(blob.type)
+        ?? (blob.type === "image/svg+xml" ? "svg" : null);
+      if (!mountedRef.current) return;
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = blobUrl;
-      a.download = `image-${currentIndex + 1}.png`;
+      a.download = `image-${currentIndex + 1}${extension ? "." + extension : ""}`;
       a.click();
       URL.revokeObjectURL(blobUrl);
     } catch {

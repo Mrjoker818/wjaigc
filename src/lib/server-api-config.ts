@@ -8,8 +8,15 @@ export type { ApiProvider, ModelInfo, ApiBalanceInfo, ApiKind };
 import { fetchWithV1Retry, shouldSkipV1Retry } from './api-helpers';
 import { getModelDisplayName } from './model-name-map';
 import { getServerSystemDir } from './server-data-root';
-import { dbGetApiProviders, dbUpsertApiProvider, dbDeleteApiProvider } from './db-storage';
+import {
+  dbGetApiProviders,
+  dbUpsertApiProvider,
+  dbDeleteApiProvider,
+  ensureDeploymentProviderBootstrap,
+} from './db-storage';
 import { isDatabaseConfigured } from './db-client';
+import { isDeploymentDatabaseOnly } from './deployment-database-mode';
+import { INVALID_DEPLOYMENT_PROVIDER_CONFIGURATION } from './deployment-provider-config';
 import {
   get302UpscaleModelsForProvider,
   resolve302UpscaleModelId,
@@ -318,13 +325,15 @@ interface ReadConfigOptions {
 }
 
 async function readConfig(options: ReadConfigOptions = {}): Promise<StoredApiConfig> {
-  // Try database first (persistent across deployments)
+  const deployed = isDeploymentDatabaseOnly();
+  const strict = deployed || options.strict;
   try {
-    const readDatabase = Boolean(options.client) || !options.strict || isDatabaseConfigured();
+    if (deployed && !options.client) await ensureDeploymentProviderBootstrap();
+    const readDatabase = Boolean(options.client) || deployed || !strict || isDatabaseConfigured();
     const dbProviderRows = readDatabase
-      ? await dbGetApiProviders(options.client ? { client: options.client, throwOnError: true } : options.strict ? { throwOnError: true } : undefined)
+      ? await dbGetApiProviders(options.client ? { client: options.client, throwOnError: true } : strict ? { throwOnError: true } : undefined)
       : [];
-    if (((options.strict || options.client) && readDatabase) || dbProviderRows.length > 0) {
+    if (((strict || options.client) && readDatabase) || dbProviderRows.length > 0) {
       const providers: ApiProvider[] = dbProviderRows.map((p, i) => ({
         id: p.id,
         name: p.name,
@@ -352,6 +361,10 @@ async function readConfig(options: ReadConfigOptions = {}): Promise<StoredApiCon
       };
     }
   } catch (error) {
+    if (deployed) {
+      if (error instanceof Error && error.message === INVALID_DEPLOYMENT_PROVIDER_CONFIGURATION) throw error;
+      throw new Error('DEPLOYMENT_PROVIDER_CONFIGURATION_UNAVAILABLE');
+    }
     if (options.strict || options.client) throw error;
     // DB not available, fall through to file
   }
@@ -384,12 +397,12 @@ async function readConfig(options: ReadConfigOptions = {}): Promise<StoredApiCon
 
 async function migrateProvidersToDb(providers: ApiProvider[]): Promise<void> {
   for (let i = 0; i < providers.length; i++) {
-    await persistProviderToDb(providers[i], i);
+    await persistProviderToDb(providers[i], i, true);
   }
 }
 
-async function persistProviderToDb(provider: ApiProvider, fallbackSortOrder: number): Promise<void> {
-  const persisted = await dbUpsertApiProvider({
+async function persistProviderToDb(provider: ApiProvider, fallbackSortOrder: number, insertOnly = false): Promise<void> {
+  const row = {
     id: provider.id,
     name: provider.name,
     display_name: provider.displayName || provider.name,
@@ -409,32 +422,41 @@ async function persistProviderToDb(provider: ApiProvider, fallbackSortOrder: num
     sort_order: provider.sortOrder ?? fallbackSortOrder,
     balance_username: provider.balanceUsername || '',
     balance_password: provider.balancePassword || '',
-  });
+  };
+  const persisted = insertOnly ? await dbUpsertApiProvider(row, { insertOnly: true }) : await dbUpsertApiProvider(row);
   if (!persisted) {
+    if (isDeploymentDatabaseOnly()) throw new Error('DEPLOYMENT_PROVIDER_WRITE_FAILED');
     throw new Error(`Failed to persist API provider ${provider.id}`);
   }
 }
 
 async function writeConfigBackup(config: StoredApiConfig): Promise<void> {
+  if (isDeploymentDatabaseOnly()) return;
   const { dir, file } = configPath();
   await mkdir(dir, { recursive: true });
   await writeFile(file, JSON.stringify({ ...config, updatedAt: Date.now() }, null, 2), 'utf8');
 }
 
 async function writeConfig(config: StoredApiConfig): Promise<void> {
+  const deployed = isDeploymentDatabaseOnly();
   // Write to database (persistent across deployments)
   // Use await to ensure DB is in sync, then clean up stale providers
   try {
-    await migrateProvidersToDb(config.providers);
+    for (const [index, provider] of config.providers.entries()) {
+      await persistProviderToDb(provider, index);
+    }
     // Clean up providers in DB that are no longer in the current config
     const currentIds = config.providers.map(p => p.id);
-    const dbProviders = await dbGetApiProviders();
+    const dbProviders = await dbGetApiProviders(deployed ? { throwOnError: true } : undefined);
     for (const dbp of dbProviders) {
       if (!currentIds.includes(dbp.id)) {
-        await dbDeleteApiProvider(dbp.id).catch(() => {});
+        const deleted = await dbDeleteApiProvider(dbp.id).catch(() => false);
+        if (deployed && !deleted) throw new Error('DEPLOYMENT_PROVIDER_WRITE_FAILED');
       }
     }
-  } catch {}
+  } catch {
+    if (deployed) throw new Error('DEPLOYMENT_PROVIDER_WRITE_FAILED');
+  }
 
   // Also write to file system as backup
   await writeConfigBackup(config);
@@ -821,7 +843,8 @@ export async function deleteApiProvider(providerId: string): Promise<boolean> {
   const next = config.providers.filter(provider => provider.id !== providerId);
   if (next.length === config.providers.length) return false;
   // Delete from database and wait for result to ensure consistency
-  await dbDeleteApiProvider(providerId);
+  const deleted = await dbDeleteApiProvider(providerId);
+  if (isDeploymentDatabaseOnly() && !deleted) throw new Error('DEPLOYMENT_PROVIDER_WRITE_FAILED');
   // Reassign sortOrder after deletion
   next.forEach((p, i) => { p.sortOrder = i; });
   await writeConfig({ providers: next, updatedAt: Date.now() });

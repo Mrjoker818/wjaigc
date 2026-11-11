@@ -6,14 +6,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminUser } from '@/lib/server-auth';
 import {
+  dbGetAuditLogById,
   dbGetAuditLogs,
   dbGetAuditStats,
+  dbRecordAuditLogResolution,
   dbUpdateAuditLogResolution,
-  dbAddAuditLog,
 } from '@/lib/db-storage';
 import type { DbAuditLog } from '@/lib/db-storage';
+import type { User } from '@/lib/user-types';
 import { findProviderForFeature } from '@/lib/server-api-config';
-import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { ensureVersionPath, fetchWithV1Retry, shouldSkipV1Retry } from '@/lib/api-helpers';
 
 // ─── GET: 查询操作日志 ──────────────────────────────────────────────────────
 
@@ -23,8 +25,9 @@ export async function GET(request: NextRequest) {
     if (!authResult) return NextResponse.json({ error: '需要管理员权限' }, { status: 403 });
 
     const { searchParams } = new URL(request.url);
-    const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
-    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') || '20')));
+    const page = Math.max(1, parseInt(searchParams.get('page') ?? '', 10) || 1);
+    const size = searchParams.get('pageSize') ?? searchParams.get('limit') ?? '';
+    const pageSize = Math.min(100, Math.max(1, parseInt(size, 10) || 20));
     const action = searchParams.get('action') || undefined;
     const level = searchParams.get('level') || undefined;
     const userId = searchParams.get('userId') || undefined;
@@ -81,9 +84,9 @@ export async function POST(request: NextRequest) {
       case 'analyze':
         return await handleAnalyze(request, body);
       case 'resolve':
-        return await handleResolve(body, authResult.name || authResult.id);
+        return await handleResolve(body, authResult);
       case 'fix':
-        return await handleFix(request, body, authResult.name || authResult.id);
+        return await handleFix(body, authResult);
       case 'batch_delete':
         return await handleBatchDelete(body);
       case 'export':
@@ -91,10 +94,10 @@ export async function POST(request: NextRequest) {
       default:
         return NextResponse.json({ success: false, error: `未知操作: ${action}` }, { status: 400 });
     }
-  } catch (error) {
-    console.error('[op-log] POST error:', error);
+  } catch {
+    console.error('[op-log] operation failed');
     return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : '操作失败' },
+      { success: false, error: '操作失败' },
       { status: 500 }
     );
   }
@@ -111,38 +114,28 @@ async function handleStatistics() {
 
 async function handleAnalyze(_request: NextRequest, body: { logIds?: string[]; query?: string }) {
   const { logIds, query } = body;
+  if (logIds !== undefined && (!Array.isArray(logIds) || logIds.length > 20
+    || logIds.some(id => typeof id !== 'string' || !id))) {
+    return NextResponse.json({ success: false, error: '日志标识无效' }, { status: 400 });
+  }
 
   // 获取要分析的日志
-  let logsToAnalyze;
-  if (logIds && logIds.length > 0) {
-    // 先获取足够多的日志再筛选
-    const result = await dbGetAuditLogs({ throwOnError: true, limit: 200, offset: 0 });
-    logsToAnalyze = result.logs.filter((log: DbAuditLog) => logIds.includes(String(log.id)));
-  } else {
-    // 默认分析最近的错误日志
-    const result = await dbGetAuditLogs({ throwOnError: true,
-      level: 'error',
-      limit: 20,
-      offset: 0,
-    });
-    logsToAnalyze = result.logs;
-  }
+  const logsToAnalyze = logIds?.length
+    ? (await Promise.all([...new Set(logIds)].map((logId) => dbGetAuditLogById(logId)))).filter((row): row is DbAuditLog => row !== null)
+    : (await dbGetAuditLogs({ throwOnError: true, level: 'error', limit: 20, offset: 0 })).logs;
 
   if (!logsToAnalyze || logsToAnalyze.length === 0) {
     return NextResponse.json({ success: false, error: '没有可分析的日志' }, { status: 400 });
   }
 
-  // 构建分析提示词
+  // 供应商只接收诊断所需的字段。
   const logsSummary = logsToAnalyze.map((log: DbAuditLog) => ({
-    id: log.id,
-    time: new Date(log.created_at).toISOString(),
+    time: new Date(Number(log.created_at)).toISOString(),
     action: log.action,
     level: log.level,
-    error: log.error_message,
+    responseStatus: log.response_status,
     model: log.model,
     provider: log.provider_id,
-    userId: log.user_id,
-    requestData: log.request_data,
     duration: log.duration_ms,
   }));
 
@@ -186,8 +179,11 @@ ${query ? `## 用户问题\n${query}` : ''}
   }
 
   try {
-    const response = await fetchWithV1Retry(baseUrl, '/chat/completions', {
+    const endpointBase = shouldSkipV1Retry(baseUrl) ? baseUrl : ensureVersionPath(baseUrl);
+    const response = await fetchWithV1Retry(endpointBase, '/chat/completions', {
       method: 'POST',
+      skipV1Retry: true,
+      redirect: 'manual',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
@@ -208,15 +204,18 @@ ${query ? `## 用户问题\n${query}` : ''}
     });
 
     if (!response.ok) {
-      const errText = await response.text().catch(() => '');
+      void response.body?.cancel().catch(() => undefined);
       return NextResponse.json({
         success: false,
-        error: `AI分析请求失败 (HTTP ${response.status}): ${errText.substring(0, 200)}`,
-      }, { status: 500 });
+        error: `AI分析请求失败 (HTTP ${response.status})`,
+      }, { status: 502 });
     }
 
     const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || '';
+    const content = data.choices?.[0]?.message?.content;
+    if (typeof content !== 'string' || !content.trim()) {
+      return NextResponse.json({ success: false, error: 'AI分析未返回结果' }, { status: 502 });
+    }
 
     let analysis;
     try {
@@ -225,9 +224,10 @@ ${query ? `## 用户问题\n${query}` : ''}
       analysis = { rawAnalysis: content };
     }
 
-    // 更新被分析的日志状态为 analyzing
+    const category = analysis?.problemCategory ?? analysis?.['问题分类'];
     for (const log of logsToAnalyze) {
-      await dbUpdateAuditLogResolution(String(log.id), 'analyzing', `AI分析: ${(analysis.problemCategory || analysis['问题分类'] || '').substring(0, 200)}`, 'system');
+      await dbUpdateAuditLogResolution(String(log.id), 'analyzing',
+        typeof category === 'string' ? `AI分析：${category.slice(0, 200)}` : 'AI分析完成', 'system', 'none');
     }
 
     return NextResponse.json({
@@ -235,142 +235,95 @@ ${query ? `## 用户问题\n${query}` : ''}
       analysis,
       analyzedCount: logsToAnalyze.length,
     });
-  } catch (err: unknown) {
-    const errMsg = err instanceof Error ? err.message : '未知错误';
-    console.error('[op-log] AI analyze error:', err);
+  } catch {
+    console.error('[op-log] analysis result unconfirmed');
     return NextResponse.json({
       success: false,
-      error: `AI分析失败: ${errMsg}`,
-    }, { status: 500 });
+      error: 'AI分析结果尚未确认',
+    }, { status: 502 });
   }
 }
 
 // ─── 标记日志处理状态 ──────────────────────────────────────────────────────
 
-async function handleResolve(body: { logId: string; status: string; detail?: string }, resolvedBy: string) {
-  const { logId, status, detail } = body;
+type AuditActor = Pick<User, 'id' | 'name'>;
 
-  if (!logId || !status) {
+async function handleResolve(body: { logId: string; status: string; detail?: string }, actor: AuditActor) {
+  const { logId, status, detail } = body;
+  if (typeof logId !== 'string' || !logId || !status || (detail !== undefined && typeof detail !== 'string')) {
     return NextResponse.json({ success: false, error: '缺少参数' }, { status: 400 });
   }
 
   const validStatuses = ['none', 'analyzing', 'fixing', 'resolved', 'wontfix'];
   if (!validStatuses.includes(status)) {
-    return NextResponse.json({ success: false, error: `无效状态: ${status}` }, { status: 400 });
+    return NextResponse.json({ success: false, error: '无效状态' }, { status: 400 });
   }
 
-  await dbUpdateAuditLogResolution(logId, status, detail || '', resolvedBy);
-  return NextResponse.json({ success: true });
+  return recordResolution({
+    logId, actor, status, detail: detail ?? '',
+    action: 'op_log_resolve', auditDetail: `更新日志处理状态为 ${status}`,
+  }, { success: true });
 }
 
-// ─── AI 智能修复 ──────────────────────────────────────────────────────────
-
-async function handleFix(_request: NextRequest, body: { logId: string; fixAction: string }, resolvedBy: string) {
+async function handleFix(body: { logId: string; fixAction: string }, actor: AuditActor) {
   const { logId, fixAction } = body;
-
-  if (!logId || !fixAction) {
+  if (typeof logId !== 'string' || !logId || typeof fixAction !== 'string' || !fixAction) {
     return NextResponse.json({ success: false, error: '缺少参数' }, { status: 400 });
   }
 
-  // 获取日志详情 - 查找特定日志
-  const allResult = await dbGetAuditLogs({ throwOnError: true, limit: 500, offset: 0 });
-  const log = allResult.logs.find((entry: DbAuditLog) => String(entry.id) === String(logId));
+  const log = await dbGetAuditLogById(logId);
   if (!log) {
     return NextResponse.json({ success: false, error: '日志不存在' }, { status: 404 });
   }
 
-  // 更新状态为修复中
-  await dbUpdateAuditLogResolution(logId, 'fixing', `正在执行修复: ${fixAction}`, resolvedBy);
+  let status: string | null = null;
+  let message: string;
+  let detail: string | undefined;
+  switch (fixAction) {
+    case 'retry_with_different_provider':
+      message = '可以切换到其他 API 提供商重试。';
+      detail = `原始提供商：${log.provider_id || '未知'}`;
+      break;
+    case 'adjust_model_params':
+      message = '建议降低图片尺寸，使用更小的质量设置或更换模型。';
+      detail = `原始模型：${log.model || '未知'}`;
+      break;
+    case 'clear_rate_limit':
+      message = '遇到 API 限流时，可以稍后重试、切换供应商或降低并发请求数。';
+      break;
+    case 'check_api_key':
+      message = '遇到认证失败时，请检查 API 密钥、账户余额和权限。';
+      break;
+    case 'auto_repair_size':
+      message = '请按模型支持的尺寸重新提交，例如 1:1、16:9 或 4:3。';
+      break;
+    case 'mark_resolved':
+      status = 'resolved';
+      message = '已标记为已解决';
+      break;
+    case 'mark_wontfix':
+      status = 'wontfix';
+      message = '已标记为不修复';
+      break;
+    default:
+      return NextResponse.json({ success: false, error: '不支持的修复操作' }, { status: 400 });
+  }
+  return recordResolution({
+    logId, actor, status, detail: message,
+    action: 'op_log_fix', auditDetail: `${fixAction} · ${message}`,
+  }, { success: true, fixResult: { success: true, message, detail } });
+}
 
+async function recordResolution(
+  input: Parameters<typeof dbRecordAuditLogResolution>[0],
+  successBody: { success: true; fixResult?: { success: true; message: string; detail?: string } },
+) {
   try {
-    let fixResult: { success: boolean; message: string; detail?: string } = { success: false, message: '未知修复操作' };
-
-    switch (fixAction) {
-      case 'retry_with_different_provider':
-        fixResult = {
-          success: true,
-          message: '建议切换到其他API提供商重试。当前提供商可能临时不可用。',
-          detail: `原始提供商: ${log.provider_id || '未知'}`,
-        };
-        break;
-
-      case 'adjust_model_params':
-        fixResult = {
-          success: true,
-          message: '建议调整生成参数：降低图片尺寸、使用更小的质量设置、或更换模型。',
-          detail: `原始模型: ${log.model || '未知'}, 错误: ${log.error_message || '未知'}`,
-        };
-        break;
-
-      case 'clear_rate_limit':
-        fixResult = {
-          success: true,
-          message: '429错误为API限流，建议：1) 等待一段时间后重试 2) 切换到其他提供商 3) 降低并发请求数',
-          detail: '检测到限流错误',
-        };
-        break;
-
-      case 'check_api_key':
-        fixResult = {
-          success: true,
-          message: '401/403错误通常为API密钥问题。建议：1) 检查API密钥是否有效 2) 确认账户余额 3) 检查权限设置',
-          detail: '认证失败，请检查API配置',
-        };
-        break;
-
-      case 'auto_repair_size':
-        if (log.request_data && typeof log.request_data === 'object') {
-          const rd = log.request_data as Record<string, unknown>;
-          fixResult = {
-            success: true,
-            message: '尺寸问题已标记。系统将自动使用最接近的合法尺寸重试。建议使用标准比例（1:1, 16:9, 4:3等）。',
-            detail: `原始请求: ${JSON.stringify({ aspectRatio: rd.aspectRatio, size: rd.size }).substring(0, 200)}`,
-          };
-        } else {
-          fixResult = { success: true, message: '无法获取原始请求参数，建议手动调整尺寸后重试。' };
-        }
-        break;
-
-      case 'mark_resolved':
-        await dbUpdateAuditLogResolution(logId, 'resolved', '管理员标记为已解决', resolvedBy);
-        fixResult = { success: true, message: '已标记为已解决' };
-        break;
-
-      case 'mark_wontfix':
-        await dbUpdateAuditLogResolution(logId, 'wontfix', '管理员标记为不修复', resolvedBy);
-        fixResult = { success: true, message: '已标记为不修复' };
-        break;
-
-      default:
-        fixResult = { success: false, message: `不支持的修复操作: ${fixAction}` };
-    }
-
-    // 如果修复成功，更新日志状态
-    if (fixResult.success && fixAction !== 'mark_resolved' && fixAction !== 'mark_wontfix') {
-      await dbUpdateAuditLogResolution(logId, 'resolved', fixResult.message, resolvedBy);
-    }
-
-    // 记录修复操作日志
-    await dbAddAuditLog({
-      user_id: 'system',
-      user_name: 'AI修复',
-      action: 'op_log_fix',
-      target_type: 'audit_log',
-      target_id: logId,
-      detail: `修复操作: ${fixAction} - ${fixResult.message}`,
-      ip_address: null,
-      created_at: Date.now(),
-      level: 'info',
-    });
-
-    return NextResponse.json({ success: true, fixResult });
-  } catch (error) {
-    console.error('[op-log] Fix error:', error);
-    await dbUpdateAuditLogResolution(logId, 'none', `修复失败: ${error instanceof Error ? error.message : '未知错误'}`, resolvedBy);
-    return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : '修复失败' },
-      { status: 500 }
-    );
+    if (await dbRecordAuditLogResolution(input)) return NextResponse.json(successBody);
+    return NextResponse.json({ success: false, error: '日志不存在' }, { status: 404 });
+  } catch {
+    console.error('[op-log] unable to confirm resolution');
+    return NextResponse.json({ success: false, error: '日志操作结果尚未确认' }, { status: 503 });
   }
 }
 

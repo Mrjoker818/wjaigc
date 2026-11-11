@@ -346,9 +346,10 @@ describe('canvas-share owner API', () => {
   );
 
   it('patches only policy fields for the session owner', async () => {
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     const response = await patchShare(mutationRequest(
       `/api/canvas-shares/${activeShare.id}`,
-      { expiresAt: '2026-11-01T00:00:00.000Z', allowDownload: true },
+      { expiresAt, allowDownload: true },
       { method: 'PATCH' },
     ), routeContext());
     const body = await expectPrivateJson(response);
@@ -357,7 +358,7 @@ describe('canvas-share owner API', () => {
     expect(mocks.patchCanvasSharePolicy).toHaveBeenCalledWith({
       actorUserId: 'owner-1',
       shareId: activeShare.id,
-      patch: { expiresAt: '2026-11-01T00:00:00.000Z', allowDownload: true },
+      patch: { expiresAt, allowDownload: true },
     });
     expect(body).toEqual(expect.objectContaining({
       share: expect.objectContaining({ shareId: activeShare.id, allowDownload: true }),

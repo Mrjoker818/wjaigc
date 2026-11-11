@@ -58,6 +58,10 @@ export async function POST(request: NextRequest) {
       created_at: Date.now(),
     });
 
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Failed to confirm audit log write' }, { status: 503 });
+    }
+
     return NextResponse.json({ success: true, id });
   } catch (error) {
     console.error('[admin/audit] POST error:', error);

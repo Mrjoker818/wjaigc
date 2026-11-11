@@ -11,7 +11,7 @@ const fixture = vi.hoisted(() => ({
   pollRequests: [] as Array<{base:string;path:string}>,
   registered: [] as string[],
   updates: [] as Array<{status?:string;error?:string;label?:string;result?:unknown}>,
-  upstreamMode: 'success' as 'success' | 'error' | 'throw' | 'polling',
+  upstreamMode: 'success' as 'success' | 'error' | 'throw' | 'polling' | 'denied',
   submitResponseUrl: '',
   remoteId: 'remote/with slash',
   holdPoll: false,
@@ -20,11 +20,13 @@ const fixture = vi.hoisted(() => ({
   releasePoll: null as (() => void) | null,
   pollSignal: null as AbortSignal | null,
   pollPending: false,
+  pollTerminal: '' as '' | 'failed' | 'cancelled',
   released: 0,
   upstreamText: 'reason synthetic-key Bearer secret-token https://example.invalid/?token=another-secret',
 }));
 vi.mock('server-only', () => ({}));
-vi.mock('@/lib/server-api-config', () => ({getApiProviders: async () => {
+vi.mock('@/lib/cloud-task-storage', async () => (await import('@/__tests__/fixtures/display3d-cloud-task-store')).createDisplay3DCloudTaskStore());
+vi.mock('@/lib/server-api-config', () => ({findProviderById: async () => fixture.provider, getApiProviders: async () => {
   if (fixture.configError) throw new Error('synthetic-private-secret');
   return fixture.otherProvider ? [fixture.provider,{...fixture.provider,id:'provider-b',baseUrl:'https://other.invalid/v1',selectedModels:fixture.otherSelected ?? fixture.provider.selectedModels,discoveredModels:[]}] : [fixture.provider];
 }}));
@@ -50,12 +52,13 @@ vi.mock('@/lib/api-helpers', () => ({fetchWithV1Retry: async (base:string, path:
     fixture.pollRequests.push({base,path});
     fixture.pollSignal=init.signal ?? null;
     if (fixture.holdPoll) await new Promise<void>(resolve => {fixture.releasePoll=resolve;});
-    return {ok:true,json:async () => ({stage:'poll'})};
+    return {ok:true,json:async () => ({stage:'poll', ...(fixture.pollTerminal ? { data: { status: fixture.pollTerminal, error: fixture.upstreamText } } : {})})};
   }
   const body = JSON.parse(String(init.body)) as {model:string};
   fixture.requests.push({base,model:body.model});
   if (fixture.upstreamMode === 'throw') throw new Error(fixture.upstreamText);
   if (fixture.upstreamMode === 'error') return {ok:false,status:503,text:async () => fixture.upstreamText};
+  if (fixture.upstreamMode === 'denied') return {ok:false,status:403,text:async () => fixture.upstreamText};
   return {ok:true,url:fixture.submitResponseUrl,json:async () => fixture.upstreamMode === 'polling' ? {stage:'submit'} : {}};
 }}));
 vi.mock('@/lib/server-auth', () => ({getSessionUser: async () => fixture.user,listManagedUsers: async () => []}));
@@ -63,10 +66,71 @@ vi.mock('@/lib/calculate-pixels', () => ({calculateActualPixelsFromRatio: () => 
 vi.mock('@/lib/api-validator', () => ({validateApiInputs: () => null}));
 
 import { POST } from '@/app/api/display-3d/generate/route';
+import { createCloudTask, getCloudTaskForUser, updateCloudTask } from '@/lib/cloud-task-storage';
 const request = (body: Record<string,unknown>) => new NextRequest('https://synthetic.invalid/api/display-3d/generate', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({brandName:'synthetic brand',...body})});
 beforeEach(() => {fixture.requests=[];fixture.pollRequests=[];fixture.registered=[];fixture.updates=[];fixture.upstreamMode='success';fixture.submitResponseUrl='';fixture.remoteId='remote/with slash';fixture.holdPoll=false;fixture.cancelled=false;fixture.abortController=null;fixture.releasePoll=null;fixture.pollSignal=null;fixture.pollPending=false;fixture.released=0;fixture.upstreamText='reason synthetic-key Bearer secret-token https://example.invalid/?token=another-secret';fixture.otherProvider=false;fixture.otherSelected=null;fixture.configError=false;fixture.provider.baseUrl='https://provider.invalid/v1';fixture.provider.compatProfile='';fixture.provider.selectedModels=['image-one','image-two'];fixture.provider.discoveredModels=[];fixture.user={id:'synthetic-user',name:'synthetic',role:'admin',status:'active',createdAt:1,updatedAt:1};});
 
 describe('display 3D explicit provider and model', () => {
+  it('records the accepted remote receipt before polling and keeps local credit at zero', async () => {
+    vi.useFakeTimers();
+    try {
+      fixture.upstreamMode = 'polling';
+      const { taskId } = await (await POST(request({ providerId: 'provider-a', model: 'image-two' }))).json();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fixture.pollRequests).toHaveLength(0);
+      expect(await getCloudTaskForUser(taskId, 'synthetic-user')).toMatchObject({
+        type: 'display3d', status: 'processing', providerId: 'provider-a', model: 'image-two',
+        remoteTaskId: fixture.remoteId, creditCost: 0, creditStatus: 'not-applicable',
+        result: { display3dReceipt: { state: 'remote', pollBase: fixture.provider.baseUrl } },
+      });
+      expect(JSON.stringify(await getCloudTaskForUser(taskId, 'synthetic-user'))).not.toContain('synthetic-key');
+    } finally { vi.clearAllTimers(); vi.useRealTimers(); }
+  });
+
+  it('does not submit when the durable dispatch marker cannot be written', async () => {
+    vi.mocked(updateCloudTask).mockRejectedValueOnce(new Error('synthetic database write failure'));
+    const result = await POST(request({ providerId: 'provider-a', model: 'image-two' }));
+    expect(result.status).toBe(200);
+    await vi.waitFor(() => expect(fixture.released).toBe(1));
+    expect(fixture.requests).toHaveLength(0);
+  });
+
+  it('fails closed before registering a task if durable storage is unavailable', async () => {
+    vi.mocked(createCloudTask).mockRejectedValueOnce(new Error('synthetic storage secret'));
+    const response = await POST(request({ providerId: 'provider-a', model: 'image-two' }));
+    expect(response.status).toBe(503);
+    expect(await response.text()).not.toContain('synthetic storage secret');
+    expect(fixture.registered).toHaveLength(0);
+    expect(fixture.requests).toHaveLength(0);
+  });
+
+  it('retries a lost receipt write under the same lease with only one provider POST', async () => {
+    vi.useFakeTimers();
+    try {
+      fixture.upstreamMode = 'polling';
+      const update = vi.mocked(updateCloudTask).getMockImplementation()!;
+      vi.mocked(updateCloudTask).mockImplementationOnce(update).mockRejectedValueOnce(new Error('synthetic receipt write error'));
+      const { taskId } = await (await POST(request({ providerId: 'provider-a', model: 'image-two' }))).json();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fixture.requests).toHaveLength(1);
+      expect(await getCloudTaskForUser(taskId, 'synthetic-user')).toMatchObject({ remoteTaskId: fixture.remoteId });
+    } finally { vi.clearAllTimers(); vi.useRealTimers(); }
+  });
+
+  it.each(['failed', 'cancelled'] as const)('settles a provider-confirmed %s receipt with a safe error', async (status) => {
+    vi.useFakeTimers();
+    try {
+      fixture.upstreamMode = 'polling';
+      fixture.pollTerminal = status;
+      const { taskId } = await (await POST(request({ providerId: 'provider-a', model: 'image-two' }))).json();
+      await vi.advanceTimersByTimeAsync(5000);
+      const saved = await getCloudTaskForUser(taskId, 'synthetic-user');
+      expect(saved).toMatchObject({ status, creditStatus: 'not-applicable' });
+      expect(JSON.stringify(saved)).not.toContain('synthetic-key');
+      expect(fixture.requests).toHaveLength(1);
+      expect(fixture.pollRequests).toHaveLength(1);
+    } finally { fixture.pollTerminal = ''; vi.clearAllTimers(); vi.useRealTimers(); }
+  });
   it('sends the explicitly selected second model to the chosen provider', async () => {
     const result=await POST(request({providerId:'provider-a',model:'image-two'}));
     expect(result.status,JSON.stringify(await result.clone().json())).toBe(200);
@@ -174,19 +238,19 @@ describe('display 3D explicit provider and model', () => {
     fixture.upstreamMode=mode;
     const result=await POST(request({providerId:'provider-a',model:'image-two'}));
     expect(result.status).toBe(200);
-    await vi.waitFor(() => expect(fixture.updates.some(update => update.status==='failed')).toBe(true));
-    const failure=fixture.updates.find(update => update.status==='failed')?.error ?? '';
+    await vi.waitFor(() => expect(fixture.updates.some(update => (update.result as {display3dOutcomeUnconfirmed?:boolean} | undefined)?.display3dOutcomeUnconfirmed)).toBe(true));
+    const failure=JSON.stringify(fixture.updates);
     expect(failure).not.toContain('synthetic-key');
     expect(failure).not.toContain('secret-token');
     expect(failure).not.toContain('another-secret');
   });
   it.each(['{"authorization":"Basic dXNlcjpwYXNz"}', '{"password":"alpha beta"}', 'encoded %73ynthetic-key', 'https://example.invalid/?X-Amz-Signature=synthetic-signature'])(
     'does not store arbitrary upstream text that might contain encoded credentials: %s', async text => {
-      fixture.upstreamMode='error';fixture.upstreamText=text;
+      fixture.upstreamMode='denied';fixture.upstreamText=text;
       const result=await POST(request({providerId:'provider-a',model:'image-two'}));
       expect(result.status).toBe(200);
       await vi.waitFor(() => expect(fixture.updates.some(update=>update.status==='failed')).toBe(true));
-      expect(fixture.updates.find(update=>update.status==='failed')?.error).toBe('API错误: 503');
+      expect(fixture.updates.find(update=>update.status==='failed')?.error).toBe('供应商拒绝展陈生成请求（HTTP 403）');
     },
   );
   it('polls an asynchronous task at the configured provider URL with an encoded task id', async () => {

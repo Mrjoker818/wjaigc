@@ -1,8 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fetchWithTimeout, fetchWithV1Retry } from '@/lib/api-helpers';
-import { PoisonedApiHostError } from '@/lib/poisoned-api-host';
+import { assertSafeProviderUrl, PoisonedApiHostError, POISONED_API_HOSTS } from '@/lib/poisoned-api-host';
 
 describe('poisoned provider host guard', () => {
+  it('checks fully qualified DNS names the same way as their unqualified spelling', () => {
+    const [blocked] = POISONED_API_HOSTS;
+    expect(() => assertSafeProviderUrl(`https://${blocked}./`)).toThrow(PoisonedApiHostError);
+    expect(() => assertSafeProviderUrl(`https://service.${blocked}./`)).toThrow(PoisonedApiHostError);
+    expect(() => assertSafeProviderUrl('https://provider.invalid./')).not.toThrow();
+  });
+
   it('refuses a poisoned host before fetchWithV1Retry leaves the process', async () => {
     const transport = vi.fn();
 

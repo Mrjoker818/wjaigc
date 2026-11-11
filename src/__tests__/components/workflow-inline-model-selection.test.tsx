@@ -68,6 +68,15 @@ afterEach(() => {
 });
 
 describe('workflow inline exact model selection', () => {
+  it('shows text saved by the property panel in the inline prompt field', () => {
+    const node = createWorkflowNode('input-text', 0, 0, 'text-node');
+    node.config = { ...node.config, text: 'Saved property text' };
+    render(<CardHarness initialNode={node} />);
+
+    expect((screen.getByPlaceholderText(/输入提示词/) as HTMLTextAreaElement).value)
+      .toBe('Saved property text');
+  });
+
   it('keeps every same-named provider option distinct', () => {
     render(<CardHarness initialNode={imageNode()} />);
     expect(Array.from(selectedModel().options).filter(option => option.value).map(option => option.value))
@@ -124,7 +133,8 @@ describe('workflow inline exact model selection', () => {
   });
 
   it('sends the optimizer exact pair to the application API, not a composite model name', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ content: 'Optimized product photo' })));
+    const fetchMock = vi.fn(async (url: string, _options?: RequestInit) =>
+      Response.json(url === '/api/chat' ? { content: 'Optimized product photo' } : {}));
     vi.stubGlobal('fetch', fetchMock);
     vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
     vi.stubGlobal('ResizeObserver', class {
@@ -141,9 +151,9 @@ describe('workflow inline exact model selection', () => {
       taskModelOptions={llmModels.map(model => ({ ...model, type: 'chat', providerId: model.providerId! }))}
     />);
     fireEvent.click(screen.getByRole('button', { name: '优化' }));
-    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/chat')).toBe(true));
+    await waitFor(() => expect(screen.getByDisplayValue('Optimized product photo')).toBeTruthy());
     const [, request] = fetchMock.mock.calls.find(([url]) => url === '/api/chat')!;
-    expect(JSON.parse(request.body)).toMatchObject({ model: 'chat-model', providerId: 'apimart', stream: false });
+    expect(JSON.parse(String(request?.body))).toMatchObject({ model: 'chat-model', providerId: 'apimart', stream: false });
   });
 
   it('keeps an ambiguous legacy image selection unselected in both card and properties', () => {

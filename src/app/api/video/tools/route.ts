@@ -1,7 +1,8 @@
 /** Video post-production helpers. */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { writeFile, mkdir, mkdtemp, rm, readdir, stat, readFile } from 'fs/promises';
+import { createReadStream } from 'fs';
+import { writeFile, mkdir, mkdtemp, rm, readdir, stat } from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { tmpdir } from 'os';
@@ -21,6 +22,7 @@ const VIDEO_DIR = path.join(getServerDataRoot(), 'generated-videos');
 const VIDEO_URL_PREFIX = '/api/serve-upload/generated-videos';
 const MAX_STORY_CLIPS = 12;
 const MAX_CLIP_BYTES = 150 * 1024 * 1024;
+const CLIP_TOO_LARGE = '视频片段过大，无法合成';
 const MAX_EXTRACTED_FRAMES = 30;
 
 async function ensureDir(): Promise<void> {
@@ -36,6 +38,35 @@ function resolveWithinDirectory(directory: string, relativePath: string): string
   const resolved = path.resolve(directory, relativePath);
   const difference = path.relative(directory, resolved);
   return difference && !difference.startsWith('..') && !path.isAbsolute(difference) ? resolved : null;
+}
+
+async function readClipBuffer(source: AsyncIterable<Uint8Array>): Promise<Buffer> {
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for await (const chunk of source) {
+    size += chunk.byteLength;
+    if (size > MAX_CLIP_BYTES) throw new Error(CLIP_TOO_LARGE);
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks, size);
+}
+
+async function* readResponseChunks(body: ReadableStream<Uint8Array>): AsyncGenerator<Uint8Array> {
+  const reader = body.getReader();
+  let finished = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        finished = true;
+        return;
+      }
+      yield value;
+    }
+  } finally {
+    if (!finished) void reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
 }
 
 async function readLocalVideoBuffer(url: string): Promise<Buffer | null> {
@@ -63,11 +94,11 @@ async function readLocalVideoBuffer(url: string): Promise<Buffer | null> {
 
   for (const candidate of candidates) {
     try {
-      const buffer = await readFile(candidate);
-      if (buffer.byteLength > MAX_CLIP_BYTES) throw new Error('视频片段过大，无法合成');
-      return buffer;
+      if ((await stat(candidate)).size > MAX_CLIP_BYTES) throw new Error(CLIP_TOO_LARGE);
+      // The inclusive end allows one extra byte to detect growth after stat.
+      return await readClipBuffer(createReadStream(candidate, { end: MAX_CLIP_BYTES }));
     } catch (error) {
-      if (error instanceof Error && error.message.includes('视频片段过大')) throw error;
+      if (error instanceof Error && error.message === CLIP_TOO_LARGE) throw error;
     }
   }
   return null;
@@ -82,12 +113,13 @@ async function downloadToBuffer(url: string): Promise<Buffer> {
     : `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
   const fullUrl = url.startsWith('http') ? url : `${base}${url}`;
   const response = await fetch(fullUrl, { signal: AbortSignal.timeout(90_000) });
-  if (!response.ok) throw new Error(`下载视频失败: ${response.status}`);
   const contentLength = Number(response.headers.get('content-length') || 0);
-  if (contentLength > MAX_CLIP_BYTES) throw new Error('视频片段过大，无法合成');
-  const buffer = Buffer.from(await response.arrayBuffer());
-  if (buffer.byteLength > MAX_CLIP_BYTES) throw new Error('视频片段过大，无法合成');
-  return buffer;
+  if (!response.ok || contentLength > MAX_CLIP_BYTES) {
+    void response.body?.cancel().catch(() => undefined);
+    if (!response.ok) throw new Error(`下载视频失败: ${response.status}`);
+    throw new Error(CLIP_TOO_LARGE);
+  }
+  return response.body ? readClipBuffer(readResponseChunks(response.body)) : Buffer.alloc(0);
 }
 
 async function ensureFfmpeg(): Promise<void> {
@@ -125,13 +157,27 @@ async function getVideoDuration(videoPath: string): Promise<number> {
   }
 }
 
-async function extractFrame(videoPath: string, outputPath: string, timestamp: number): Promise<void> {
+async function hasExtractedFrame(outputPath: string): Promise<boolean> {
+  try { return (await stat(outputPath)).size > 0; }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+async function extractFrame(videoPath: string, outputPath: string, timestamp: number, allowLastFrame = false): Promise<boolean> {
   await execFileAsync('ffmpeg', [
     '-ss', String(Math.max(0, timestamp)), '-i', videoPath,
     '-frames:v', '1', '-y', outputPath,
   ], { timeout: 60_000, maxBuffer: 1024 * 1024 });
-  const output = await stat(outputPath);
-  if (output.size === 0) throw new Error('FFmpeg did not produce a video frame');
+  if (await hasExtractedFrame(outputPath)) return true;
+  // A sparse video may end well before its container duration. Decode through EOF into one file.
+  if (allowLastFrame && timestamp > 0) {
+    await execFileAsync('ffmpeg', ['-i', videoPath, '-vsync', '0', '-update', '1', '-y', outputPath],
+      { timeout: 60_000, maxBuffer: 1024 * 1024 });
+    if (await hasExtractedFrame(outputPath)) return false;
+  }
+  throw new Error('FFmpeg did not produce a video frame');
 }
 
 async function createVideoThumbnail(videoPath: string, outputPath: string): Promise<void> {
@@ -148,12 +194,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     if (action === 'extract-frames') {
       assertAllowedVideoSource(videoUrl);
-      await ensureDir();
-      await ensureFfmpeg();
-
-      const mode = body.mode === 'fps' || body.mode === 'first_last' || body.mode === 'keyframes'
+      const mode = body.mode === 'fps' || body.mode === 'first_last' || body.mode === 'keyframes' || body.mode === 'single'
         ? body.mode
         : 'uniform';
+      const requestedTimestamp: unknown = body.timestamp;
+      const singleTimestamp = mode === 'single' && typeof requestedTimestamp === 'number'
+        && Number.isFinite(requestedTimestamp) && requestedTimestamp >= 0 ? requestedTimestamp : undefined;
+      if (mode === 'single' && singleTimestamp === undefined) {
+        return NextResponse.json({ success: false, error: '请输入有效的非负时间（秒）' }, { status: 400 });
+      }
+
+      await ensureDir();
+      await ensureFfmpeg();
       const frameCount = Math.round(clampNumber(body.frameCount, 12, 1, MAX_EXTRACTED_FRAMES));
       const fps = clampNumber(body.fps, 1, 0.1, 10);
       const workDir = await mkdtemp(path.join(tmpdir(), 'wujie-frames-'));
@@ -163,6 +215,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const videoPath = path.join(workDir, 'input.mp4');
         await writeFile(videoPath, await downloadToBuffer(videoUrl));
         const duration = await getVideoDuration(videoPath);
+        if (singleTimestamp !== undefined && duration > 0 && singleTimestamp >= duration) {
+          return NextResponse.json({ success: false, error: '指定时间必须小于视频时长' }, { status: 400 });
+        }
         const frames: Array<{ url: string; timestamp?: number }> = [];
 
         if (mode === 'keyframes') {
@@ -175,20 +230,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             .sort();
           frames.push(...filenames.map(name => ({ url: getVideoResultUrl(name) })));
         } else {
-          const timestamps = mode === 'first_last'
-            ? [0, Math.max(0, duration - 0.1)].filter((time, index, values) => index === 0 || time !== values[0])
-            : Array.from({ length: frameCount }, (_, index) => {
-                if (mode === 'fps') return index / fps;
-                return duration > 0 && frameCount > 1 ? (duration * index) / (frameCount - 1) : 0;
-              });
+          let timestamps: number[];
+          if (singleTimestamp !== undefined) {
+            timestamps = [singleTimestamp];
+          } else if (mode === 'first_last') {
+            const last = Math.max(0, duration - 0.1);
+            timestamps = last > 0 ? [0, last] : [0];
+          } else {
+            timestamps = Array.from({ length: frameCount }, (_, index) => {
+              if (mode === 'fps') return index / fps;
+              return duration > 0 && frameCount > 1 ? (duration * index) / (frameCount - 1) : 0;
+            });
+          }
 
           for (let index = 0; index < timestamps.length; index += 1) {
             const timestamp = timestamps[index];
             if (mode === 'fps' && duration > 0 && timestamp >= duration) break;
-            const safeTimestamp = getSafeFrameTimestamp(timestamp, duration);
+            const seekTimestamp = singleTimestamp ?? getSafeFrameTimestamp(timestamp, duration);
             const filename = `frame_${token}_${String(index + 1).padStart(3, '0')}.png`;
-            await extractFrame(videoPath, path.join(VIDEO_DIR, filename), safeTimestamp);
-            frames.push({ url: getVideoResultUrl(filename), timestamp: safeTimestamp });
+            const foundAtSeek = await extractFrame(videoPath, path.join(VIDEO_DIR, filename), seekTimestamp,
+              mode !== 'single' && index === timestamps.length - 1);
+            frames.push({ url: getVideoResultUrl(filename), ...(foundAtSeek ? { timestamp: seekTimestamp } : {}) });
           }
         }
 
@@ -244,7 +306,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       assertAllowedVideoSource(videoUrl);
       assertAllowedVideoSource(audioUrl);
       const generatedAudio = isGeneratedAudioLocation(audioUrl)
-        ? await readGeneratedAudioFromUrl(audioUrl, req.signal) : undefined;
+        ? await readGeneratedAudioFromUrl(audioUrl, req.signal, authResult.userId) : undefined;
       if (generatedAudio === null) throw new Error('生成音频文件不存在');
       await ensureDir();
       await ensureFfmpeg();

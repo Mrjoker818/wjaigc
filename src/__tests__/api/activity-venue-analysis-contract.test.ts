@@ -109,7 +109,7 @@ describe('venue analysis task admission', () => {
     const result=await POST(request({providerId:undefined}));
     expect(result.status).toBe(200);
     await vi.waitFor(() => expect(fixture.requests).toHaveLength(1));
-    expect(fixture.bases[0]).toBe('https://other.invalid');
+    expect(fixture.bases[0]).toBe('https://other.invalid/v1');
     expect(fixture.requests[0].model).toBe('vision-two');
   });
 

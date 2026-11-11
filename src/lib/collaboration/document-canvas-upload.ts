@@ -51,7 +51,7 @@ export async function loadDocumentCanvasVideoSize(file: File, signal?: AbortSign
 export interface CanvasImageFileDelivery {
   files: File[];
   authority: 'unknown' | 'legacy' | 'document';
-  documentUpload?: (files: File[]) => Promise<void>;
+  documentUpload?: (files: File[]) => Promise<unknown>;
   legacyUpload: (files: File[]) => Promise<void>;
 }
 
@@ -64,6 +64,63 @@ export async function deliverCanvasImageFiles(input: CanvasImageFileDelivery): P
     return;
   }
   await input.legacyUpload(input.files);
+}
+
+const VIDEO_TOOL_RESULT_PREFIX = '/api/serve-upload/generated-videos/';
+const VIDEO_TOOL_FILENAMES = {
+  'image/png': /^(?:frame|keyframe)_\d+_[a-f0-9]{8}_\d{3}\.png$/u,
+  'image/gif': /^video_\d+_[a-f0-9]{8}\.gif$/u,
+  'video/mp4': /^(?:compressed|merged)_\d+_[a-f0-9]{8}\.mp4$/u,
+};
+
+export type VideoToolMediaFormat = keyof typeof VIDEO_TOOL_FILENAMES;
+
+export async function readGeneratedVideoToolFiles(
+  urls: string[], format: VideoToolMediaFormat, assertCurrent: () => void,
+): Promise<File[]> {
+  const video = format === 'video/mp4';
+  const limit = video ? MAX_ASSET_VIDEO_BYTES : IMAGE_LIMIT;
+  const paths = urls.map(url => {
+    const filename = url.startsWith(VIDEO_TOOL_RESULT_PREFIX) ? url.slice(VIDEO_TOOL_RESULT_PREFIX.length) : '';
+    if (!VIDEO_TOOL_FILENAMES[format].test(filename)) throw new Error('视频工具返回的文件地址无效');
+    return { url, filename };
+  });
+  const files: File[] = [];
+  for (const { url, filename } of paths) {
+    assertCurrent();
+    const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store', redirect: 'error',
+      signal: AbortSignal.timeout(video ? 60_000 : 15_000) });
+    if (!response.ok || response.headers.get('content-type')?.split(';')[0] !== format || !response.body) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new Error('无法读取视频工具结果');
+    }
+    if (Number(response.headers.get('content-length')) > limit) {
+      await response.body.cancel().catch(() => undefined);
+      throw new Error('视频工具结果超过协作画布导入上限');
+    }
+    const reader = response.body.getReader();
+    const parts: ArrayBuffer[] = [];
+    let bytes = 0;
+    try {
+      assertCurrent();
+      for (;;) {
+        const { value, done } = await reader.read();
+        assertCurrent();
+        if (done) break;
+        bytes += value.byteLength;
+        if (bytes > limit) throw new Error('视频工具结果超过协作画布导入上限');
+        parts.push(new Uint8Array(value).buffer);
+      }
+    } catch (error) {
+      await reader.cancel().catch(() => undefined);
+      throw error;
+    } finally {
+      reader.releaseLock();
+    }
+    if (bytes === 0) throw new Error('视频工具结果为空');
+    files.push(new File(parts, filename, { type: format }));
+  }
+  return files;
 }
 
 export interface CommitDocumentCanvasFileInput extends Omit<DocumentCanvasUploadInput, 'idempotencyKey'> {
@@ -102,7 +159,7 @@ export async function commitDocumentCanvasFile(input: CommitDocumentCanvasFileIn
 
 export type DocumentCanvasUploadErrorCode = 'unsupported' | 'too-large' | 'unauthenticated' | 'forbidden'
   | 'conflict' | 'busy' | 'network' | 'invalid-response' | 'stale-project' | 'not-writable'
-  | 'authority-unresolved' | 'cancelled' | 'failed';
+  | 'authority-unresolved' | 'video-validator-unavailable' | 'cancelled' | 'failed';
 
 export class DocumentCanvasUploadError extends Error {
   constructor(readonly code: DocumentCanvasUploadErrorCode) {
@@ -294,6 +351,14 @@ export async function uploadDocumentCanvasFile(input: DocumentCanvasUploadInput)
   }
   assertNotAborted(input.signal);
   if (!response.ok) {
+    if (response.status === 503 && input.file.type.startsWith('video/')
+      && response.headers.get('content-type')?.split(';')[0] === 'application/json') {
+      const error = asRecord(await response.json().catch(() => null));
+      assertNotAborted(input.signal);
+      if (error?.code === 'DOCUMENT_VIDEO_VALIDATOR_UNAVAILABLE') {
+        throw new DocumentCanvasUploadError('video-validator-unavailable');
+      }
+    }
     const errors: Partial<Record<number, DocumentCanvasUploadErrorCode>> = {
       401: 'unauthenticated', 403: 'forbidden', 409: 'conflict', 413: 'too-large', 503: 'busy',
     };

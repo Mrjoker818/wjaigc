@@ -600,9 +600,8 @@ async function invalidSubmit(s: Session, card: Locator, expected: 'empty' | 'sho
   await payload(s, null); await quiet(s);
 }
 async function closePasswordButton(s: Session, card: Locator): Promise<void> {
-  // The supplied close button is a direct card child containing an X icon.
-  // It is measured as shipped, without fabricating an accessible button name.
-  const close = card.locator(':scope > button'); expect(await close.count()).toBe(1);
+  const close = card.getByRole('button', { name: '关闭修改密码', exact: true });
+  expect(await close.count()).toBe(1);
   expect(await close.locator('svg').count()).toBe(1);
   await reach(s, close); await noOverlap(card.getByRole('heading', { name: '修改密码', exact: true }), close);
   await click(s, close); expect(await dialog(s).count()).toBe(0);
@@ -731,6 +730,12 @@ describe.each(MATRIX)('AH ordinary user settings $theme $width x $height', ({ th
       let card = await passwordOpen(s);
       const first = await labelledPassword(s, card, '新密码'), second = await labelledPassword(s, card, '确认密码');
       const submit = card.getByRole('button', { name: '确认修改', exact: true });
+      expect(await card.getAttribute('role')).toBe('dialog');
+      expect(await first.evaluate(el => document.activeElement === el)).toBe(true);
+      await s.page.keyboard.press('Shift+Tab');
+      expect(await card.getByRole('button', { name: '关闭修改密码' }).evaluate(el => document.activeElement === el)).toBe(true);
+      await s.page.keyboard.press('Tab');
+      expect(await first.evaluate(el => document.activeElement === el)).toBe(true);
       await focusViaLabel(s, card, '新密码', first); await fillFocused(s, first, '');
       await focusViaLabel(s, card, '确认密码', second); await fillFocused(s, second, '');
       await invalidSubmit(s, card, 'empty', ['密码至少6位']);
@@ -747,18 +752,23 @@ describe.each(MATRIX)('AH ordinary user settings $theme $width x $height', ({ th
       await noOverlap(first, second); await noOverlap(second, submit); await pageFits(s, card);
       await closePasswordButton(s, card); await payload(s, null);
       card = await passwordOpen(s);
-      // Closing is not specified to clear drafts. Reopen, then explicitly clear
-      // with real Backspace before preparing another mismatched, unsubmitted draft.
       const againFirst = await labelledPassword(s, card, '新密码'), againSecond = await labelledPassword(s, card, '确认密码');
-      await focusViaLabel(s, card, '新密码', againFirst); await fillFocused(s, againFirst, '');
-      await focusViaLabel(s, card, '确认密码', againSecond); await fillFocused(s, againSecond, '');
+      expect(await againFirst.inputValue()).toBe('');
+      expect(await againSecond.inputValue()).toBe('');
+      await focusViaLabel(s, card, '确认密码', againSecond);
       await fillFocused(s, againSecond, 'AhNeverSubmittedTwo456!');
       await focusViaLabel(s, card, '新密码', againFirst); await fillFocused(s, againFirst, 'AhNeverSubmittedOne123!');
       expect(await againFirst.inputValue()).not.toBe(await againSecond.inputValue());
       await closePasswordBackdrop(s, card);
-      // Both close paths must permit a real reopen. No focus-trap/autofocus,
-      // Escape-close or close-clears-draft contract is invented by this suite.
-      card = await passwordOpen(s); await pageFits(s, card); await closePasswordButton(s, card);
+      const opener = section(s, '安全与隐私').getByRole('button', { name: '修改密码', exact: true });
+      await opener.focus();
+      card = await passwordOpen(s);
+      expect(await card.getByLabel('新密码', { exact: true }).inputValue()).toBe('');
+      expect(await card.getByLabel('确认密码', { exact: true }).inputValue()).toBe('');
+      await pageFits(s, card);
+      await s.page.keyboard.press('Escape');
+      await card.waitFor({ state: 'detached' });
+      expect(await opener.evaluate(el => document.activeElement === el)).toBe(true);
       expect((await state(s)).toasts).toEqual(['密码至少6位', '密码至少6位', '两次输入的密码不一致']);
       expect((await state(s)).themes).toEqual([]); expect(await dirty(s).count()).toBe(0);
       await payload(s, null); await valuesAre(s, DEFAULTS); await quiet(s);

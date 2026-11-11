@@ -1,7 +1,7 @@
 import type { ApiProvider, ModelInfo } from '@/lib/universal-api-types';
 import type { CapabilityLayer, SupportedOperation } from './model-capability-contract';
 import { PEAR_IMAGE_MAX_OUTPUTS, getPearImageModelSpec } from '@/lib/pear-image-models';
-import { getPearVideoModelSpec } from '@/lib/pear-video-models';
+import { PEAR_VIDEO_GENERATE_OPERATIONS, getPearVideoModelSpec } from '@/lib/pear-video-models';
 
 export type ProviderCapabilityFamily = 'pear' | 'apib' | '4s' | 'ai-link' | '302';
 
@@ -209,10 +209,11 @@ function pearCapabilities(modelId: string): CapabilityLayer | undefined {
   }
   const video = getPearVideoModelSpec(modelId);
   if (!video) return undefined;
-  const operations: SupportedOperation[] = [];
-  if (video.modes.includes('text2video')) operations.push('text-to-video');
-  if (video.modes.includes('image2video')) operations.push('image-to-video');
-  if (video.modes.includes('reference2video')) operations.push('multi-reference');
+  const operations = video.modes.flatMap(mode => {
+    const operation = PEAR_VIDEO_GENERATE_OPERATIONS[mode];
+    return operation ? [operation] : [];
+  });
+  const maxReferenceImages = operations.includes('multi-reference') ? video.maxImages : Math.min(1, video.maxImages);
   return {
     allowedRatios: [...video.ratios],
     // The tools use lower-case p; the submit builder sends the documented upper-case value.
@@ -220,8 +221,8 @@ function pearCapabilities(modelId: string): CapabilityLayer | undefined {
     qualityOptions: [],
     allowedDurationsSeconds: [...video.durations],
     maxDurationSeconds: Math.max(...video.durations),
-    supportsReferenceImages: video.maxImages > 0,
-    maxReferenceImages: video.maxImages,
+    supportsReferenceImages: maxReferenceImages > 0,
+    maxReferenceImages,
     supportedOperations: operations,
   };
 }
@@ -229,6 +230,7 @@ function pearCapabilities(modelId: string): CapabilityLayer | undefined {
 const PRESET_FAMILIES: Readonly<Record<string, ProviderCapabilityFamily>> = {
   pear: 'pear',
   pearapi: 'pear',
+  'pearapi-video': 'pear',
   apib: 'apib',
   apimart: 'apib',
   '4s': '4s',

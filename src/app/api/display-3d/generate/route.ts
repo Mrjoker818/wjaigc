@@ -1,15 +1,63 @@
+import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { getApiProviders } from '@/lib/server-api-config';
 import { resolveProfileForModel, adjustRequestForProfile, parseResponseForProfile } from '@/lib/api-compatibility';
 import { buildDisplay3DRenderPrompt } from '@/lib/display3d-prompts';
 import { registerTask, waitForQueueSlot, updateTaskProgress, getTaskInfo, isTaskCancelled, registerTaskAbortController, unregisterTaskAbortController, releaseQueueSlot } from '@/lib/task-registry';
-import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { claimCloudTaskLease, createCloudTask, releaseCloudTaskLease, updateCloudTask,
+  type CloudTaskLease, type UpdateCloudTaskInput } from '@/lib/cloud-task-storage';
+import { configuredPaidProviderBaseUrl, submitPaidProviderJson } from '@/lib/paid-provider-submit';
+import { completeDisplay3DTask, display3DLeaseFence, display3DProviderTerminal, display3DRemoteReceipt, failDisplay3DTask,
+  pollDisplay3DTask, DISPLAY3D_IMAGE_PATH, DISPLAY3D_POLL_WINDOW_MS, DISPLAY3D_QUEUE_EXPIRED, DISPLAY3D_QUEUE_WAIT_MS,
+  DISPLAY3D_UNCONFIRMED } from '@/lib/display3d-generation-task';
 import { getSessionUser } from '@/lib/server-auth';
 import { calculateActualPixelsFromRatio } from '@/lib/calculate-pixels';
 import { validateApiInputs } from '@/lib/api-validator';
 import { getConfiguredModelsForProvider } from '@/lib/model-type-classification';
 import { resolveTaskModelFromProviders } from '@/lib/task-core/model-catalog';
 import { ModelCapabilityError } from '@/lib/task-core/model-capability-contract';
+
+const SUBMISSION_TIMEOUT_MS = 300_000;
+const TERMINAL_STATUSES = ['completed', 'failed', 'cancelled', 'timeout'];
+
+function recordAcceptedReceipt(taskId: string, update: UpdateCloudTaskInput): Promise<boolean> {
+  // A lost storage acknowledgement can be retried under the same lease without another provider request.
+  return updateCloudTask(taskId, update).catch(() => updateCloudTask(taskId, update));
+}
+
+function continueDisplay3DPolling(taskId: string, userId: string): void {
+  const controller = new AbortController();
+  let inFlight = false;
+  let stopped = false;
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    clearInterval(interval);
+    clearTimeout(deadline);
+    unregisterTaskAbortController(taskId, controller);
+    releaseQueueSlot(taskId);
+  };
+  const deadline = setTimeout(() => {
+    controller.abort();
+    updateTaskProgress(taskId, { status: 'processing', label: DISPLAY3D_UNCONFIRMED, result: { display3dOutcomeUnconfirmed: true } });
+  }, DISPLAY3D_POLL_WINDOW_MS);
+  const interval = setInterval(async () => {
+    const local = getTaskInfo(taskId);
+    if (isTaskCancelled(taskId) || !local || TERMINAL_STATUSES.includes(local.status)) {
+      controller.abort();
+      return;
+    }
+    if (inFlight) return;
+    inFlight = true;
+    try {
+      const task = await pollDisplay3DTask(taskId, userId, controller.signal);
+      if (!task || TERMINAL_STATUSES.includes(task.status)) stop();
+    } catch { /* An interrupted status read leaves the receipt available for recovery. */ }
+    finally { inFlight = false; }
+  }, 5_000);
+  controller.signal.addEventListener('abort', stop, { once: true });
+  registerTaskAbortController(taskId, controller);
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -128,172 +176,112 @@ export async function POST(request: NextRequest) {
     }
 
     const { body: adjustedBody, endpoint } = adjustRequestForProfile(rawBody, profile);
-    if (adjustedBody.model !== selectedModel || endpoint !== '/images/generations') {
+    if (adjustedBody.model !== selectedModel || endpoint !== DISPLAY3D_IMAGE_PATH) {
       return NextResponse.json({ error: '所选模型与当前展陈生成接口不兼容，请检查模型配置' }, { status: 400 });
     }
 
-    // Register task
-    const taskId = `d3d_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    registerTask(taskId, 'display3d', `3D展陈: ${brandName}`, sessionUser?.id);
+    const apiBase = configuredPaidProviderBaseUrl(provider.baseUrl);
+    const taskId = `d3d_${randomUUID()}`;
+    const userId = sessionUser.id;
+    const label = `3D展陈: ${brandName}`;
+    const now = Date.now();
+    const created = await createCloudTask({
+      id: taskId, userId, type: 'display3d', status: 'queued', providerId: provider.id, model: selectedModel,
+      creditStatus: 'not-applicable', creditCost: 0, progress: 0, label, createdAt: now, updatedAt: now,
+      result: { display3dReceipt: { state: 'queued' } },
+    }).catch(() => false);
+    if (!created) {
+      return NextResponse.json({ error: '任务记录暂不可用，本次展陈生成未提交' }, { status: 503 });
+    }
+    registerTask(taskId, 'display3d', label, userId, 'durable');
 
     // Start async generation
     (async () => {
       let submissionController: AbortController | undefined;
+      let lease: CloudTaskLease | null = null;
+      let dispatched = false;
+      let polling = false;
       try {
-        const acquired = await waitForQueueSlot(taskId);
+        const acquired = await waitForQueueSlot(taskId, DISPLAY3D_QUEUE_WAIT_MS);
         const queuedTask = getTaskInfo(taskId);
         const cancelled = isTaskCancelled(taskId);
-        const terminal = !queuedTask || ['completed', 'failed', 'cancelled', 'timeout'].includes(queuedTask.status);
+        const terminal = !queuedTask || TERMINAL_STATUSES.includes(queuedTask.status);
         if (!acquired || cancelled || terminal) {
-          if (cancelled) releaseQueueSlot(taskId);
           if (!acquired && !cancelled && !terminal) {
-            updateTaskProgress(taskId, { status: 'failed', error: '等待执行名额超时，任务未向供应商提交' });
+            if (await updateCloudTask(taskId, { status: 'failed', expectedStatuses: ['queued'], error: DISPLAY3D_QUEUE_EXPIRED })) {
+              updateTaskProgress(taskId, { status: 'failed', error: DISPLAY3D_QUEUE_EXPIRED });
+            }
           }
           return;
         }
-        updateTaskProgress(taskId, { status: 'processing', progress: 10, label: '正在生成展陈方案...' });
-
-        // The configured base is authoritative for a billable submission.
-        const apiBase = provider.baseUrl.replace(/\/+$/, '');
-        const apiPath = '/images/generations';
         submissionController = new AbortController();
         registerTaskAbortController(taskId, submissionController);
-
-        const response = await fetchWithV1Retry(apiBase, apiPath, {
-          method: 'POST',
-          skipV1Retry: true,
-          redirect: 'manual',
-          signal: AbortSignal.any([submissionController.signal, AbortSignal.timeout(300_000)]),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${provider.apiKey}`,
-          },
-          body: JSON.stringify(adjustedBody),
+        lease = await claimCloudTaskLease(taskId, `display3d-submit-${randomUUID()}`, SUBMISSION_TIMEOUT_MS + 30_000);
+        if (!lease || submissionController.signal.aborted || isTaskCancelled(taskId)) return;
+        const fence = display3DLeaseFence(lease);
+        const started = await updateCloudTask(taskId, {
+          ...fence, expectedStatuses: ['queued'], status: 'processing', progress: 10, label: '正在生成展陈方案...',
+          result: { display3dReceipt: { state: 'started' } }, mergeResult: true,
         });
+        if (!started || submissionController.signal.aborted || isTaskCancelled(taskId)) return;
+        updateTaskProgress(taskId, { status: 'processing', progress: 10, label: '正在生成展陈方案...' });
 
+        const remainingLeaseMs = lease.expiresAt - Date.now();
+        if (remainingLeaseMs <= 0) return;
+        dispatched = true;
+        const receipt = await submitPaidProviderJson({
+          baseUrl: apiBase, path: DISPLAY3D_IMAGE_PATH, apiKey: provider.apiKey, body: adjustedBody,
+          signal: AbortSignal.any([submissionController.signal, AbortSignal.timeout(Math.min(remainingLeaseMs, SUBMISSION_TIMEOUT_MS))]),
+        });
         if (submissionController.signal.aborted || isTaskCancelled(taskId)) return;
-
-        if (!response.ok) {
-          updateTaskProgress(taskId, { status: 'failed', error: `API错误: ${response.status}` });
+        if (receipt.kind === 'rejected') {
+          await failDisplay3DTask(taskId, lease, 'failed', `供应商拒绝展陈生成请求（HTTP ${receipt.status}）`);
           return;
         }
-
-        const apiResponse = await response.json();
-        if (submissionController.signal.aborted || isTaskCancelled(taskId)) return;
-        unregisterTaskAbortController(taskId, submissionController);
-        submissionController = undefined;
-        const parsed = parseResponseForProfile(apiResponse, profile);
-
-        if (parsed.mode === 'direct' && parsed.directImageUrls.length > 0) {
-          updateTaskProgress(taskId, {
-            status: 'completed',
-            progress: 100,
-            result: {
-              imageUrls: parsed.directImageUrls,
-              prompt,
-              type: 'display3d',
-            },
-          });
-        } else if (parsed.mode === 'polling' && parsed.taskIds.length > 0) {
-          // Poll for async results
-          const pollTaskId = parsed.taskIds[0];
-          if (pollTaskId === '.' || pollTaskId === '..') {
-            updateTaskProgress(taskId, { status: 'processing', label: '上游任务已提交，但查询标识异常，请核实任务状态', result: { display3dOutcomeUnconfirmed: true } });
-            releaseQueueSlot(taskId);
+        if (receipt.kind === 'received') {
+          const terminal = display3DProviderTerminal(receipt.data);
+          if (terminal) {
+            await failDisplay3DTask(taskId, lease, terminal);
             return;
           }
-          const encodedPollTaskId = encodeURIComponent(pollTaskId);
-          let pollBase = apiBase;
-          try {
-            const submittedUrl = new URL(response.url);
-            const providerUrl = new URL(provider.baseUrl);
-            if (submittedUrl.origin === providerUrl.origin && !submittedUrl.search && !submittedUrl.hash && submittedUrl.pathname.endsWith(apiPath)) {
-              pollBase = `${submittedUrl.origin}${submittedUrl.pathname.slice(0, -apiPath.length)}`.replace(/\/+$/, '');
+          const parsed = parseResponseForProfile(receipt.data, profile);
+          if (parsed.directImageUrls.length) {
+            const saved = await recordAcceptedReceipt(taskId, {
+              ...fence, expectedStatuses: ['processing'], mergeResult: true,
+              result: { display3dReceipt: { state: 'direct' }, imageUrls: parsed.directImageUrls, prompt },
+            });
+            if (saved && !submissionController.signal.aborted && !isTaskCancelled(taskId)) {
+              await completeDisplay3DTask(taskId, lease, parsed.directImageUrls, prompt);
             }
-          } catch {
-            // Some transports cannot report the final URL; retain the existing fallback.
+            return;
           }
-          const pollPath = profile.pollPathTemplate?.startsWith('/') && profile.pollPathTemplate.includes('{taskId}')
-            ? profile.pollPathTemplate.replace('{taskId}', encodedPollTaskId)
-            : `/tasks/${encodedPollTaskId}`;
-          let pollCount = 0;
-          const maxPolls = 60;
-          const controller = new AbortController();
-          let inFlight = false;
-          let pollInterval: ReturnType<typeof setInterval> | undefined;
-          let pollDeadline: ReturnType<typeof setTimeout> | undefined;
-          const stop = (): void => {
-            if (pollInterval !== undefined) clearInterval(pollInterval);
-            if (pollDeadline !== undefined) clearTimeout(pollDeadline);
-            pollInterval = undefined;
-            pollDeadline = undefined;
-            unregisterTaskAbortController(taskId, controller);
-          };
-          const isStopped = (): boolean => {
-            const task = getTaskInfo(taskId);
-            return controller.signal.aborted || isTaskCancelled(taskId) || !task
-              || ['completed', 'failed', 'cancelled', 'timeout'].includes(task.status);
-          };
-          controller.signal.addEventListener('abort', stop, { once: true });
-          registerTaskAbortController(taskId, controller);
-          if (isStopped()) { stop(); return; }
-          pollDeadline = setTimeout(() => {
-            if (isStopped()) { stop(); return; }
-            stop();
-            controller.abort();
-            updateTaskProgress(taskId, { status: 'processing', label: '远端任务查询超时，结果待核，请保留任务编号核实', result: { display3dOutcomeUnconfirmed: true } });
-            releaseQueueSlot(taskId);
-          }, 305_000);
-          pollInterval = setInterval(async () => {
-            if (isStopped()) { stop(); return; }
-            if (inFlight) return;
-            pollCount++;
-            if (pollCount > maxPolls) {
-              stop();
-              updateTaskProgress(taskId, { status: 'processing', label: '远端任务查询超时，结果待核，请保留任务编号核实', result: { display3dOutcomeUnconfirmed: true } });
-              releaseQueueSlot(taskId);
-              return;
-            }
-            inFlight = true;
-            try {
-              const pollRes = await fetchWithV1Retry(pollBase, pollPath, {
-                signal: controller.signal,
-                headers: { 'Authorization': `Bearer ${provider.apiKey}` },
-              });
-              if (isStopped()) { stop(); return; }
-              if (!pollRes.ok) return;
-              const pollData = await pollRes.json();
-              if (isStopped()) { stop(); return; }
-              const pollParsed = parseResponseForProfile(pollData, profile);
-              if (pollParsed.mode === 'direct' && pollParsed.directImageUrls.length > 0) {
-                stop();
-                updateTaskProgress(taskId, {
-                  status: 'completed',
-                  progress: 100,
-                  result: {
-                    imageUrls: pollParsed.directImageUrls,
-                    prompt,
-                    type: 'display3d',
-                  },
-                });
-              }
-            } catch {
-              // continue polling
-            } finally {
-              inFlight = false;
-            }
-          }, 5000);
-        } else {
-          updateTaskProgress(taskId, { status: 'failed', error: '无法解析API响应' });
+          const remoteTaskId = parsed.taskIds[0];
+          const remote = remoteTaskId && display3DRemoteReceipt(apiBase, receipt.responseUrl, remoteTaskId, profile);
+          if (remote) {
+            const saved = await recordAcceptedReceipt(taskId, {
+              ...fence, expectedStatuses: ['processing'], remoteTaskId, progress: 15, mergeResult: true,
+              result: { display3dReceipt: remote, prompt },
+            });
+            if (saved && !submissionController.signal.aborted && !isTaskCancelled(taskId)) polling = true;
+            if (saved) return;
+          }
         }
+        updateTaskProgress(taskId, { status: 'processing', label: DISPLAY3D_UNCONFIRMED, result: { display3dOutcomeUnconfirmed: true } });
       } catch {
         if (submissionController?.signal.aborted || isTaskCancelled(taskId)) return;
-        updateTaskProgress(taskId, {
-          status: 'failed',
-          error: '展陈生成请求失败，请核实任务状态',
-        });
+        if (dispatched) {
+          updateTaskProgress(taskId, { status: 'processing', label: DISPLAY3D_UNCONFIRMED, result: { display3dOutcomeUnconfirmed: true } });
+        } else {
+          const error = '任务记录未能准备，本次展陈生成未提交';
+          await updateCloudTask(taskId, { status: 'failed', expectedStatuses: ['queued', 'processing'], error,
+            ...(lease ? display3DLeaseFence(lease) : {}) }).catch(() => false);
+          updateTaskProgress(taskId, { status: 'failed', error });
+        }
       } finally {
         if (submissionController) unregisterTaskAbortController(taskId, submissionController);
+        if (lease) await releaseCloudTaskLease(taskId, lease.owner).catch(() => false);
+        if (polling && !submissionController?.signal.aborted && !isTaskCancelled(taskId)) continueDisplay3DPolling(taskId, userId);
+        else releaseQueueSlot(taskId);
       }
     })();
 

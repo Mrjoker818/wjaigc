@@ -28,6 +28,7 @@ if (process.env.DOCTOR_SKIP_ENV_FILE !== '1') {
 }
 
 const production = process.argv.includes('--production') || process.env.COZE_PROJECT_ENV === 'PROD' || process.env.NODE_ENV === 'production';
+const deploymentDatabaseOnly = process.env.WUJIE_DEPLOYMENT_DB_ONLY === '1';
 const startup = process.argv.includes('--startup');
 const remoteUrl = process.argv.find((arg) => arg.startsWith('--url='))?.slice('--url='.length)?.replace(/\/$/, '');
 const results = [];
@@ -53,7 +54,7 @@ function secretCheckAny(area, names, strict = production) {
 
 function checkAuthPersistenceMode() {
   const databaseConfigured = Boolean(resolveDoctorDatabaseUrl(process.env));
-  const rawMode = process.env.WUJIE_AUTH_PERSISTENCE_MODE;
+  const rawMode = deploymentDatabaseOnly ? 'DB_ONLY' : process.env.WUJIE_AUTH_PERSISTENCE_MODE;
   const mode = rawMode === undefined
     ? databaseConfigured ? 'DB_ONLY' : 'FILE_ONLY'
     : rawMode;
@@ -155,6 +156,27 @@ async function checkMediaGateway(client) {
   }
 }
 
+async function checkDeploymentAuthentication(client) {
+  try {
+    const { rows: [state] } = await client.query(`
+      SELECT EXISTS (SELECT 1 FROM wujie_users) AS has_users,
+        EXISTS (SELECT 1 FROM wujie_users WHERE role = 'admin' AND status = 'active'
+          AND (credential_hash <> '' OR password_hash <> '')) AS has_administrator,
+        EXISTS (SELECT 1 FROM wujie_system_settings WHERE key = 'auth_secret_ring_v1'
+          AND value->>'version' = '1'
+          AND length(value->'active'->>'secret') >= 32) AS has_signing_ring
+    `);
+    if (state?.has_administrator) add('PASS', 'deployment-administrator', 'active administrator stored in database');
+    else if (!state?.has_users && configured('WUJIE_ADMIN_PASSWORD', 12)) {
+      add('WARN', 'deployment-administrator', 'initial administrator is configured and awaits first login');
+    } else add('FAIL', 'deployment-administrator', 'database has no active administrator with a credential');
+    add(state?.has_signing_ring ? 'PASS' : 'WARN', 'authentication-secret',
+      state?.has_signing_ring ? 'database signing ring present' : 'database signing ring awaits initialization');
+  } catch {
+    add('FAIL', 'deployment-administrator', 'unable to verify database authentication state');
+  }
+}
+
 async function checkDatabase() {
   const connectionString = resolveDoctorDatabaseUrl(process.env);
   if (!connectionString) {
@@ -168,6 +190,7 @@ async function checkDatabase() {
     await client.connect();
     await client.query('SELECT 1 AS healthcheck');
     add('PASS', 'database', 'connection and query succeeded');
+    if (deploymentDatabaseOnly) await checkDeploymentAuthentication(client);
     await checkMediaGateway(client);
   } catch (error) {
     add('FAIL', 'database', `connection failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -850,13 +873,15 @@ async function main() {
   checkCanvasKernelMode();
   checkStage4Modes();
   const strictCredentials = production && !startup;
-  secretCheckAny('authentication-secret', ['WUJIE_AUTH_SECRET', 'NEXTAUTH_SECRET'], strictCredentials);
+  if (!deploymentDatabaseOnly) {
+    secretCheckAny('authentication-secret', ['WUJIE_AUTH_SECRET', 'NEXTAUTH_SECRET'], strictCredentials);
+    if (configured('WUJIE_ADMIN_PASSWORD', 12)) add('PASS', 'WUJIE_ADMIN_PASSWORD', 'configured');
+    else add(strictCredentials ? 'FAIL' : 'WARN', 'WUJIE_ADMIN_PASSWORD', 'missing, weak, or placeholder value');
+  }
   checkAuthPersistenceMode();
   checkPreviousSessionSetting();
   secretCheck('INTERNAL_API_SECRET', strictCredentials);
   secretCheck('PAYMENT_TOKEN_SECRET', strictCredentials);
-  if (configured('WUJIE_ADMIN_PASSWORD', 12)) add('PASS', 'WUJIE_ADMIN_PASSWORD', 'configured');
-  else add(strictCredentials ? 'FAIL' : 'WARN', 'WUJIE_ADMIN_PASSWORD', 'missing, weak, or placeholder value');
   if (process.env.MANDATORY_API_AUTH === 'true') add('PASS', 'MANDATORY_API_AUTH', 'enabled');
   else add(strictCredentials ? 'FAIL' : 'WARN', 'MANDATORY_API_AUTH', 'must be true for a release environment');
   for (const provider of ['APIMART_API_KEY', 'GEMINI_API_KEY']) {

@@ -1,15 +1,21 @@
 import 'server-only';
+import {isDeepStrictEqual} from 'node:util';
 import type {PoolClient} from 'pg';
 import {getPool} from '@/lib/db-client';
+import {createAssetStorageTransaction} from '@/lib/asset-core/storage';
+import type {AssetVersion} from '@/lib/asset-core/types';
 import {readDocumentWorkspaceProject} from '@/lib/collaboration/document-workspace-reference';
 import {prepareDocumentAssetsForImport} from '@/lib/collaboration/document-asset-validation';
 import {DocumentMediaError,parseMediaVersionImport,type MediaImportCommand} from '@/lib/collaboration/document-media-request';
-import {workflowImageGridPreparationIdentity,type WorkflowImageGridPreparationIdentity,
+import {importedMediaIdentity} from '@/lib/collaboration/document-media-source';
+import {workflowImageGridPreparationIdentity,workflowImageGridDocumentMedia,workflowImagePublishedMediaMatches,type WorkflowImageGridPreparationIdentity,
   type PreparedWorkflowImageGrid,type WorkflowImageGridPublication} from './workflow-image-preparation';
 import {commitPreparedDocumentDerivedGridInTransaction,readPreparedDocumentDerivedGridInTransaction,
   type WorkflowDocumentDerivedGridResult} from './collaboration/document-media-import';
 export interface WorkflowDocumentImagePublicationDependencies {connect?:()=>Promise<PoolClient>}
 export type WorkflowDocumentImageGridPublication=WorkflowImageGridPublication<WorkflowDocumentDerivedGridResult>&{connectionErrors?:readonly unknown[]};
+interface GridReplay {value:WorkflowDocumentDerivedGridResult;versions:AssetVersion[]}
+type GridAttempt=WorkflowDocumentImageGridPublication|{status:'verify-media';replay:GridReplay};
 function conflict():never {throw new DocumentMediaError('DOCUMENT_MEDIA_CONFLICT');}
 async function initialCommands(identity:WorkflowImageGridPreparationIdentity,signal:AbortSignal):Promise<MediaImportCommand[]> {
   const {input,source}=identity;
@@ -38,7 +44,7 @@ export async function publishPreparedDocumentWorkflowImageGrid(prepared:Prepared
   dependencies:WorkflowDocumentImagePublicationDependencies={}):Promise<WorkflowDocumentImageGridPublication> {
   const identity=workflowImageGridPreparationIdentity(prepared),connect=dependencies.connect??(()=>getPool().connect());
   const connectionErrors:unknown[]=[];
-  async function attempt(write:boolean):Promise<WorkflowDocumentImageGridPublication> {
+  async function attempt(write:boolean,verified?:GridReplay):Promise<GridAttempt> {
     let client:PoolClient|undefined,open=false,commitSent=false,discard=false,released=false;
     const release=():void=>{if(client&&!released){released=true;try{client.release(discard);}catch(error){connectionErrors.push(error);}}};
     try{
@@ -53,6 +59,22 @@ export async function publishPreparedDocumentWorkflowImageGrid(prepared:Prepared
         ?await commitPreparedDocumentDerivedGridInTransaction(client,identity.input.actorUserId,prepared,assets,commands,signal)
         :await readPreparedDocumentDerivedGridInTransaction(client,identity.input.actorUserId,prepared,signal);
       if(!value){await client.query('ROLLBACK');open=false;return {status:'unknown',error:new Error('DOCUMENT_GRID_COMMIT_UNCONFIRMED')};}
+      // Only a write returning these preparation IDs can rely on the staged
+      // files. A concurrent commit may be newer than the document preflight.
+      const freshlyWritten=write&&value.tiles.every(({reference},index)=>
+        reference.assetVersionId===importedMediaIdentity(workflowImageGridDocumentMedia(prepared,index)).versionId);
+      if(!freshlyWritten){
+        const storage=createAssetStorageTransaction(client),versions:AssetVersion[]=[];
+        for(const {reference} of value.tiles){
+          signal.throwIfAborted();
+          const version=await storage.findVersion(identity.source.access.ownerId,identity.input.projectId,reference.assetVersionId);
+          if(!version||version.assetId!==reference.assetId||version.file.url!==reference.url)conflict();
+          versions.push(version);
+        }
+        const replay={value,versions};
+        if(!verified){await client.query('ROLLBACK');open=false;return {status:'verify-media',replay};}
+        if(!isDeepStrictEqual(replay,verified))conflict();
+      }
       signal.throwIfAborted();commitSent=true;await client.query('COMMIT');open=false;
       // A definitive COMMIT receipt wins over cancellation arriving during send.
       const actual=new Set(value.tiles.map(tile=>tile.reference.url));
@@ -64,12 +86,20 @@ export async function publishPreparedDocumentWorkflowImageGrid(prepared:Prepared
       return {status:'rolled-back',error};
     }finally{release();}
   }
-  let result=await attempt(true);
+  async function resolved(write:boolean):Promise<WorkflowDocumentImageGridPublication>{
+    const first=await attempt(write);if(first.status!=='verify-media')return first;
+    try{
+      for(const version of first.replay.versions)if(!await workflowImagePublishedMediaMatches(version,signal))conflict();
+    }catch(error){return {status:'rolled-back',error};}
+    const confirmed=await attempt(false,first.replay);
+    return confirmed.status==='verify-media'?{status:'unknown',error:new Error('DOCUMENT_GRID_COMMIT_UNCONFIRMED')}:confirmed;
+  }
+  let result=await resolved(true);
   if(result.status==='unknown'){
     const original=result.error;
     // Never reuse a connection whose COMMIT outcome is unknown. Only a fresh,
     // fully authorized complete canonical manifest may turn uncertainty into ACK.
-    try{const recovered=await attempt(false);result=recovered.status==='committed'?recovered
+    try{const recovered=await resolved(false);result=recovered.status==='committed'?recovered
       :{status:'unknown',error:recovered.status==='unknown'?new AggregateError([original,recovered.error],'DOCUMENT_GRID_COMMIT_UNCONFIRMED'):original};}
     catch(error){result={status:'unknown',error:new AggregateError([original,error],'DOCUMENT_GRID_COMMIT_UNCONFIRMED')};}
   }

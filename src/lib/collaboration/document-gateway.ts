@@ -22,7 +22,7 @@ import {
   assertDocumentTransportAdmission, documentTransportCanStart,
   registerDocumentTransportGateway, withDocumentWebSocketAdmission,
 } from './document-transport-gate';
-import { getDocumentExecutionScope } from './document-execution-scope';
+import { documentExecutionHttpFailure, getDocumentExecutionScope } from './document-execution-scope';
 import { getPool } from '@/lib/db-client';
 
 const DOCUMENT_PROTOCOL = 'wujie-document-v1';
@@ -177,6 +177,7 @@ export function createDocumentGateway({
 
   function queue(
     connection: DocumentConnection, operation: () => Promise<void>, retainedBytes = 0,
+    phase: 'read' | 'write' = 'read',
   ): void {
     if (!connection.active || closeForTransportChange(connection) || connection.socket.readyState !== WebSocket.OPEN) return;
     if (connection.queuedInboundBytes + retainedBytes > maxQueuedBytesPerConnection
@@ -198,11 +199,22 @@ export function createDocumentGateway({
       assertDocumentTransportAdmission();
       await operation();
     }).catch(error => {
-      if (connection.active && !closeForTransportChange(connection)) connection.socket.close(
-        error instanceof DocumentUpdateRejectedError || error instanceof DocumentAssetError
-          ? 4400 : error instanceof DocumentAccessError ? 1008 : 1011,
-        'document unavailable',
-      );
+      if (connection.active && !closeForTransportChange(connection)) {
+        const closeCode = error instanceof DocumentUpdateRejectedError || error instanceof DocumentAssetError
+          ? 4400 : error instanceof DocumentAccessError ? 1008 : 1011;
+        const reason = error instanceof DocumentAssetError ? error.reason
+          : error instanceof DocumentUpdateRejectedError ? 'update_rejected'
+            : error instanceof DocumentAccessError ? 'access_denied' : 'operation_failed';
+        try {
+          const sqlState: unknown = error instanceof Error ? Object.getOwnPropertyDescriptor(error, 'code')?.value : undefined;
+          const databaseCode = typeof sqlState === 'string' && /^[0-9A-Z]{5}$/.test(sqlState) ? sqlState : undefined;
+          console.warn({ code: 'WUJIE_DOCUMENT_OPERATION_FAILED', phase, reason, closeCode, databaseCode,
+            storage: error instanceof DocumentAssetError ? error.storage : undefined,
+            executionCode: documentExecutionHttpFailure(error)?.code,
+          });
+        } catch { /* Diagnostics cannot keep a failed connection open. */ }
+        connection.socket.close(closeCode, 'document unavailable');
+      }
     }).finally(() => {
       connection.pendingOperations -= 1;
       connection.queuedInboundBytes -= retainedBytes;
@@ -444,7 +456,7 @@ export function createDocumentGateway({
             for (const peer of room) {
               if (peer !== connection) queue(peer, () => reconcile(peer));
             }
-          }, bytes.length);
+          }, bytes.length, bytes[0] === 0x02 ? 'write' : 'read');
         });
         finish();
       });

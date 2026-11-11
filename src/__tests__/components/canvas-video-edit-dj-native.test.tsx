@@ -8,10 +8,11 @@ import { Scanner } from '@tailwindcss/oxide';
 import { chromium, type Browser, type BrowserContext, type Page, type Locator, type Request } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 type Theme='gold'|'mono';
-interface Options {admin?:boolean; requireMissing?:boolean; touch?:boolean;holdRecovery?:boolean;catalogLoading?:boolean}
+interface Options {admin?:boolean; requireMissing?:boolean; touch?:boolean;holdRecovery?:boolean;catalogLoading?:boolean; videoSubmit?: (request: Request) => Promise<{ status: number; json: Record<string, unknown> }>}
 interface FixtureWindow extends Window {canvasUi:{png:string;mount(theme:Theme,options:Options):void;unmount():void;state:{mounts:number;disposed:boolean;scopeChecks:number;images:unknown[];groups:unknown[];actions:string[];view:{offsetX:number;offsetY:number;zoom:number}|null;events:Array<{type:string;target:string}>}}}
 interface Session {context:BrowserContext;page:Page;options:Options;errors:string[];counts:Map<string,number>;handlers:Set<Promise<void>>;mounted:boolean;pending:Set<Request>;completed:Set<Request>;failed:Set<Request>;refused:Set<Request>;responseStatus:Map<Request,number>;nativeWaiters:Set<()=>void>;png:Buffer;releaseRecovery:()=>void;recoveryCalls:number}
 const ORIGIN='https://canvas-shell-mobile.invalid';
+const VIDEO_SUBMIT_PATHS = ['/api/video/generate', '/api/video/extend'];
 const THEMES:readonly Theme[]=['gold','mono'];
 const HELP_FILES=['canvas-overview.jpeg','erase-tool.jpeg','mask-tool.jpeg','remove-bg.jpeg','upscale.jpeg','lang-edit.jpeg','svg-trace.jpeg','extend.jpeg','oh-my-prompt.jpeg'];
 const ENTRY=String.raw`
@@ -32,14 +33,20 @@ const sketchContext={key:scope.key,captureScope:()=>{scope.assertCurrent();retur
 const bxDescriptor={providerId:'bx-provider',modelId:'bx-image',kind:'image' as const,sourceType:'image' as const,protocol:'openai',executionMode:'sync' as const,allowedRatios:['1:1','3:2'],allowedSizes:['1024x1024'],qualityOptions:['standard'],maxOutputs:2,supportsVision:false,supportsReferenceImages:true,maxReferenceImages:14,supportsMask:false,allowedDurationsSeconds:[],maxDurationSeconds:0,supportedOperations:['image-to-image','multi-reference'] as Array<'image-to-image'|'multi-reference'>,outputKinds:['image'],capabilitySources:{allowedRatios:'admin' as const,allowedSizes:'admin' as const,qualityOptions:'admin' as const,supportsReferenceImages:'admin' as const,maxReferenceImages:'admin' as const}};
 const bxUnsupported={...bxDescriptor,modelId:'bx-no-reference',supportsReferenceImages:false,maxReferenceImages:0};
 const bySecond={...bxDescriptor,providerId:'by-provider-b',maxReferenceImages:2,allowedRatios:['1:1','16:9'],allowedSizes:['1536x1024'],qualityOptions:['hd'],maxOutputs:1};
-function Entry({theme,admin,catalogLoading}:{theme:'gold'|'mono';admin:boolean;catalogLoading:boolean}):React.ReactElement{
+function Entry({theme,admin,catalogLoading,videoSubmission}:{theme:'gold'|'mono';admin:boolean;catalogLoading:boolean;videoSubmission:boolean}):React.ReactElement{
  const [images,setImages]=useState<CanvasImage[]>([{id:'br-A',url:png,mediaType:'video' as const,videoUrl:"data:video/mp4;base64,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",videoDuration:1,x:40,y:120,width:240,height:135,name:'BW A',prompt:'BR成员A'},{id:'br-B',url:png,x:100,y:270,width:56,height:56,name:'BW B',prompt:'BR成员B'},{id:'br-keep',url:png,x:100,y:380,width:56,height:56,name:'BW 保留',prompt:'BR组外素材'}]);const [selected,setSelected]=useState<CanvasImage|null>(null);state.images=images;const [groups,setGroups]=useState<Array<{id:string;name:string;note:string;imageIds:string[];x:number;y:number;collapsed:boolean}>>([]);state.groups=groups;
- return <><OperationAuditClient/><InfiniteCanvas images={images} selectedImage={selected} projectId="canvas-ui-project" isPanelCollapsed={false} isAdmin={admin}
+ return <>{!videoSubmission && <OperationAuditClient/>}<InfiniteCanvas images={images} selectedImage={selected} projectId="canvas-ui-project" isPanelCollapsed={false} isAdmin={admin}
  taskModelCatalog={[bxDescriptor,bxUnsupported,bySecond]} taskModelOptions={[{id:'bx-image',providerId:'bx-provider',providerName:'BX 合成供应商',name:'BX 图像',type:'image'},{id:'bx-no-reference',providerId:'bx-provider',providerName:'BX 合成供应商',name:'BX 不支持参考图',type:'image'},{id:'bx-image',providerId:'by-provider-b',providerName:'BY 合成供应商乙',name:'BY 图像乙',type:'image'}]} themeStyle={theme==='mono'?'monochrome':'gold'} initialViewState={{offsetX:0,offsetY:0,zoom:1}} onViewStateChange={view=>{state.view=view;}}
  initialGroups={groups} onGroupsChange={next=>{setGroups(next);}} versionHistoryManager={manager} sketchImageEnabled={true} sketchContext={sketchContext} catalogStatus={{loading:catalogLoading,error:null}} onImagesChange={setImages} onSelectImage={setSelected} onPreviewImage={action('preview')} onGenerateVariation={action('variation')} onExtractKeywords={action('keywords')} onSendToChat={image=>{state.actions.push('chat:'+image.id);}} onFusion={action('fusion')} onAddImages={()=>{throw Error('CANVAS_UI_FIXTURE_UNEXPECTED_PUBLISH')}}
+ onRequestTaskPoll={async ({taskId}) => {
+   if (!videoSubmission || typeof taskId !== 'string' || !taskId.startsWith('dj-synthetic-')) throw Error('DJ_UNEXPECTED_POLL');
+   const clip = images.find(image => image.id === 'br-A');
+   state.actions.push(taskId);
+   return Response.json({status:'completed', imageUrl:clip?.videoUrl, videoUrl:clip?.videoUrl, videoThumbnailUrl:png});
+ }}
  onSwitchToDashboard={action('dashboard')} onToggleVisionPrompt={action('omp')} onToggleSettings={action('settings')} onToggleTheme={action('theme')} onToggleUserManager={action('users')} onToggleAdminSystem={action('admin')} onToggleProjectData={action('projects')} onToggleFavorites={action('favorites')} onTogglePromptTemplate={action('templates')} onToggleHelp={action('external-help')} onSwitchToNodeMode={action('node')} onSwitchToWorkflowHub={action('workflow')}/></>;
 }
-Object.assign(window,{canvasUi:{state,png,mount(theme:'gold'|'mono',options:{admin?:boolean;catalogLoading?:boolean}){if(state.mounts||state.disposed)throw Error('CANVAS_UI_FIXTURE_REMOUNT');state.mounts++;for(const type of ['pointerdown','pointerup','gotpointercapture','lostpointercapture','click'])document.addEventListener(type,observe,true);document.documentElement.classList.add(theme==='mono'?'theme-monochrome':'theme-gold');root.render(<Entry theme={theme} admin={options.admin===true} catalogLoading={options.catalogLoading===true}/>);},unmount(){if(!state.disposed){state.disposed=true;root.unmount();}taskEventsClient.disconnect();for(const type of ['pointerdown','pointerup','gotpointercapture','lostpointercapture','click'])document.removeEventListener(type,observe,true);}}});
+Object.assign(window,{canvasUi:{state,png,mount(theme:'gold'|'mono',options:{admin?:boolean;catalogLoading?:boolean;videoSubmission?:boolean}){if(state.mounts||state.disposed)throw Error('CANVAS_UI_FIXTURE_REMOUNT');state.mounts++;for(const type of ['pointerdown','pointerup','gotpointercapture','lostpointercapture','click'])document.addEventListener(type,observe,true);document.documentElement.classList.add(theme==='mono'?'theme-monochrome':'theme-gold');root.render(<Entry theme={theme} admin={options.admin===true} catalogLoading={options.catalogLoading===true} videoSubmission={options.videoSubmission===true}/>);},unmount(){if(!state.disposed){state.disposed=true;root.unmount();}taskEventsClient.disconnect();for(const type of ['pointerdown','pointerup','gotpointercapture','lostpointercapture','click'])document.removeEventListener(type,observe,true);}}});
 `;
 let browser: Browser | undefined;
 let bundle = '', css = '';
@@ -128,9 +135,15 @@ async function session(theme: Theme = 'gold', width: number = 390, height: numbe
     await context.route('**/*', async route => {
       const operation = (async (): Promise<void> => {
         const request = route.request(), url = new URL(request.url()), headers = request.headers();
-        if (url.origin !== ORIGIN || url.username || url.password || request.method() !== 'GET' || request.postData() !== null
+        if (url.origin !== ORIGIN || url.username || url.password
           || headers.authorization || headers.cookie || headers['x-api-key'] || headers['api-key'] || headers['idempotency-key']) throw Error('CANVAS_UI_FIXTURE_HTTP_BOUNDARY');
         const key = url.pathname + url.search, count = (s.counts.get(key) ?? 0) + 1; s.counts.set(key, count);
+        if (options.videoSubmit && VIDEO_SUBMIT_PATHS.includes(key)) {
+          if (request.method() !== 'POST' || headers['content-type'] !== 'application/json' || count > 3) throw Error('DJ_SUBMIT_BOUNDARY');
+          await route.fulfill(await options.videoSubmit(request));
+          return;
+        }
+        if (request.method() !== 'GET' || request.postData() !== null) throw Error('CANVAS_UI_FIXTURE_HTTP_BOUNDARY');
         if (count > (['/api/session','/api/auth/me','/api/task-events'].includes(key)?6:HELP_FILES.some(file=>key==='/api/help-image?file='+file)?3:1)) throw Error('CANVAS_UI_FIXTURE_HTTP_COUNT ' + key);
         if (key === '/' && request.isNavigationRequest()) {
           await route.fulfill({ contentType: 'text/html', body: `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style></head><body style="margin:0;width:100vw;height:100dvh;overflow:hidden"><div id="fixture-root" style="position:relative;width:100%;height:100%"></div></body></html>` }); return;
@@ -150,7 +163,9 @@ async function session(theme: Theme = 'gold', width: number = 390, height: numbe
     await page.goto(ORIGIN); await page.addScriptTag({ content: bundle });
     console.log('BB_FETCH_RECEIVER_DIAG',JSON.stringify(await page.evaluate(async()=>{const errors:string[]=[];const holder={fetcher:window.fetch};try{await holder.fetcher('http://[');}catch(error){errors.push(String(error));}try{await window.fetch('http://[');}catch(error){errors.push(String(error));}return errors;})));
     s.png=Buffer.from((await page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.png)).split(',')[1],'base64');
-    await page.evaluate(v => (window as unknown as FixtureWindow).canvasUi.mount(v.theme,v.options), {theme,options}); s.mounted = true;
+    await page.evaluate(v => (window as unknown as FixtureWindow).canvasUi.mount(v.theme,v.options), {
+      theme, options: { admin: options.admin, catalogLoading: options.catalogLoading, videoSubmission: Boolean(options.videoSubmit) },
+    }); s.mounted = true;
     await page.locator('[data-canvas-viewport]').waitFor();
     await nativeRequestsFinished(s); await settle(page);
     await page.waitForFunction(()=>(window as unknown as FixtureWindow).canvasUi.state.view!==null,undefined,{timeout:1500});
@@ -184,6 +199,7 @@ async function dispose(s: Session, expectedRefusal?: 'http' | 'websocket', clean
   // prefix. A boundary selftest must not succeed merely because close failed.
   const invalid=(code:string):never=>{if(failures.length)throw new AggregateError([Error(code),...failures],'CANVAS_UI_FIXTURE_VALIDATION_AND_CLEANUP');throw Error(code);};
   const allowed=['/','/api/session','/api/auth/me','/api/task-events','/api/upscayl','/api/models?type=upscaler','/api/models?type=removebg','/api/models?type=3d','/logo.png','/api/tasks/recover?projectId=canvas-ui-project',...HELP_FILES.map(file=>'/api/help-image?file='+file)];
+  if (s.options.videoSubmit) allowed.push(...VIDEO_SUBMIT_PATHS);
   const keys=[...s.counts.keys()];
   if(s.options.requireMissing || s.counts.get('/')!==1 || keys.some(k=>!allowed.includes(k)&&!(expectedRefusal==='http'&&k==='/unexpected'))){
     console.log('CANVAS_UI_FIXTURE_REQUEST_DIAGNOSTIC',JSON.stringify({counts:[...s.counts],errors:s.errors}));
@@ -224,6 +240,112 @@ async function djTap(s:Session,c:Locator):Promise<void>{await c.scrollIntoViewIf
 async function djAudit(c:Locator):Promise<void>{await c.scrollIntoViewIfNeeded();const v=await c.evaluate(el=>{const r=el.getBoundingClientRect(),faults:string[]=[];const walker=document.createTreeWalker(el,NodeFilter.SHOW_TEXT);let n:Node|null;while((n=walker.nextNode())){if(!n.textContent?.trim())continue;const range=document.createRange();range.selectNodeContents(n);for(const b of range.getClientRects())if(b.left<r.left-.5||b.right>r.right+.5||b.top<r.top-.5||b.bottom>r.bottom+.5)faults.push('text-clipped');}return {name:el.getAttribute('aria-label')||el.getAttribute('title')||el.textContent?.trim()||'',width:r.width,height:r.height,inside:r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight,hit:el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)),faults};});console.log('DJ_CONTROL',JSON.stringify(v));expect.soft(v.width,'touch width '+v.name).toBeGreaterThanOrEqual(44);expect.soft(v.height,'touch height '+v.name).toBeGreaterThanOrEqual(44);expect.soft(v.inside&&v.hit,'visible '+v.name).toBe(true);expect.soft(v.name,'accessible purpose').not.toBe('');expect.soft(v.faults,'readable '+v.name).toEqual([]);}
 async function djOpen(s:Session,e:DJEntry):Promise<Locator>{const c=await s.context.newCDPSession(s.page);let active=false;try{expect(await s.page.evaluate(()=>Boolean(document.elementFromPoint(128,198)?.closest('[data-canvas-image-id="br-A"]')))).toBe(true);await c.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:128,y:198,id:1,force:1}]});active=true;await s.page.locator('[data-popup="context-menu"]').waitFor({state:'visible'});await c.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});active=false;}finally{try{if(active)await c.send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});}finally{await c.detach();}}await djTap(s,s.page.locator('[data-popup="context-menu"]').getByRole('button',{name:e.entry==='extend'?'视频延长':'视频编辑',exact:true}));const root=s.page.locator('div.fixed[class~="z-[250]"]').filter({has:s.page.getByRole('heading',{name:'视频编辑',exact:true})});await root.waitFor({state:'visible'});return root;}
 async function djMedia(v:Locator):Promise<{duration:number;time:number;frames:number;paused:boolean;muted:boolean;width:number;height:number;inline:boolean;error:number|null}>{return v.evaluate(el=>{const video=el as HTMLVideoElement;return {duration:video.duration,time:video.currentTime,frames:video.getVideoPlaybackQuality().totalVideoFrames,paused:video.paused,muted:video.muted,width:video.videoWidth,height:video.videoHeight,inline:video.playsInline,error:video.error?.code??null};});}
+
+function djState(s: Session) {
+  return s.page.evaluate(() => (window as unknown as FixtureWindow).canvasUi.state);
+}
+
+async function expectCompletedEdit(s: Session, entry: DJEntry['entry'], prompt: string) {
+  await expect.poll(async () => {
+    const { images } = await djState(s);
+    return images.find((image): image is { id: string } =>
+      typeof image === 'object' && image !== null && 'id' in image
+      && typeof image.id === 'string' && image.id.startsWith(`processing-video-${entry}-`),
+    );
+  }, { timeout: 5000 }).toMatchObject({
+    isProcessing: false, mediaType: 'video', generatedFromImageId: 'br-A', relationType: 'edit', prompt,
+  });
+}
+
+it.each(['edit', 'extend'] as const)('DJ submission %s preserves its draft after rejection and completes an accepted retry', async entry => {
+  const e: DJEntry = { theme: 'gold', width: 390, height: 844, entry };
+  const path = entry === 'edit' ? VIDEO_SUBMIT_PATHS[0] : VIDEO_SUBMIT_PATHS[1];
+  const prompt = `DJ synthetic ${entry} draft`;
+  const taskId = `dj-synthetic-${entry}`;
+  const error = entry === 'edit' ? '离线测试拒绝编辑' : '视频延长请求未受理，请重试';
+  let requests = 0;
+  await withSession(e.theme, e.width, e.height, {
+    touch: true,
+    videoSubmit: async request => {
+      expect(new URL(request.url()).pathname).toBe(path);
+      const body = request.postDataJSON();
+      expect(body).toMatchObject(entry === 'edit'
+        ? { prompt, mode: 'image2video', imageUrl: expect.stringMatching(/^data:image\/png;base64,/) }
+        : { prompt, extendDuration: 10, videoUrl: expect.stringMatching(/^data:video\/mp4;base64,/) });
+      requests += 1;
+      if (requests === 1) {
+        return entry === 'edit'
+          ? { status: 422, json: { error, taskId: 'dj-synthetic-refused' } }
+          : { status: 200, json: { success: true } };
+      }
+      return { status: 200, json: { taskId } };
+    },
+  }, async s => {
+    const before = await djState(s);
+    const dialog = await djOpen(s, e);
+    const field = dialog.getByRole('textbox');
+    const submit = dialog.getByRole('button', { name: entry === 'edit' ? '应用编辑' : '延长视频', exact: true });
+    await field.fill(prompt);
+    if (entry === 'extend') await djTap(s, dialog.getByRole('button', { name: '+10秒' }));
+    const rejected = s.page.waitForResponse(ORIGIN + path);
+    await djTap(s, submit);
+    await rejected;
+    await settle(s.page);
+    expect(await dialog.isVisible()).toBe(true);
+    expect(await dialog.getByRole('alert').textContent()).toBe(error);
+    expect(await field.inputValue()).toBe(prompt);
+    expect((await djState(s)).images).toEqual(before.images);
+
+    await djTap(s, submit);
+    await dialog.waitFor({ state: 'detached' });
+    await expectCompletedEdit(s, entry, prompt);
+    const after = await djState(s);
+    expect(after.actions).toEqual([taskId]);
+    expect(after.images.slice(0, before.images.length)).toEqual(before.images);
+    expect(requests).toBe(2);
+  });
+}, 25000);
+
+it('DJ submission late acceptance completes the original task without closing the reopened editor', async () => {
+  const e: DJEntry = { theme: 'gold', width: 390, height: 844, entry: 'edit' };
+  let release!: () => void;
+  const hold = new Promise<void>(resolve => { release = resolve; });
+  const taskId = 'dj-synthetic-late';
+  const prompt = 'DJ older request';
+  await withSession(e.theme, e.width, e.height, {
+    touch: true,
+    videoSubmit: async request => {
+      expect(new URL(request.url()).pathname).toBe(VIDEO_SUBMIT_PATHS[0]);
+      expect(request.postDataJSON()).toMatchObject({ prompt });
+      await hold;
+      return { status: 200, json: { taskId } };
+    },
+  }, async s => {
+    try {
+      const original = await djOpen(s, e);
+      await original.getByRole('textbox').fill(prompt);
+      const sent = s.page.waitForRequest(ORIGIN + VIDEO_SUBMIT_PATHS[0]);
+      await djTap(s, original.getByRole('button', { name: '应用编辑', exact: true }));
+      await sent;
+      await s.page.keyboard.press('Escape');
+      await original.waitFor({ state: 'detached' });
+      const replacement = await djOpen(s, { ...e, entry: 'extend' });
+      await replacement.getByRole('textbox').fill('DJ replacement draft');
+      const response = s.page.waitForResponse(ORIGIN + VIDEO_SUBMIT_PATHS[0]);
+      release();
+      await response;
+      await settle(s.page);
+      expect(await replacement.isVisible()).toBe(true);
+      expect(await replacement.getByRole('textbox').inputValue()).toBe('DJ replacement draft');
+      await expectCompletedEdit(s, 'edit', prompt);
+      expect(await replacement.getByRole('textbox').inputValue()).toBe('DJ replacement draft');
+      expect((await djState(s)).actions).toEqual([taskId]);
+    } finally {
+      release();
+    }
+  });
+}, 25000);
+
 for(const e of djMatrix)it('DJ '+e.theme+' '+e.width+'x'+e.height+' '+e.entry+(e.escape?' escape':'')+' actual parent mobile video edit and extend controls',async()=>{await withSession(e.theme,e.width,e.height,{touch:true},async s=>{const before=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);try{const root=await djOpen(s,e),panel=root.locator('>div'),video=root.locator('video');await expect.poll(async()=>(await djMedia(video)).width,{timeout:1500,message:'owned clip really decoded in edit panel'}).toBe(160);const initial=await djMedia(video);expect(initial.duration).toBe(1);expect(initial.height).toBe(90);expect(initial.error).toBe(null);expect.soft(initial.inline,'mobile preview plays inline').toBe(true);expect.soft(await root.getAttribute('role'),'video edit dialog').toBe('dialog');expect.soft(await root.getAttribute('aria-label'),'video edit dialog name').toBe('视频编辑');const expectedField=e.entry==='extend'?/^描述视频后续画面发展/:/^描述你想要对视频做的修改/;expect.soft(await root.getByPlaceholder(expectedField).count(),'menu entry selects requested initial tab').toBe(1);const frame=await panel.boundingBox();expect.soft(!!frame&&frame.x>=0&&frame.y>=0&&frame.x+frame.width<=e.width&&frame.y+frame.height<=e.height,'bounded mobile panel').toBe(true);await djCapture(s,e,'opened');const close=root.locator('button').first();
  if(e.escape){await close.focus();expect(await close.evaluate(el=>document.activeElement===el),'focus inside edit panel').toBe(true);await s.page.keyboard.press('Escape');await root.waitFor({state:'detached'});console.log('DJ_ESCAPE_COMPLETE',JSON.stringify(e));}
  else{const controls=root.locator('button');for(let i=0;i<await controls.count();i++)await djAudit(controls.nth(i));const play=root.locator('button').filter({has:s.page.locator('svg.lucide-play,svg.lucide-pause')}).last(),mute=root.locator('button').filter({has:s.page.locator('svg.lucide-volume2,svg.lucide-volume-x')}).last(),reset=root.locator('button').filter({has:s.page.locator('svg.lucide-rotate-ccw')}).last();await djTap(s,play);await expect.poll(async()=>(await djMedia(video)).time,{timeout:1500,message:'edit-preview native playback advances'}).toBeGreaterThan(.05);await djTap(s,play);await expect.poll(async()=>(await djMedia(video)).paused,{timeout:1500}).toBe(true);await djTap(s,mute);expect((await djMedia(video)).muted).toBe(true);await djTap(s,mute);expect((await djMedia(video)).muted).toBe(false);await djTap(s,reset);await expect.poll(async()=>(await djMedia(video)).time,{timeout:1500}).toBeLessThan(.01);

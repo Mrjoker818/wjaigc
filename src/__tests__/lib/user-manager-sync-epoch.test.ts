@@ -4,6 +4,7 @@ import {
   serializeCanvasWorkspacePlacements,
 } from '@/lib/asset-core/canvas-adapter';
 import type { Project } from '@/lib/user-types';
+import type { Workflow } from '@/lib/workflow-engine';
 
 const storage = new Map<string, string>();
 
@@ -608,6 +609,40 @@ describe('UserManager project sync response isolation', () => {
       'local-project-delete-remote-edit',
     ]));
     expect(envelope.conflictBackups.length).toBeLessThanOrEqual(50);
+  });
+
+  it.each([false, true])('acknowledges only the workflow retained after a concurrent rename (remote workflow edit: %s)', async remoteWorkflowEdit => {
+    const baseline: Workflow = {
+      id: 'graph', projectId: 'project-a', name: 'Baseline graph', version: '1', status: 'idle',
+      nodes: [], connections: [], createdAt: 1, updatedAt: 1,
+    };
+    const localWorkflow = { ...baseline, name: 'Saved local graph', updatedAt: 3 };
+    const remoteWorkflow = { ...baseline, name: 'Other tab graph', updatedAt: 2 };
+    const initial: Project = { ...project('user-a', '/media/base.png'), metadata: { workflow: baseline } };
+    let serverProject = structuredClone(initial);
+    let revision = 1;
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: RequestInit) => {
+      if (String(input) === '/api/user-data/sync?key=projects') {
+        return Response.json({ success: true, value: [serverProject], assetGraphMode: 'shadow', projectRevision: revision });
+      }
+      const body = JSON.parse(String(init?.body)) as { projectRevision: number; value: Project[] };
+      if (body.projectRevision !== revision) return Response.json({ success: false, currentRevision: revision }, { status: 409 });
+      serverProject = structuredClone(body.value[0]);
+      return Response.json({ success: true, projectRevision: ++revision });
+    }));
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    expect(await manager.loadProjectsFromServer(0, 'user-a')).toBe(true);
+    manager.updateProjectInMemory(initial.id, { metadata: { workflow: localWorkflow }, updatedAt: 3 });
+
+    serverProject = { ...initial, name: 'Renamed in another tab', updatedAt: 2,
+      metadata: { workflow: remoteWorkflowEdit ? remoteWorkflow : baseline } };
+    revision = 2;
+    await manager.flushProjectsToServerWithConflictRecovery();
+
+    expect(serverProject).toMatchObject({ name: 'Renamed in another tab',
+      metadata: { workflow: remoteWorkflowEdit ? remoteWorkflow : localWorkflow } });
+    expect(manager.hasAcknowledgedProjectWorkflow(initial.id, localWorkflow)).toBe(!remoteWorkflowEdit);
   });
 
   it('rebases a rev0 conflict through GET and later autosave without resurrecting a remote deletion', async () => {

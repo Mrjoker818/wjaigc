@@ -10,6 +10,7 @@ const fixture = vi.hoisted(() => ({
   provider: { id: 'provider-a', name: 'synthetic', isEnabled: true, type: 'image', modelType: 'image', apiKey: 'synthetic-key', baseUrl: 'https://provider.invalid/v1', compatProfile: '', selectedModels: ['image-one'], discoveredModels: [], createdAt: 1, updatedAt: 1 },
 }));
 vi.mock('server-only', () => ({}));
+vi.mock('@/lib/cloud-task-storage', async () => (await import('@/__tests__/fixtures/display3d-cloud-task-store')).createDisplay3DCloudTaskStore());
 vi.mock('@/lib/server-api-config', () => ({ getApiProviders: async () => [fixture.provider] }));
 vi.mock('@/lib/server-auth', () => ({ getSessionUser: async () => ({ id: fixture.userId, role: 'admin', status: 'active' }), listManagedUsers: async () => [] }));
 vi.mock('@/lib/display3d-prompts', () => ({ buildDisplay3DRenderPrompt: () => 'synthetic prompt' }));

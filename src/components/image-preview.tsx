@@ -5,6 +5,7 @@ import { Download, Copy, X, ZoomIn, ZoomOut, Check, FileImage, FileCode, Loader2
 import { exportAsPSD } from '@/lib/psd-export';
 import { downloadSVG } from '@/lib/svg-export';
 import type { CanvasImage } from './infinite-canvas';
+import { useModalFocus } from './canvas/use-modal-focus';
 
 type ViewMode = '2d' | '3d';
 type ThreeDMode = 'cube' | 'sphere';
@@ -30,6 +31,11 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
   const [threeDMode, setThreeDMode] = useState<ThreeDMode>('cube');
 
   const previewRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const imageId = image?.id;
+  const imageUrl = image?.url;
+  useModalFocus(previewRef, closeRef, onClose, Boolean(image));
+
   useLayoutEffect(() => {
     previewSession.current += 1;
     setIsLoading(Boolean(image));
@@ -42,16 +48,7 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
       if (copyTimer.current !== null) clearTimeout(copyTimer.current);
       copyTimer.current = null;
     };
-  }, [image?.id, image?.url]);
-
-  useEffect(() => {
-    if (!image) return;
-    const opener = document.activeElement;
-    previewRef.current?.focus();
-    return () => {
-      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
-    };
-  }, [image]);
+  }, [imageId, imageUrl]);
 
   // 3D viewer state
   const [rotX, setRotX] = useState(-15);
@@ -64,7 +61,7 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
   const animRef3D = useRef<number>(0);
   const rotRef3D = useRef({ x: -15, y: 25 });
   const sphereCanvasRef = useRef<HTMLCanvasElement>(null);
-  const imgDataRef = useRef<{ data: Uint8ClampedArray; w: number; h: number } | null>(null);
+  const [sphereTexture, setSphereTexture] = useState<{ id: string; url: string; pixels: ImageData } | null>(null);
 
   useEffect(() => {
     const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -75,83 +72,61 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
   }, []);
 
   // Preload image pixel data for sphere rendering
-  useEffect(() => {
-    if (viewMode !== '3d' || !image) return;
-    imgDataRef.current = null;
+  useLayoutEffect(() => {
+    setSphereTexture(null);
+    if (viewMode !== '3d' || imageId === undefined || !imageUrl) return;
+
+    const controller = new AbortController();
     const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
+    let cachedImage: HTMLImageElement | undefined;
+    const readTexture = (decoded: HTMLImageElement) => {
+      if (controller.signal.aborted) return;
+      const { naturalWidth, naturalHeight } = decoded;
+      if (naturalWidth === 0 || naturalHeight === 0) return;
+      const scale = Math.min(400 / naturalWidth, 400 / naturalHeight, 1);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(naturalHeight * scale));
+      const context = canvas.getContext('2d');
+      if (!context) return;
+      context.drawImage(decoded, 0, 0, canvas.width, canvas.height);
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+      setSphereTexture({ id: imageId, url: imageUrl, pixels });
+    };
+    const loadFromCache = async () => {
+      if (controller.signal.aborted) return;
       try {
-        const c = document.createElement('canvas');
-        const maxDim = 400;
-        const scale = Math.min(maxDim / img.width, maxDim / img.height, 1);
-        const w = Math.round(img.width * scale);
-        const h = Math.round(img.height * scale);
-        c.width = w;
-        c.height = h;
-        const ctx = c.getContext('2d');
-        if (!ctx) return;
-        ctx.drawImage(img, 0, 0, w, h);
-        const data = ctx.getImageData(0, 0, w, h).data;
-        imgDataRef.current = { data, w, h };
-      } catch {
-        // CORS fallback
-        fetch('/api/cache-image', {
+        const response = await fetch('/api/cache-image', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imageUrl: image!.url }),
-        })
-          .then(r => r.text())
-          .then(dataUrl => {
-            const img2 = new Image();
-            img2.onload = () => {
-              const c = document.createElement('canvas');
-              const maxDim = 400;
-              const scale = Math.min(maxDim / img2.width, maxDim / img2.height, 1);
-              const w = Math.round(img2.width * scale);
-              const h = Math.round(img2.height * scale);
-              c.width = w;
-              c.height = h;
-              const ctx = c.getContext('2d');
-              if (!ctx) return;
-              ctx.drawImage(img2, 0, 0, w, h);
-              const data = ctx.getImageData(0, 0, w, h).data;
-              imgDataRef.current = { data, w, h };
-            };
-            img2.src = dataUrl;
-          })
-          .catch(() => {});
-      }
+          body: JSON.stringify({ imageUrl }),
+          signal: controller.signal,
+        });
+        if (!response.ok || controller.signal.aborted) return;
+        const result = await response.json();
+        if (controller.signal.aborted || result?.success !== true || typeof result.imageUrl !== 'string' || !result.imageUrl) return;
+        const cached = new Image();
+        cachedImage = cached;
+        cached.onload = () => {
+          try { readTexture(cached); } catch { /* The cached image could not be read. */ }
+        };
+        cached.src = result.imageUrl;
+      } catch { /* The cache request failed or was cancelled. */ }
     };
-    img.onerror = () => {
-      fetch('/api/cache-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl: image!.url }),
-      })
-        .then(r => r.text())
-        .then(dataUrl => {
-          const img2 = new Image();
-          img2.onload = () => {
-            const c = document.createElement('canvas');
-            const maxDim = 400;
-            const scale = Math.min(maxDim / img2.width, maxDim / img2.height, 1);
-            const w = Math.round(img2.width * scale);
-            const h = Math.round(img2.height * scale);
-            c.width = w;
-            c.height = h;
-            const ctx = c.getContext('2d');
-            if (!ctx) return;
-            ctx.drawImage(img2, 0, 0, w, h);
-            const data = ctx.getImageData(0, 0, w, h).data;
-            imgDataRef.current = { data, w, h };
-          };
-          img2.src = dataUrl;
-        })
-        .catch(() => {});
+
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try { readTexture(img); } catch { void loadFromCache(); }
     };
-    img.src = image!.url;
-  }, [viewMode, image?.url]);
+    img.onerror = () => { void loadFromCache(); };
+    img.src = imageUrl;
+    return () => {
+      controller.abort();
+      img.onload = null;
+      img.onerror = null;
+      if (cachedImage) cachedImage.onload = null;
+    };
+  }, [viewMode, imageId, imageUrl]);
 
   // Auto rotation
   useEffect(() => {
@@ -176,7 +151,7 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
     if (viewMode !== '3d' || threeDMode !== 'sphere') return;
     const canvas = sphereCanvasRef.current;
     if (!canvas) return;
-    const src = imgDataRef.current;
+    const src = sphereTexture && sphereTexture.id === imageId && sphereTexture.url === imageUrl ? sphereTexture.pixels : null;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
@@ -195,8 +170,8 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
     const centerX = cw / 2;
     const centerY = ch / 2;
     const radius = Math.min(cw, ch) * 0.38;
-    const imgW = src.w;
-    const imgH = src.h;
+    const imgW = src.width;
+    const imgH = src.height;
     const srcData = src.data;
 
     // Lower resolution rendering for speed
@@ -302,7 +277,7 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
     ctx.fillStyle = '#d4af37'; ctx.fill();
     ctx.beginPath(); ctx.arc(cx2, cy2, 3.5, 0, Math.PI * 2);
     ctx.fillStyle = '#0a0a0a'; ctx.fill();
-  }, [viewMode, threeDMode, rotX, rotY]);
+  }, [viewMode, threeDMode, rotX, rotY, imageId, imageUrl, sphereTexture]);
 
   // 3D drag handlers
   const handle3DPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>): void => {
@@ -492,41 +467,15 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
 
   return (
     <div
+      ref={previewRef}
       className="fixed inset-0 z-[80] flex items-center justify-center bg-black/85 p-2 backdrop-blur-md animate-in fade-in duration-200"
       role="dialog"
       aria-modal="true"
       aria-label="图片预览"
+      tabIndex={-1}
       onClick={onClose}
-      onKeyDown={(event: React.KeyboardEvent<HTMLDivElement>): void => {
-        event.stopPropagation();
-        if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
-          event.preventDefault();
-          onClose();
-          return;
-        }
-        if (event.key !== 'Tab') return;
-        const panel = previewRef.current;
-        if (!panel) return;
-        const controls = Array.from(panel.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter(element => element.getClientRects().length > 0);
-        if (!controls.length) {
-          event.preventDefault();
-          panel.focus();
-          return;
-        }
-        const first = controls[0];
-        const last = controls[controls.length - 1];
-        if (event.shiftKey && (document.activeElement === first || document.activeElement === panel)) {
-          event.preventDefault();
-          last.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault();
-          first.focus();
-        }
-      }}
     >
       <div
-        ref={previewRef}
-        tabIndex={-1}
         className={`relative flex w-[calc(100vw-1rem)] min-h-0 min-w-0 flex-col ${viewMode === '3d' ? 'max-w-[700px] h-[min(600px,calc(100dvh-1rem))]' : 'max-w-[70rem] h-[min(56rem,calc(100dvh-1rem))]'} ${bgColor} ${borderColor} border rounded-xl overflow-hidden shadow-2xl outline-none [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:shrink-0 [&_button]:whitespace-nowrap [&_button]:focus-visible:ring-2 [&_button]:focus-visible:ring-inset [&_button]:focus-visible:ring-primary`}
         onClick={(e) => e.stopPropagation()}
       >
@@ -621,6 +570,8 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
             <div className={`h-4 w-px ${borderColor}`} />
 
             <button
+              ref={closeRef}
+              type="button"
               onClick={onClose}
               aria-label="关闭图片预览"
               className={`p-1.5 ${btnText} hover:${textColor} ${isMonochrome ? 'hover:bg-gray-100' : 'hover:bg-white/10'} rounded-lg transition-all`}

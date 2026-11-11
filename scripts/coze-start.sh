@@ -1,16 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+DEPLOYMENT=0
+if [ "${1:-}" = "--deployment" ]; then
+  DEPLOYMENT=1
+  if [ -z "${DATABASE_URL:+configured}${PGDATABASE_URL:+configured}" ]; then
+    echo "[coze-start] Deployment requires DATABASE_URL or PGDATABASE_URL." >&2
+    exit 1
+  fi
+fi
+
 PORT="${PORT:-${DEPLOY_RUN_PORT:-5000}}"
 export PORT
 
 # Coze reserves COZE_* configuration keys. Pin the independent preview origin
 # explicitly in DEV only; deployed runtimes keep their platform-owned origin.
-if [ "${COZE_PROJECT_ENV:-}" = "DEV" ] && [ -n "${WUJIE_PREVIEW_ORIGIN:-}" ]; then
+if [ "$DEPLOYMENT" -eq 0 ] && [ "${COZE_PROJECT_ENV:-}" = "DEV" ] && [ -n "${WUJIE_PREVIEW_ORIGIN:-}" ]; then
   export COZE_PROJECT_DOMAIN_DEFAULT="${WUJIE_PREVIEW_ORIGIN}"
 fi
 
 start_server() {
+  if [ "$DEPLOYMENT" -eq 1 ]; then
+    export WUJIE_DEPLOYMENT_DB_ONLY=1
+    export WUJIE_AUTH_PERSISTENCE_MODE=DB_ONLY
+  fi
   if [ "${WUJIE_PRESENCE_ENABLED:-}" = "true" ] || [ "${WUJIE_YJS_ENABLED:-}" = "true" ]; then
     echo "[coze-start] Starting production server with collaboration on port ${PORT}..."
     export NODE_ENV=production
@@ -58,6 +71,9 @@ artifact_matches_source() {
 
 # --- Fast path: the build belongs to the current clean source tree ---
 if artifact_matches_source ".next"; then
+  if [ "$DEPLOYMENT" -eq 1 ]; then
+    node scripts/verify-deploy-package.mjs --source
+  fi
   start_server
 fi
 
@@ -67,20 +83,29 @@ fi
 # from source right here as the last-resort fallback.
 echo "[coze-start] No matching build artifacts found. Building..."
 
-# Install dependencies if needed
-if [ ! -x "node_modules/.bin/next" ]; then
-  echo "[coze-start] Installing dependencies..."
-  if ! pnpm install --frozen-lockfile 2>&1; then
-    echo "[coze-start] frozen-lockfile failed, trying --ignore-scripts..."
-    pnpm install --ignore-scripts
-    node scripts/prepare-tools.mjs 2>/dev/null || true
-    node scripts/patch-pg-ssl.js 2>/dev/null || true
+# Scope bootstrap credentials to the server process.
+(
+  unset WUJIE_BOOTSTRAP_PROVIDERS_JSON WUJIE_ADMIN_PASSWORD
+  if [ "$DEPLOYMENT" -eq 1 ]; then
+    node scripts/verify-deploy-package.mjs --source
   fi
-fi
 
-# Build
-echo "[coze-start] Running next build..."
-pnpm run build
+  if [ ! -x "node_modules/.bin/next" ]; then
+    echo "[coze-start] Installing dependencies..."
+    if ! pnpm install --frozen-lockfile 2>&1; then
+      echo "[coze-start] frozen-lockfile failed, trying --ignore-scripts..."
+      pnpm install --ignore-scripts
+      node scripts/prepare-tools.mjs 2>/dev/null || true
+      node scripts/patch-pg-ssl.js 2>/dev/null || true
+    fi
+  fi
+
+  echo "[coze-start] Running next build..."
+  pnpm run build
+  if [ "$DEPLOYMENT" -eq 1 ]; then
+    node scripts/verify-deploy-package.mjs --built
+  fi
+)
 
 if [ -n "$SOURCE_TREE" ] && ! artifact_matches_source ".next"; then
   echo "[coze-start] Build ID does not match clean source tree; refusing to start." >&2

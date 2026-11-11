@@ -159,6 +159,36 @@ describe('accepted-only expired lease recovery is scheduled, never inline paid w
     const callback = defaults.after.mock.calls[0][0] as () => Promise<unknown>;
     await callback(); expect(defaults.recover).toHaveBeenCalledOnce(); expect(defaults.recover).toHaveBeenCalledWith(f.task, requestId);
   });
+  it.each(['deferred', 'throw'] as const)('correlates original-receipt recovery with the task when it returns %s', async mode => {
+    const f = fixture();
+    const deps = { ...f.deps, scheduleRecovery: undefined };
+    if (mode === 'deferred') {
+      defaults.recover.mockResolvedValue({ status: 'deferred', reason: 'SKETCH_IMAGE_PUBLICATION_UNCONFIRMED' });
+    } else {
+      defaults.recover.mockRejectedValue(new Error('private-recovery-error'));
+    }
+    const log = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    try {
+      const response = await pollSketchImageTask(body, f.task, actor, requestId, deps);
+      expect(response.status).toBe(202);
+      expect(await responseJson(response)).toMatchObject({ recoveryPending: true });
+      expect(log).not.toHaveBeenCalled();
+
+      const callback = defaults.after.mock.calls[0][0] as () => Promise<void>;
+      await callback();
+
+      const entries = log.mock.calls.filter(([label]) => label === '[SketchRuntime]').map(([, value]) => JSON.parse(String(value)));
+      expect(entries).toEqual([
+        expect.objectContaining({ requestId, taskId: body.taskId, event: 'worker-start', phase: 'image-worker', reason: 'SKETCH_IMAGE_RECEIPT_RECOVERY' }),
+        expect.objectContaining({ requestId, taskId: body.taskId, phase: 'image-worker', ...(mode === 'deferred'
+          ? { event: 'worker-return', status: 'deferred', reason: 'SKETCH_IMAGE_PUBLICATION_UNCONFIRMED' }
+          : { event: 'worker-throw', status: 'unknown' }) }),
+      ]);
+      privateAbsent(entries);
+      expect(defaults.recover).toHaveBeenCalledExactlyOnceWith(f.task, requestId);
+      expect(f.effects).toEqual([]);
+    } finally { log.mockRestore(); }
+  });
   it('default after rejection remains 202 without inline recovery or raw errors', async () => {
     const f = fixture(), deps = { ...f.deps }; delete deps.scheduleRecovery;
     defaults.after.mockImplementation(() => { throw new SketchHttpError(418, 'private-after-error'); });

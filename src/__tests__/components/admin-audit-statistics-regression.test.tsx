@@ -110,12 +110,19 @@ const props: Props = {
 let logs: Array<Promise<Response>>;
 let statistics: Array<Promise<Response>>;
 let requests: string[];
+let actions: Array<{ body: object; response: Response }>;
 
 beforeEach(() => {
   expect(boundary.violations, 'unexpected work between tests remains visible').toEqual([]);
-  logs = []; statistics = []; requests = [];
+  logs = []; statistics = []; requests = []; actions = [];
   globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = String(input);
+    if (url === '/api/admin/op-log' && init?.method === 'POST' && actions.length > 0) {
+      const { body, response } = actions.shift()!;
+      const sent = JSON.parse(String(init.body));
+      if (JSON.stringify(sent) !== JSON.stringify(body)) boundary.violations.push('audit action contract');
+      return Promise.resolve(response);
+    }
     if (init?.method && init.method !== 'GET') {
       boundary.violations.push('method:' + init.method);
       return Promise.reject(new Error('AUDIT_TEST_UNEXPECTED_METHOD'));
@@ -138,6 +145,7 @@ afterEach(() => {
     expect(boundary.violations, 'even caught unexpected network or database attempts fail the test').toEqual([]);
     expect(logs, 'all planned list responses were requested').toHaveLength(0);
     expect(statistics, 'all planned statistics responses were requested').toHaveLength(0);
+    expect(actions, 'all planned action responses were requested').toHaveLength(0);
   } finally {
     boundary.violations.length = 0;
     globalThis.fetch = deniedFetch;
@@ -152,6 +160,23 @@ function card(label: string): HTMLElement {
 }
 
 describe('audit statistics UI with the real read contract', () => {
+  it('uses actual log fields and sends an audited status change to the operation API', async () => {
+    const record = { ...row, level: 'error', error_message: '合成请求失败', resolution_status: 'none' };
+    logs.push(Promise.resolve(logResponse([record])), Promise.resolve(logResponse([{ ...record, resolution_status: 'resolved' }])));
+    statistics.push(Promise.resolve(ok({ success: true, stats })), Promise.resolve(ok({ success: true, stats })));
+    actions.push({
+      body: { action: 'resolve', logId: record.id, status: 'resolved', detail: '管理员标记为已解决' },
+      response: ok({ success: true }),
+    });
+    render(<AdminTabs {...props} />);
+    await screen.findByText('合成请求失败');
+    fireEvent.click(screen.getByRole('button', { name: '展开详情' }));
+    fireEvent.click(screen.getByRole('button', { name: '已解决' }));
+    await waitFor(() => {
+      expect(screen.getAllByText('已解决', { exact: true })).toHaveLength(2);
+    });
+  });
+
   it('denies unexpected fetch, direct sockets and the database module', async () => {
     await expect(fetch('https://outside.invalid/')).rejects.toThrow('AUDIT_TEST_UNEXPECTED_REQUEST');
     expect(boundary.violations).toEqual(['request:https://outside.invalid/']);

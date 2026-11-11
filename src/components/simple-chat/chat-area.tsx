@@ -438,6 +438,7 @@ export default function ChatArea({
   const [imageModels, setImageModels] = useState<Array<ChatModelInfo>>([]);
   const [tempChat, setTempChat] = useState(false);
   const messageScope = JSON.stringify([user.id, project?.id ?? null, task?.id ?? null]);
+  const [searchTarget, setSearchTarget] = useState<{ scope: string; messageId: string } | null>(null);
   const draftScope = JSON.stringify([user.id, project?.id ?? null, task?.id ?? null, tempChat]);
   const requestScopeEpochRef = useRef({ scope: draftScope, epoch: 0 });
   const ordinaryRequestEpochRef = useRef<number | null>(null);
@@ -609,7 +610,10 @@ export default function ChatArea({
   const [showModelCompare, setShowModelCompare] = useState(false);
   // API 用量统计
   const [showUsageStats, setShowUsageStats] = useState(false);
-  const [tokenUsage, setTokenUsage] = useState<{ promptTokens: number; completionTokens: number; totalTokens: number } | null>(null);
+  const [usageByConversation, setUsageByConversation] = useState<
+    Record<string, { promptTokens: number; completionTokens: number; totalTokens: number }>
+  >({});
+  const tokenUsage = usageByConversation[messageScope];
   // 多轮图片上下文
   const [historyImages, setHistoryImages] = useState<string[]>([]);
 
@@ -1137,6 +1141,16 @@ export default function ChatArea({
     };
   }, [messageScope, messagesScope, draftScope, draftReadyScope]);
   useEffect(() => {
+    if (showGlobalSearch || !searchTarget || searchTarget.scope !== messageScope || messagesScope !== messageScope) return;
+    const target = Array.from(messagesScrollRef.current?.querySelectorAll<HTMLElement>('[data-chat-message-id]') ?? [])
+      .find(element => element.dataset.chatMessageId === searchTarget.messageId);
+    setSearchTarget(null);
+    if (!target) return;
+    followMessagesRef.current = false;
+    userScrollVersionRef.current += 1;
+    target.scrollIntoView({ behavior: 'instant', block: 'center' });
+  }, [showGlobalSearch, searchTarget, messagesScope, messageScope]);
+  useEffect(() => {
     if (messages.length === 0 || messagesScope !== messageScope || !followMessagesRef.current) return;
     const container = messagesScrollRef.current;
     if (!container) return;
@@ -1630,6 +1644,7 @@ export default function ChatArea({
     userMessage: SimpleChatMessage,
   ): Promise<void> => {
     const requestEpoch = requestScopeEpochRef.current.epoch;
+    const usageScope = messageScopeRef.current;
     const requestScopeIsCurrent = () => (
       requestEpoch === requestScopeEpochRef.current.epoch
       && isWorkspaceResultScopeCurrent(context.projectId, projectIdRef.current)
@@ -1891,10 +1906,13 @@ export default function ChatArea({
       };
       const promptEst = allMessages.reduce((sum, message) => sum + estimateTokens(message.content || ''), 0);
       const completionEst = estimateTokens(fullContent);
-      setTokenUsage(previous => ({
-        promptTokens: (previous?.promptTokens || 0) + promptEst,
-        completionTokens: (previous?.completionTokens || 0) + completionEst,
-        totalTokens: (previous?.totalTokens || 0) + promptEst + completionEst,
+      setUsageByConversation(previous => ({
+        ...previous,
+        [usageScope]: {
+          promptTokens: (previous[usageScope]?.promptTokens || 0) + promptEst,
+          completionTokens: (previous[usageScope]?.completionTokens || 0) + completionEst,
+          totalTokens: (previous[usageScope]?.totalTokens || 0) + promptEst + completionEst,
+        },
       }));
     }
   }, []);
@@ -3659,6 +3677,8 @@ export default function ChatArea({
       {/* Share Dialog — 公开链接分享 */}
       {showShare && (
         <ShareDialog
+          key={messageScope}
+          userId={user.id}
           conversationId={task?.id || project?.id || 'unknown'}
           conversationTitle={task?.name || project?.name || '对话'}
           messages={messages.map(m => ({ id: m.id, role: m.role, content: m.content, images: m.images, timestamp: m.createdAt }))}
@@ -3705,10 +3725,11 @@ export default function ChatArea({
             messages: (t.messages || []).map(m => ({ id: m.id, role: m.role as 'user' | 'assistant', content: m.content })),
           })) || []}
           onClose={() => setShowGlobalSearch(false)}
-          onNavigate={(taskId) => {
-            setShowGlobalSearch(false);
+          onNavigate={(taskId, messageId) => {
             const selectedTask = project?.tasks.find(candidate => candidate.id === taskId);
-            if (selectedTask) onSelectTask(selectedTask);
+            if (!project || !selectedTask) return;
+            setSearchTarget({ scope: JSON.stringify([user.id, project.id, taskId]), messageId });
+            if (task?.id !== taskId) onSelectTask(selectedTask);
           }}
         />
       )}

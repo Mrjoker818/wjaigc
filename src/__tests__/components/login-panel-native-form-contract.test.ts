@@ -29,9 +29,9 @@ describe('login panel native form contract', () => {
     expect(homePageSource).toContain("if (productType === 'chat')");
     expect(homePageSource).toContain("window.location.href = '/simple-chat';");
     expect(homePageSource).toContain('setCurrentUser(user);');
-    expect(homePageSource).toContain(
-      'return <CanvasWorkspace initialUser={currentUser} onLoggedOut={handleWorkspaceLogout} />;'
-    );
+    const canvasMount = homePageSource.match(/return <CanvasWorkspace\b[^>]*\/>;/u)?.[0] ?? '';
+    expect(canvasMount).toContain('initialUser={currentUser}');
+    expect(canvasMount).toContain('onLoggedOut={handleWorkspaceLogout}');
   });
 
   it('routes chat without briefly mounting the canvas workspace', () => {

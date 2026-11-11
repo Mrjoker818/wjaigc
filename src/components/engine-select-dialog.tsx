@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useEffect } from 'react';
-import { X, Zap, Cpu, Sparkles, Loader2 } from 'lucide-react';
+import React, { useEffect, useId } from 'react';
+import { Check, X, Zap, Cpu, Sparkles, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export type EditEngine = 'auto' | 'ai' | 'local';
@@ -23,6 +23,7 @@ interface EngineSelectDialogProps {
   onSelect: (engine: EditEngine) => void;
   onClose: () => void;
   loadingEngine?: EditEngine | null;
+  selectedEngine?: EditEngine;
 }
 
 const ENGINE_OPTIONS: Record<EditEngine, Omit<EngineOption, 'id'>> = {
@@ -47,12 +48,12 @@ const ENGINE_OPTIONS: Record<EditEngine, Omit<EngineOption, 'id'>> = {
 
 const TOOL_SPECIFIC_HINTS: Record<string, Record<EditEngine, string>> = {
   upscale: {
-    auto: 'AI专用放大模型 → 通用AI放大（本地引擎已移除）',
+    auto: 'AI专用放大模型 → 通用AI放大',
     ai: 'SeedVR2 / Real-ESRGAN 等云端AI超分模型',
     local: '本地保真放大已随本地模型移除，不再可用',
   },
   removebg: {
-    auto: 'RemoveBG专用模型 → 通用AI透明背景（本地引擎已移除）',
+    auto: 'RemoveBG专用模型 → 通用AI透明背景',
     ai: 'BRIA-RMBG / BiRefNet 等AI抠图模型',
     local: '本地 IOPaint RemoveBG 已随本地模型移除，不再可用',
   },
@@ -79,7 +80,9 @@ export function EngineSelectDialog({
   onSelect,
   onClose,
   loadingEngine,
+  selectedEngine,
 }: EngineSelectDialogProps) {
+  const titleId = useId();
   useEffect(() => {
     if (!open) return;
     const handleEscape = (event: KeyboardEvent): void => {
@@ -94,9 +97,8 @@ export function EngineSelectDialog({
 
   if (!open) return null;
 
-  const engines: EditEngine[] = LOCAL_ENGINE_REMOVED_TOOLS.has(toolType)
-    ? ['auto', 'ai']
-    : ['auto', 'ai', 'local'];
+  const supportsLocalEngine = !LOCAL_ENGINE_REMOVED_TOOLS.has(toolType);
+  const engines: EditEngine[] = supportsLocalEngine ? ['auto', 'ai', 'local'] : ['auto', 'ai'];
 
   return (
     <div
@@ -104,6 +106,8 @@ export function EngineSelectDialog({
       onClick={onClose}
     >
       <div
+        role="dialog"
+        aria-labelledby={titleId}
         className="relative w-[480px] max-w-[90vw] max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain bg-card border border-border rounded-2xl shadow-2xl p-6 animate-in zoom-in-95 duration-200"
         onClick={e => e.stopPropagation()}
       >
@@ -117,8 +121,8 @@ export function EngineSelectDialog({
         </button>
 
         {/* 标题 */}
-        <div className="mb-5">
-          <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
+        <div className="mb-5 pr-12">
+          <h2 id={titleId} className="text-xl font-bold text-foreground flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-primary" />
             {title}
           </h2>
@@ -132,16 +136,22 @@ export function EngineSelectDialog({
           {engines.map(engineId => {
             const opt = ENGINE_OPTIONS[engineId];
             const hint = TOOL_SPECIFIC_HINTS[toolType][engineId];
+            const description = engineId === 'auto' && !supportsLocalEngine
+              ? '优先使用云端专用模型，必要时尝试通用图像模型'
+              : opt.description;
             const isLoading = loadingEngine === engineId;
+            const isSelected = selectedEngine === engineId;
             return (
               <button
                 key={engineId}
                 disabled={!!loadingEngine}
+                aria-pressed={selectedEngine === undefined ? undefined : isSelected}
                 onClick={() => onSelect(engineId)}
                 className={cn(
                   "w-full text-left p-4 rounded-xl border-2 transition-all duration-200",
                   "bg-background hover:border-primary/50 hover:bg-primary/5",
                   "border-border group relative disabled:opacity-60 disabled:cursor-not-allowed",
+                  isSelected && "border-primary bg-primary/10",
                   isLoading && "border-primary bg-primary/10 pointer-events-none"
                 )}
               >
@@ -161,8 +171,9 @@ export function EngineSelectDialog({
                           {opt.badge}
                         </span>
                       )}
+                      {isSelected && <Check aria-hidden="true" className="h-4 w-4 shrink-0 text-primary" />}
                     </div>
-                    <p className="text-sm text-muted-foreground mt-0.5">{opt.description}</p>
+                    <p className="text-sm text-muted-foreground mt-0.5">{description}</p>
                     <p className="text-xs text-muted-foreground/70 mt-1.5 font-mono">{hint}</p>
                   </div>
                 </div>

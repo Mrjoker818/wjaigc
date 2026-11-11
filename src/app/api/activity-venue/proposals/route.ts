@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getApiProviders } from '@/lib/server-api-config';
-import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { configuredPaidProviderBaseUrl } from '@/lib/paid-provider-submit';
+import { submitVenueCompletion } from '@/lib/activity-venue-submission';
 import { getSessionUser } from '@/lib/server-auth';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { selectActivityVenueModel } from '@/lib/activity-venue-model';
@@ -59,6 +60,7 @@ export async function POST(request: NextRequest) {
     const selection = selectActivityVenueModel(providers, sessionUser, providerId, model);
     if (!selection.ok) return NextResponse.json({ error: selection.error }, { status: selection.status });
     const { provider, modelId: selectedModel } = selection;
+    const baseUrl = configuredPaidProviderBaseUrl(provider.baseUrl);
     const taskId = `venue_proposals_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     registerTask(taskId, 'venue-proposals', `布局方案生成: ${brandName}`, sessionUser?.id);
 
@@ -123,33 +125,18 @@ export async function POST(request: NextRequest) {
 
 确保3套方案在以下维度有明显差异：空间布局策略、视觉风格取向、互动体验形式、预算侧重点。regionUsage 中的 regionId 必须使用上述场馆区域ID；若无可用ID，regionUsage 返回空数组。`;
 
-        let apiBase = provider.baseUrl.replace(/\/+$/, '');
-        if (apiBase.endsWith('/v1')) apiBase = apiBase.slice(0, -3);
-
-        const response = await fetchWithV1Retry(apiBase, '/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${provider.apiKey}`,
-          },
-          body: JSON.stringify({
+        const content = await submitVenueCompletion({
+          taskId, baseUrl, apiKey: provider.apiKey,
+          body: {
             model: selectedModel,
             messages: [
               { role: 'system', content: systemPrompt },
               { role: 'user', content: userPrompt },
             ],
             max_tokens: 4096,
-          }),
+          },
         });
-
-        if (!response.ok) {
-          const errText = await response.text();
-          updateTaskProgress(taskId, { status: 'failed', error: `方案生成失败: ${response.status} ${errText.slice(0, 200)}` });
-          return;
-        }
-
-        const apiResp = await response.json();
-        const content = apiResp.choices?.[0]?.message?.content || '';
+        if (content === undefined) return;
 
         let proposals: unknown = null;
         try {
@@ -175,10 +162,10 @@ export async function POST(request: NextRequest) {
           progress: 100,
           result: { proposals: parsed.data.proposals, type: 'venue-proposals' },
         });
-      } catch (err) {
+      } catch {
         updateTaskProgress(taskId, {
           status: 'failed',
-          error: err instanceof Error ? err.message : '方案生成失败',
+          error: `方案生成未能完成（任务 ${taskId}），请核实任务状态`,
         });
       }
     })();

@@ -411,6 +411,7 @@ export type WorkflowStatus = 'idle' | 'running' | 'paused' | 'completed' | 'fail
 
 export interface Workflow {
   id: string;
+  projectId?: string;
   name: string;
   version: string;
   nodes: WorkflowNode[];
@@ -1949,6 +1950,30 @@ function getConfigStringArray(config: Record<string, unknown>, key: string): str
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
+function readStoryboardPart(script: string, part: unknown): string {
+  const invalid = () => new Error('分镜脚本格式错误：需要包含 7 段镜头提示词和旁白的 JSON');
+  const trimmed = script.trim();
+  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/iu.exec(trimmed);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fenced?.[1] ?? trimmed);
+  } catch {
+    throw invalid();
+  }
+  const scenes = isRecord(parsed) ? parsed.scenes : undefined;
+  if (!Array.isArray(scenes) || scenes.length !== 7
+    || !scenes.every((scene): scene is { prompt: string; narration: string } =>
+      isRecord(scene) && typeof scene.prompt === 'string' && Boolean(scene.prompt.trim())
+      && typeof scene.narration === 'string' && Boolean(scene.narration.trim()))) {
+    throw invalid();
+  }
+  if (part === 'narration') return scenes.map(scene => scene.narration.trim()).join('\n');
+  if (typeof part !== 'number' || !Number.isInteger(part) || part < 1 || part > scenes.length) {
+    throw invalid();
+  }
+  return scenes[part - 1].prompt.trim();
+}
+
 export interface WorkflowSkillExecutionContext {
   projectId: string;
   workflowId: string;
@@ -2516,7 +2541,9 @@ export function buildNodeExecutionRequest(
 
     case 'ai-video-generate': {
       const vGenBody: Record<string, unknown> = {
-        prompt: config.prompt || config.textContent || config.text || '',
+        prompt: node.config.storyboardPart === undefined
+          ? config.prompt || config.textContent || config.text || ''
+          : readStoryboardPart(getConfigString(inputs, 'prompt'), node.config.storyboardPart),
         model: config.model || '',
         mode: config.mode || 'text2video',
         aspectRatio: config.aspectRatio || '16:9',
@@ -2810,7 +2837,9 @@ export function buildNodeExecutionRequest(
 
     // ─── 音频生成节点（TTS） ───
     case 'ai-audio': {
-      const text = getConfigString(config, 'text') || getConfigString(config, 'prompt');
+      const text = node.config.storyboardPart === 'narration'
+        ? readStoryboardPart(getConfigString(inputs, 'prompt'), 'narration')
+        : getConfigString(config, 'text') || getConfigString(config, 'prompt');
       return {
         endpoint: '/api/audio/generate',
         method: 'POST',

@@ -23,6 +23,7 @@ import { lockSketchImageLedger, settleSketchImageCredits, verifySketchImageSettl
 import { assertSketchFenceRestoringTimeouts } from './document';
 import { sketchFields } from './http';
 import { getConfiguredSketchImageRouting } from './configured-image-dependencies';
+import { createSketchRuntimeObserver } from './runtime-observation';
 
 export interface SketchImagePublicationInput {
   identity: Readonly<SketchImageTaskIdentity>;
@@ -220,6 +221,9 @@ export async function publishSketchImageTask(value: SketchImagePublicationInput,
   const controller = new AbortController(), deadline = Math.min(actual.lease.expiresAt, Date.now() + 30_000);
   const timer = setTimeout(() => controller.abort(), Math.max(0, deadline - Date.now()));
   const signal = AbortSignal.any([actual.signal, controller.signal]); actual = Object.freeze({ ...actual, signal });
+  const observe = createSketchRuntimeObserver({ taskId: actual.identity.taskId,
+    providerId: actual.identity.input.imageProviderId, modelId: actual.identity.input.imageModelId });
+  let stage = 'INPUT_IMAGE';
   let client: PoolClient | undefined, guarded: PoolClient | undefined;
   let began = false, committing = false, discard = false;
   const files: PersistedAssetFile[] = [];
@@ -228,6 +232,7 @@ export async function publishSketchImageTask(value: SketchImagePublicationInput,
     if (original.mimeType !== 'image/png') refuse();
     const dimensions = await inspectBinaryImage(original.buffer, 'image/png', signal);
     if (dimensions.width > 2048 || dimensions.height > 2048) refuse();
+    stage = 'TRANSACTION';
     signal.throwIfAborted(); client = await connect(); signal.throwIfAborted();
     // Await the driver operation even after cancellation. A busy connection may
     // never be released or used for ROLLBACK by a timed-out Promise.race consumer.
@@ -243,13 +248,16 @@ export async function publishSketchImageTask(value: SketchImagePublicationInput,
     // Do not inherit a pooled REPEATABLE READ snapshot taken before a waited lock.
     await guarded.query('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
     await guarded.query("SET LOCAL lock_timeout='5s'; SET LOCAL statement_timeout='10s'");
+    stage = 'TASK_ACCESS';
     const rawTask = (await guarded.query<SketchImageTaskRow>('SELECT * FROM cloud_tasks WHERE id=$1 FOR UPDATE', [actual.identity.taskId])).rows[0];
     if (!rawTask || !['processing', 'completed'].includes(rawTask.status)) refuse();
     const task = taskSnapshot(rawTask);
     assertSketchImageTaskRow(task, actual.identity, actual.lease, 0, deadline, task.status);
     if (!isDeepStrictEqual(readSketchImageCheckpoint(task.result.sketchImageExecution, actual.identity), actual.checkpoint)) refuse();
     await currentFence(guarded, actual, deadline, task.status);
+    stage = 'MODEL_ACCESS';
     if (task.status === 'processing') await currentModelFence(guarded, actual);
+    stage = 'ASSET_GRAPH';
     const storage = createAssetStorageTransaction(guarded), { identity } = actual;
     const { ownerId } = identity.access, projectId = identity.projectId;
     const graph = (await guarded.query<{ metadata: Record<string, unknown> }>(
@@ -272,10 +280,12 @@ export async function publishSketchImageTask(value: SketchImagePublicationInput,
     const oldInput = snapshot(await storage.findVersionByIdempotency(ownerId, projectId, idempotency.input));
     const oldOutput = snapshot(await storage.findVersionByIdempotency(ownerId, projectId, idempotency.output));
     if (task.status === 'processing' && (oldInput || oldOutput)) refuse();
+    stage = 'LEDGER';
     const ledgerTask = await currentFence(guarded, actual, deadline, task.status);
     const ledger = await lockSketchImageLedger(guarded, ledgerTask);
     await currentFence(guarded, actual, deadline, task.status); // AFTER task/project/graph/idempotency/ledger locks.
     if (task.status === 'completed') {
+      stage = 'COMPLETED_READBACK';
       if (!oldInput || !oldOutput || oldInput.requestDigest !== identity.requestDigest || oldOutput.requestDigest !== identity.requestDigest
         || oldInput.version.assetId === oldOutput.version.assetId) refuse();
       const settlement = verifySketchImageSettlement(ledger, [task.result.sketchImageSettlement,
@@ -291,10 +301,12 @@ export async function publishSketchImageTask(value: SketchImagePublicationInput,
       await finalCompletion(guarded, storage, actual, deadline, oldInput.version, oldOutput.version);
       signal.throwIfAborted(); committing = true; await client.query('COMMIT'); return true;
     }
+    stage = 'RESULT_IMAGE';
     const output = await loadSafeImageInput(actual.imageUrl, { signal, maxBytes: OUTPUT_MAX });
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(output.mimeType)) refuse();
     await inspectBinaryImage(output.buffer, output.mimeType, signal);
     await currentFence(guarded, actual, deadline, 'processing');
+    stage = 'SETTLEMENT';
     const settlement = await settleSketchImageCredits(guarded, ledger, actual.checkpoint.usage);
     const bound = new Proxy(storage, { get(target, key) {
       if (key === 'insertVersion') return async (version: AssetVersion, digest: string, meta?: Record<string, unknown>): Promise<void> => {
@@ -308,6 +320,7 @@ export async function publishSketchImageTask(value: SketchImagePublicationInput,
     const save = async (bytes: Buffer, mimeType: string, filename: string): Promise<AssetFile> => {
       const saved = await persist({ bytes, mimeType, filename, signal }); const file = trackFile(saved, files); signal.throwIfAborted(); return file;
     };
+    stage = 'ASSET_WRITE';
     const preview = await service.createAssetVersion({ actorUserId: ownerId, projectId, kind: 'image', idempotencyKey: idempotency.input,
       requestDigest: identity.requestDigest, file: await save(original.buffer, 'image/png', 'input-sketch.png'), metadata: metadata(actual, settlement, 'input') });
     const image = await service.createAssetVersion({ actorUserId: ownerId, projectId, kind: 'image', idempotencyKey: idempotency.output,
@@ -315,19 +328,27 @@ export async function publishSketchImageTask(value: SketchImagePublicationInput,
       file: await save(output.buffer, output.mimeType, `generated-image.${output.mimeType === 'image/jpeg' ? 'jpg' : output.mimeType.slice(6)}`), metadata: metadata(actual, settlement, 'output') });
     if (preview.reused || image.reused || preview.asset.id === image.asset.id) refuse();
     // Re-read original SQL rows; never trust just the returned service objects or persistence metadata.
+    stage = 'ASSET_READBACK';
     const storedInput = snapshot(await storage.findVersion(ownerId, projectId, preview.version.id));
     const storedOutput = snapshot(await storage.findVersion(ownerId, projectId, image.version.id));
     if (!storedInput || !storedOutput) refuse();
     await verifyVersion(guarded, storage, storedInput, 'input', actual, settlement, original.buffer);
     await verifyVersion(guarded, storage, storedOutput, 'output', actual, settlement, original.buffer, storedInput.id, output.buffer);
     await currentFence(guarded, actual, deadline, 'processing');
+    stage = 'TASK_COMPLETE';
     if (!await completeCloudTask(identity.taskId, snapshot({ previewAssetId: preview.asset.id, previewAssetVersionId: preview.version.id,
       imageAssetId: image.asset.id, imageAssetVersionId: image.version.id, analysis: actual.checkpoint.analysis, sketchImageSettlement: settlement }),
     { client: guarded, leaseOwner: actual.lease.owner, leaseAttemptCount: actual.lease.attemptCount, deadlineAt: deadline })) refuse();
     await finalCompletion(guarded, storage, actual, deadline, storedInput, storedOutput);
     await currentModelFence(guarded, actual);
     signal.throwIfAborted(); committing = true; await client.query('COMMIT'); return true;
-  } catch {
+  } catch (error) {
+    try {
+      const sqlState: unknown = error instanceof Error ? Object.getOwnPropertyDescriptor(error, 'code')?.value : undefined;
+      const code = typeof sqlState === 'string' && /^[0-9A-Z]{5}$/.test(sqlState) ? `_PG_${sqlState}` : '';
+      observe({ event: committing ? 'publication-commit-unknown' : 'publication-refused', phase: 'publication',
+        reason: `SKETCH_IMAGE_PUBLICATION_${committing ? 'COMMIT' : stage}${code}`, aborted: signal.aborted, confirmed: false });
+    } catch { /* Diagnostics cannot interrupt transaction cleanup. */ }
     if (committing) { discard = true; throw new SketchImagePublicationError(); }
     if (client && began) {
       let rolledBack = false;

@@ -88,3 +88,45 @@ describe('vector editor save failure feedback', () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 });
+
+it.each(['dismiss and reopen', 'switch the mounted editor'] as const)(
+  'only hands off the current save when users %s',
+  async transition => {
+    const firstAsset = { ...asset, svgUrl: '/synthetic/a.svg' };
+    const secondAsset = { ...asset, svgUrl: '/synthetic/b.svg', svg: asset.svg.replace('#ff0000', '#008000') };
+    const savedSecond = { ...secondAsset, svgUrl: '/synthetic/b-saved.svg' };
+    let finishOld!: (response: Response) => void;
+    let finishCurrent!: (response: Response) => void;
+    const request = vi.fn()
+      .mockImplementationOnce(() => new Promise<Response>(resolve => { finishOld = resolve; }))
+      .mockImplementationOnce(() => new Promise<Response>(resolve => { finishCurrent = resolve; }));
+    vi.stubGlobal('fetch', request);
+    const onClose = vi.fn();
+    const onSave = vi.fn();
+    function Fixture() {
+      const [editing, setEditing] = useState<VectorDesignAsset | null>(firstAsset);
+      return <>
+        <button onClick={() => setEditing(secondAsset)}>打开另一个矢量图</button>
+        {editing && <VectorEditorDialog asset={editing} templateIds={[]} onSave={onSave}
+          onClose={() => { onClose(); setEditing(null); }} />}
+      </>;
+    }
+    render(<Fixture />);
+    fireEvent.click(screen.getByRole('button', { name: '保存到画布' }));
+    if (transition === 'dismiss and reopen') fireEvent.click(screen.getAllByRole('button', { name: '关闭' })[0]);
+    fireEvent.click(screen.getByRole('button', { name: '打开另一个矢量图' }));
+    const save = screen.getByRole('button', { name: '保存到画布' });
+    expect(document.querySelector('.vector-edit-stage rect')?.getAttribute('fill')).toBe('#008000');
+    expect(save).toHaveProperty('disabled', false);
+    fireEvent.click(save);
+    expect(request).toHaveBeenCalledTimes(2);
+
+    await act(async () => finishOld(Response.json({ success: true, asset: firstAsset })));
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(transition === 'dismiss and reopen' ? 1 : 0);
+    expect(screen.getByRole('button', { name: '保存到画布' })).toHaveProperty('disabled', true);
+    await act(async () => finishCurrent(Response.json({ success: true, asset: savedSecond })));
+    expect(onSave).toHaveBeenCalledExactlyOnceWith(savedSecond);
+    expect(screen.queryByRole('button', { name: '保存到画布' })).toBeNull();
+  },
+);

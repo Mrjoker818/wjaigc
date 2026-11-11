@@ -297,8 +297,9 @@ export async function publishSketchTask(inputValue: SketchPublicationInput, depe
     checkpoint = 'ASSET_CREATION';
     const service = createAssetService({ read: async callback => callback(bound), transaction: async callback => callback(bound) });
     const [preview, html] = await service.createAssetVersionsAtomically(creates);
-    checkpoint = 'ASSET_READBACK';
+    checkpoint = preview.version.file.storageKey ? 'PREVIEW_OBJECT_READBACK' : 'PREVIEW_LOCAL_READBACK';
     await verifyVersion(client, storage, preview.version, 'image', value, requestDigest, png);
+    checkpoint = 'HTML_READBACK';
     await verifyVersion(client, storage, html.version, 'document', value, requestDigest, png);
     if (settlement && (!isDeepStrictEqual(preview.version.metadata?.sketchTokenSettlement, settlement)
       || !isDeepStrictEqual(html.version.metadata?.sketchTokenSettlement, settlement))) refuse('SKETCH_PUBLICATION_SETTLEMENT_MISMATCH');

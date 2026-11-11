@@ -1,3 +1,4 @@
+import { requireTestCredential } from '../helpers/e2e-credentials';
 import { describe, it, expect, beforeAll } from 'vitest';
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:5000';
@@ -24,8 +25,8 @@ async function login(name?: string, password?: string): Promise<{ cookie: string
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      name: name || process.env.E2E_TEST_USERNAME || 'Mr.joker',
-      password: password || process.env.E2E_TEST_PASSWORD || 'Wujie#2026Reset',
+      name: name || requireTestCredential('E2E_TEST_USERNAME'),
+      password: password || requireTestCredential('E2E_TEST_PASSWORD'),
     }),
   });
   const setCookie = res.headers.get('set-cookie');
@@ -113,8 +114,8 @@ describe('安全测试 — OWASP Top 10', () => {
         {
           method: 'POST',
           body: JSON.stringify({
-            name: process.env.E2E_TEST_USERNAME || 'Mr.joker',
-            password: process.env.E2E_TEST_PASSWORD || 'Wujie#2026Reset',
+            name: requireTestCredential('E2E_TEST_USERNAME'),
+            password: requireTestCredential('E2E_TEST_PASSWORD'),
             isAdmin: true, // 尝试注入管理员权限
             role: 'admin',
           }),
@@ -151,8 +152,8 @@ describe('安全测试 — OWASP Top 10', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: process.env.E2E_TEST_USERNAME || 'Mr.joker',
-          password: process.env.E2E_TEST_PASSWORD || 'Wujie#2026Reset',
+          name: requireTestCredential('E2E_TEST_USERNAME'),
+          password: requireTestCredential('E2E_TEST_PASSWORD'),
         }),
       });
       const body = await res2.json();
@@ -167,8 +168,8 @@ describe('安全测试 — OWASP Top 10', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: process.env.E2E_TEST_USERNAME || 'Mr.joker',
-          password: process.env.E2E_TEST_PASSWORD || 'Wujie#2026Reset',
+          name: requireTestCredential('E2E_TEST_USERNAME'),
+          password: requireTestCredential('E2E_TEST_PASSWORD'),
         }),
       });
       const setCookie = res.headers.get('set-cookie') || '';
@@ -180,8 +181,8 @@ describe('安全测试 — OWASP Top 10', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: process.env.E2E_TEST_USERNAME || 'Mr.joker',
-          password: process.env.E2E_TEST_PASSWORD || 'Wujie#2026Reset',
+          name: requireTestCredential('E2E_TEST_USERNAME'),
+          password: requireTestCredential('E2E_TEST_PASSWORD'),
         }),
       });
       const setCookie = res.headers.get('set-cookie') || '';
@@ -377,7 +378,7 @@ describe('安全测试 — OWASP Top 10', () => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            name: process.env.E2E_TEST_USERNAME || 'Mr.joker',
+            name: requireTestCredential('E2E_TEST_USERNAME'),
             password: `wrong_password_${i}`,
           }),
         });
@@ -389,8 +390,8 @@ describe('安全测试 — OWASP Top 10', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: process.env.E2E_TEST_USERNAME || 'Mr.joker',
-          password: process.env.E2E_TEST_PASSWORD || 'Wujie#2026Reset',
+          name: requireTestCredential('E2E_TEST_USERNAME'),
+          password: requireTestCredential('E2E_TEST_PASSWORD'),
         }),
       });
       expect(res.status).toBe(200);
@@ -407,8 +408,8 @@ describe('安全测试 — OWASP Top 10', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: process.env.E2E_TEST_USERNAME || 'Mr.joker',
-          password: process.env.E2E_TEST_PASSWORD || 'Wujie#2026Reset',
+          name: requireTestCredential('E2E_TEST_USERNAME'),
+          password: requireTestCredential('E2E_TEST_PASSWORD'),
         }),
       });
       const setCookie = loginRes.headers.get('set-cookie') || '';

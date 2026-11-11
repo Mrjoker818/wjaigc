@@ -82,13 +82,32 @@ describe('payment configuration read failure', () => {
     expect(await dbGetSystemSetting('other-setting')).toBeNull();
     expect(await loadPaymentConfig()).toMatchObject({ wechatEnabled: false, alipayEnabled: false });
   });
-  it('does not insert an order after a configuration read failure', async () => {
+  it('reports configuration storage unavailability without inserting an order', async () => {
     mocks.execSql.mockRejectedValue(new Error('synthetic-private-storage-failure'));
     const response = await POST(orderRequest());
-    expect((await response.json()).success).toBe(false);
-    expect(response.status).toBeGreaterThanOrEqual(400);
+    const body = await response.json();
+    expect(response.status).toBe(503);
+    expect(body).toMatchObject({ success: false, errorCode: 'PAYMENT_CONFIG_UNAVAILABLE' });
+    expect(JSON.stringify(body)).not.toContain('synthetic-private-storage-failure');
     expect(mocks.execSql).toHaveBeenCalledTimes(1);
     expect(String(mocks.execSql.mock.calls[0][0])).toContain('SELECT value FROM wujie_system_settings');
     expect(mocks.getPool).not.toHaveBeenCalled();
+  });
+  it.each([undefined, '{bad-json'])('keeps absent or malformed configuration (%s) unconfigured on creation', async (value) => {
+    if (value !== undefined) mocks.execSql.mockResolvedValue({ rows: [{ value }], rowCount: 1 });
+    const response = await POST(orderRequest());
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ success: false, errorCode: 'PAYMENT_NOT_CONFIGURED' });
+    expect(mocks.execSql).toHaveBeenCalledTimes(1);
+  });
+  it('creates the order when configuration is readable and enabled', async () => {
+    mocks.execSql.mockResolvedValueOnce({ rows: [{ value: JSON.stringify({
+      wechatEnabled: true, wechatPayLink: 'wxp://synthetic',
+    }) }], rowCount: 1 }).mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    const response = await POST(orderRequest());
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ success: true, amount: 100, paymentMethod: 'wechat' });
+    expect(mocks.execSql).toHaveBeenCalledTimes(2);
+    expect(mocks.execSql).toHaveBeenLastCalledWith(expect.stringContaining('INSERT INTO wujie_recharge_orders'), expect.arrayContaining(['synthetic-user', 100]));
   });
 });

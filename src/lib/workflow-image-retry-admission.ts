@@ -19,6 +19,11 @@ function unavailable(errors:unknown[]=[]):never{throw new WorkflowImageRetryAdmi
   errors.length?new AggregateError(errors,'WORKFLOW_IMAGE_RETRY_FAILURES_IN_ORDER'):undefined);}
 function object(value:unknown):Record<string,unknown>|undefined{return value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:undefined;}
 function json(value:unknown):unknown{return JSON.parse(JSON.stringify(value));}
+export function isNonbillableWorkflowImageRetry(cost:unknown,status:unknown,charge:unknown,refund:unknown):boolean {
+  // pg returns NUMERIC as text. Check exact zero before conversion to a JS number.
+  return (cost===0||typeof cost==='string'&&/^0+(?:\.0+)?$/u.test(cost))&&status==='not-applicable'
+    &&(charge==null||charge==='')&&(refund==null||refund==='');
+}
 
 /** Admission shares the original cloud-task uniqueness and caller transaction.
  * The terminal ancestor is locked for reading; it is never reopened or charged. */
@@ -45,6 +50,7 @@ export async function admitWorkflowImageRetry(input:{
     const snapshot=object(row.result),marker=object(snapshot?.imageRetry);
     if(!snapshot||!marker||row.id!==id||row.user_id!==input.actorUserId||row.project_id!==original.projectId||row.type!=='workflow'
       ||row.idempotency_key!==idempotencyKey||row.request_digest!==requestDigest
+      ||!isNonbillableWorkflowImageRetry(row.credit_cost,row.credit_status,row.charged_transaction_id,row.refunded_transaction_id)
       ||snapshot?.projectId!==original.projectId||snapshot.workflowId!==result.workflowId
       ||!isDeepStrictEqual(snapshot.executionGraph,json(graph))||marker?.version!==1
       ||marker.sourceExecutionId!==original.id||marker.nodeId!==input.nodeId
@@ -114,6 +120,7 @@ export async function admitWorkflowImageRetry(input:{
   }
   const task=await getCloudTaskForUser(id,input.actorUserId);if(!task)unavailable();
   matches({id:task.id,user_id:task.userId,project_id:task.projectId,type:task.type,idempotency_key:task.idempotencyKey,
-    request_digest:task.requestDigest,result:task.result});
+    request_digest:task.requestDigest,result:task.result,credit_cost:task.creditCost,credit_status:task.creditStatus,
+    charged_transaction_id:task.chargedTransactionId,refunded_transaction_id:task.refundedTransactionId});
   return {task,reused:!created,...(connectionErrors.length?{connectionErrors}:{} )};
 }

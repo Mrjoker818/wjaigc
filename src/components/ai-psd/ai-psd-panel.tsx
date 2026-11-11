@@ -1495,8 +1495,9 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
             <span>模型</span>
             <ChevronDown className={`w-3 h-3 transition-transform ${showModelPanel ? 'rotate-180' : ''}`} />
           </button>
-          <button className={`${th.btnGhost} p-1`} onClick={() => setIsMinimized(v => !v)}><Minus className="w-4 h-4" /></button>
-          <button className={`${th.btnGhost} p-1`} onClick={onClose}><X className="w-4 h-4" /></button>
+          <button type="button" aria-label={isMinimized ? '恢复 AI PSD' : '最小化 AI PSD'} aria-expanded={!isMinimized}
+            className={`${th.btnGhost} p-1`} onClick={() => setIsMinimized(v => !v)}><Minus className="w-4 h-4" /></button>
+          <button type="button" aria-label="关闭 AI PSD" className={`${th.btnGhost} p-1`} onClick={onClose}><X className="w-4 h-4" /></button>
         </div>
 
         {!isMinimized && (<>

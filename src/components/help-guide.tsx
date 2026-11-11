@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
+import { useModalFocus } from './canvas/use-modal-focus';
 import {
   Move, Sparkles, MessageSquare, Keyboard, Lightbulb,
   BookOpen, X, Info, Wand2, ImagePlus, GitMerge,
@@ -157,7 +158,7 @@ function ToolsSection() {
     <div>
       <h3 className="text-sm font-bold text-[var(--color-on-surface)] mb-2">图片编辑工具</h3>
       <p className="text-xs text-[var(--color-on-surface-variant)] mb-3">
-        选中图片后，通过顶部工具栏使用各种编辑功能。AI 模型优先 + 本地算法兜底，确保编辑质量。
+        选中图片后，通过顶部工具栏使用各种编辑功能。可用模型与处理方式以当前部署配置为准。
       </p>
       <SubTitle>放大</SubTitle>
       <FeatureItem>智能补细节把图片变大变高清，不改画面内容、不换背景</FeatureItem>
@@ -166,14 +167,14 @@ function ToolsSection() {
       <SubTitle>移除背景</SubTitle>
       <FeatureItem>自动把主体和背景分开，一键删掉杂乱背景</FeatureItem>
       <FeatureItem>同时输出透明背景图 + 黑白蒙版图（白色 = 主体，黑色 = 背景）</FeatureItem>
-      <FeatureItem>多模型可选：BiRefNet 通用推荐 / U2Net 轻量快速 / Silueta 轻量人像</FeatureItem>
+      <FeatureItem>使用当前部署中已配置且可用的去背景模型或图像处理能力</FeatureItem>
       <SubTitle>编辑元素（元素拆解）</SubTitle>
       <FeatureItem>选中图片 → 顶部工具栏“编辑元素”，AI 拆解图中元素并生成拆解方案</FeatureItem>
       <FeatureItem>拆解严格忠于原图元素，不新增画面外的内容，结果逐项还原原图中的真实元素</FeatureItem>
       <FeatureItem>支持拆解构件 / 材质 / BOM 清单 / 平面分区，输出复核提示供设计师、制作方、结构工程师确认</FeatureItem>
       <SubTitle>擦除</SubTitle>
       <FeatureItem>画笔涂抹消除并自动无缝补上新的画面</FeatureItem>
-      <FeatureItem>IOPaint 多模型优先（LaMa 通用 / ZITS 结构保持 / Anime-Lama 动漫），AI 模型兜底</FeatureItem>
+      <FeatureItem>提交后使用当前部署中已配置且可用的图像编辑能力修补涂抹区域</FeatureItem>
       <SubTitle>蒙版修图</SubTitle>
       <FeatureItem>给图片加“透明遮罩膜”，精准控制编辑范围</FeatureItem>
       <FeatureItem>画笔 + 提示词输入 + AI 生成，后端精确蒙版合成</FeatureItem>
@@ -817,16 +818,7 @@ export function HelpGuide({ isOpen, onClose, initialSection = 'canvas', themeSty
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const dialog = dialogRef.current;
-    closeRef.current?.focus();
-    return () => {
-      const active = document.activeElement;
-      if (opener?.isConnected && (active === document.body || dialog?.contains(active))) opener.focus();
-    };
-  }, [isOpen]);
+  useModalFocus(dialogRef, closeRef, onClose, isOpen);
 
   if (!isOpen) return null;
 
@@ -836,31 +828,7 @@ export function HelpGuide({ isOpen, onClose, initialSection = 'canvas', themeSty
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-2"
       onMouseDown={(event) => event.stopPropagation()}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="使用说明"
-        onKeyDown={(event) => {
-          if (event.key === 'Tab' && !event.defaultPrevented && !event.altKey && !event.ctrlKey && !event.metaKey
-            && event.target instanceof Element && event.target.closest('[role="dialog"]') === event.currentTarget) {
-            const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
-              'button, select, input, textarea, a[href], [tabindex]',
-            )).filter(item => item.tabIndex >= 0 && !item.matches(':disabled')
-              && !item.closest('[hidden], [inert]') && item.getClientRects().length > 0
-              && getComputedStyle(item).visibility === 'visible');
-            const first = focusable[0];
-            const last = focusable[focusable.length - 1];
-            if (event.shiftKey && document.activeElement === first && last) {
-              event.preventDefault();
-              last.focus();
-            } else if (!event.shiftKey && document.activeElement === last && first) {
-              event.preventDefault();
-              first.focus();
-            }
-          }
-          if (event.key === 'Escape' && !event.defaultPrevented) {
-            event.preventDefault();
-            event.stopPropagation();
-            onClose();
-          }
-        }}
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="使用说明" tabIndex={-1}
         style={{
           '--color-surface': themeStyle === 'monochrome' ? '#ffffff' : '#1a1a1a',
           '--color-surface-container': themeStyle === 'monochrome' ? '#f3f4f6' : '#252529',

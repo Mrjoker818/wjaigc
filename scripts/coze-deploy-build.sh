@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+unset WUJIE_BOOTSTRAP_PROVIDERS_JSON WUJIE_ADMIN_PASSWORD
+
 echo "[coze-deploy-build] Starting production build process..."
+
+node scripts/verify-deploy-package.mjs --source
 
 # Step 1: Install dependencies
 # Try frozen-lockfile first (fast, reproducible), fall back to normal install
@@ -16,7 +20,7 @@ fi
 
 # Apply checksum-managed migrations during the build phase so the runtime
 # fast path can remain within Coze's cold-start budget.
-if [ -n "${DATABASE_URL:-${PGDATABASE_URL:-}}" ]; then
+if [ -n "${DATABASE_URL:+configured}${PGDATABASE_URL:+configured}" ]; then
   echo "[coze-deploy-build] Applying database migrations..."
   pnpm run migrate
 else
@@ -26,6 +30,8 @@ fi
 # Step 2: Build the project
 echo "[coze-deploy-build] Building Next.js project..."
 pnpm run build
+
+node scripts/verify-deploy-package.mjs --built
 
 # Step 3: Keep .next as the sole build artifact; drop the build cache.
 # The Turbopack build cache (.next/cache) is build-only and is by far the

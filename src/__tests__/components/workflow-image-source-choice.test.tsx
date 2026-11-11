@@ -1,10 +1,23 @@
 // @vitest-environment jsdom
 // Additional editor boundaries; original tests, budgets and assertions stay intact.
 import React from 'react';
+import {webcrypto} from 'node:crypto';
 import {act,cleanup,fireEvent,render,within,waitFor} from '@testing-library/react';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import NodeEditor from '@/components/node-editor';
 import {parseWorkflowImageGridAction,type WorkflowImageGridActionRequest} from '@/lib/workflow-image-action-request';
+import type {WorkflowGridRecoveryStore} from '@/lib/workflow-image-grid-client';
+// Mounted-editor cases exercise graph/history. Native IndexedDB has its own recovery test.
+const gridRecovery=vi.hoisted(()=>new Map<string,Awaited<ReturnType<WorkflowGridRecoveryStore['claim']>>>());
+vi.mock('@/lib/workflow-image-grid-client',async importOriginal=>{
+ const actual=await importOriginal<typeof import('@/lib/workflow-image-grid-client')>();
+ return {...actual,createWorkflowImageGridClient:(host:Parameters<typeof actual.createWorkflowImageGridClient>[0])=>
+   actual.createWorkflowImageGridClient(host,{
+     read:async scope=>gridRecovery.get(scope),
+     claim:async(scope,request)=>{const saved=gridRecovery.get(scope);if(saved)return saved;gridRecovery.set(scope,request);return request;},
+     remove:async(scope,id)=>{if(gridRecovery.get(scope)?.operationId===id)gridRecovery.delete(scope);},
+   })};
+});
 let gridPosted:WorkflowImageGridActionRequest[]=[];
 let gridReply:((request:WorkflowImageGridActionRequest)=>Promise<Response>)|undefined;
 function completeGrid(request:WorkflowImageGridActionRequest):Response {return Response.json({success:true,status:'committed',value:{projectId:request.projectId,workspaceId:request.workspaceId,operationId:request.operationId,parentVersionId:request.source.assetVersionId??'fixture-parent',tiles:request.targetNodeIds.map((nodeId,index)=>({nodeId,cell:{index,column:index%request.columns,row:Math.floor(index/request.columns),columns:request.columns,rows:request.rows,left:(index%request.columns)*(1200/request.columns),top:Math.floor(index/request.columns)*(800/request.rows),width:1200/request.columns,height:800/request.rows},reference:{kind:'image',assetId:'a'+index,assetVersionId:'v'+index,placementId:'p'+index,entityId:nodeId,url:'/fixture-tile-'+index+'.png'}}))}});}
@@ -46,7 +59,8 @@ function openNodeMenu(c:HTMLElement):void {
  fireEvent.click(within(panel).getByRole('button',{name:'节点菜单'}));
 }
 beforeEach(()=>{
- localStorage.clear();frames.clear();frameId=0;hitTarget=null;gridPosted=[];gridReply=undefined;
+ localStorage.clear();frames.clear();frameId=0;hitTarget=null;gridPosted=[];gridReply=undefined;gridRecovery.clear();
+ vi.stubGlobal('crypto',webcrypto);
  vi.stubGlobal('PointerEvent',TestPointer);vi.stubGlobal('BroadcastChannel',undefined);
  vi.stubGlobal('requestAnimationFrame',(f:FrameRequestCallback):number=>{frames.set(++frameId,f);return frameId;});vi.stubGlobal('cancelAnimationFrame',(id:number):void=>{frames.delete(id);});
  vi.stubGlobal('matchMedia',vi.fn(()=>({matches:false,addEventListener:vi.fn(),removeEventListener:vi.fn()})));

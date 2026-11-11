@@ -34,11 +34,12 @@ function saveSettings(settings: Partial<OmpSettings>) {
 }
 
 // API Functions
-async function analyzeVisionPromptInternal(imageDataUrl: string): Promise<VisionApiResultData> {
+async function analyzeVisionPromptInternal(imageDataUrl: string, signal: AbortSignal): Promise<VisionApiResultData> {
   const res = await fetch('/api/vision-prompt', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ imageUrl: imageDataUrl }), // no model — API auto-detects
+    signal,
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -137,11 +138,17 @@ function buildVisionCategories(result: VisionApiResultData): VisionKeywordCatego
 
 interface VisionScopedState {
   imagePreview: string;
+  readingImage: boolean;
+  usingLocalImage: boolean;
   internalAnalyzing: boolean;
   internalResult: VisionApiResultData | null;
   deferredError: string;
   version: number;
 }
+const EMPTY_VISION_STATE: VisionScopedState = {
+  imagePreview: '', readingImage: false, usingLocalImage: false, internalAnalyzing: false,
+  internalResult: null, deferredError: '', version: 0,
+};
 type VisionStateUpdate = (update: (state: VisionScopedState) => VisionScopedState, epoch?: number) => void;
 interface VisionTabProps {
   state: VisionScopedState;
@@ -154,61 +161,87 @@ interface VisionTabProps {
   externalAnalyzing?: boolean;
   floating?: boolean;
   negativeNotApplied?: boolean;
-  active?: boolean;
+  active: boolean;
 }
 
-function VisionTab({ state, updateState, nextOperation, initialImageUrl, onInsertPrompt, onOptimizePrompt, externalResult, externalAnalyzing, floating, negativeNotApplied, active = true }: VisionTabProps) {
-  const { imagePreview, internalAnalyzing, internalResult, deferredError } = state;
+function VisionTab({ state, updateState, nextOperation, initialImageUrl, onInsertPrompt, onOptimizePrompt, externalResult, externalAnalyzing, floating, negativeNotApplied, active }: VisionTabProps) {
+  const { imagePreview, readingImage, usingLocalImage, internalAnalyzing, internalResult, deferredError } = state;
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [sentKey, setSentKey] = useState<string | null>(null);
   const [negativeCopyError, setNegativeCopyError] = useState(false);
-  const displayedErrorRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!deferredError) { displayedErrorRef.current = null; return; }
-    if (active && displayedErrorRef.current !== deferredError) {
-      displayedErrorRef.current = deferredError;
-      alert(deferredError);
-      updateState(previous => previous.deferredError === deferredError ? { ...previous, deferredError: '' } : previous);
-    }
-  }, [active, deferredError, updateState]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileReaderRef = useRef<FileReader | null>(null);
+  const analysisRef = useRef<AbortController | null>(null);
+  const previousExternalAnalysis = useRef(externalAnalyzing);
 
-  // Prefer external result/state (from canvas right-click flow) if present, else internal
-  const result = externalResult ?? internalResult;
-  const isAnalyzing = externalAnalyzing || internalAnalyzing;
+  const result = usingLocalImage ? internalResult : externalResult ?? internalResult;
+  const isAnalyzing = internalAnalyzing || (!usingLocalImage && externalAnalyzing);
+
+  const stopVisionWork = useCallback(() => {
+    const reader = fileReaderRef.current;
+    fileReaderRef.current = null;
+    if (reader?.readyState === FileReader.LOADING) reader.abort();
+    const analysis = analysisRef.current;
+    analysisRef.current = null;
+    analysis?.abort();
+  }, []);
+  useLayoutEffect(() => stopVisionWork, [stopVisionWork]);
 
   useEffect(() => {
-    if (initialImageUrl && !imagePreview) {
-      updateState(previous => previous.imagePreview ? previous : { ...previous, imagePreview: initialImageUrl });
+    if (initialImageUrl) {
+      updateState(previous => previous.imagePreview || previous.usingLocalImage ? previous : { ...previous, imagePreview: initialImageUrl });
     }
-  }, [initialImageUrl]);
+  }, [initialImageUrl, updateState]);
+
+  useEffect(() => {
+    const started = externalAnalyzing && !previousExternalAnalysis.current;
+    previousExternalAnalysis.current = externalAnalyzing;
+    if (!started || !usingLocalImage) return;
+    stopVisionWork();
+    const operation = nextOperation();
+    updateState(() => ({ ...EMPTY_VISION_STATE, imagePreview: initialImageUrl ?? '', version: operation.id }), operation.epoch);
+  }, [externalAnalyzing, usingLocalImage, initialImageUrl, nextOperation, stopVisionWork, updateState]);
 
   const handleFileUpload = useCallback((file: File) => {
     if (!file.type.startsWith('image/')) return;
+    stopVisionWork();
     const operation = nextOperation();
-    updateState(previous => ({ ...previous, version: operation.id, internalAnalyzing: false, internalResult: null, deferredError: '' }), operation.epoch);
+    updateState(() => ({ ...EMPTY_VISION_STATE, version: operation.id, usingLocalImage: true, readingImage: true }), operation.epoch);
     const reader = new FileReader();
-    reader.onload = (event) => {
-      const image = event.target?.result;
-      if (typeof image === 'string') updateState(previous => previous.version === operation.id ? { ...previous, imagePreview: image } : previous, operation.epoch);
+    fileReaderRef.current = reader;
+    const finish = (image: string) => {
+      if (fileReaderRef.current !== reader) return;
+      fileReaderRef.current = null;
+      updateState(previous => previous.version === operation.id ? {
+        ...previous, imagePreview: image, readingImage: false, deferredError: image ? '' : '无法读取图片，请重新选择',
+      } : previous, operation.epoch);
     };
-    reader.readAsDataURL(file);
-  }, [nextOperation, updateState]);
+    reader.onload = () => finish(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = reader.onabort = () => finish('');
+    try { reader.readAsDataURL(file); } catch { finish(''); }
+  }, [nextOperation, stopVisionWork, updateState]);
 
   const handleAnalyze = useCallback(async () => {
-    if (!imagePreview || isAnalyzing) return;
+    if (!active || !imagePreview || readingImage || fileReaderRef.current || isAnalyzing || analysisRef.current) return;
     const operation = nextOperation();
+    const request = new AbortController();
+    analysisRef.current = request;
     updateState(previous => ({ ...previous, version: operation.id, internalAnalyzing: true, internalResult: null, deferredError: '' }), operation.epoch);
     try {
-      const data = await analyzeVisionPromptInternal(imagePreview);
+      const data = await analyzeVisionPromptInternal(imagePreview, request.signal);
+      if (analysisRef.current !== request) return;
       updateState(previous => previous.version === operation.id ? { ...previous, internalResult: data } : previous, operation.epoch);
     } catch (error) {
+      if (analysisRef.current !== request) return;
       const message = error instanceof Error ? error.message : '图片识词失败，请重试';
       updateState(previous => previous.version === operation.id ? { ...previous, deferredError: message } : previous, operation.epoch);
     } finally {
-      updateState(previous => previous.version === operation.id ? { ...previous, internalAnalyzing: false } : previous, operation.epoch);
+      if (analysisRef.current === request) {
+        analysisRef.current = null;
+        updateState(previous => previous.version === operation.id ? { ...previous, internalAnalyzing: false } : previous, operation.epoch);
+      }
     }
-  }, [imagePreview, isAnalyzing, nextOperation, updateState]);
+  }, [active, imagePreview, readingImage, isAnalyzing, nextOperation, updateState]);
 
   const categories = result ? buildVisionCategories(result) : [];
 
@@ -247,9 +280,10 @@ function VisionTab({ state, updateState, nextOperation, initialImageUrl, onInser
   };
 
   const resetTab = useCallback(() => {
+    stopVisionWork();
     const operation = nextOperation();
-    updateState(previous => ({ ...previous, imagePreview: '', internalResult: null, internalAnalyzing: false, deferredError: '', version: operation.id }), operation.epoch);
-  }, [nextOperation, updateState]);
+    updateState(() => ({ ...EMPTY_VISION_STATE, usingLocalImage: true, version: operation.id }), operation.epoch);
+  }, [nextOperation, stopVisionWork, updateState]);
 
   const accent = floating ? '#d4af37' : undefined;
 
@@ -257,38 +291,45 @@ function VisionTab({ state, updateState, nextOperation, initialImageUrl, onInser
     <div className="min-h-0 h-full flex flex-col p-4 gap-3 overflow-hidden max-md:h-auto max-md:min-h-full max-md:overflow-visible">
       <div className="min-h-0 flex-1 overflow-y-auto space-y-3 max-md:overflow-visible">
         {/* Image Upload Area */}
-        <div 
-          className={`relative border-2 border-dashed rounded-xl transition-all cursor-pointer overflow-hidden
+        <div
+          className={`relative border-2 border-dashed rounded-xl transition-all overflow-hidden
             ${floating
               ? (imagePreview ? 'border-[#d4af37]/40' : 'border-[#444] hover:border-[#d4af37]/60 hover:bg-[#222]')
               : (imagePreview ? 'border-primary/30' : 'border-border hover:border-primary/50 hover:bg-muted/30')}`}
           style={{ minHeight: imagePreview ? '0' : '120px' }}
-          onClick={() => fileInputRef.current?.click()}
         >
           <input ref={fileInputRef} type="file" accept="image/*" className="hidden"
-            onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0])} />
-          
-          {imagePreview ? (
-            <div className="relative group">
-              <img src={imagePreview} alt="Upload" className="w-full h-32 object-contain bg-muted/30" />
-              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                <span className="text-white text-xs">点击更换图片</span>
-              </div>
-              <button onClick={(e) => { e.stopPropagation(); resetTab(); }}
-                className="absolute top-2 right-2 p-1 bg-black/60 rounded-full text-white hover:bg-black/80">
-                <X className="w-3 h-3" />
-              </button>
-            </div>
-          ) : (
-            <div className={`flex flex-col items-center justify-center py-8 gap-2 ${floating ? 'text-gray-400' : 'text-muted-foreground'}`}>
-              <Upload className="w-8 h-8 opacity-50" />
-              <span className="text-xs">点击上传图片，AI自动识别关键词</span>
-            </div>
+            onChange={event => {
+              const file = event.currentTarget.files?.[0];
+              event.currentTarget.value = '';
+              if (file) handleFileUpload(file);
+            }} />
+          <button type="button" aria-label={imagePreview ? '更换图片' : '上传图片'} onClick={() => fileInputRef.current?.click()}
+            className="group relative block w-full min-h-11 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-[-2px]">
+            {imagePreview ? (
+              <>
+                <img src={imagePreview} alt="待识词图片" className="w-full h-32 object-contain bg-muted/30" />
+                <span className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity flex items-center justify-center text-white text-xs">点击更换图片</span>
+              </>
+            ) : (
+              <span className={`flex flex-col items-center justify-center py-8 gap-2 ${floating ? 'text-gray-400' : 'text-muted-foreground'}`}>
+                <Upload className="w-8 h-8 opacity-50" />
+                <span className="text-xs">点击上传图片，AI自动识别关键词</span>
+              </span>
+            )}
+          </button>
+          {imagePreview && (
+            <button type="button" aria-label="移除图片" onClick={resetTab}
+              className="absolute top-2 right-2 inline-flex min-h-11 min-w-11 items-center justify-center bg-black/60 rounded-full text-white hover:bg-black/80">
+              <X className="w-4 h-4" />
+            </button>
           )}
         </div>
+        {readingImage && <p role="status" className="text-sm">正在读取图片…</p>}
+        {active && deferredError && <p role="alert" className={`text-sm ${floating ? 'text-red-300' : 'text-destructive'}`}>{deferredError}</p>}
 
         {/* Analyze Button */}
-        {imagePreview && !isAnalyzing && !result && (
+        {imagePreview && !readingImage && !isAnalyzing && !result && (
           <Button onClick={handleAnalyze} className={`w-full gap-2 ${floating ? 'bg-[#d4af37] text-black hover:bg-[#c9a227]' : ''}`}>
             <Eye className="w-4 h-4" />开始识词
           </Button>
@@ -618,18 +659,23 @@ export default function OhMyPrompt({
     visionLifecycle.current.active = isOpen;
     visionLifecycle.current.epoch += 1;
     if (!isOpen) setVisionStates({});
+    else setVisionStates(previous => {
+      const state = previous[activeVisionScope];
+      if (!state || !state.readingImage && !state.internalAnalyzing) return previous;
+      return { ...previous, [activeVisionScope]: { ...state, readingImage: false, internalAnalyzing: false } };
+    });
     return () => { visionLifecycle.current.active = false; visionLifecycle.current.epoch += 1; };
-  }, [isOpen]);
+  }, [isOpen, activeVisionScope]);
   const nextVisionOperation = useCallback(() => ({ id: ++visionLifecycle.current.operation, epoch: visionLifecycle.current.epoch }), []);
   const updateVisionState = useCallback<VisionStateUpdate>((update, epoch) => {
     if (!visionLifecycle.current.active || (epoch !== undefined && epoch !== visionLifecycle.current.epoch)) return;
     setVisionStates(previous => {
-      const current = previous[activeVisionScope] ?? { imagePreview: '', internalAnalyzing: false, internalResult: null, deferredError: '', version: 0 };
+      const current = previous[activeVisionScope] ?? EMPTY_VISION_STATE;
       const next = update(current);
       return next === current ? previous : { ...previous, [activeVisionScope]: next };
     });
   }, [activeVisionScope]);
-  const currentVisionState = visionStates[activeVisionScope] ?? { imagePreview: '', internalAnalyzing: false, internalResult: null, deferredError: '', version: 0 };
+  const currentVisionState = visionStates[activeVisionScope] ?? EMPTY_VISION_STATE;
   const settings = loadSettings();
 
   useEffect(() => {
@@ -724,6 +770,7 @@ export default function OhMyPrompt({
                 onOptimizePrompt={handleOptimize}
                 externalResult={externalVisionResult}
                 externalAnalyzing={externalIsAnalyzing}
+                active={activeTab === 'vision'}
                 negativeNotApplied={Boolean(onInsertVisionPrompt)}
                 floating={floating}
               />

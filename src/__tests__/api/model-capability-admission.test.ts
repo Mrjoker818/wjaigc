@@ -93,14 +93,15 @@ describe('video model capability admission', () => {
 
     expect(videoGenerateSource).toContain('resolveTaskModelForUser(provider.id, pureModel, sessionUser)');
     expect(videoGenerateSource).toContain('validateTaskModelSelection(descriptor, {');
-    expect(videoGenerateSource).toContain('operation: toSupportedVideoOperation(');
+    expect(videoGenerateSource).toContain('operation: pearOperation ?? toSupportedVideoOperation(');
     expect(videoGenerateSource).toContain('durationSeconds: parsedDuration');
-    expect(videoGenerateSource).toContain('referenceImageCount:');
+    expect(videoGenerateSource).toContain('referenceImageCount,');
     expect(providerResolution).toBeGreaterThan(-1);
     expect(admissionGate).toBeGreaterThan(providerResolution);
     expect(billing).toBeGreaterThan(admissionGate);
     expect(taskCreation).toBeGreaterThan(admissionGate);
     expect(providerRequest).toBeGreaterThan(admissionGate);
+    expect(providerRequest).toBeLessThan(billing);
   });
 
   it('requires video-extend capability before the extend route creates or charges a task', () => {

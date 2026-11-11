@@ -66,9 +66,10 @@ describe('model catalog request ordering', () => {
     let refresh!: Promise<void>;
     act(() => { refresh = hook.result.current.reload(controller.signal); });
     const outcome = refresh.catch(error => error);
-    act(() => controller.abort());
+    await act(async () => { controller.abort(); await outcome; });
     expect((await outcome).name).toBe('AbortError');
-    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+    expect(hook.result.current.loading).toBe(false);
+    expect(hook.result.current.error).toBeNull();
     expect(hook.result.current.models.map(model => model.id)).toEqual(['initial']);
   });
 

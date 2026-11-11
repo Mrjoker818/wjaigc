@@ -302,9 +302,14 @@ describe('workflow return while persistence is pending', () => {
   it('does not apply an old workflow return after the active account changes', async () => {
     const state = createFixture(); setup(state);
     await waitFor(() => expect(state.persisted).toHaveLength(1));
-    fireEvent.click(screen.getByRole('button', { name: '切换合成账号' }));
+    expect(state.parent['project-a'].messages.some(message => message.id === returnedId)).toBe(true);
+    // The new account loads its own messages even when the project and task IDs match.
+    fireEvent.click(screen.getByRole('button', { name: '切换账号并载入消息' }));
+    await screen.findByText('另一账号原消息');
     await act(async () => { state.gate.resolve(); await state.gate.promise; });
     expect(screen.queryByText('工作流结果已返回：synthetic-result')).toBeNull();
+    expect(state.parent['project-a'].messages.map(message => message.content)).toEqual(['另一账号原消息']);
+    expect(state.requests.filter(request => request === 'POST /api/assets/transfer')).toHaveLength(1);
     expect(window.location.search).toContain('workflowExecutionId=synthetic-execution');
   });
 

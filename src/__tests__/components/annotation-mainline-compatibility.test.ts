@@ -24,9 +24,12 @@ describe('annotation upgrade compatibility with latest main', () => {
 
     expect(handlerStart).toBeGreaterThan(-1);
     expect(handlerEnd).toBeGreaterThan(handlerStart);
-    expect(handler).toContain('setVisionResult(data)');
+    expect(handler).toMatch(/const result = await response\.json\(\);\s*if \(!current\(\)\) return;/);
+    expect(handler).toContain('setVisionResults(previous => ({ ...previous, [resultScope]: data }));');
+    expect(source).toContain('visionResult={visionResults[visionScopeKey] ?? null}');
+    expect(source).toMatch(/onInsertVisionPrompt=\{\(text: string\) => \{[\s\S]*?setVisionInsertions\(previous => \[\.\.\.previous, \{ id, scope: visionScopeKey, text \}\]\);/);
     expect(handler).toContain('关键词已生成，请在灵感工坊中选择发送');
-    expect(handler).not.toContain('setExternalPrompt(promptText)');
+    expect(handler).not.toMatch(/\b(?:setExternalPrompt|setVisionInsertions)\(/);
   });
 
   test('wires database idempotency into the real edit and credit boundary', () => {

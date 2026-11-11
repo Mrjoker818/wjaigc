@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   refundCredits: vi.fn(),
   getCloudTaskById: vi.fn(),
   getCloudTaskForUser: vi.fn(),
+  updateCloudTask: vi.fn(),
   refundCloudTaskCredits: vi.fn(),
   terminateCloudTaskAndRefund: vi.fn(),
   recordCloudTaskCancelled: vi.fn(),
@@ -36,6 +37,7 @@ vi.mock('@/lib/cloud-task-storage', () => ({
   CloudTaskAdmissionError: class CloudTaskAdmissionError extends Error {},
   getCloudTaskById: mocks.getCloudTaskById,
   getCloudTaskForUser: mocks.getCloudTaskForUser,
+  updateCloudTask: mocks.updateCloudTask,
   refundCloudTaskCredits: mocks.refundCloudTaskCredits,
   terminateCloudTaskAndRefund: mocks.terminateCloudTaskAndRefund,
 }));
@@ -144,6 +146,43 @@ describe('POST /api/cancel-task', () => {
     const response = await POST(request('task-1'));
 
     expect(response.status).toBe(401);
+    expect(mocks.cancelTask).not.toHaveBeenCalled();
+  });
+
+  it.each(['queued', 'processing'])('cancels a durable %s display job without changing credit state', async status => {
+    const taskId = 'd3d_fixture';
+    const order: string[] = [];
+    mocks.getSessionUser.mockResolvedValue({ id: 'user-a', role: 'user' });
+    mocks.getCloudTaskById.mockResolvedValue({ id: taskId, userId: 'user-a', type: 'display3d', status,
+      creditCost: 0, creditStatus: 'not-applicable', result: { display3dReceipt: { pollBase: 'private-fixture' } } });
+    mocks.updateCloudTask.mockImplementation(async () => { order.push('stored'); return true; });
+    mocks.cancelTask.mockImplementation(() => { order.push('aborted'); return true; });
+    const response = await POST(request(taskId));
+    expect(response.status).toBe(200);
+    expect(order).toEqual(['stored', 'aborted']);
+    expect(mocks.updateCloudTask).toHaveBeenCalledWith(taskId, expect.objectContaining({ status: 'cancelled' }));
+    expect(mocks.updateCloudTask.mock.calls[0]?.[1]).not.toHaveProperty('creditStatus');
+    expect(mocks.recordCloudTaskCancelled).not.toHaveBeenCalled();
+    expect(mocks.refundCloudTaskCredits).not.toHaveBeenCalled();
+    expect(await response.text()).not.toContain('private-fixture');
+  });
+
+  it('does not abort a display job when durable completion wins the cancellation race', async () => {
+    const taskId = 'd3d_fixture';
+    const task = { id: taskId, userId: 'user-a', type: 'display3d', status: 'processing' };
+    mocks.getSessionUser.mockResolvedValue({ id: 'user-a', role: 'user' });
+    mocks.getCloudTaskById.mockResolvedValueOnce(task).mockResolvedValueOnce({ ...task, status: 'completed' });
+    mocks.updateCloudTask.mockResolvedValue(false);
+    const response = await POST(request(taskId));
+    expect(response.status).toBe(409);
+    expect(mocks.cancelTask).not.toHaveBeenCalled();
+  });
+
+  it('does not cancel a durable display job owned by another account', async () => {
+    mocks.getSessionUser.mockResolvedValue({ id: 'user-a', role: 'user' });
+    mocks.getCloudTaskById.mockResolvedValue({ id: 'd3d_fixture', userId: 'user-b', type: 'display3d', status: 'processing' });
+    expect((await POST(request('d3d_fixture'))).status).toBe(404);
+    expect(mocks.updateCloudTask).not.toHaveBeenCalled();
     expect(mocks.cancelTask).not.toHaveBeenCalled();
   });
 

@@ -29,6 +29,8 @@ import {
   type AuthSecretRingV1,
 } from './auth/auth-secret-ring';
 import {
+  hasCompletedDatabaseAdminBootstrap,
+  insertInitialDatabaseAdministrator,
   readDatabaseSecretRing,
   resolveDatabaseSecretRing,
   updateUserCredentials,
@@ -41,6 +43,7 @@ import type { User } from './user-types';
 import { ensureUserDataDirs, getUserDataDir } from './server-user-storage';
 import { getServerSystemDir, getServerUsersDir } from './server-data-root';
 import { isDatabaseConfigured } from './db-client';
+import { isDeploymentDatabaseOnly } from './deployment-database-mode';
 import { dbReadUsers, dbReadUsersWithClient, dbWriteUsers, dbDeleteUser, dbDeleteUserData, dbInitCredits } from './db-storage';
 import { getRuntimeSettings } from './runtime-settings';
 
@@ -85,6 +88,7 @@ export const WUJIE_SESSION_COOKIE = 'wujie_session';
 export const WUJIE_SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 
 const DEFAULT_ADMIN_NAME = process.env.WUJIE_ADMIN_USERNAME || 'Mr.joker';
+const DEFAULT_ADMIN_ID = 'admin_mr_joker';
 const LEGACY_STABLE_AUTH_SECRET = 'wujie-ai-stable-auth-secret-fallback-2024';
 
 export class AuthConfigurationError extends Error {
@@ -117,6 +121,9 @@ function configuredAdminBootstrapPassword(): string | null {
 
 export function getProductionAuthConfigurationIssues(): string[] {
   if (!isProductionRuntime()) return [];
+  if (isDeploymentDatabaseOnly()) {
+    return isDatabaseConfigured() ? [] : ['Missing DATABASE_URL or PGDATABASE_URL'];
+  }
 
   const issues: string[] = [];
   if (!configuredAuthSecret()) issues.push('Missing WUJIE_AUTH_SECRET or NEXTAUTH_SECRET');
@@ -212,7 +219,7 @@ function isMissingFileError(error: unknown): boolean {
 function getAuthPersistenceMode(): AuthPersistenceMode {
   return resolveAuthPersistenceMode({
     databaseConfigured: isDatabaseConfigured(),
-    rawMode: process.env.WUJIE_AUTH_PERSISTENCE_MODE,
+    rawMode: isDeploymentDatabaseOnly() ? 'DB_ONLY' : process.env.WUJIE_AUTH_PERSISTENCE_MODE,
     production: isProductionRuntime(),
   });
 }
@@ -549,11 +556,13 @@ function normalizeStoredUser(user: StoredUser): StoredUser {
 }
 
 function normalizeStoredUserAt(user: StoredUser, now: number): StoredUser {
+  const hasDefaultAdminProducts = isRootAdminUser(user)
+    || (user.role === 'admin' && user.id === DEFAULT_ADMIN_ID && isDeploymentDatabaseOnly());
   return {
     ...user,
     role: user.role || 'user',
     status: user.status || 'active',
-    productType: user.productType || undefined,
+    productType: user.productType || (hasDefaultAdminProducts ? 'canvas,chat' : undefined),
     groupId: user.groupId || undefined,
     chatModels: user.chatModels || undefined,
     imageModels: user.imageModels || undefined,
@@ -763,12 +772,12 @@ async function writeFileStoreLocked(file: StoredUsersFile): Promise<void> {
   }
 }
 
-async function createDefaultAdministrator(): Promise<StoredUser> {
+async function createDefaultAdministrator() {
   const now = Date.now();
   const password = requireAdminBootstrapPassword();
   const ring = await authSecretRing();
   return {
-    id: 'admin_mr_joker',
+    id: DEFAULT_ADMIN_ID,
     name: DEFAULT_ADMIN_NAME,
     passwordHash: createLegacyPasswordHash(password, ring.active.secret),
     credentialHash: await createScryptCredential(password),
@@ -776,10 +785,10 @@ async function createDefaultAdministrator(): Promise<StoredUser> {
     status: 'active',
     productType: 'canvas,chat',
     apiPermissions: defaultApiPermissions(),
-    storageFolder: storageFolder('admin_mr_joker'),
+    storageFolder: storageFolder(DEFAULT_ADMIN_ID),
     createdAt: now,
     updatedAt: now,
-  };
+  } satisfies StoredUser;
 }
 
 function normalizeDefaultAdministrator(file: StoredUsersFile): void {
@@ -826,6 +835,16 @@ async function readStore(): Promise<StoredUsersFile> {
   }
 
   const file = await readDatabaseStore();
+  if (isDeploymentDatabaseOnly()) {
+    if (file.users.length > 0 || await hasCompletedDatabaseAdminBootstrap()) return file;
+    await insertInitialDatabaseAdministrator(await createDefaultAdministrator());
+    const stored = await readDatabaseStore();
+    if (stored.users.length === 0 && !await hasCompletedDatabaseAdminBootstrap()) {
+      throw persistenceUnavailable();
+    }
+    return stored;
+  }
+
   const adminIndex = file.users.findIndex(user => user.name === DEFAULT_ADMIN_NAME);
   if (adminIndex === -1) {
     const admin = await createDefaultAdministrator();
@@ -1022,13 +1041,14 @@ export async function authenticateUser(input: {
   const file = await readStore();
   const now = Date.now();
   const index = file.users.findIndex(user => user.name === name);
-  const isDefaultAdmin = name === DEFAULT_ADMIN_NAME;
+  const deploymentDatabaseOnly = isDeploymentDatabaseOnly();
+  const isDefaultAdmin = !deploymentDatabaseOnly && name === DEFAULT_ADMIN_NAME;
 
   if (index === -1) {
     if (!isDefaultAdmin || password !== requireAdminBootstrapPassword()) return null;
 
     const ring = await authSecretRing();
-    const id = safeId(input.profile?.id, 'admin_mr_joker');
+    const id = safeId(input.profile?.id, DEFAULT_ADMIN_ID);
     const user: StoredUser = {
       id,
       name,
@@ -1080,8 +1100,9 @@ export async function authenticateUser(input: {
   }
 
   if (!passwordMatches) {
+    if (!isDefaultAdmin) return null;
     const recoveryPassword = configuredAdminBootstrapPassword();
-    if (!isDefaultAdmin || !recoveryPassword || password !== recoveryPassword) return null;
+    if (!recoveryPassword || password !== recoveryPassword) return null;
 
     const recovered = await persistUserCredentials(user, {
       name,
@@ -1107,6 +1128,14 @@ export async function authenticateUser(input: {
         userId: user.id,
       });
     }
+  }
+
+  if (deploymentDatabaseOnly) {
+    const email = input.profile?.email;
+    if (typeof email === 'string' && email !== authenticatedUser.email) {
+      return publicUser(await persistUserProfile(authenticatedUser, { email }));
+    }
+    return publicUser(authenticatedUser);
   }
 
   const nextRole = isDefaultAdmin ? 'admin' : authenticatedUser.role || 'user';
@@ -1147,7 +1176,7 @@ export async function listManagedUsers(): Promise<User[]> {
 /** Reuse the original database/user normalization without bootstrap or file fallback. */
 export async function listManagedUsersWithClient(client: PoolClient): Promise<User[]> {
   const file = await readDatabaseStore(client);
-  normalizeDefaultAdministrator(file);
+  if (!isDeploymentDatabaseOnly()) normalizeDefaultAdministrator(file);
   return file.users.map(publicUser);
 }
 

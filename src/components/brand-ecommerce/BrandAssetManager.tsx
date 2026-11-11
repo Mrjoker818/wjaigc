@@ -140,8 +140,7 @@ export function BrandAssetManager({ currentSettings, onApply, userId, isMonochro
   }, [onApply]);
 
   // ─── Delete asset ───
-  const handleDelete = useCallback(async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleDelete = useCallback(async (id: string) => {
     try {
       const resp = await fetch('/api/brand-assets', {
         method: 'POST',
@@ -155,8 +154,7 @@ export function BrandAssetManager({ currentSettings, onApply, userId, isMonochro
   }, []);
 
   // ─── Set as default ───
-  const handleSetDefault = useCallback(async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleSetDefault = useCallback(async (id: string) => {
     try {
       const resp = await fetch('/api/brand-assets', {
         method: 'POST',
@@ -239,28 +237,34 @@ export function BrandAssetManager({ currentSettings, onApply, userId, isMonochro
               assets.map(asset => (
                 <div
                   key={asset.id}
-                  onClick={() => handleLoad(asset)}
-                  className={`flex items-center gap-2 px-3 py-2.5 cursor-pointer transition-colors group ${isMonochrome ? 'hover:bg-gray-50' : 'hover:bg-[#2a2a2a]'}`}
+                  className={`flex items-center gap-2 px-3 py-2.5 transition-colors ${isMonochrome ? 'hover:bg-gray-50' : 'hover:bg-[#2a2a2a]'}`}
                 >
                   {/* Star for default */}
                   <button
-                    onClick={(e) => handleSetDefault(asset.id, e)}
+                    type="button"
+                    onClick={() => handleSetDefault(asset.id)}
                     className="shrink-0 cursor-pointer transition-colors"
                     style={{ color: asset.isDefault ? accent : isMonochrome ? '#d1d5db' : '#555' }}
                     title={asset.isDefault ? '默认方案' : '设为默认'}
+                    aria-label={`${asset.isDefault ? '默认方案' : '设为默认'}：${asset.name}`}
                   >
                     <Star size={12} fill={asset.isDefault ? accent : 'none'} />
                   </button>
 
-                  {/* Asset info */}
-                  <div className="flex-1 min-w-0">
-                    <div className={`text-xs font-medium truncate ${text}`}>
+                  <button
+                    type="button"
+                    onClick={() => handleLoad(asset)}
+                    aria-label={`应用方案：${asset.name}`}
+                    className="min-w-0 flex-1 cursor-pointer rounded-md text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                    style={{ outlineColor: accent }}
+                  >
+                    <span className={`block text-xs font-medium truncate ${text}`}>
                       {asset.name}
                       {asset.isDefault && (
                         <span className="ml-1 text-[10px] font-normal" style={{ color: accent }}>默认</span>
                       )}
-                    </div>
-                    <div className={`text-[10px] truncate ${textSub}`}>
+                    </span>
+                    <span className={`block text-[10px] truncate ${textSub}`}>
                       {asset.productDesc?.slice(0, 30) || '无描述'}
                       {asset.brandColors?.length > 0 && (
                         <span className="ml-1.5 inline-flex gap-0.5">
@@ -269,14 +273,16 @@ export function BrandAssetManager({ currentSettings, onApply, userId, isMonochro
                           ))}
                         </span>
                       )}
-                    </div>
-                  </div>
+                    </span>
+                  </button>
 
                   {/* Delete */}
                   <button
-                    onClick={(e) => handleDelete(asset.id, e)}
+                    type="button"
+                    onClick={() => handleDelete(asset.id)}
                     className={`shrink-0 opacity-100 p-1 rounded transition-all cursor-pointer ${isMonochrome ? 'text-gray-400 hover:text-red-500' : 'text-gray-500 hover:text-red-400'}`}
                     title="删除方案"
+                    aria-label={`删除方案：${asset.name}`}
                   >
                     <Trash2 size={11} />
                   </button>

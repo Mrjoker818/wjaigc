@@ -1,4 +1,7 @@
 import type { Workflow } from './workflow-engine';
+import type { Project } from './user-types';
+
+type ProjectMetadata = NonNullable<Project['metadata']>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -31,4 +34,15 @@ export function mergeWorkflowIntoProjectMetadata(
     ...(isRecord(metadata) ? metadata : {}),
     workflow,
   };
+}
+
+export function retainSavedProjectWorkflow(
+  canvasMetadata: ProjectMetadata,
+  savedMetadata: Project['metadata'],
+): ProjectMetadata {
+  const savedWorkflow = savedMetadata?.workflow;
+  if (canvasMetadata.workflow === savedWorkflow) return canvasMetadata;
+  if (savedWorkflow !== undefined) return { ...canvasMetadata, workflow: savedWorkflow };
+  const { workflow: _staleWorkflow, ...metadata } = canvasMetadata;
+  return metadata;
 }

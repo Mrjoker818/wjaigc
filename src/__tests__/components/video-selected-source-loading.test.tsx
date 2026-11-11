@@ -66,4 +66,35 @@ describe('video source selection while models load', () => {
     expect(screen.getByPlaceholderText('输入视频URL（画布选中视频会自动填充）')).toHaveProperty('value','');
     expect(generate).not.toHaveBeenCalled();
   });
+
+  it('keeps a manual source when an eligible model arrives and applies a new canvas selection', async () => {
+    let resolveCatalog!: (value: Response) => void;
+    const pending = new Promise<Response>(resolve => { resolveCatalog = resolve; });
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      if (String(input) === '/api/models?type=video') return pending;
+      throw new Error('Unexpected fixture request: ' + String(input));
+    }));
+    const generate = vi.fn();
+    const props = {
+      externalPrompt: 'Extend this clip',
+      externalPromptMode: 'extend' as const,
+      onVideoGenerate: generate,
+    };
+    const canvasSource = 'https://media.invalid/canvas.mp4';
+    const manualSource = 'https://media.invalid/manual.mp4';
+    const view = render(<VideoGenerationPanel {...props} selectedVideoUrl={canvasSource} />);
+    const input = await screen.findByPlaceholderText('输入视频URL（画布选中视频会自动填充）');
+    fireEvent.change(input, { target: { value: manualSource } });
+    expect(screen.getByText(manualSource)).toBeTruthy();
+
+    await act(async () => { resolveCatalog(Response.json(catalog)); });
+    await screen.findByRole('button', { name: '视频延长' });
+    expect(screen.getByText(manualSource)).toBeTruthy();
+    expect(screen.queryByText(canvasSource)).toBeNull();
+
+    const nextCanvasSource = 'https://media.invalid/next-canvas.mp4';
+    view.rerender(<VideoGenerationPanel {...props} selectedVideoUrl={nextCanvasSource} />);
+    expect(await screen.findByText(nextCanvasSource)).toBeTruthy();
+    expect(generate).not.toHaveBeenCalled();
+  });
 });

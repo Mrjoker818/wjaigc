@@ -1,5 +1,6 @@
 import type { SimpleChatProject } from '@/components/simple-chat/simple-chat-types';
 import { recoverInterruptedSimpleChatProjects } from '@/components/simple-chat/simple-chat-types';
+import { expectedActorHeaders } from '@/lib/expected-actor-header';
 import {
   acknowledgeSimpleChatOperations,
   compactSimpleChatOperations,
@@ -116,6 +117,7 @@ export interface SimpleChatDashboardProjectsOptions {
   userId: string;
   store: SimpleChatEnvelopeStore;
   fetchImpl?: typeof fetch;
+  onStatus?: (value: 'identity') => void;
 }
 
 export async function loadSimpleChatDashboardProjects(
@@ -129,14 +131,19 @@ export async function loadSimpleChatDashboardProjects(
       method: 'GET',
       credentials: 'include',
       cache: 'no-store',
+      headers: expectedActorHeaders(options.userId),
     });
-    if (response.status === 401 || response.status === 403) return [];
+    if (response.status === 401 || response.status === 403 || response.status === 409) return [];
     if (response.status === 429 || response.status >= 500) {
       shouldReadLocal = true;
     } else if (!response.ok) {
       return [];
     } else {
       const body: unknown = await response.json();
+      if (!body || typeof body !== 'object' || !('userId' in body) || body.userId !== options.userId) {
+        options.onStatus?.('identity');
+        return [];
+      }
       if (isReadSuccess(body) && validateSimpleChatProjects(body.value).success) {
         return cloneValue(body.value);
       }

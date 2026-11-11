@@ -90,7 +90,9 @@ export function PromptOptimizer({ isMonochrome, currentPrompt, onApply, onClose 
         <div className="min-h-0 min-w-0 space-y-4 overflow-y-auto overscroll-contain p-3 sm:p-5">
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             {MODE_CONFIG.map((m) => (
-              <button key={m.key} onClick={() => setMode(m.key)} aria-pressed={mode === m.key} disabled={isOptimizing}
+              <button key={m.key} onClick={() => {
+                if (m.key !== mode) { setMode(m.key); setResult(""); }
+              }} aria-pressed={mode === m.key} disabled={isOptimizing}
                 className={"min-h-11 min-w-0 break-words rounded-lg border px-3 py-2 text-left text-sm transition-colors disabled:cursor-wait " + (mode === m.key
                   ? (isMonochrome ? "border-amber-500 bg-amber-50 text-amber-800" : "border-[#d4af37] bg-[#d4af37]/10 text-[#d4af37]")
                   : (isMonochrome ? "border-gray-200 text-gray-600 hover:border-gray-300" : "border-[#404040] text-white/75 hover:border-[#505050]"))}>
@@ -101,7 +103,7 @@ export function PromptOptimizer({ isMonochrome, currentPrompt, onApply, onClose 
           </div>
           <div>
             <label htmlFor={promptId} className={"mb-1 block text-xs " + subText}>原始提示词</label>
-            <textarea id={promptId} value={prompt} onChange={(e) => setPrompt(e.target.value)} disabled={isOptimizing} placeholder="输入要优化的提示词…"
+            <textarea id={promptId} value={prompt} onChange={(e) => { setPrompt(e.target.value); setResult(""); }} disabled={isOptimizing} placeholder="输入要优化的提示词…"
               className={"min-h-24 w-full resize-y rounded-lg border px-3 py-2 text-base " + inputBg} />
           </div>
           {error && <div role="alert" className={"break-words rounded-lg border p-3 text-sm " + (isMonochrome ? "border-red-200 bg-red-50 text-red-700" : "border-red-400/30 bg-red-400/5 text-red-300")}>{error}</div>}

@@ -37,6 +37,7 @@ lerna-debug.log*
 
 # Runtime data
 data/
+/deploy-seed/
 pids
 *.pid
 *.seed

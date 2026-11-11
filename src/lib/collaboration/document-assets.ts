@@ -21,7 +21,10 @@ interface DocumentAssetRow {
 export class DocumentAssetError extends Error {
   readonly code = 'DOCUMENT_ASSET_FORBIDDEN';
 
-  constructor() {
+  constructor(
+    readonly reason: 'asset_scope' | 'version_missing' | 'placement_missing' | 'media_unavailable' = 'asset_scope',
+    readonly storage?: 'local' | 'object',
+  ) {
     super('项目文档不能引用此资产版本');
     this.name = 'DocumentAssetError';
   }
@@ -78,7 +81,7 @@ export async function assertProjectCanvasPlacement(
       FOR SHARE`,
     [placementId, ownerId, projectId, versionId],
   );
-  if (result.rowCount !== 1) throw new DocumentAssetError();
+  if (result.rowCount !== 1) throw new DocumentAssetError('placement_missing');
 }
 
 export async function assertProjectAssetVersion(
@@ -110,7 +113,7 @@ export async function assertProjectAssetVersion(
     [versionId, ownerId, projectId],
   );
   const row = result.rows[0];
-  if (result.rowCount !== 1 || !row) throw new DocumentAssetError();
+  if (result.rowCount !== 1 || !row) throw new DocumentAssetError('version_missing');
   const version: AssetVersion = {
     id: row.id,
     assetId: row.asset_id,
@@ -132,6 +135,6 @@ export async function assertProjectAssetVersion(
   try {
     await getManagedAssetMediaDescriptor(version, row.kind);
   } catch {
-    throw new DocumentAssetError();
+    throw new DocumentAssetError('media_unavailable', row.storage_key ? 'object' : 'local');
   }
 }

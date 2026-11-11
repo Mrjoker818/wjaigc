@@ -13,7 +13,9 @@ import { getInternalRequestHeaders, requireApiAuthOrReject } from '@/lib/api-aut
 // 允许最长5分钟（ONNX放大+AI精修可能较慢）
 export const maxDuration = 300;
 import { enhanceViaAI } from '@/lib/quality-enhance';
-import { UPSCALE_OUTPUT_DIR, UPSCALE_OUTPUT_URL_PREFIX } from '@/lib/image-tools/config';
+import { isOnnxConfigured, ONNX_MODEL, ONNX_WORKER, ONNX_WORKER_ENV, runLocalPython } from '@/lib/image-tools/config';
+import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
+import { saveImageFile } from '@/lib/server-data-root';
 import { validateApiInputs } from '@/lib/api-validator';
 import { resolveOnnxReportedOutput } from '@/lib/image-tools/onnx-output-boundary';
 
@@ -642,246 +644,51 @@ async function resizeToTarget(
 async function upscaleViaOnnx(
   imageUrl: string,
   scale: number,
-  face: boolean,
 ): Promise<{ url: string; model: string; strategy: string } | null> {
-  console.log(`[upscale-pro] Strategy 2: Local ONNX Real-ESRGAN (scale=${scale}x, face=${face})`);
+  if (!Number.isInteger(scale) || scale < 2 || scale > 4 || !await isOnnxConfigured()) return null;
 
-  let expectedOutputFile: string | null = null;
+  let workDir: string | undefined;
   try {
-    const { execFile } = await import('child_process');
-    const path = await import('path');
-    const fs = await import('fs');
-    const { tmpdir } = await import('os');
-    const { randomUUID } = await import('crypto');
+    const { lstat, mkdtemp, readFile, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { randomUUID } = await import('node:crypto');
+    const { default: path } = await import('node:path');
+    const { default: sharp } = await import('sharp');
+    const buffer = await fetchImageBuffer(imageUrl, { maxBytes: 20 * 1024 * 1024 });
+    const source = sharp(buffer, { limitInputPixels: 64 * 1024 * 1024 });
+    const { width, height } = await source.metadata();
+    if (!width || !height || width * height * scale ** 2 > 64 * 1024 * 1024) return null;
 
-    // 检查脚本和模型文件是否存在
-    const scriptPath = path.join(process.cwd(), 'scripts', 'upscale_onnx.py');
-    const modelDir = path.join(process.cwd(), 'onnx-models');
-
-    if (!fs.existsSync(scriptPath)) {
-      console.warn('[upscale-pro] ONNX upscale script not found:', scriptPath);
-      return null;
-    }
-
-    // 列出可用模型
-    const availableModels = fs.readdirSync(modelDir)
-      .filter(f => f.endsWith('.onnx'))
-      .map(f => f.replace('.onnx', ''));
-    if (availableModels.length === 0) {
-      console.warn('[upscale-pro] No ONNX models found in', modelDir);
-      return null;
-    }
-
-    // 选择模型：根据scale选择合适的模型
-    let modelName = 'realesrgan-x4plus-fp16'; // 默认使用x4plus fp16模型（体积小速度快）
-    if (!availableModels.includes(modelName)) {
-      const alternatives = ['realesrgan-x4plus', 'RealESRGAN_x4plus', 'realesrgan-x2plus'];
-      modelName = alternatives.find(m => availableModels.includes(m)) || availableModels[0];
-    }
-
-    // 先将图片下载/保存到临时文件
-    let inputPath: string;
-    if (imageUrl.startsWith('data:')) {
-      const matches = imageUrl.match(/^data:image\/(\w+);base64,(.+)$/);
-      if (!matches) {
-        console.warn('[upscale-pro] Invalid data URL format');
-        return null;
-      }
-      const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1];
-      const buffer = Buffer.from(matches[2], 'base64');
-      inputPath = path.join('/tmp', `upscale-input-${Date.now()}.${ext}`);
-      fs.writeFileSync(inputPath, buffer);
-    } else if (imageUrl.startsWith('/') || imageUrl.startsWith('/api/')) {
-      const baseUrl = process.env.DEPLOY_RUN_PORT
-        ? `http://localhost:${process.env.DEPLOY_RUN_PORT}`
-        : 'http://localhost:5000';
-      inputPath = path.join('/tmp', `upscale-input-${Date.now()}.png`);
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30000);
-      let downloadCompleted = false;
-      try {
-        const resp = await fetch(`${baseUrl}${imageUrl}`, { signal: controller.signal });
-        if (!resp.ok) {
-          console.warn(`[upscale-pro] Failed to download local image: ${resp.status}`);
-          return null;
-        }
-        const buf = Buffer.from(await resp.arrayBuffer());
-        downloadCompleted = true;
-        fs.writeFileSync(inputPath, buf);
-      } finally {
-        // The deadline owns both response headers and the complete body.
-        clearTimeout(timeout);
-        if (!downloadCompleted) controller.abort();
-      }
-    } else {
-      // 外部 URL — 带重试机制，避免偶发网络问题导致降级
-      inputPath = path.join('/tmp', `upscale-input-${Date.now()}.png`);
-      let lastError: Error | null = null;
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 30000);
-        let downloadCompleted = false;
-        try {
-          const resp = await fetch(imageUrl, { signal: controller.signal });
-          if (!resp.ok) {
-            controller.abort();
-            console.warn(`[upscale-pro] Failed to download remote image (attempt ${attempt}/3): ${resp.status}`);
-            lastError = new Error(`HTTP ${resp.status}`);
-            if (attempt < 3) { await new Promise(r => setTimeout(r, 1000 * attempt)); continue; }
-            return null;
-          }
-          const buf = Buffer.from(await resp.arrayBuffer());
-          downloadCompleted = true;
-          fs.writeFileSync(inputPath, buf);
-          lastError = null;
-          break;
-        } catch (err: unknown) {
-          controller.abort();
-          lastError = err instanceof Error ? err : new Error(String(err));
-          console.warn(`[upscale-pro] Download remote image failed (attempt ${attempt}/3): ${lastError.message}`);
-          if (attempt < 3) { await new Promise(r => setTimeout(r, 1000 * attempt)); }
-        } finally {
-          clearTimeout(timeout);
-          if (!downloadCompleted) controller.abort();
-        }
-      }
-      if (lastError) return null;
-    }
-
-    // 计算tile大小：根据图片尺寸动态调整，避免OOM
-    const sharp = await import('sharp');
-    const metadata = await sharp.default(inputPath).metadata();
-    let maxDim = Math.max(metadata.width || 512, metadata.height || 512);
-    // ONNX Real-ESRGAN x4模型固定4×放大
-    // 策略：先让模型4×放大，再精确resize到目标尺寸(origW*scale × origH*scale)
-    // 对于2×：可先用sharp缩小到一半再4×放大(2×效果)，或直接4×再缩小
-    // 直接4×再缩小更简单且质量更好（模型4×输出包含更多细节，缩小不会丢失）
-    // 对于超大图(>1024px)先缩小输入避免CPU超时，缩小后4×放大+resize补偿
-    const maxInputSize = 1024;
-    if (maxDim > maxInputSize) {
-      const ratio = maxInputSize / maxDim;
-      const newW = Math.round((metadata.width || 512) * ratio);
-      const newH = Math.round((metadata.height || 512) * ratio);
-      const resizedBuf = await sharp.default(inputPath)
-        .resize(newW, newH, { kernel: 'lanczos3' })
-        .png()
-        .toBuffer();
-      const resizedPath = inputPath.replace(/(\.\w+)$/, '-resized$1');
-      fs.writeFileSync(resizedPath, resizedBuf);
-      inputPath = resizedPath;
-      maxDim = Math.max(newW, newH);
-      // 注意：不修改effectiveScale，保持用户选择的倍率
-      // 后续会精确resize到目标尺寸 origW*scale × origH*scale
-    }
-
-    // 计算tile大小：输入已缩放到 ≤1024px，固定 512 tile 使分块数从 64(128px) 降至 4(512px)，
-    // 推理总像素不变但每块固定开销（session.run/numpy/文件IO）减少约 16 倍，CPU 放大显著提速
-    const tileSize = 512;
-
-    console.log(`[upscale-pro] ONNX upscale: input=${maxDim}px, model=${modelName}, tile=${tileSize}, target=${scale}x (model=4x then resize)`);
-
-    // 调用Python ONNX脚本
-    if ((metadata.width || 512) * (metadata.height || 512) > 512 * 512) {
-      expectedOutputFile = path.join(tmpdir(), `upscale_onnx_${randomUUID()}.png`);
-    }
-    const params = JSON.stringify({
-      inputFile: inputPath,
-      scale: 4,  // ONNX Real-ESRGAN 模型固定4×放大，后续用sharp精确resize到目标尺寸
-      tileSize,
-      model: modelName,
-      ...(expectedOutputFile ? { outputFile: expectedOutputFile } : {}),
-    });
-
-    const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-      const proc = execFile(
-        'python3',
-        [scriptPath],
-        { timeout: 600000, maxBuffer: 50 * 1024 * 1024 },
-        (error, stdout, stderr) => {
-          if (error) {
-            reject(error);
-          } else {
-            resolve({ stdout, stderr });
-          }
-        },
-      );
-      proc.stdin?.write(params);
-      proc.stdin?.end();
-    });
-
-    // 清理输入临时文件
-    try { fs.unlinkSync(inputPath); } catch {}
-
-    // 解析输出 — Python脚本返回 outputFile（文件路径）或 image（base64编码的图片数据）
-    const output = JSON.parse(result.stdout.trim());
-    if (!output.success) {
-      console.warn(`[upscale-pro] ONNX upscale failed: ${output.error || result.stderr.slice(0, 200)}`);
-      return null;
-    }
-
-    const reportedOutput = resolveOnnxReportedOutput(output, expectedOutputFile);
-    if (!reportedOutput) {
-      console.warn('[upscale-pro] ONNX upscale: output identity mismatch or no output');
-      return null;
-    }
-    let resultUrl = reportedOutput.kind === 'file' ? reportedOutput.path : reportedOutput.url;
-
-    // 精确resize到目标尺寸：ONNX模型固定4×放大，但用户可能选2×/4×/8×
-    // 始终检查并精确调整到 origW*scale × origH*scale
-    const originalWidth = metadata.width || 512;
-    const originalHeight = metadata.height || 512;
-    const targetW = originalWidth * scale;
-    const targetH = originalHeight * scale;
-    // 需要resize的情况：输入被缩小过、scale≠4、或tile对齐偏差
-    // 始终精确调整到 origW*scale × origH*scale
-    {
-      if (reportedOutput.kind === 'file') {
-        const resizedBuf = await sharp.default(reportedOutput.path)
-          .resize(targetW, targetH, { kernel: 'lanczos3' })
-          .png()
-          .toBuffer();
-        fs.writeFileSync(reportedOutput.path, resizedBuf);
-        console.log(`[upscale-pro] ONNX output resized to ${targetW}x${targetH}`);
-      } else {
-        // base64 data URL — decode, resize, re-encode
-        const base64Match = resultUrl.match(/^data:image\/(png|jpeg|webp);base64,(.+)$/);
-        if (base64Match) {
-          const imgBuf = Buffer.from(base64Match[2], 'base64');
-          const resizedBuf = await sharp.default(imgBuf)
-            .resize(targetW, targetH, { kernel: 'lanczos3' })
-            .png()
-            .toBuffer();
-          resultUrl = `data:image/png;base64,${resizedBuf.toString('base64')}`;
-          console.log(`[upscale-pro] ONNX base64 output resized to ${targetW}x${targetH}`);
-        }
-      }
-    }
-
-    // 如果输出是文件路径，保存到持久化目录
-    if (reportedOutput.kind === 'file') {
-      const fileName = path.basename(reportedOutput.path);
-      const outputDir = UPSCALE_OUTPUT_DIR;
-      if (!fs.existsSync(outputDir)) {
-        fs.mkdirSync(outputDir, { recursive: true });
-      }
-      const destPath = path.join(outputDir, fileName);
-      fs.copyFileSync(reportedOutput.path, destPath);
-      try { fs.unlinkSync(reportedOutput.path); } catch {}
-      resultUrl = `${UPSCALE_OUTPUT_URL_PREFIX}${fileName}`;
-    } else if (resultUrl.startsWith('data:')) {
-      const persistedUrl = await persistResult(resultUrl);
-      resultUrl = persistedUrl;
-    }
-
-    console.log(`[upscale-pro] ONNX Real-ESRGAN success: ${resultUrl.slice(0, 80)}`);
-    return { url: resultUrl, model: `ONNX-${modelName}`, strategy: 'local-Real-ESRGAN' };
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    console.warn(`[upscale-pro] ONNX Real-ESRGAN error: ${errMsg}`);
+    workDir = await mkdtemp(path.join(tmpdir(), 'wujie-upscale-'));
+    const inputFile = path.join(workDir, 'input.png');
+    const outputFile = path.join(workDir, 'output.png');
+    const prepared = await source.resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+      .png().toBuffer({ resolveWithObject: true });
+    await writeFile(inputFile, prepared.data);
+    const output = JSON.parse(await runLocalPython([ONNX_WORKER], {
+      timeout: 120_000,
+      input: JSON.stringify({ inputFile, outputFile, scale: 4, model: ONNX_MODEL }),
+      env: ONNX_WORKER_ENV,
+    }));
+    const reported = output?.success === true && output.model === ONNX_MODEL
+      ? resolveOnnxReportedOutput(output, outputFile) : null;
+    if (reported?.kind !== 'file') return null;
+    const file = await lstat(reported.path);
+    if (!file.isFile() || file.size > 64 * 1024 * 1024) return null;
+    const result = sharp(await readFile(reported.path), { limitInputPixels: 4096 ** 2 });
+    const metadata = await result.metadata();
+    if (metadata.format !== 'png' || metadata.width !== prepared.info.width * 4
+      || metadata.height !== prepared.info.height * 4) return null;
+    const resized = await result.resize(width * scale, height * scale, { fit: 'fill' }).png().toBuffer();
+    const url = saveImageFile(resized, `upscale-onnx-${randomUUID()}.png`, 'uploads/upscale');
+    return { url, model: `ONNX-${ONNX_MODEL}`, strategy: 'local-Real-ESRGAN' };
+  } catch {
+    console.warn('[upscale-pro] Local ONNX fallback failed or was busy');
     return null;
   } finally {
-    if (expectedOutputFile) {
-      try { (await import('fs')).unlinkSync(expectedOutputFile); } catch {}
+    if (workDir) {
+      const { rm } = await import('node:fs/promises');
+      await rm(workDir, { recursive: true, force: true }).catch(() => {});
     }
   }
 }
@@ -1195,7 +1002,7 @@ async function performUpscaleChain(
   }
 
   // 策略2: 本地 ONNX Real-ESRGAN
-  const localResult = await upscaleViaOnnx(imageUrl, scale, face);
+  const localResult = await upscaleViaOnnx(imageUrl, scale);
   if (localResult?.url) {
     // 策略2.5: ONNX放大后追加AI画质精修（带关键词约束，仅修复画质不改变内容）
     let enhancedUrl = localResult.url;
@@ -1245,5 +1052,5 @@ async function performUpscaleChain(
     }
   }
 
-  return { success: false, error: '所有放大策略均失败：云端API(PearAPI/fal.ai)不可用、本地放大服务未启动' };
+  return { success: false, error: '云端放大与已配置的本地 ONNX 策略均未完成放大' };
 }

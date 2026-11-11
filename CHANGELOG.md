@@ -177,7 +177,7 @@
 ### 🔒 P0 生产环境数据丢失修复
 - detectAndRecoverOrphanedUsers：启动时自动检测并恢复孤立用户
 - 修复 db-storage.ts 循环依赖、authSecret 警告刷屏、readStore 回退覆盖生产数据
-- 临时密码 wujie_reset_2024 恢复孤立账号
+- 管理员通过密码重置流程恢复孤立账号。
 
 ### ⚡ P0 任务并发控制
 - task-registry 每用户最大 15 并发、全局 500 任务上限、自动排队

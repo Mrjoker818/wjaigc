@@ -219,6 +219,35 @@ async function openEditor(s:Session,name:string):Promise<void>{const explicit=gr
 let captureIndex=0;
 async function capture(s:Session,e:BREntry,label:string):Promise<void>{const dir=path.resolve('output/playwright/canvas-group-br-native-20261019',String(process.pid));await mkdir(dir,{recursive:true});const file=path.join(dir,e.theme+'-'+e.width+'x'+e.height+'-'+(++captureIndex)+'-'+label+'.png');await s.page.screenshot({path:file});console.log('BR_CAPTURE',JSON.stringify({path:file,label,coze:false,physicalAndroid:false,serverPersistence:false}));}
 async function check(e:BREntry,run:(s:Session)=>Promise<void>):Promise<void>{await withSession(e.theme,e.width,e.height,{touch:true},async s=>{try{await group(s).waitFor();for(const name of ['折叠','取消分组'])await audit(group(s).getByRole('button',{name,exact:true}),name);await capture(s,e,'before-action');await run(s);await capture(s,e,'end');}catch(error){await capture(s,e,'failure');throw error;}});}
+it('BR mobile ungroup ignores a cancelled touch and accepts keyboard activation', async () => {
+  await withSession('mono', 390, 844, { touch: true }, async s => {
+    const before = await snapshot(s);
+    const ungroup = group(s).getByRole('button', { name: '取消分组', exact: true });
+    const bounds = await ungroup.boundingBox();
+    if (!bounds) throw Error('BR_UNGROUP_RECT');
+    const x = bounds.x + bounds.width / 2;
+    const y = bounds.y + bounds.height / 2;
+    const cdp = await s.context.newCDPSession(s.page);
+    try {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
+    } finally {
+      await cdp.detach();
+    }
+    await settle(s.page);
+    expect((await snapshot(s)).groups).toEqual(before.groups);
+    expect((await snapshot(s)).images).toEqual(before.images);
+
+    await ungroup.focus();
+    await s.page.keyboard.press('Enter');
+    await group(s).waitFor({ state: 'detached' });
+    const after = await snapshot(s);
+    expect(after.groups).toEqual([]);
+    expect(after.images).toEqual((before.images as BRImage[]).map(image =>
+      image.id === 'br-keep' ? image : { ...image, groupId: undefined },
+    ));
+  });
+}, 25000);
 for(const e of MATRIX){
  it('BR '+e.theme+' '+e.width+'x'+e.height+' group fold and expand preserves every image and metadata',async()=>{await check(e,async s=>{const before=await snapshot(s);await tap(s,group(s).getByRole('button',{name:'折叠',exact:true}));expect(await s.page.locator('[data-canvas-image-id="br-A"]').isVisible()).toBe(false);expect(await s.page.locator('[data-canvas-image-id="br-B"]').isVisible()).toBe(false);const folded=await snapshot(s);expect((folded.groups as BRGroup[])[0].collapsed).toBe(true);expect(folded.images).toEqual(before.images);await tap(s,group(s).getByRole('button',{name:'展开',exact:true}));expect(await s.page.locator('[data-canvas-image-id="br-A"]').isVisible()).toBe(true);expect(await s.page.locator('[data-canvas-image-id="br-B"]').isVisible()).toBe(true);const after=await snapshot(s);expect(after.groups).toEqual(before.groups);expect(after.images).toEqual(before.images);expect(after.view).toEqual(before.view);expect(after.actions).toEqual([]);console.log('BR_FOLD',JSON.stringify({folded:(folded.groups as BRGroup[])[0].collapsed,restored:after.groups,view:after.view}));});},25000);
  it('BR '+e.theme+' '+e.width+'x'+e.height+' group edits name and note then cancels a later edit',async()=>{await check(e,async s=>{const before=await snapshot(s);await openEditor(s,'BR 原组名');const fields=s.page.getByRole('textbox');await audit(fields.nth(0),'组名',true);await audit(fields.nth(1),'备注',true);await capture(s,e,'editor-open');await fields.nth(0).fill('BR 新组名');await tap(s,fields.nth(1));const survived=await fields.count();expect.soft(survived,'switching to note retains editor').toBe(2);if(survived===2)await fields.nth(1).fill('BR 新备注');const save=s.page.getByRole('button',{name:'保存',exact:true});if(await save.count()){await audit(save,'保存');await tap(s,save);}else{await s.page.touchscreen.tap(e.width-12,e.height-104);await settle(s.page);}const saved=await snapshot(s);expect.soft(saved.groups).toEqual((before.groups as BRGroup[]).map(v=>({...v,name:'BR 新组名',note:'BR 新备注'})));expect(saved.images).toEqual(before.images);expect(saved.view).toEqual(before.view);await openEditor(s,'BR 新组名');await s.page.getByRole('textbox').nth(0).fill('BR 不保存');const cancel=s.page.getByRole('button',{name:'取消',exact:true});if(await cancel.count()){await audit(cancel,'取消编辑');await tap(s,cancel);}else await s.page.keyboard.press('Escape');const after=await snapshot(s);expect(after.groups).toEqual(saved.groups);expect(after.images).toEqual(before.images);expect(after.view).toEqual(before.view);expect(after.actions).toEqual([]);console.log('BR_EDIT',JSON.stringify({noteEditorSurvived:survived===2,saved:saved.groups,afterCancel:after.groups,view:after.view}));});},25000);

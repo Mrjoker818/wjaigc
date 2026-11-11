@@ -1,6 +1,7 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { matchBlockedPath } from './verify-deploy-package.mjs';
 
 const EXCLUDED_PROJECT_DIRS = [
   '.tmp',
@@ -57,11 +58,14 @@ async function main() {
   let removed = 0;
 
   for (const traceFile of traceFiles) {
-    const trace = await readTraceWhenAvailable(traceFile);
+    const trace = await readTraceWhenAvailable(traceFile).catch(() => {
+      throw new Error(`Cannot read NFT manifest ${JSON.stringify(path.relative(projectRoot, traceFile))}.`);
+    });
     const files = Array.isArray(trace.files) ? trace.files : [];
     const filtered = files.filter((file) => {
       const resolved = path.resolve(path.dirname(traceFile), file);
-      const excluded = excludedRoots.some((root) => isInside(root, resolved));
+      const excluded = Boolean(matchBlockedPath(resolved))
+        || excludedRoots.some((root) => isInside(root, resolved));
       if (excluded) removed += 1;
       return !excluded;
     });

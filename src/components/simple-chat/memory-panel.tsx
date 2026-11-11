@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Brain, Loader2, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 export interface MemoryItem {
   id: string;
@@ -41,6 +42,7 @@ export function MemoryPanel({ memories, onClose, onAdd, onDelete, isLoading, isP
   const [error, setError] = useState<string | null>(null);
   const active = useRef(true);
   const actionInFlight = useRef(false);
+  const returnFocus = useRef<HTMLElement | null>(null);
   const pending = busy || isPending || isLoading;
 
   useEffect(() => {
@@ -85,16 +87,22 @@ export function MemoryPanel({ memories, onClose, onAdd, onDelete, isLoading, isP
   };
 
   return (
-    <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div
-        role="dialog" aria-label="AI 记忆" aria-modal="true"
-        className="flex max-h-[calc(100dvh-2rem)] min-h-0 w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
-        onClick={e => e.stopPropagation()}
+    <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
+      <DialogContent
+        showCloseButton={false} aria-describedby={undefined} aria-modal="true"
+        onCloseAutoFocus={event => {
+          if (returnFocus.current?.isConnected) {
+            event.preventDefault();
+            returnFocus.current.focus();
+          }
+        }}
+        onOpenAutoFocus={() => { returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; }}
+        className="flex max-h-[calc(100dvh-2rem)] min-h-0 w-full max-w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden rounded-2xl border-border p-0 shadow-2xl sm:max-w-lg"
       >
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-3">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
             <Brain size={17} className="text-primary" />
-            <h2 className="text-sm font-semibold">AI 记忆</h2>
+            <DialogTitle className="text-sm font-semibold">AI 记忆</DialogTitle>
             <span className="basis-full text-xs text-muted-foreground sm:basis-auto">跨对话记住你的偏好</span>
           </div>
           <button onClick={onClose} aria-label="关闭记忆面板" className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted">
@@ -152,7 +160,11 @@ export function MemoryPanel({ memories, onClose, onAdd, onDelete, isLoading, isP
               aria-label="记忆内容"
               value={newContent}
               onChange={e => setNewContent(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); void handleAdd(); } }}
+              onKeyDown={e => {
+                if (e.key !== "Enter" || e.nativeEvent.isComposing || e.keyCode === 229) return;
+                e.preventDefault();
+                void handleAdd();
+              }}
               placeholder="例如：我偏好简洁有力的短句风格..."
               className="min-h-11 min-w-0 flex-1 rounded-lg border border-border bg-muted px-3 py-2 text-base outline-none placeholder:text-foreground/75 focus:border-primary/50"
             />
@@ -166,7 +178,7 @@ export function MemoryPanel({ memories, onClose, onAdd, onDelete, isLoading, isP
             </button>
           </div>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

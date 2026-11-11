@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useLayoutEffect, useState } from 'react';
 
 export interface VenueRegion {
   id: string;
@@ -55,17 +55,42 @@ export function VenueRegionCanvas({
   className = '',
 }: VenueRegionCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const imgRef = useRef<HTMLImageElement | null>(null);
+  const [loaded, setLoaded] = useState<{ url: string; image: HTMLImageElement } | null>(null);
+  const image = loaded?.url === imageUrl ? loaded.image : null;
 
-  const draw = useCallback(() => {
+  useEffect(() => {
+    setLoaded(null);
+    if (!imageUrl) return;
+    const image = new Image();
+    let current = true;
+    image.crossOrigin = 'anonymous';
+    image.onload = () => {
+      if (current && image.naturalWidth > 0 && image.naturalHeight > 0) setLoaded({ url: imageUrl, image });
+    };
+    image.src = imageUrl;
+    return () => {
+      current = false;
+      image.onload = null;
+    };
+  }, [imageUrl]);
+
+  useLayoutEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !imgRef.current) return;
+    if (!canvas) return;
+    if (!image) {
+      canvas.width = canvas.width;
+      return;
+    }
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    const width = canvas.parentElement?.clientWidth || 600;
+    const height = Math.max(1, Math.round(width * image.naturalHeight / image.naturalWidth));
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
     const { width: cw, height: ch } = canvas;
     ctx.clearRect(0, 0, cw, ch);
-    ctx.drawImage(imgRef.current, 0, 0, cw, ch);
+    ctx.drawImage(image, 0, 0, cw, ch);
 
     regions.forEach((region) => {
       if (!hasVenueRegionCoordinates(region)) return;
@@ -106,39 +131,19 @@ export function VenueRegionCanvas({
       ctx.fillStyle = '#fff';
       ctx.fillText(label, pillX + 6, pillY + pillH - 5);
     });
-  }, [regions, selectedRegionId]);
+  }, [image, regions, selectedRegionId]);
 
-  // Load image and draw
-  useEffect(() => {
-    if (!imageUrl) return;
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      imgRef.current = img;
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      // Set canvas size to match image aspect ratio within container
-      const containerW = canvas.parentElement?.clientWidth || 600;
-      const aspect = img.naturalHeight / img.naturalWidth;
-      canvas.width = containerW;
-      canvas.height = Math.round(containerW * aspect);
-      draw();
-    };
-    img.src = imageUrl;
-  }, [imageUrl, draw]);
-
-  // Redraw when regions/selection change
-  useEffect(() => {
-    if (imgRef.current) draw();
-  }, [draw]);
-
-  const handleClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!onSelectRegion || regions.length === 0) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+  const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!image || !onSelectRegion || regions.length === 0) return;
+    const canvas = e.currentTarget;
     const rect = canvas.getBoundingClientRect();
-    const mx = (e.clientX - rect.left) / rect.width;
-    const my = (e.clientY - rect.top) / rect.height;
+    if (rect.width <= 0 || rect.height <= 0) return;
+    // Match the centered object-fit: contain box used to display the bitmap.
+    const scale = Math.min(rect.width / canvas.width, rect.height / canvas.height);
+    const width = canvas.width * scale, height = canvas.height * scale;
+    const mx = (e.clientX - rect.left - (rect.width - width) / 2) / width;
+    const my = (e.clientY - rect.top - (rect.height - height) / 2) / height;
+    if (mx < 0 || mx > 1 || my < 0 || my > 1) return;
 
     // Find topmost region containing click (last = topmost visually)
     const hit = [...regions].reverse().find((r) => {
@@ -147,14 +152,16 @@ export function VenueRegionCanvas({
       return mx >= x && mx <= x + w && my >= y && my <= y + h;
     });
     if (hit) onSelectRegion(hit.id);
-  }, [regions, onSelectRegion]);
+  };
 
   return (
     <canvas
       ref={canvasRef}
       onClick={handleClick}
+      role="img"
+      aria-label="场馆区域标注图"
       className={`block w-full rounded-lg cursor-pointer ${className}`}
-      style={{ maxHeight: '360px', objectFit: 'contain' }}
+      style={{ maxHeight: '360px', objectFit: 'contain', objectPosition: 'center' }}
     />
   );
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   mergeWorkflowIntoProjectMetadata,
+  retainSavedProjectWorkflow,
   workflowFromProjectMetadata,
 } from '@/lib/project-workflow';
 import type { Workflow } from '@/lib/workflow-engine';
@@ -39,5 +40,17 @@ describe('project workflow restoration', () => {
     expect(workflowFromProjectMetadata({ workflow: { ...workflow, nodes: null } })).toBeNull();
     expect(workflowFromProjectMetadata({ workflow: { ...workflow, id: '' } })).toBeNull();
     expect(workflowFromProjectMetadata(null)).toBeNull();
+  });
+
+  it('keeps the acknowledged workflow when an older canvas snapshot is written or recovered', () => {
+    const pendingCanvas = { workflow, groups: [{ id: 'group-1', name: 'Group', note: '', imageIds: [] }] };
+    const acknowledged = { ...workflow, name: 'Latest saved workflow', updatedAt: 2 };
+
+    const metadata = retainSavedProjectWorkflow(pendingCanvas, { workflow: acknowledged });
+
+    expect(workflowFromProjectMetadata(metadata)).toEqual(acknowledged);
+    expect(metadata.groups).toEqual(pendingCanvas.groups);
+    expect(pendingCanvas.workflow).toBe(workflow);
+    expect(retainSavedProjectWorkflow(pendingCanvas, {})).toEqual({ groups: pendingCanvas.groups });
   });
 });

@@ -101,6 +101,13 @@ interface AuditLogView extends AuditLogEntry {
   target_type?: string;
   target_id?: string;
   level?: string;
+  error_message?: string | null;
+  resolution_status?: string | null;
+  provider_id?: string | null;
+  duration_ms?: number | null;
+  stack_trace?: string | null;
+  request_data?: unknown;
+  response_status?: number | null;
 }
 
 type BillingModelCategoryFilter = 'all' | BillingModelCategory;
@@ -421,6 +428,7 @@ export default function AdminTabs(props: AdminTabsProps) {
   const [auditTotal, setAuditTotal] = useState(0);
   const [auditAiAnalysis, setAuditAiAnalysis] = useState<Record<string, string>>({});
   const [auditAiLoading, setAuditAiLoading] = useState<string | null>(null);
+  const auditActionOwner = useRef<symbol | null>(null);
 
   /* ── Settings state ── */
   const [systemSettings, setSystemSettings] = useState<Record<string, string>>({});
@@ -486,7 +494,8 @@ export default function AdminTabs(props: AdminTabsProps) {
     setAuditStats(null);
     setAuditStatsError(false);
     setAuditStatsLoading(false);
-    return () => { auditActive.current = false; auditScope.current++; };
+    setAuditAiLoading(null);
+    return () => { auditActive.current = false; auditScope.current++; auditActionOwner.current = null; };
   }, [activeTab]);
 
   const denyAuditAccess = useCallback((requestId: number, resource: 'logs' | 'stats') => {
@@ -502,6 +511,8 @@ export default function AdminTabs(props: AdminTabsProps) {
     setAuditHasSnapshot(false);
     setAuditExpandedId(null);
     setAuditAiAnalysis({});
+    auditActionOwner.current = null;
+    setAuditAiLoading(null);
     setAuditLoadError('forbidden');
   }, []);
 
@@ -1338,7 +1349,8 @@ export default function AdminTabs(props: AdminTabsProps) {
                       return (
                         <div key={key} className="flex min-w-0 items-center justify-between gap-3 py-2 px-3 bg-muted/30 rounded-lg">
                           <div className="min-w-0 flex-1"><span className="text-sm text-foreground [overflow-wrap:anywhere]">{label}</span><p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">{desc}</p></div>
-                          <button onClick={handleToggle} className={`relative h-11 w-12 shrink-0 rounded-lg transition-colors before:absolute before:inset-x-0 before:top-1/2 before:h-6 before:-translate-y-1/2 before:rounded-full before:content-[''] ${has ? 'before:bg-primary' : 'before:bg-muted'}`}>
+                          <button type="button" role="switch" aria-label={label} aria-checked={has} onClick={handleToggle}
+                            className={`relative h-11 w-12 shrink-0 rounded-lg transition-colors before:absolute before:inset-x-0 before:top-1/2 before:h-6 before:-translate-y-1/2 before:rounded-full before:content-[''] ${has ? 'before:bg-primary' : 'before:bg-muted'}`}>
                             <span className={`pointer-events-none absolute top-1/2 w-4 h-4 -translate-y-1/2 rounded-full bg-white shadow transition-transform ${has ? 'left-7' : 'left-1'}`} />
                           </button>
                         </div>
@@ -2046,54 +2058,61 @@ export default function AdminTabs(props: AdminTabsProps) {
       info: { icon: CheckCircle2, color: 'text-blue-500', label: '信息' },
     };
     const resolutionLabels: Record<string, { label: string; color: string }> = {
-      unresolved: { label: '未处理', color: 'bg-destructive/15 text-destructive' },
-      investigating: { label: '调查中', color: 'bg-yellow-500/15 text-yellow-500' },
+      none: { label: '未处理', color: 'bg-destructive/15 text-destructive' },
+      analyzing: { label: '调查中', color: 'bg-yellow-500/15 text-yellow-500' },
+      fixing: { label: '处理中', color: 'bg-yellow-500/15 text-yellow-500' },
       resolved: { label: '已解决', color: 'bg-green-500/15 text-green-500' },
-      ignored: { label: '已忽略', color: 'bg-muted text-muted-foreground' },
+      wontfix: { label: '已忽略', color: 'bg-muted text-muted-foreground' },
     };
 
-    const handleAiAnalyze = async (logId: string) => {
+    const runAuditAction = async (
+      logId: string,
+      body: { action: 'analyze'; logIds: string[] }
+        | { action: 'fix'; logId: string; fixAction: string }
+        | { action: 'resolve'; logId: string; status: string; detail: string },
+    ) => {
+      if (!auditActive.current || auditPermissionBarrier.current !== null || auditActionOwner.current) return;
+      const owner = Symbol();
+      auditActionOwner.current = owner;
+      const scope = auditScope.current;
+      const requestId = ++auditRequestId.current;
+      const isCurrent = () => auditActive.current && auditScope.current === scope && auditActionOwner.current === owner;
+      setAuditExpandedId(logId);
       setAuditAiLoading(logId);
       try {
         const res = await fetch('/api/admin/op-log', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'ai-analyze', logId }),
+          body: JSON.stringify(body),
         });
-        if (res.ok) {
-          const data = await res.json();
-          setAuditAiAnalysis(prev => ({ ...prev, [logId]: data.analysis || '分析失败' }));
+        if (!isCurrent()) return;
+        if (res.status === 401 || res.status === 403) {
+          denyAuditAccess(requestId, 'logs');
+          return;
         }
-      } catch { setAuditAiAnalysis(prev => ({ ...prev, [logId]: '分析请求失败' })); }
-      finally { setAuditAiLoading(null); }
-    };
+        const data = await res.json();
+        if (!isCurrent()) return;
+        if (!res.ok || data.success !== true) throw new Error('AUDIT_ACTION_UNCONFIRMED');
 
-    const handleAiFix = async (logId: string) => {
-      setAuditAiLoading('fix-' + logId);
-      try {
-        const res = await fetch('/api/admin/op-log', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'ai-fix', logId }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setAuditAiAnalysis(prev => ({ ...prev, [logId]: (prev[logId] || '') + '\n\n🔧 修复结果:\n' + (data.result || '修复完成') }));
-          loadAuditLogs(auditPage, auditFilterAction, auditFilterLevel, auditFilterUserId);
+        if (body.action === 'analyze') {
+          const analysis = data.analysis;
+          if (!analysis) throw new Error('AUDIT_ANALYSIS_MISSING');
+          const text = typeof analysis === 'string' ? analysis : JSON.stringify(analysis, null, 2);
+          setAuditAiAnalysis(prev => ({ ...prev, [logId]: text }));
+        } else if (body.action === 'fix') {
+          const message = data.fixResult?.message;
+          if (data.fixResult?.success !== true || typeof message !== 'string') throw new Error('AUDIT_SUGGESTION_MISSING');
+          setAuditAiAnalysis(prev => ({ ...prev, [logId]: message }));
         }
-      } catch { setAuditAiAnalysis(prev => ({ ...prev, [logId]: (prev[logId] || '') + '\n\n修复请求失败' })); }
-      finally { setAuditAiLoading(null); }
-    };
-
-    const handleResolution = async (logId: string, status: string) => {
-      try {
-        await fetch('/api/admin/op-log', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'resolve', logId, resolutionStatus: status, resolutionDetail: `管理员标记为${resolutionLabels[status]?.label || status}` }),
-        });
-        loadAuditLogs(auditPage, auditFilterAction, auditFilterLevel, auditFilterUserId);
-      } catch {}
+        if (body.action !== 'fix') void loadAuditLogs(auditPage, auditFilterAction, auditFilterLevel, auditFilterUserId);
+      } catch {
+        if (isCurrent()) setAuditAiAnalysis(prev => ({ ...prev, [logId]: '日志操作尚未确认，请核对当前状态。' }));
+      } finally {
+        if (isCurrent()) {
+          auditActionOwner.current = null;
+          setAuditAiLoading(null);
+        }
+      }
     };
 
     return (
@@ -2193,11 +2212,19 @@ export default function AdminTabs(props: AdminTabsProps) {
                   const level = String(log.level || 'info');
                   const logId = String(log.id || i);
                   const isExpanded = auditExpandedId === logId;
-                  const isDanger = level === 'error';
+                  const isDanger = level === 'error' || level === 'critical';
                   const li = levelIcons[level] || levelIcons.info;
                   const LevelIcon = li.icon;
-                  const resStatus = String(log.resolutionStatus || 'unresolved');
-                  const resInfo = resolutionLabels[resStatus] || resolutionLabels.unresolved;
+                  const resStatus = log.resolution_status || log.resolutionStatus || 'none';
+                  const resInfo = resolutionLabels[resStatus] || resolutionLabels.none;
+                  const error = log.error_message ?? log.errorMessage;
+                  const provider = log.provider_id ?? log.providerId;
+                  const duration = log.duration_ms ?? log.duration;
+                  const stackTrace = log.stack_trace ?? log.stackTrace;
+                  const requestData = log.request_data ?? log.requestData;
+                  const suggestedAction = log.response_status === 429 ? 'clear_rate_limit'
+                    : log.response_status === 401 || log.response_status === 403 ? 'check_api_key'
+                    : 'adjust_model_params';
                   return (
                     <React.Fragment key={logId}>
                       <tr className={`border-b border-border/30 hover:bg-muted/30 transition-colors ${isDanger ? 'bg-destructive/5' : ''}`}>
@@ -2205,13 +2232,13 @@ export default function AdminTabs(props: AdminTabsProps) {
                         <td className="py-2.5 px-3"><span className={`inline-flex items-center gap-1 text-xs font-medium ${li.color}`}><LevelIcon className="w-3 h-3" />{li.label}</span></td>
                         <td className="py-2.5 px-3 text-foreground font-medium text-xs truncate max-w-20" title={String(log.user_name || log.user_id || '-')}>{String(log.user_name || log.user_id || '-')}</td>
                         <td className="py-2.5 px-3"><span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${actionColors[action] || 'bg-muted text-muted-foreground'}`}>{actionLabels[action] || action}</span></td>
-                        <td className="py-2.5 px-3 text-muted-foreground text-xs truncate max-w-64" title={String(log.errorMessage || log.detail || '')}>{String(log.errorMessage || log.detail || '-')}</td>
+                        <td className="py-2.5 px-3 text-muted-foreground text-xs truncate max-w-64" title={String(error || log.detail || '')}>{String(error || log.detail || '-')}</td>
                         <td className="py-2.5 px-3"><span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${resInfo.color}`}>{resInfo.label}</span></td>
                         <td className="py-2.5 px-3">
                           <div className="flex items-center gap-1">
                             <button onClick={() => setAuditExpandedId(isExpanded ? null : logId)} className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground" title="展开详情"><ChevronDown className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`} /></button>
-                            {isDanger && <button onClick={() => handleAiAnalyze(logId)} disabled={auditAiLoading === logId} className="p-1 rounded hover:bg-primary/15 text-muted-foreground hover:text-primary" title="AI分析"><Brain className="w-3.5 h-3.5" /></button>}
-                            {isDanger && resStatus !== 'resolved' && <button onClick={() => handleAiFix(logId)} disabled={auditAiLoading === 'fix-' + logId} className="p-1 rounded hover:bg-green-500/15 text-muted-foreground hover:text-green-500" title="AI修复"><Wrench className="w-3.5 h-3.5" /></button>}
+                            {isDanger && <button onClick={() => void runAuditAction(logId, { action: 'analyze', logIds: [logId] })} disabled={auditAiLoading !== null} className="p-1 rounded hover:bg-primary/15 text-muted-foreground hover:text-primary" title="AI分析"><Brain className="w-3.5 h-3.5" /></button>}
+                            {isDanger && resStatus !== 'resolved' && <button onClick={() => void runAuditAction(logId, { action: 'fix', logId, fixAction: suggestedAction })} disabled={auditAiLoading !== null} className="p-1 rounded hover:bg-green-500/15 text-muted-foreground hover:text-green-500" title="修复建议"><Wrench className="w-3.5 h-3.5" /></button>}
                           </div>
                         </td>
                       </tr>
@@ -2223,23 +2250,23 @@ export default function AdminTabs(props: AdminTabsProps) {
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
                                 <div><span className="text-muted-foreground">用户ID:</span> <span className="text-foreground font-mono">{String(log.user_id || '-')}</span></div>
                                 <div><span className="text-muted-foreground">目标:</span> <span className="text-foreground">{String(log.target_type || '')}{log.target_id ? ` #${log.target_id}` : ''}</span></div>
-                                {log.errorMessage && <div className="md:col-span-2"><span className="text-muted-foreground">错误信息:</span> <span className="text-destructive font-mono">{String(log.errorMessage)}</span></div>}
+                                {error && <div className="md:col-span-2"><span className="text-muted-foreground">错误信息:</span> <span className="text-destructive font-mono">{String(error)}</span></div>}
                                 {log.model && <div><span className="text-muted-foreground">模型:</span> <span className="text-foreground">{String(log.model)}</span></div>}
-                                {log.providerId && <div><span className="text-muted-foreground">提供商:</span> <span className="text-foreground">{String(log.providerId)}</span></div>}
-                                {log.duration && <div><span className="text-muted-foreground">耗时:</span> <span className="text-foreground">{Number(log.duration).toFixed(0)}ms</span></div>}
+                                {provider && <div><span className="text-muted-foreground">提供商:</span> <span className="text-foreground">{String(provider)}</span></div>}
+                                {duration != null && <div><span className="text-muted-foreground">耗时:</span> <span className="text-foreground">{Number(duration).toFixed(0)}ms</span></div>}
                               </div>
                               {/* 堆栈 */}
-                              {Boolean(log.stackTrace) && (
+                              {Boolean(stackTrace) && (
                                 <details className="text-xs">
                                   <summary className="text-muted-foreground cursor-pointer hover:text-foreground max-md:min-h-11 max-md:py-3">堆栈跟踪</summary>
-                                  <pre className="text-destructive/80 whitespace-pre-wrap break-words font-mono max-h-32 overflow-auto mt-1 p-2 bg-background rounded">{String(log.stackTrace)}</pre>
+                                  <pre className="text-destructive/80 whitespace-pre-wrap break-words font-mono max-h-32 overflow-auto mt-1 p-2 bg-background rounded">{String(stackTrace)}</pre>
                                 </details>
                               )}
                               {/* 请求数据 */}
-                              {Boolean(log.requestData) && (
+                              {Boolean(requestData) && (
                                 <details className="text-xs">
                                   <summary className="text-muted-foreground cursor-pointer hover:text-foreground max-md:min-h-11 max-md:py-3">请求数据</summary>
-                                  <pre className="text-muted-foreground whitespace-pre-wrap break-words font-mono max-h-32 overflow-auto mt-1 p-2 bg-background rounded">{typeof log.requestData === 'string' ? log.requestData : JSON.stringify(log.requestData, null, 2)}</pre>
+                                  <pre className="text-muted-foreground whitespace-pre-wrap break-words font-mono max-h-32 overflow-auto mt-1 p-2 bg-background rounded">{typeof requestData === 'string' ? requestData : JSON.stringify(requestData, null, 2)}</pre>
                                 </details>
                               )}
                               {/* 详情 */}
@@ -2252,20 +2279,20 @@ export default function AdminTabs(props: AdminTabsProps) {
                               {/* AI分析结果 */}
                               {auditAiAnalysis[logId] && (
                                 <div className="p-3 bg-primary/5 rounded-lg border border-primary/20">
-                                  <div className="flex items-center gap-1.5 text-xs font-medium text-primary mb-1"><Brain className="w-3.5 h-3.5" /> AI 分析</div>
+                                  <div className="flex items-center gap-1.5 text-xs font-medium text-primary mb-1"><Brain className="w-3.5 h-3.5" /> 日志处理结果</div>
                                   <pre className="text-xs text-foreground whitespace-pre-wrap break-words font-mono max-h-48 overflow-auto">{auditAiAnalysis[logId]}</pre>
                                 </div>
                               )}
                               {/* AI加载中 */}
-                              {auditAiLoading && (auditAiLoading === logId || auditAiLoading === 'fix-' + logId) && (
-                                <div className="flex items-center gap-2 text-xs text-primary"><RefreshCw className="w-3 h-3 animate-spin" /> {auditAiLoading.startsWith('fix-') ? 'AI修复中...' : 'AI分析中...'}</div>
+                              {auditAiLoading === logId && (
+                                <div className="flex items-center gap-2 text-xs text-primary" role="status"><RefreshCw className="w-3 h-3 animate-spin" /> 正在处理日志…</div>
                               )}
                               {/* 解决状态操作 */}
                               {isDanger && (
                                 <div className="flex flex-wrap items-center gap-2 pt-1">
                                   <span className="text-xs text-muted-foreground">处理状态:</span>
                                   {Object.entries(resolutionLabels).map(([key, info]) => (
-                                    <button key={key} onClick={() => handleResolution(logId, key)} className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${resStatus === key ? info.color : 'bg-muted text-muted-foreground hover:text-foreground'}`}>{info.label}</button>
+                                    <button key={key} onClick={() => void runAuditAction(logId, { action: 'resolve', logId, status: key, detail: `管理员标记为${info.label}` })} disabled={auditAiLoading !== null} aria-pressed={resStatus === key} className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${resStatus === key ? info.color : 'bg-muted text-muted-foreground hover:text-foreground'}`}>{info.label}</button>
                                   ))}
                                 </div>
                               )}

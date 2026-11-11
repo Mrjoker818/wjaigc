@@ -11,6 +11,8 @@ import type { AssetGraphMode } from '@/lib/asset-core/types';
 import { resolveCanvasKernelMode, type CanvasKernelMode } from '@/lib/canvas-kernel/mode';
 import { resolveWorkflowRendererMode, type WorkflowRendererMode } from '@/lib/workflow-renderer/mode';
 import { clearCanvasUnloadRecovery } from '@/lib/canvas-autosave-guard';
+import { retainSavedProjectWorkflow } from '@/lib/project-workflow';
+import type { Workflow } from '@/lib/workflow-engine';
 
 const STORAGE_KEY = 'unbounded_ai_user_data';
 const CURRENT_USER_KEY = 'unbounded_ai_current_user';
@@ -379,6 +381,12 @@ function projectWithoutImages(project: Project): Omit<Project, 'canvasImages'> {
   return fields as Omit<Project, 'canvasImages'>;
 }
 
+function projectFieldsWithoutWorkflow(fields: Omit<Project, 'canvasImages'>): unknown {
+  const { metadata, updatedAt: _updatedAt, ...rest } = fields;
+  const { workflow: _workflow, ...metadataFields } = metadata ?? {};
+  return { ...rest, metadata: Object.keys(metadataFields).length ? metadataFields : undefined };
+}
+
 function rebaseProjectSnapshots(
   baseProjects: Project[],
   localProjects: Project[],
@@ -488,12 +496,29 @@ function rebaseProjectSnapshots(
     const remoteFields = projectWithoutImages(remoteProject);
     let fields = remoteFields;
     if (baseFields) {
-      const localChanged = !snapshotsEqual(localFields, baseFields);
-      const remoteChanged = !snapshotsEqual(remoteFields, baseFields);
+      const localWorkflowChanged = !snapshotsEqual(localFields.metadata?.workflow, baseFields.metadata?.workflow);
+      const remoteWorkflowChanged = !snapshotsEqual(remoteFields.metadata?.workflow, baseFields.metadata?.workflow);
+      const workflowChanged = localWorkflowChanged || remoteWorkflowChanged;
+      // A workflow save and a rename can both advance updatedAt without editing the same field.
+      const baseComparable = workflowChanged ? projectFieldsWithoutWorkflow(baseFields) : baseFields;
+      const localComparable = workflowChanged ? projectFieldsWithoutWorkflow(localFields) : localFields;
+      const remoteComparable = workflowChanged ? projectFieldsWithoutWorkflow(remoteFields) : remoteFields;
+      const localChanged = !snapshotsEqual(localComparable, baseComparable);
+      const remoteChanged = !snapshotsEqual(remoteComparable, baseComparable);
+      const workflowConflict = localWorkflowChanged && remoteWorkflowChanged
+        && !snapshotsEqual(localFields.metadata?.workflow, remoteFields.metadata?.workflow);
       if (localChanged && !remoteChanged) {
         fields = localFields;
-      } else if (localChanged && remoteChanged && !snapshotsEqual(localFields, remoteFields)) {
+      }
+      if (workflowConflict || (localChanged && remoteChanged && !snapshotsEqual(localComparable, remoteComparable))) {
         backup('concurrent-project-edit', remoteProject.id, localProject, remoteProject);
+      }
+      if (workflowChanged) {
+        const workflowMetadata = localWorkflowChanged && !remoteWorkflowChanged ? localFields.metadata : remoteFields.metadata;
+        if (!snapshotsEqual(fields.metadata?.workflow, workflowMetadata?.workflow)) {
+          fields = { ...fields, updatedAt: Math.max(localFields.updatedAt, remoteFields.updatedAt),
+            metadata: retainSavedProjectWorkflow(fields.metadata ?? {}, workflowMetadata) };
+        }
       }
     } else if (!snapshotsEqual(localProject, remoteProject)) {
       backup('concurrent-project-add', remoteProject.id, localProject, remoteProject);
@@ -2580,6 +2605,13 @@ export class UserManager {
   getProject(projectId: string): Project | null {
     const userData = this.getCurrentUserData();
     return userData?.projects.find(p => p.id === projectId) || null;
+  }
+
+  hasAcknowledgedProjectWorkflow(projectId: string, workflow: Workflow): boolean {
+    const actorId = this.currentUserId;
+    if (!actorId) return false;
+    const project = this._lastAuthoritativeProjects.get(actorId)?.find(candidate => candidate.id === projectId);
+    return !!project && snapshotsEqual(project.metadata?.workflow, workflow);
   }
 
   updateProjectInMemory(projectId: string, updates: Partial<Project>): Project | null {

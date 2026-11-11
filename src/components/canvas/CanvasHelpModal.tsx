@@ -1,7 +1,9 @@
 'use client';
 
+import { useRef } from 'react';
 import { Info, FileText, X, Eraser, Brush, Scissors, ZoomIn, Pencil, Bot, Type, Scan, ShoppingBag, PenTool, Expand, MoreHorizontal } from 'lucide-react';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
+import { useModalFocus } from './use-modal-focus';
 
 interface CanvasHelpModalProps {
   mode: 'instructions' | 'changelog';
@@ -10,19 +12,23 @@ interface CanvasHelpModalProps {
 }
 
 export function CanvasHelpModal({ mode, isMonochrome, onClose }: CanvasHelpModalProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useModalFocus(dialogRef, closeRef, onClose);
+
   return (
     <div data-modal="canvas-help" className="absolute inset-0 z-[90] flex items-center justify-center" onClick={onClose}>
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-      <div role="dialog" aria-modal="true" aria-label={mode === 'instructions' ? '使用说明' : '更新内容'} className={`relative flex min-h-0 flex-col rounded-2xl border shadow-2xl overflow-hidden ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#444]'}`} style={{ width: 'min(560px, calc(100% - 16px))', maxHeight: '80dvh' }} onClick={(e) => e.stopPropagation()}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={mode === 'instructions' ? '使用说明' : '更新内容'} tabIndex={-1} className={`relative flex min-h-0 flex-col rounded-2xl border shadow-2xl overflow-hidden ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#444]'}`} style={{ width: 'min(560px, calc(100% - 16px))', maxHeight: '80dvh' }} onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className={`flex shrink-0 items-center justify-between px-5 py-3 border-b ${isMonochrome ? 'border-gray-100' : 'border-white/[0.14]'}`}>
           <div className="flex items-center gap-2">
             {mode === 'instructions' ? <Info size={16} className={isMonochrome ? 'text-gray-700' : 'text-gold'} /> : <FileText size={16} className={isMonochrome ? 'text-gray-700' : 'text-gold'} />}
             <span className={`text-sm font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>{mode === 'instructions' ? '使用说明' : '更新内容'}</span>
           </div>
-          <button aria-label="关闭画布帮助" onClick={onClose} className={`flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center p-1 rounded-lg transition-colors ${isMonochrome ? 'text-blue-600 hover:text-blue-700 hover:bg-blue-50' : 'text-gold-muted/70 hover:text-white hover:bg-[#2a2a2a]'}`}><X size={16} /></button>
+          <button ref={closeRef} type="button" aria-label="关闭画布帮助" onClick={onClose} className={`flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center p-1 rounded-lg transition-colors ${isMonochrome ? 'text-blue-600 hover:text-blue-700 hover:bg-blue-50' : 'text-gold-muted/70 hover:text-white hover:bg-[#2a2a2a]'}`}><X size={16} /></button>
         </div>
-        <div className={`min-h-0 flex-1 overflow-y-auto overscroll-contain ${isMonochrome ? 'text-gray-700' : 'text-text-bright'}`}>
+        <div role="region" aria-label={mode === 'instructions' ? '使用说明内容' : '更新内容记录'} tabIndex={0} className={`min-h-0 flex-1 overflow-y-auto overscroll-contain focus-visible:outline-2 focus-visible:-outline-offset-2 ${isMonochrome ? 'text-gray-700 focus-visible:outline-blue-600' : 'text-text-bright focus-visible:outline-gold'}`}>
           {mode === 'instructions' ? (
             <InstructionsContent isMonochrome={isMonochrome} />
           ) : (
@@ -97,9 +103,9 @@ function InstructionsContent({ isMonochrome }: { isMonochrome: boolean }) {
       <div>
         <div className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isMonochrome ? 'text-gray-600' : 'text-gold'}`}>图片编辑工具</div>
         <div className="space-y-3">
-          <ToolCard icon={Eraser} title="擦除" desc="画笔涂抹消除，自动修复" imageFile="erase-tool.jpeg" detail="涂抹要消除的区域，本地 LaMa/ZITS/Anime-Lama 优先修复，AI 智能修复兜底，所有工具统一使用图像生成面板当前模型，支持任务取消" isMonochrome={isMonochrome} />
+          <ToolCard icon={Eraser} title="擦除" desc="画笔涂抹消除，自动修复" imageFile="erase-tool.jpeg" detail="涂抹要消除的区域后提交修复。系统使用当前部署中已配置且可用的图像编辑能力，支持取消任务。" isMonochrome={isMonochrome} />
           <ToolCard icon={Brush} title="蒙版" desc="精准遮罩，AI 重新生成" imageFile="mask-tool.jpeg" detail="画白色区域标记要重新生成的部分，输入提示词描述，AI 仅在蒙版区域生成新内容" isMonochrome={isMonochrome} />
-          <ToolCard icon={Scissors} title="移除背景" desc="一键去背景，输出主体图+蒙版" imageFile="remove-bg.jpeg" detail="自动分离主体与背景，同时生成透明底主体图和黑白蒙版图，本地 BiRefNet/U2Net/Silueta 优先，AI 原生透明输出+边缘颜色混合修复，消除抠图锯齿" isMonochrome={isMonochrome} />
+          <ToolCard icon={Scissors} title="移除背景" desc="一键去背景，输出主体图+蒙版" imageFile="remove-bg.jpeg" detail="使用当前部署中已配置且可用的去背景能力分离主体与背景，同时输出透明底主体图和黑白蒙版图。" isMonochrome={isMonochrome} />
           <ToolCard icon={ZoomIn} title="放大" desc="无损放大，智能补细节" imageFile="upscale.jpeg" detail="AI 放大支持 4 种模型（302 超级放大 V2 / 放大 V6 / 基础放大 / ESRGAN 高清增强），倍率 2x/4x，支持 PNG/JPG/WEBP 输出" isMonochrome={isMonochrome} />
           <ToolCard icon={Pencil} title="语言修图" desc="自然语言描述修改图片" imageFile="lang-edit.jpeg" detail="用自然语言描述修改意图，支持 OpenAI（可区域涂抹）+ Gemini（智能理解），自动裁切适配比例" isMonochrome={isMonochrome} />
           <ToolCard icon={Bot} title="Agent 编排" desc="智能编排多工具" detail="AI 自动选择和组合工具（修图/生图/分析/调色），多轮决策直至完成" isMonochrome={isMonochrome} />

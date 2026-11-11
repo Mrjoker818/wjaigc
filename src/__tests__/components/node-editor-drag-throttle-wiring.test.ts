@@ -52,7 +52,8 @@ describe('node editor drag throttling', () => {
 
   it('wires React Flow drag lifecycle into the same host guard as legacy drag', () => {
     expect(source).toContain('useWorkflowDragSynchronization');
-    expect(source).toContain('onNodeDragStart={beginWorkflowDrag}');
-    expect(source).toContain('onNodeDragEnd={finishWorkflowDrag}');
+    expect(source).toMatch(
+      /<WorkflowReactFlowSurface\b[\s\S]*?onNodeDragStart=\{positions => \{\s*positions\.forEach\(position => noteMaterialUserGeometry\(position\.nodeId\)\);\s*beginWorkflowDrag\(\);\s*\}\}\s+onNodeDragEnd=\{finishWorkflowDrag\}/,
+    );
   });
 });

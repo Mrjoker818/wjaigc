@@ -2,9 +2,10 @@ import 'server-only';
 import {createHash} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
 import type {PoolClient} from 'pg';
-import type {AssetFile} from '@/lib/asset-core/types';
+import type {AssetFile,AssetVersion} from '@/lib/asset-core/types';
 import {persistAssetBytes,type PersistedAssetFile} from '@/lib/asset-core/binary-persistence';
-import {readMediaBody} from '@/lib/collaboration/document-media-request';
+import {readManagedAssetVersionBytes} from '@/lib/asset-core/managed-media-read';
+import {IMAGE_IMPORT_LIMIT,readMediaBody} from '@/lib/collaboration/document-media-request';
 import {prepareUploadedMedia,importedMediaIdentity,type PreparedImportedMedia} from '@/lib/collaboration/document-media-source';
 import {assertWorkflowImageGridShape,type WorkflowImageGridCell} from './workflow-image-actions';
 import {cropWorkflowImageGrid,cropWorkflowImageGridCell,WORKFLOW_IMAGE_GRID_LIMITS} from './workflow-image-grid';
@@ -56,6 +57,15 @@ export interface WorkflowImageGridPreparationOptions {signal?:AbortSignal;timeou
 export const WORKFLOW_IMAGE_PREPARATION_LIMITS=Object.freeze({maxJobs:1,timeoutMs:120_000,maxOutputBytes:WORKFLOW_IMAGE_GRID_LIMITS.maxOutputBytes});
 interface GridRecord {active:boolean;source:WorkflowImageMediaSource;identity:WorkflowImageGridPreparationIdentity;documentMedia:Map<number,PreparedImportedMedia>;signal:AbortSignal}
 const preparations=new WeakMap<PreparedWorkflowImageGrid,GridRecord>();let activeJobs=0;
+/** Compare the full canonical read with the immutable file recorded in the receipt. */
+export async function workflowImagePublishedMediaMatches(version:AssetVersion,signal:AbortSignal,
+  read:typeof readManagedAssetVersionBytes=readManagedAssetVersionBytes):Promise<boolean> {
+  signal.throwIfAborted();
+  const media=await read(version,'image',{signal});
+  signal.throwIfAborted();
+  return media.mimeType===version.file.mimeType&&media.bytes.length===version.file.byteSize&&media.totalBytes===media.bytes.length
+    &&createHash('sha256').update(media.bytes).digest('hex')===version.file.checksum;
+}
 /** Share the original preparation admission and real IO lifetime with read-only receipt verification. */
 export async function withWorkflowImageReceiptRead<T>(read:(signal:AbortSignal)=>Promise<T>,options:Pick<WorkflowImageGridPreparationOptions,'signal'|'timeoutMs'>={}):Promise<T> {
   options.signal?.throwIfAborted();
@@ -178,6 +188,11 @@ async function prepareSelectedWorkflowImageGrid<T>(input:WorkflowImageGridPrepar
     const tiles=selection?[await cropWorkflowImageGridCell(media.bytes,frozen.columns,frozen.rows,selection.column,selection.row,cropOptions)]
       :await cropWorkflowImageGrid(media.bytes,frozen.columns,frozen.rows,cropOptions);active();
     if(tiles.length!==frozen.targetNodeIds.length)invalid();
+    // Every published PNG must fit the managed-image reader as well as document ingress.
+    // Check the whole batch before staging the parent or any tile.
+    if(tiles.some(tile=>tile.bytes.length>IMAGE_IMPORT_LIMIT)
+      ||tiles.reduce((total,tile)=>total+tile.bytes.length,0)>WORKFLOW_IMAGE_PREPARATION_LIMITS.maxOutputBytes)
+      throw new Error('WORKFLOW_IMAGE_GRID_OUTPUT_LIMIT');
     // A real legacy parent file is prepared here; its asset/version must be created
     // together with children inside the publisher's SAME authorized transaction.
     if(!source.version){
@@ -186,16 +201,14 @@ async function prepareSelectedWorkflowImageGrid<T>(input:WorkflowImageGridPrepar
       identity.legacyParentFile=checkedFile(file,media.bytes,media.mimeType);
     }
     record={active:false,source:media.source,identity,documentMedia:new Map(),signal};
-    let outputBytes=0;
     for(const [index,tile] of tiles.entries()){
-      active();outputBytes+=tile.bytes.length;
-      if(outputBytes>WORKFLOW_IMAGE_PREPARATION_LIMITS.maxOutputBytes)throw new Error('WORKFLOW_IMAGE_GRID_OUTPUT_LIMIT');
+      active();
       let file:PersistedAssetFile;
       if(source.access.kind==='document'){
         // Use the original body and media WeakMaps, not structural casts or an
         // editor impersonating the owner's private version-import API.
         const request=new Request('https://workflow.local.invalid/image-grid',{method:'POST',body:Uint8Array.from(tile.bytes),headers:{'content-length':String(tile.bytes.length)}});
-        const body=await readMediaBody(request,WORKFLOW_IMAGE_GRID_LIMITS.maxInputBytes,signal);active();
+        const body=await readMediaBody(request,IMAGE_IMPORT_LIMIT,signal);active();
         const prepared=await prepareUploadedMedia(body,'image/png',`workflow-grid-${index}.png`,source.access.actorUserId,source.access.ownerId,source.access.projectId,signal);
         file=importedMediaIdentity(prepared).file;record.documentMedia.set(index,prepared);
       } else file=await persist({bytes:tile.bytes,mimeType:'image/png',filename:`workflow-grid-${index}.png`,signal});

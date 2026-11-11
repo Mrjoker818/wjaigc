@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState, type ReactElement, type ReactPortal } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactElement, type ReactPortal } from 'react';
 import { createPortal } from 'react-dom';
 import { Layers, Minus, PanelTopOpen, X } from 'lucide-react';
 
@@ -48,19 +48,8 @@ export function MobileGenerationGroupHost({ 'data-toolbar': toolbar, groupIds, i
   const opener = useRef<HTMLButtonElement>(null);
   const previousMode = useRef(mode);
   useLayoutEffect((): void => {
-    if (previousMode.current !== mode && mode !== 'expanded') opener.current?.focus();
+    if (previousMode.current !== mode) opener.current?.focus({ preventScroll: true });
     previousMode.current = mode;
-  }, [mode]);
-  useEffect((): (() => void) | undefined => {
-    if (mode !== 'expanded') return undefined;
-    const keydown = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      event.stopPropagation();
-      setMode('minimized');
-    };
-    document.addEventListener('keydown', keydown, true);
-    return (): void => document.removeEventListener('keydown', keydown, true);
   }, [mode]);
   if (typeof document === 'undefined') return null;
   const surface = isMonochrome ? 'border-gray-200 bg-white text-gray-800 shadow-lg' : 'border-white/15 bg-[#171717] text-gray-100 shadow-xl';
@@ -79,7 +68,16 @@ export function MobileGenerationGroupHost({ 'data-toolbar': toolbar, groupIds, i
           <Layers className="h-4 w-4" />生成组 ({groupIds.length})
         </button>
       ) : (
-        <header className="flex shrink-0 items-center gap-1 border-b border-current/15 px-2 py-1">
+        <header
+          className="flex shrink-0 items-center gap-1 border-b border-current/15 px-2 py-1"
+          onKeyDown={event => {
+            // Slot content can contain its own dropdowns and dialogs.
+            if (mode !== 'expanded' || event.key !== 'Escape' || event.defaultPrevented || event.nativeEvent.isComposing) return;
+            event.preventDefault();
+            event.stopPropagation();
+            setMode('minimized');
+          }}
+        >
           <span className="min-w-0 flex-1 truncate text-sm font-semibold">生成组 ({groupIds.length})</span>
           <button ref={opener} type="button" aria-label={mode === 'expanded' ? '最小化生成组设置' : '打开生成组设置'} aria-expanded={mode === 'expanded'} className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg ${button}`} onClick={() => setMode(current => current === 'expanded' ? 'minimized' : 'expanded')}>
             {mode === 'expanded' ? <Minus className="h-5 w-5" /> : <PanelTopOpen className="h-5 w-5" />}

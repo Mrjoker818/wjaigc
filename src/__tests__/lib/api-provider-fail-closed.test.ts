@@ -8,8 +8,8 @@ vi.mock('@/lib/db-client', async original => ({
 vi.mock('fs/promises', async original => ({
   ...await original<typeof import('fs/promises')>(), readFile: io.read, writeFile: io.write, mkdir: io.mkdir,
 }));
-import { getApiProviders } from '@/lib/server-api-config';
-import { dbGetApiProviders } from '@/lib/db-storage';
+import { getApiProviders, updateApiProvider } from '@/lib/server-api-config';
+import { dbGetApiProviders, migrateFileDataToDb } from '@/lib/db-storage';
 import { prepareImageEditModelPlan } from '@/lib/task-core/image-edit-model-plan';
 
 const oldFile = JSON.stringify({ providers: [{ id: 'stale', name: 'Stale provider', apiKey: 'stale-key', baseUrl: 'https://stale.invalid',
@@ -94,5 +94,42 @@ describe('real provider configuration chain strict read', (): void => {
       .rejects.toMatchObject({ status: 503, code: 'IMAGE_EDIT_MODEL_PLAN_UNAVAILABLE', message: 'IMAGE_EDIT_MODEL_PLAN_UNAVAILABLE' });
     expect(io.read).not.toHaveBeenCalled();
     assertReadOnly();
+  });
+});
+
+describe('deployment database credentials', () => {
+  beforeEach(() => {
+    vi.stubEnv('WUJIE_DEPLOYMENT_DB_ONLY', '1');
+    vi.stubEnv('WUJIE_BOOTSTRAP_PROVIDERS_JSON', '');
+  });
+
+  it('ignores a legacy provider file when a deployed database is empty', async () => {
+    expect(await getApiProviders()).toEqual([]);
+    expect(io.read).not.toHaveBeenCalled();
+  });
+
+  it('reports a database failure without returning a legacy provider file', async () => {
+    io.sql.mockRejectedValue(new Error('synthetic-private-database-value'));
+    await expect(getApiProviders()).rejects.toThrow('DEPLOYMENT_PROVIDER_CONFIGURATION_UNAVAILABLE');
+    expect(io.read).not.toHaveBeenCalled();
+  });
+
+  it('does not import or regenerate legacy credential files on deployed startup', async () => {
+    await migrateFileDataToDb();
+    expect(io.read).not.toHaveBeenCalled();
+    expect(io.write).not.toHaveBeenCalled();
+    expect(io.sql).not.toHaveBeenCalled();
+  });
+
+  it('stores an administrator model change in PostgreSQL without a file copy', async () => {
+    io.sql.mockImplementation(async (sql: string) => ({
+      rows: sql.startsWith('SELECT * FROM wujie_api_providers') ? [row] : [],
+      rowCount: 1,
+    }));
+    const provider = await updateApiProvider('db-provider', { selectedModels: ['next-image'] });
+    expect(provider?.selectedModels).toEqual(['next-image']);
+    expect(io.sql.mock.calls.filter(([sql]) => sql.includes('INSERT INTO wujie_api_providers'))).toHaveLength(1);
+    expect(io.write).not.toHaveBeenCalled();
+    expect(io.mkdir).not.toHaveBeenCalled();
   });
 });

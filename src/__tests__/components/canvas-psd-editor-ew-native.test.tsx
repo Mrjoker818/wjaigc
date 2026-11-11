@@ -232,6 +232,31 @@ async function ewAudit(c:Locator):Promise<void>{await c.scrollIntoViewIfNeeded()
 async function ewCanvas(root:Locator):Promise<{width:number;height:number;hit:boolean}>{return root.getByTestId('layer-canvas').evaluate(el=>{const r=el.getBoundingClientRect();return {width:r.width,height:r.height,hit:el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))};});}
 async function ewPixels(root:Locator):Promise<void>{await expect.poll(async()=>root.getByTestId('layer-canvas').evaluate(el=>{const c=el as HTMLCanvasElement,ctx=c.getContext('2d');if(!ctx||!c.width||!c.height)return false;const d=ctx.getImageData(0,0,c.width,c.height).data;let orange=0,cyan=0;for(let i=0;i<d.length;i+=4){if(d[i]===209&&d[i+1]===122&&d[i+2]===53&&d[i+3]===255)orange++;if(d[i]===50&&d[i+1]===166&&d[i+2]===163&&d[i+3]===255)cyan++;}return orange>10&&cyan>10;}),{timeout:1500,message:'two actual decoded owned PNG colors drawn, not just nonempty canvas'}).toBe(true);}
 async function ewTab(s:Session,root:Locator,name:'画布'|'图层'|'属性'):Promise<void>{const tabs=root.getByRole('group',{name:'PSD 编辑视图',exact:true}),tab=tabs.getByRole('button',{name,exact:true});await ewAudit(tab);await ewTap(s,tab);expect(await tab.getAttribute('aria-pressed')).toBe('true');expect(await tabs.locator('[aria-pressed="true"]').count()).toBe(1);}
+it('EW PSD row keyboard selects layers and cancels rename with focus restored', async () => {
+  const e: EWCase = { theme: 'gold', width: 390, height: 844, kind: 'readonly' };
+  await withSession(e.theme, e.width, e.height, { touch: true }, async s => {
+    const root = await ewOpen(s, e);
+    await ewTab(s, root, '图层');
+    const background = root.getByRole('button', { name: 'EW 合成背景', exact: true });
+    const subject = root.getByRole('button', { name: 'EW 合成主体', exact: true });
+    await background.focus();
+    await s.page.keyboard.press('Enter');
+    expect(await background.getAttribute('aria-pressed')).toBe('true');
+    await subject.focus();
+    await s.page.keyboard.press('Space');
+    expect(await subject.getAttribute('aria-pressed')).toBe('true');
+    expect(await background.getAttribute('aria-pressed')).toBe('false');
+    await s.page.keyboard.press('F2');
+    const field = root.getByRole('textbox', { name: '重命名图层' });
+    expect(await field.evaluate(el => document.activeElement === el)).toBe(true);
+    await field.fill('EW 草稿不会保存');
+    await s.page.keyboard.press('Escape');
+    await field.waitFor({ state: 'detached' });
+    expect(await subject.evaluate(el => document.activeElement === el)).toBe(true);
+    await ewTap(s, root.getByRole('button', { name: '关闭', exact: true }));
+    await root.waitFor({ state: 'detached' });
+  });
+}, 25000);
 for(const e of ewCases)it(`EW ${e.theme} ${e.width}x${e.height} ${e.kind} restored readonly PSD UI`,async()=>{await withSession(e.theme,e.width,e.height,{touch:e.kind!=='mouse'},async s=>{const before=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);try{const root=await ewOpen(s,e);await ewCapture(s,e,'restored');const rect=await ewCanvas(root);console.log('EW_CANVAS',JSON.stringify({...e,canvas:rect}));expect.soft(rect.width,'usable document canvas width').toBeGreaterThanOrEqual(160);expect.soft(rect.height,'usable document canvas height').toBeGreaterThanOrEqual(96);expect.soft(rect.hit,'document surface exposed on entry').toBe(true);
  if(e.kind==='layout'){for(const c of await root.locator('button:visible').all())if(!await c.isDisabled())await ewAudit(c);}else{await ewPixels(root);if(e.width<768)await ewTab(s,root,'图层');const row=root.locator('[data-layer-row="ew-subject"]');await ewTap(s,row.getByText('EW 合成主体',{exact:true}));expect(await row.getAttribute('data-layer-selected')).toBe('true');expect(await root.locator('[data-layer-selected="true"]').count()).toBe(1);if(e.width<768){await ewAudit(row.locator('[data-layer-action="visibility"]'));await ewAudit(row.locator('[data-layer-action="lock"]'));await ewTab(s,root,'属性');}const inspector=root.getByRole('region',{name:'图层属性',exact:true});await inspector.waitFor({state:'visible'});expect(await inspector.getByTestId('layer-position').textContent()).toBe('80,32');expect(await inspector.getByText('64x64',{exact:true}).textContent()).toBe('64x64');await inspector.getByText('EW 合成主体',{exact:true}).waitFor({state:'visible'});const modes=inspector.getByRole('group',{name:'PSD 导出模式',exact:true});expect(await modes.getByRole('button').count()).toBe(3);expect(await modes.locator('[aria-pressed="true"]').count()).toBe(1);expect(await modes.getByRole('button',{name:'基础',exact:true}).getAttribute('aria-pressed')).toBe('true');if(e.width<768){for(const c of await modes.getByRole('button').all())await ewAudit(c);await ewAudit(inspector.getByTestId('layer-export-psd'));await ewTab(s,root,'画布');const back=await ewCanvas(root);expect(back.width).toBeCloseTo(rect.width,1);expect(back.height).toBeCloseTo(rect.height,1);expect(back.hit).toBe(true);await ewPixels(root);await ewTab(s,root,'属性');await ewTap(s,inspector.getByRole('button',{name:'关闭属性面板',exact:true}));expect(await root.getByRole('button',{name:'画布',exact:true}).getAttribute('aria-pressed')).toBe('true');expect((await ewCanvas(root)).hit).toBe(true);await ewPixels(root);}await ewCapture(s,e,'readonly-operations');}
  await root.getByTestId('layer-document-status').filter({hasText:'已保存'}).waitFor({state:'visible'});const close=root.getByRole('button',{name:'关闭',exact:true});if(e.kind==='escape'){await close.focus();await s.page.keyboard.press('Escape');}else await ewTap(s,close);await root.waitFor({state:'detached'});const after=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);expect(after.images).toEqual(before.images);expect(after.groups).toEqual(before.groups);expect(after.view).toEqual(before.view);expect(after.actions).toEqual([]);expect(s.counts.get('/api/layer-documents?projectId=canvas-ui-project&sourceImageId=br-A&sourceVersionId=et-owned-source-v1')).toBe(1);expect([...s.counts.keys()].filter(k=>k.startsWith('/api/layer-documents'))).toHaveLength(1);console.log('EW_READONLY_BODY',JSON.stringify({...e,noLayerMutationSaveTaskOrExport:true,bodyNotGate:true}));}finally{await ewCapture(s,e,'end-or-failure');}});},25000);

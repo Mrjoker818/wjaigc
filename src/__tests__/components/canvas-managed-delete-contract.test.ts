@@ -23,12 +23,17 @@ describe('managed canvas image deletion wiring', () => {
     const contextMenuStart = canvasSource.indexOf("{ label: '删除', shortcut: 'Delete'");
     const hoverToolbarStart = canvasSource.indexOf('title="删除"');
     const layerPanelStart = canvasSource.indexOf('<LayerPanel');
+    const layerPanelEnd = canvasSource.indexOf('\n          />', layerPanelStart);
 
     expect(coordinatorStart).toBeGreaterThan(-1);
     expect(canvasSource.slice(keyboardStart, keyboardStart + 700)).toContain('void requestDeleteImages(');
     expect(canvasSource.slice(contextMenuStart, contextMenuStart + 500)).toContain('void requestDeleteImages(');
     expect(canvasSource.slice(hoverToolbarStart - 650, hoverToolbarStart + 100)).toContain('void requestDeleteImages(');
-    expect(canvasSource.slice(layerPanelStart, layerPanelStart + 1800)).toContain('void requestDeleteImages(');
+    expect(layerPanelStart).toBeGreaterThan(-1);
+    expect(layerPanelEnd).toBeGreaterThan(layerPanelStart);
+    expect(canvasSource.slice(layerPanelStart, layerPanelEnd)).toMatch(
+      /onDelete=\{\(id\) => \{\s*void requestDeleteImages\(\[id\]\);\s*\}\}/,
+    );
   });
 
   it('deletes managed placements before removing and immediately persisting canvas images', () => {

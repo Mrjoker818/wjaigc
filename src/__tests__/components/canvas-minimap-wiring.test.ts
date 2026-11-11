@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { resolveCanvasBottomDockLayout } from '@/lib/canvas-bottom-dock-layout';
 
 const componentPath = resolve(process.cwd(), 'src/components/canvas/CanvasMinimap.tsx');
 const clusterPath = resolve(process.cwd(), 'src/components/canvas/CanvasZoomCluster.tsx');
@@ -198,15 +199,26 @@ describe('V588-UI-003 canvas minimap wiring', () => {
 
     expect(component).toContain("bottom: 'var(--canvas-minimap-bottom, 76px)'");
     expect(canvas).toMatch(
-      /const\s+minimapBottomOffset\s*=\s*\(showLayerPanel\s*\|\|\s*showVersionHistory\)\s*\?\s*'calc\(min\(30dvh, 260px\) \+ 28px\)'\s*:\s*'76px'\s*;/,
+      /const dock = showLayerPanel\s*\? scope\.querySelector<HTMLElement>\('\[data-popup="layer-panel"\]'\)\s*:\s*showVersionHistory && !versionHistorySuspended\s*\? scope\.querySelector<HTMLElement>\('\[data-popup="version-history"\]'\)\s*:\s*null;/,
     );
-    expect(canvas).toContain("'--canvas-minimap-bottom': minimapBottomOffset");
-    expect(canvas).toMatch(
-      /<div[\s\S]*?data-canvas-minimap-host[\s\S]*?'--canvas-minimap-bottom':\s*minimapBottomOffset[\s\S]*?<CanvasMinimap/,
-    );
-    expect(canvas).not.toMatch(
-      /data-canvas-viewport[\s\S]{0,1200}'--canvas-minimap-bottom':\s*minimapBottomOffset/,
-    );
+    expect(canvas).toContain('const scopeCandidate = toolbarCandidate?.parentElement;');
+    expect(canvas).toContain('dockTop: dock?.getBoundingClientRect().top ?? null,');
+    expect(canvas).toContain("scope.style.setProperty('--canvas-minimap-bottom', `${layout.minimapBottom}px`);");
+    expect(canvas).toMatch(/data-canvas-minimap-host\s+ref=\{minimapHostRef\}\s*>\s*<CanvasMinimap/);
+    expect(canvas).not.toMatch(/data-canvas-viewport[\s\S]{0,1200}'--canvas-minimap-bottom'/);
     expect(canvas).toContain('rightOffset={canvasOccupiedRight + 12}');
+
+    const layoutInput = {
+      viewportHeight: 900, canvasBottom: 900, toolbarHeight: 48,
+      minimapHeight: 144, minimapOpen: true, lastOpened: 'dock' as const,
+    };
+    expect(resolveCanvasBottomDockLayout({ ...layoutInput, dockTop: null })).toMatchObject({
+      minimapBottom: 76, dismissPanel: null,
+    });
+    for (const dockTop of [650, 610]) {
+      expect(resolveCanvasBottomDockLayout({ ...layoutInput, dockTop })).toMatchObject({
+        minimapBottom: layoutInput.viewportHeight - dockTop + 28, dismissPanel: null,
+      });
+    }
   });
 });

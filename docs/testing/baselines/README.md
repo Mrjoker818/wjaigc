@@ -52,3 +52,9 @@ git diff --exit-code origin/main -- src package.json pnpm-lock.yaml
 - 每个阶段完成后同步更新 Obsidian 的“无界计划”目录。
 - 只有完成阶段验证的检查点才允许推送 GitHub。
 - 未经真实浏览器、真实数据库或真实云端验证的能力只能标记为“未验证”或“阻塞”。
+
+## 2026-11-11 正式站候选审核
+
+[逐路径审核记录](production-acceptance-review-2026-11-11.json) 对应固定保护基线与本轮审核前的主线。它保存 160 条路径各自的来源、审查对象和决定。只有标记为 `reviewed` 的精确路径进入授权清单；标记为 `hold` 的路径继续由发布检查阻塞。审核记录中的源码审查不等于正式站验收。
+
+`tests/unit/production-acceptance-review-records.spec.ts` 验证历史来源、授权清单和实际文件对象。后续修复或修改已审查的文件时，应先复审并更新相应记录。保留原比较基线和其他历史授权记录。

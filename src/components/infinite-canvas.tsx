@@ -533,6 +533,15 @@ export interface AnnotationExecutionContext {
   confirmPublication: (payload: unknown, signal: AbortSignal) => Promise<boolean>;
 }
 
+export type CanvasVideoToolOutput =
+  | { format: 'image/png' | 'image/gif'; urls: string[]; sourceImageId?: string; modelName?: string }
+  | { format: 'video/mp4'; video: CanvasImage & { videoUrl: string } };
+
+interface CapturedVideoToolInsertion {
+  assertCurrent: () => void;
+  insert: (output: CanvasVideoToolOutput) => Promise<number>;
+}
+
 interface InfiniteCanvasProps {
   /** Enabled only by the product after the image runtime delivery gates pass. */
   sketchImageEnabled?: boolean;
@@ -550,7 +559,8 @@ interface InfiniteCanvasProps {
   onFusion: (images: CanvasImage[]) => void;
   onAddImages: (imageUrls: string[], sourceImageId?: string, meta?: { modelName?: string; apiProvider?: string }) => void;
   captureDisplay3dInsertion?: () => (imageUrls: string[], meta?: { modelName?: string; apiProvider?: string }) => Promise<void>;
-  onUploadFiles?: (files: File[]) => Promise<void>;
+  captureVideoToolInsertion?: () => CapturedVideoToolInsertion;
+  onUploadFiles?: (files: File[]) => Promise<unknown>;
   uploadAuthority?: 'unknown' | 'legacy' | 'document';
   onReferenceSelect?: (image: CanvasImage) => void;
   referenceIds?: string[];
@@ -823,7 +833,7 @@ function CanvasScaledMenuSelect({
   );
 }
 
-export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, taskModelCatalog = [], taskModelOptions = [], catalogStatus = { loading: false, error: null }, images, onImagesChange, selectedImage, onSelectImage, onPreviewImage, onGenerateVariation, onExtractKeywords, onAddImages, captureDisplay3dInsertion, onUploadFiles, uploadAuthority, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, renderOhMyPromptExternally = false, onCloseOhMyPrompt, onInsertPrompt, onInsertVisionPrompt, visionScopeKey, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onCanvasToolActivated, onCaptureCropHistory, onUndo, onRedo, mobileCanUndo, mobileCanRedo, onHistoryTransactionBegin, onHistoryTransactionCommit, onHistoryTransactionRollback, isHistoryTransitionPending = false, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onDeleteImages, canRetryPendingDelete, onUploadEffectReverseSource, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, canvasGeneratorActorId, initialAnnotations = [], onAnnotationsChange, documentMetadataMode = false, annotationExecutionContext, onRequestTaskPoll }: InfiniteCanvasProps) {
+export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, taskModelCatalog = [], taskModelOptions = [], catalogStatus = { loading: false, error: null }, images, onImagesChange, selectedImage, onSelectImage, onPreviewImage, onGenerateVariation, onExtractKeywords, onAddImages, captureDisplay3dInsertion, captureVideoToolInsertion, onUploadFiles, uploadAuthority, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, renderOhMyPromptExternally = false, onCloseOhMyPrompt, onInsertPrompt, onInsertVisionPrompt, visionScopeKey, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onCanvasToolActivated, onCaptureCropHistory, onUndo, onRedo, mobileCanUndo, mobileCanRedo, onHistoryTransactionBegin, onHistoryTransactionCommit, onHistoryTransactionRollback, isHistoryTransitionPending = false, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onDeleteImages, canRetryPendingDelete, onUploadEffectReverseSource, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, canvasGeneratorActorId, initialAnnotations = [], onAnnotationsChange, documentMetadataMode = false, annotationExecutionContext, onRequestTaskPoll }: InfiniteCanvasProps) {
   const effectiveUploadAuthority = uploadAuthority ?? (projectId ? 'unknown' : 'legacy');
   const isMonochrome = themeStyle === 'monochrome';
   const taskModelCatalogIndex = useMemo(
@@ -1096,22 +1106,43 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     );
   }, [canvasOccupiedRight, canvasSize.height, canvasSize.width, fitViewportContent]);
 
-  const restoredViewProjectIdRef = useRef<string | null>(null);
+  const initialProjectViewRef = useRef<{
+    projectKey: string;
+    x: number;
+    y: number;
+    zoom: number;
+    initialized: boolean;
+  } | null>(null);
   useEffect(() => {
     const currentProjectKey = projectId || '__canvas_without_project__';
-    if (restoredViewProjectIdRef.current === currentProjectKey) return;
-    restoredViewProjectIdRef.current = currentProjectKey;
+    if (initialProjectViewRef.current?.projectKey !== currentProjectKey) {
+      initialProjectViewRef.current = {
+        projectKey: currentProjectKey, x: viewOffset.x, y: viewOffset.y, zoom, initialized: false,
+      };
+    }
+    const initialView = initialProjectViewRef.current;
+    if (initialView.initialized) return;
+    if (viewportPanPointerIdRef.current !== null
+      || viewOffset.x !== initialView.x || viewOffset.y !== initialView.y || zoom !== initialView.zoom) {
+      // A manual pan owns the viewport even before it has committed an offset.
+      initialView.initialized = true;
+      return;
+    }
 
     const restored = normalizeCanvasViewState(initialViewState);
     if (restored) {
+      initialView.initialized = true;
       applyViewState(restored);
       return;
     }
 
-    if (images.length > 0) {
-      requestAnimationFrame(resetViewToContent);
-    }
-  }, [applyViewState, images.length, initialViewState, projectId, resetViewToContent]);
+    // The document's media can arrive after the canvas shell mounts.
+    if (!images.some(image => !image.isProcessingPlaceholder)) return;
+    initialView.initialized = true;
+    requestAnimationFrame(() => {
+      if (initialProjectViewRef.current === initialView && canvasContainerRef.current) resetViewToContent();
+    });
+  }, [applyViewState, images, initialViewState, projectId, resetViewToContent, viewOffset.x, viewOffset.y, zoom]);
 
   // Keep the stable index observable without rebuilding it for render-only image changes.
   useMemo(() => ({ total: images.length, indexed: spatialIndex.size }), [images.length, spatialIndex]);
@@ -1659,10 +1690,27 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   const [, setIsGeneratingPanorama] = useState(false);
   const [, ] = useState(false);
   // 视频抽帧状态
-  const [videoExtractMode, setVideoExtractMode] = useState<'uniform'|'fps'|'first_last'|'keyframes'>('uniform');
+  const [videoExtractMode, setVideoExtractMode] = useState<'uniform'|'fps'|'first_last'|'keyframes'|'single'>('uniform');
   const [showVideoExtractPanel, setShowVideoExtractPanel] = useState(false);
   const [videoExtractFrameCount, setVideoExtractFrameCount] = useState(12);
+  const [videoExtractTimestamp, setVideoExtractTimestamp] = useState('0');
   const [videoExtractProcessing, setVideoExtractProcessing] = useState(false);
+  const videoExtractPanelSessionRef = useRef({ processing: false });
+  const openVideoExtractPanel = (image: CanvasImage | null | undefined, mode = videoExtractMode) => {
+    if (image?.mediaType !== 'video' || !image.videoUrl) { toast.error('请先选中视频文件'); return; }
+    videoExtractPanelSessionRef.current = { processing: false };
+    setEditImageId(image.id);
+    setVideoExtractMode(mode);
+    setVideoExtractFrameCount(12);
+    setVideoExtractTimestamp('0');
+    setVideoExtractProcessing(false);
+    setShowVideoExtractPanel(true);
+  };
+  const closeVideoExtractPanel = useCallback(() => {
+    videoExtractPanelSessionRef.current = { processing: false };
+    setVideoExtractProcessing(false);
+    setShowVideoExtractPanel(false);
+  }, []);
   const [showPsdEditor, setShowPsdEditor] = useState(false);
   const psdEditorCloseGuardRef = useRef<(() => Promise<boolean>) | null>(null);
   const [psdEditorImageUrl, setPsdEditorImageUrl] = useState<string>('');
@@ -2428,11 +2476,35 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   const [dubVoice, setDubVoice] = useState('female-calm');
   const [dubSpeed, setDubSpeed] = useState(1);
   const [isDubbing, setIsDubbing] = useState(false);
+  const addGeneratedVideo = useCallback(async (
+    image: CanvasImage, videoUrl: string, thumbnailUrl: string | undefined, insertion?: CapturedVideoToolInsertion,
+  ): Promise<void> => {
+    const video: CanvasImage & { videoUrl: string } = {
+      ...image,
+      id: crypto.randomUUID(),
+      assetId: undefined,
+      assetVersionId: undefined,
+      placementId: undefined,
+      url: thumbnailUrl || image.url,
+      videoUrl,
+      mediaType: 'video',
+      x: image.x + image.width + 30,
+      createdAt: Date.now(),
+      generatedFromImageId: image.id,
+    };
+    const confirmed = insertion
+      ? await insertion.insert({ format: 'video/mp4', video }) === 1
+      : onImagesChange([...imagesRef.current, video]) !== false;
+    if (!confirmed) throw new Error('视频结果尚未确认添加到画布');
+  }, [onImagesChange]);
+
   const handleVideoDub = useCallback(async () => {
     if (!videoDubTarget?.videoUrl || !dubText.trim()) { toast.error('请输入配音文本'); return; }
     setIsDubbing(true);
     const tid = toast.loading('正在生成配音并合成视频...');
     try {
+      const insertion = captureVideoToolInsertion?.();
+      if (!insertion && documentMetadataMode) throw new Error('协作画布当前无法导入配音结果');
       // 先调用TTS生成音频
       const ttsRes = await fetch('/api/audio/generate', {
         method: 'POST',
@@ -2442,6 +2514,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       if (!ttsRes.ok) throw new Error('配音生成失败');
       const ttsData = await ttsRes.json();
       if (!ttsData.audioUrl) throw new Error('配音生成失败');
+      insertion?.assertCurrent();
       // 然后调用视频合成接口
       const composeRes = await fetch('/api/video/tools', {
         method: 'POST',
@@ -2450,82 +2523,32 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       });
       if (!composeRes.ok) throw new Error('视频合成失败');
       const composeData = await composeRes.json();
-      if (composeData.videoUrl) {
-        onAddImages([composeData.videoUrl]);
-        toast.success('配音视频已添加到画布', { id: tid });
-        setShowVideoDubPanel(false);
-      }
+      if (typeof composeData.videoUrl !== 'string' || !composeData.videoUrl) throw new Error('视频合成未返回文件');
+      await addGeneratedVideo(videoDubTarget, composeData.videoUrl, undefined, insertion);
+      toast.success('配音视频已添加到画布', { id: tid });
+      setShowVideoDubPanel(false);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '配音失败', { id: tid });
     } finally {
       setIsDubbing(false);
     }
-  }, [videoDubTarget, dubText, dubVoice, dubSpeed, onAddImages]);
+  }, [videoDubTarget, dubText, dubVoice, dubSpeed, captureVideoToolInsertion, documentMetadataMode, addGeneratedVideo]);
 
   // Whether any floating panel is open (used to auto-hide connections & image toolbar)
   const localMediaToolWindowOpen = showRemoveBgPicker || showDisplayDecomposePanel || show3DModal || showVideoExtractPanel || showPsdEditor;
   const anyPanelOpen = showSvgTracePanel || showAgentEditor || showBrandEcommerce || showFontDesign || showBrandFactory || showBrandIp || showSceneStudio || showBrandPackaging || showDisplay3D || showEffectReverse || showSketchToCode || showVideoEditPanel || showCanvasGenerator || showRefineEngine || showHumanRepair || showLogoSkill || showAiPsd || showStickerAssistant || showVideoDubPanel || localMediaToolWindowOpen;
 
   // Video tools handler
-  const handleVideoTool = async (action: 'to-gif' | 'extract-cover' | 'compress' | 'extract-frame', image: CanvasImage, timestamp?: number) => {
-    if (!image.videoUrl) return;
-
-    // Client-side frame extraction using HTML5 Canvas
-    if (action === 'extract-cover' || action === 'extract-frame') {
-      try {
-        const video = document.createElement('video');
-        video.crossOrigin = 'anonymous';
-        video.src = image.videoUrl;
-        video.muted = true;
-        video.preload = 'auto';
-
-        await new Promise<void>((resolve, reject) => {
-          video.onloadeddata = () => resolve();
-          video.onerror = () => reject(new Error('视频加载失败'));
-          video.load();
-        });
-
-        const targetTime = timestamp ?? 0;
-        video.currentTime = Math.min(targetTime, video.duration - 0.1);
-
-        await new Promise<void>(resolve => {
-          video.onseeked = () => resolve();
-        });
-
-        const canvas = document.createElement('canvas');
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) throw new Error('Canvas context failed');
-        ctx.drawImage(video, 0, 0);
-
-        const dataUrl = canvas.toDataURL('image/png');
-        const label = timestamp !== undefined
-          ? `帧 @ ${video.currentTime}s`
-          : '视频封面';
-
-        // Save frame as image and add to canvas
-        const saveRes = await fetch('/api/save-image', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ dataUrl, filename: `frame-${Date.now()}.png` }),
-        });
-        const saveData = await saveRes.json();
-        const frameUrl = saveData.url || saveData.localPath || dataUrl;
-
-        onAddImages([frameUrl], undefined, {
-          modelName: 'frame-extract',
-          apiProvider: 'local',
-        });
-        toast.success(`已提取${label}`);
-      } catch (err) {
-        console.error('[frame-extract] error:', err);
-        toast.error('帧提取失败，视频可能存在跨域限制');
-      }
+  const handleVideoTool = async (action: 'to-gif' | 'extract-cover' | 'compress', image: CanvasImage) => {
+    if (action === 'extract-cover') {
+      await handleVideoExtractFrames(image, 'single', 1, 0);
       return;
     }
+    if (!image.videoUrl) { toast.error('这不是视频文件'); return; }
 
     try {
+      const insertion = captureVideoToolInsertion?.();
+      if (!insertion && documentMetadataMode) throw new Error('协作画布当前无法导入视频工具结果');
       const response = await fetch('/api/video/tools', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2544,24 +2567,21 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       if (!response.ok || !result.success) throw new Error(result.error || '视频处理失败');
 
       if (action === 'to-gif' && typeof result.gifUrl === 'string') {
-        onAddImages([result.gifUrl], image.id, { modelName: 'video-to-gif', apiProvider: 'local' });
+        if (insertion) {
+          const confirmed = await insertion.insert({ format: 'image/gif', urls: [result.gifUrl], sourceImageId: image.id, modelName: 'video-to-gif' });
+          if (confirmed !== 1) throw new Error('GIF 尚未确认添加到画布');
+        } else {
+          onAddImages([result.gifUrl], image.id, { modelName: 'video-to-gif', apiProvider: 'local' });
+        }
         toast.success('GIF 已添加到画布');
         return;
       }
       if (action === 'compress' && typeof result.videoUrl === 'string') {
-        const compressedVideo: CanvasImage = {
-          ...image,
-          id: `compressed-video-${Date.now()}`,
-          url: typeof result.thumbnailUrl === 'string' ? result.thumbnailUrl : image.url,
-          videoUrl: result.videoUrl,
-          mediaType: 'video',
-          x: image.x + image.width + 30,
-          createdAt: Date.now(),
-          generatedFromImageId: image.id,
-        };
-        onImagesChange([...imagesRef.current, compressedVideo]);
+        await addGeneratedVideo(image, result.videoUrl, typeof result.thumbnailUrl === 'string' ? result.thumbnailUrl : undefined, insertion);
         toast.success('压缩视频已添加到画布');
+        return;
       }
+      throw new Error('视频工具响应缺少结果文件');
     } catch (error) {
       console.error(`[video-tool] ${action} error:`, error);
       toast.error(error instanceof Error ? error.message : '视频处理失败');
@@ -2690,7 +2710,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     setShowDownloadPopup(false);
     setEffectReverseSource(null);
     setShowCanvasGenerator(false);
-    setShowVideoExtractPanel(false);
+    closeVideoExtractPanel();
     if (psdEditorCloseGuardRef.current) {
       void psdEditorCloseGuardRef.current();
     } else {
@@ -2710,7 +2730,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     setEditMode('none');
     setActiveTool('none');
     window.dispatchEvent(new Event('wujie:canvas-tool-opened'));
-  }, [setAnnotationV2Mode]);
+  }, [closeVideoExtractPanel, setAnnotationV2Mode]);
 
   const activateCanvasToolSession = useCallback((
     toolId: string,
@@ -11662,28 +11682,45 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   const handleConfirmColorAdjust = applyColorAdjust;
 
   // 视频批量抽帧
-  const handleVideoExtractFrames = useCallback(async (img: CanvasImage, mode: string = 'uniform', count: number = 8) => {
-    if (!img.videoUrl) { toast.error('这不是视频文件'); return; }
+  const handleVideoExtractFrames = useCallback(async (
+    img: CanvasImage, mode = 'uniform', count = 8, timestamp?: number,
+  ): Promise<boolean> => {
+    if (!img.videoUrl) { toast.error('这不是视频文件'); return false; }
     const tid = toast.loading('正在从视频中提取帧...');
     try {
+      const insertion = captureVideoToolInsertion?.();
+      if (!insertion && documentMetadataMode) throw new Error('协作画布当前无法导入抽帧结果');
       const res = await fetch('/api/video/tools', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'extract-frames', videoUrl: img.videoUrl, mode, frameCount: count, fps: 1 }),
+        body: JSON.stringify({ action: 'extract-frames', videoUrl: img.videoUrl, mode, frameCount: count, fps: 1, timestamp }),
       });
       if (!res.ok) throw new Error('抽帧失败');
-      const data = await res.json();
-      if (data.frames && data.frames.length > 0) {
-        const frameUrls = data.frames.map((f: {url: string}) => f.url);
-        onAddImages(frameUrls);
-        toast.success(`成功提取 ${frameUrls.length} 帧`, { id: tid });
-      } else {
-        toast.error('未能提取到帧', { id: tid });
+      const data: { frames?: Array<{ url?: unknown }> } = await res.json();
+      if (!Array.isArray(data.frames) || data.frames.length === 0 || data.frames.length > 30) {
+        throw new Error('未能提取到帧');
       }
+      const frameUrls = data.frames.map(frame => {
+        if (typeof frame?.url !== 'string' || !frame.url) throw new Error('抽帧响应无效');
+        return frame.url;
+      });
+      if (insertion) {
+        const inserted = await insertion.insert({ format: 'image/png', urls: frameUrls,
+          ...(mode === 'single' ? { modelName: 'frame-extract' } : {}) });
+        if (inserted !== frameUrls.length) {
+          toast.warning(`已提取 ${frameUrls.length} 帧，画布确认导入 ${inserted} 帧`, { id: tid });
+          return inserted > 0;
+        }
+      } else {
+        onAddImages(frameUrls);
+      }
+      toast.success(`成功提取 ${frameUrls.length} 帧`, { id: tid });
+      return true;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '抽帧失败', { id: tid });
+      return false;
     }
-  }, [onAddImages]);
+  }, [captureVideoToolInsertion, documentMetadataMode, onAddImages]);
 
   // 720全景图生成（直接调用图像生成API）
   const handleGeneratePanorama = useCallback(async (img?: CanvasImage) => {
@@ -12561,7 +12598,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     { icon: <Pencil size={14} className={isMonochrome ? monoColors['语言修图'] : ''} />, label: '语言修图', desc: '用自然语言描述修改图片', action: () => { if (selectedImage) onEditImage?.(selectedImage); else onEditImage?.(null); } },
     { icon: <Bot size={14} className={isMonochrome ? monoColors['Agent编排'] : ''} />, label: 'Agent编排', desc: '智能编排多工具编辑图片', action: () => { const img = selectedImageData || selectedImage; if (!activateCanvasToolSession('agent', 'image-toolbar', img ? [img.id] : [])) return; if (img) { setAgentEditImage(img); } else { setAgentEditImage(null); } setShowAgentEditor(true); } },
     { icon: <Globe size={14} className={isMonochrome ? 'text-emerald-500' : 'text-emerald-400'} />, label: '全景生成', desc: '生成720°全景图', action: () => handleGeneratePanorama() },
-    { icon: <Film size={14} className={isMonochrome ? 'text-purple-500' : 'text-purple-400'} />, label: '视频抽帧', desc: '从视频中提取帧图片', action: () => { const img = selectedImageData; if (img?.mediaType === 'video') { setEditImageId(img.id); setVideoExtractFrameCount(12); setVideoExtractProcessing(false); setShowVideoExtractPanel(true); } else { toast.error('请先选中视频文件'); } } },
+    { icon: <Film size={14} className={isMonochrome ? 'text-purple-500' : 'text-purple-400'} />, label: '视频抽帧', desc: '从视频中提取帧图片', action: () => openVideoExtractPanel(selectedImageData) },
     { icon: <Volume2 size={14} className={isMonochrome ? 'text-orange-500' : 'text-orange-400'} />, label: 'AI配音', desc: '为视频添加AI配音', action: () => { const img = selectedImageData; if (img?.mediaType === 'video') { setVideoDubTarget(img); setShowVideoDubPanel(true); } else toast.error('请先选中视频文件'); } },
     { icon: <FileImage size={14} className={isMonochrome ? 'text-emerald-600' : 'text-emerald-400'} />, label: '转 GIF', desc: '将视频转换为 GIF 动图', action: () => { const img = selectedImageData; if (img?.mediaType === 'video') handleVideoTool('to-gif', img); else toast.error('请先选中视频文件'); } },
     { icon: <Package size={14} className={isMonochrome ? 'text-sky-600' : 'text-sky-400'} />, label: '视频压缩', desc: '压缩视频并保留可播放副本', action: () => { const img = selectedImageData; if (img?.mediaType === 'video') handleVideoTool('compress', img); else toast.error('请先选中视频文件'); } },
@@ -12810,7 +12847,14 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '视频编辑', action: () => { setVideoEditTarget(selectedImageData); setVideoEditTab('edit'); setShowVideoEditPanel(true); } }] : []),
     ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '视频延长', action: () => { setVideoEditTarget(selectedImageData); setShowVideoEditPanel(true); setVideoEditTab('extend'); } }] : []),
     ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '视频对比', action: () => { const img = selectedImageData; if (img?.videoUrl) setCompareVideos({ a: { url: img.videoUrl, label: img.prompt?.slice(0, 30) || '视频1' }, b: { url: img.videoUrl, label: '请选择第二个视频' } }); } }] : []),
-    ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '提取帧生成视频', action: async () => { const img = selectedImageData; if (!img?.videoUrl) return; try { const video = document.createElement('video'); video.crossOrigin = 'anonymous'; video.src = img.videoUrl; video.muted = true; video.preload = 'auto'; await new Promise<void>((resolve, reject) => { video.onloadeddata = () => resolve(); video.onerror = () => reject(new Error('视频加载失败')); video.load(); }); video.currentTime = 0; await new Promise<void>(resolve => { video.onseeked = () => resolve(); }); const canvas = document.createElement('canvas'); canvas.width = video.videoWidth; canvas.height = video.videoHeight; const ctx = canvas.getContext('2d'); if (!ctx) throw new Error('Canvas context failed'); ctx.drawImage(video, 0, 0); const dataUrl = canvas.toDataURL('image/png'); const saveRes = await fetch('/api/save-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataUrl, filename: `frame-for-video-${Date.now()}.png` }), }); const saveData = await saveRes.json(); const frameUrl = saveData.url || saveData.localPath || dataUrl; onAddImages([frameUrl], undefined, { modelName: 'frame-extract', apiProvider: 'local' }); toast.success('已提取帧到画布，选中后可在视频面板中图生视频'); } catch (err) { console.error('[extract-frame-video] error:', err); toast.error('帧提取失败'); } } }] : []),
+    ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{
+      label: '提取帧生成视频',
+      action: async () => {
+        if (await handleVideoExtractFrames(selectedImageData, 'single', 1, 0)) {
+          toast.info('选中提取的帧后，可在视频面板中图生视频');
+        }
+      },
+    }] : []),
     // 视频工具集
     ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [
       { label: '─'.repeat(15), action: () => {} }, // 分隔线
@@ -12819,7 +12863,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       { label: '批量抽帧(均匀5帧)', action: () => { handleVideoExtractFrames(selectedImageData, 'uniform', 5); } },
       { label: '批量抽帧(关键帧)', action: () => { handleVideoExtractFrames(selectedImageData, 'keyframes', 0); } },
       { label: 'AI配音合成', action: () => { setVideoDubTarget(selectedImageData); setShowVideoDubPanel(true); } },
-      { label: '提取帧', action: () => { const t = prompt('输入提取时间点（秒）', '0'); if (t !== null) { const time = Number(t); if (t.trim() === '' || !Number.isFinite(time) || time < 0) { toast.error('请输入有效的非负时间（秒）'); return; } handleVideoTool('extract-frame', selectedImageData, time); } } },
+      { label: '提取帧', action: () => openVideoExtractPanel(selectedImageData, 'single') },
       { label: '视频压缩', action: () => { handleVideoTool('compress', selectedImageData); } },
     ] : []),
     { label: '删除', shortcut: 'Delete', action: () => { void requestDeleteImages([...selectedIds]); } },
@@ -17286,18 +17330,41 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
               aria-label="视频抽帧"
               className="fixed left-1/2 top-1/2 z-[85] w-80 max-w-[calc(100vw-2rem)] max-h-[calc(100dvh-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto overscroll-contain rounded-xl border border-[#333] bg-[#1a1a1a] shadow-2xl [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:whitespace-nowrap"
               data-popup="video-extract"
-              onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setShowVideoExtractPanel(false); setEditMode('none'); setActiveTool('none'); } }}
+              onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); closeVideoExtractPanel(); setEditMode('none'); setActiveTool('none'); } }}
             >
               <div className="sticky top-0 z-10 px-4 py-2 bg-[#111] border-b border-[#333] flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-white flex items-center gap-2">
                   <Film size={16} className="text-[#d4af37]" />
                   视频抽帧
                 </h3>
-                <button onClick={() => { setShowVideoExtractPanel(false); setEditMode('none'); setActiveTool('none'); }} aria-label="关闭视频抽帧" className="flex items-center justify-center text-white/60 hover:text-white">
+                <button onClick={() => { closeVideoExtractPanel(); setEditMode('none'); setActiveTool('none'); }} aria-label="关闭视频抽帧" className="flex items-center justify-center text-white/60 hover:text-white">
                   <X size={16} />
                 </button>
               </div>
-              <div className="p-4 space-y-4">
+              <form className="p-4 space-y-4" onSubmit={async event => {
+                event.preventDefault();
+                const panel = videoExtractPanelSessionRef.current;
+                if (!img.videoUrl || panel.processing) return;
+                const timestamp = videoExtractMode === 'single' ? Number(videoExtractTimestamp) : undefined;
+                if (timestamp !== undefined && (!videoExtractTimestamp.trim() || !Number.isFinite(timestamp) || timestamp < 0)) {
+                  toast.error('请输入有效的非负时间（秒）');
+                  return;
+                }
+                panel.processing = true;
+                setVideoExtractProcessing(true);
+                try {
+                  const inserted = timestamp === undefined
+                    ? await handleVideoExtractFrames(img, videoExtractMode, videoExtractFrameCount)
+                    : await handleVideoExtractFrames(img, 'single', 1, timestamp);
+                  if (inserted && videoExtractPanelSessionRef.current === panel) {
+                    closeVideoExtractPanel();
+                    setEditMode('none');
+                  }
+                } finally {
+                  panel.processing = false;
+                  if (videoExtractPanelSessionRef.current === panel) setVideoExtractProcessing(false);
+                }
+              }}>
                 <div className="aspect-video bg-black rounded-lg overflow-hidden">
                   {img.videoUrl ? (
                     <video src={img.videoUrl} className="w-full h-full object-contain" controls muted playsInline />
@@ -17313,9 +17380,12 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       { id: 'fps', label: '每秒1帧' },
                       { id: 'first_last', label: '首尾帧' },
                       { id: 'keyframes', label: '关键帧' },
+                      { id: 'single', label: '指定时间' },
                     ] as const).map(mode => (
                       <button
                         key={mode.id}
+                        type="button"
+                        disabled={videoExtractProcessing}
                         onClick={() => setVideoExtractMode(mode.id)}
                         aria-pressed={videoExtractMode === mode.id}
                         className={`px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
@@ -17336,46 +17406,30 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                     </label>
                   </div>
                 )}
+                {videoExtractMode === 'single' && (
+                  <label className="block space-y-1 text-xs text-white/60">
+                    <span>提取时间点（秒）</span>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      step="any"
+                      required
+                      value={videoExtractTimestamp}
+                      disabled={videoExtractProcessing}
+                      onChange={event => setVideoExtractTimestamp(event.target.value)}
+                      className="block min-h-11 w-full rounded-lg border border-[#555] bg-[#111] px-3 text-base text-white focus-visible:outline-2 focus-visible:outline-[#d4af37]"
+                    />
+                  </label>
+                )}
                 <button
+                  type="submit"
                   disabled={videoExtractProcessing || !img.videoUrl}
-                  onClick={async () => {
-                    if (!img.videoUrl) return;
-                    setVideoExtractProcessing(true);
-                    try {
-                      const res = await fetch('/api/video/tools', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          action: 'extract-frames',
-                          videoUrl: img.videoUrl,
-                          mode: videoExtractMode,
-                          frameCount: videoExtractFrameCount,
-                          fps: videoExtractMode === 'fps' ? 1 : undefined,
-                        }),
-                      });
-                      const data = await res.json();
-                      if (data.frames?.length > 0) {
-                        onAddImages(data.frames.flatMap((frame: unknown) => {
-                          if (!frame || typeof frame !== 'object' || !('url' in frame)) return [];
-                          return typeof frame.url === 'string' ? [frame.url] : [];
-                        }));
-                        toast.success(`成功提取 ${data.frames.length} 帧`);
-                        setShowVideoExtractPanel(false);
-                        setEditMode('none');
-                      } else {
-                        toast.error('未能提取到帧');
-                      }
-                    } catch (e) {
-                      toast.error(e instanceof Error ? e.message : '抽帧失败');
-                    } finally {
-                      setVideoExtractProcessing(false);
-                    }
-                  }}
                   className="w-full py-2.5 rounded-lg bg-[#d4af37] text-black font-semibold text-sm hover:bg-[#e5c048] transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {videoExtractProcessing ? <><Loader2 size={16} className="animate-spin" /> 提取中...</> : '开始抽帧'}
                 </button>
-              </div>
+              </form>
             </div>
           );
         })()}
@@ -17383,6 +17437,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         {/* ====== VIDEO EDIT PANEL ====== */}
         {showVideoEditPanel && videoEditTarget && (
           <VideoEditPanel
+            key={videoEditTarget.id}
             isOpen={showVideoEditPanel}
             videoUrl={videoEditTarget.videoUrl || videoEditTarget.url}
             thumbnailUrl={videoEditTarget.videoThumbnailUrl || videoEditTarget.url}
@@ -17406,8 +17461,9 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                     mode: 'image2video',
                   }),
                 });
-                const data = await res.json();
-                if (data.taskId) {
+                const data = await res.json().catch(() => null);
+                const taskId = data?.taskId;
+                if (res.ok && data?.success !== false && typeof taskId === 'string' && taskId.trim()) {
                   // 创建processing frame
                   const sourceId = videoEditTarget?.id;
                   const frameId = `processing-video-edit-${Date.now()}`;
@@ -17433,7 +17489,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                     if (videoEditPollCount >= 100) { clearInterval(pollInterval); activeIntervalsRef.current.delete(pollInterval); toast.error('视频编辑超时'); onImagesChange(imagesRef.current.filter((img: CanvasImage) => img.id !== frameId)); return; }
                     try {
                       const pollRes = await onRequestTaskPollRef.current({
-                        taskId: data.taskId,
+                        taskId,
                         model: videoModel,
                         providerId: videoProviderId,
                       });
@@ -17453,7 +17509,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                             videoUrl: stableVideo || rawVideoUrl,
                             thumbnailUrl: stableThumb || rawThumbUrl || undefined,
                           });
-                          onImagesChange(images.map((img: CanvasImage) =>
+                          onImagesChange(imagesRef.current.map((img: CanvasImage) =>
                             img.id === frameId
                               ? {
                                   ...img,
@@ -17468,7 +17524,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                           ));
                         }).catch(() => {
                           // 持久化失败兜底：直接用原始URL
-                          onImagesChange(images.map((img: CanvasImage) =>
+                          onImagesChange(imagesRef.current.map((img: CanvasImage) =>
                             img.id === frameId
                               ? {
                                   ...img,
@@ -17499,14 +17555,12 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                     } catch { /* ignore poll errors */ }
                   }, 3000);
                   activeIntervalsRef.current.add(pollInterval); // P2-4: 追踪interval以备unmount清理
-                } else if (data.error) {
-                  toast.error(data.error);
+                } else {
+                  throw new Error(typeof data?.error === 'string' && data.error.trim() ? data.error : '视频编辑请求未受理，请重试');
                 }
               } catch (err) {
-                console.error('[video-edit] API error:', err);
-                toast.error('视频编辑请求失败');
+                throw err instanceof Error && !(err instanceof TypeError) ? err : new Error('视频编辑请求失败');
               }
-              setShowVideoEditPanel(false);
             }}
             onExtend={async (params) => {
               // 视频延长：调用视频延长API
@@ -17522,8 +17576,9 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                     providerId: params.providerId || undefined,
                   }),
                 });
-                const data = await res.json();
-                if (data.taskId) {
+                const data = await res.json().catch(() => null);
+                const taskId = data?.taskId;
+                if (res.ok && data?.success !== false && typeof taskId === 'string' && taskId.trim()) {
                   const sourceId = videoEditTarget?.id;
                   const frameId = `processing-video-extend-${Date.now()}`;
                   const frame = {
@@ -17546,7 +17601,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                     if (videoExtendPollCount >= 100) { clearInterval(pollInterval); activeIntervalsRef.current.delete(pollInterval); toast.error('视频延长超时'); onImagesChange(imagesRef.current.filter((img: CanvasImage) => img.id !== frameId)); return; }
                     try {
                       const pollRes = await onRequestTaskPollRef.current({
-                        taskId: data.taskId,
+                        taskId,
                         model: videoModel,
                         providerId: videoProviderId,
                       });
@@ -17566,7 +17621,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                             videoUrl: stableVideo || rawVideoUrl,
                             thumbnailUrl: stableThumb || rawThumbUrl || undefined,
                           });
-                          onImagesChange(images.map((img: CanvasImage) =>
+                          onImagesChange(imagesRef.current.map((img: CanvasImage) =>
                             img.id === frameId
                               ? {
                                   ...img,
@@ -17581,7 +17636,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                           ));
                         }).catch(() => {
                           // 持久化失败兜底：直接用原始URL
-                          onImagesChange(images.map((img: CanvasImage) =>
+                          onImagesChange(imagesRef.current.map((img: CanvasImage) =>
                             img.id === frameId
                               ? {
                                   ...img,
@@ -17612,14 +17667,12 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                     } catch { /* ignore poll errors */ }
                   }, 3000);
                   activeIntervalsRef.current.add(pollInterval); // P2-4: 追踪interval以备unmount清理
-                } else if (data.error) {
-                  toast.error(data.error);
+                } else {
+                  throw new Error(typeof data?.error === 'string' && data.error.trim() ? data.error : '视频延长请求未受理，请重试');
                 }
               } catch (err) {
-                console.error('[video-extend] API error:', err);
-                toast.error('视频延长请求失败');
+                throw err instanceof Error && !(err instanceof TypeError) ? err : new Error('视频延长请求失败');
               }
-              setShowVideoEditPanel(false);
             }}
           />
         )}
@@ -19974,6 +20027,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         }
         subtitle="设置当前工具使用的处理引擎"
         toolType={(engineDialog || 'upscale') as 'upscale' | 'removebg' | 'svg' | 'segment'}
+        selectedEngine={engineDialog === 'upscale' ? (upscaleMode === 'ai-only' ? 'ai' : 'auto') : undefined}
         onSelect={(eng: EditEngine) => {
           if (engineDialog === 'upscale') {
             if (isUpscaleSubmissionUnknown || isUpscaleSubmitting || isUpscaleQuoteLoading || upscaleQuote || upscaleActionPendingRef.current) {

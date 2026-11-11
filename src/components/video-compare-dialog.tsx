@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
 import { X, Columns2, Layers, MoveHorizontal } from 'lucide-react';
+import { useModalFocus } from './canvas/use-modal-focus';
 
 type CompareMode = 'side-by-side' | 'overlay' | 'slider';
 
@@ -38,41 +39,56 @@ export default function VideoCompareDialog({
   const videoARef = useRef<HTMLVideoElement>(null);
   const videoBRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
   const isDragging = useRef(false);
+  const playbackRequest = useRef(0);
+  useModalFocus(dialogRef, closeRef, onClose, open);
+  const sourcePair = JSON.stringify([videoA.url, videoB.url]);
 
   const accentColor = isGold ? '#d4af37' : '#3b82f6';
   const bgDark = '#0a0a0a';
   const borderColor = isGold ? 'rgba(212,175,55,0.3)' : 'rgba(59,130,246,0.3)';
 
+  const stopPlayback = useCallback(() => {
+    playbackRequest.current++;
+    videoARef.current?.pause();
+    videoBRef.current?.pause();
+    setIsPlaying(false);
+  }, []);
+
   const selectedVideoBId = videoBOptions.find((option: VideoCompareOption): boolean => option.url === videoB.url)?.id || '';
   const handleSelectVideoB = (id: string): void => {
     const option = videoBOptions.find((candidate: VideoCompareOption): boolean => candidate.id === id);
     if (!onSelectVideoB || !option || option.url === videoA.url) return;
-    if (videoARef.current) {
-      videoARef.current.pause();
-      videoARef.current.currentTime = 0;
-    }
-    if (videoBRef.current) {
-      videoBRef.current.pause();
-      videoBRef.current.currentTime = 0;
-    }
-    setIsPlaying(false);
+    stopPlayback();
+    if (videoARef.current) videoARef.current.currentTime = 0;
+    if (videoBRef.current) videoBRef.current.currentTime = 0;
+    setDuration(0);
     setCurrentTime(0);
     onSelectVideoB(option.id);
   };
 
   // Sync playback state between two videos
   const handlePlayPause = useCallback(() => {
-    if (!videoARef.current || !videoBRef.current) return;
+    const first = videoARef.current;
+    const second = videoBRef.current;
+    if (!first || !second) return;
     if (isPlaying) {
-      videoARef.current.pause();
-      videoBRef.current.pause();
-    } else {
-      videoARef.current.play();
-      videoBRef.current.play();
+      stopPlayback();
+      return;
     }
-    setIsPlaying(!isPlaying);
-  }, [isPlaying]);
+    if (duration > 0 && (first.currentTime >= duration || second.currentTime >= duration)) {
+      first.currentTime = 0;
+      second.currentTime = 0;
+      setCurrentTime(0);
+    }
+    const request = ++playbackRequest.current;
+    setIsPlaying(true);
+    void Promise.all([first.play(), second.play()]).catch(() => {
+      if (request === playbackRequest.current) stopPlayback();
+    });
+  }, [duration, isPlaying, stopPlayback]);
 
   const handleSeek = useCallback((time: number) => {
     if (!videoARef.current || !videoBRef.current) return;
@@ -88,9 +104,32 @@ export default function VideoCompareDialog({
   }, []);
 
   const handleLoadedMetadata = useCallback(() => {
-    const nextDuration = videoARef.current?.duration ?? 0;
-    setDuration(Number.isFinite(nextDuration) && nextDuration >= 0 ? nextDuration : 0);
+    const first = videoARef.current?.duration ?? 0;
+    const second = videoBRef.current?.duration ?? 0;
+    setDuration(Number.isFinite(first) && first > 0 && Number.isFinite(second) && second > 0 ? Math.min(first, second) : 0);
   }, []);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const first = videoARef.current;
+    const second = videoBRef.current;
+    if (first?.currentTime) first.currentTime = 0;
+    if (second?.currentTime) second.currentTime = 0;
+    setIsPlaying(false);
+    setCurrentTime(0);
+    handleLoadedMetadata();
+    return () => {
+      playbackRequest.current++;
+      isDragging.current = false;
+      if (first && !first.paused) first.pause();
+      if (second && !second.paused) second.pause();
+    };
+  }, [open, mode, videoA.url, videoB.url, handleLoadedMetadata]);
+
+  const handlePlaybackEnded = useCallback(() => {
+    stopPlayback();
+    if (duration > 0) handleSeek(duration);
+  }, [duration, handleSeek, stopPlayback]);
 
   // Slider drag handlers
   const handleSliderMouseDown = useCallback((e: React.MouseEvent) => {
@@ -127,16 +166,6 @@ export default function VideoCompareDialog({
     };
   }, []);
 
-  // ESC to close
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [open, onClose]);
-
   if (!open) return null;
 
   const formatTime = (t: number) => {
@@ -153,9 +182,11 @@ export default function VideoCompareDialog({
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-label="视频对比"
+      tabIndex={-1}
       data-modal="video-compare"
       className="fixed inset-0 z-[200] flex items-center justify-center p-2"
       style={{ background: 'rgba(0,0,0,0.85)' }}
@@ -173,7 +204,12 @@ export default function VideoCompareDialog({
               {modeButtons.map(mb => (
                 <button
                   key={mb.id}
-                  onClick={() => setMode(mb.id)}
+                  onClick={() => {
+                    if (mode === mb.id) return;
+                    stopPlayback();
+                    setCurrentTime(0);
+                    setMode(mb.id);
+                  }}
                   aria-pressed={mode === mb.id}
                   className="flex min-h-11 min-w-11 items-center justify-center gap-1 whitespace-nowrap px-2 rounded text-sm transition-colors"
                   style={{
@@ -188,7 +224,7 @@ export default function VideoCompareDialog({
               ))}
             </div>
           </div>
-          <button onClick={onClose} aria-label="关闭视频对比" className="flex h-11 w-11 items-center justify-center rounded hover:bg-white/10 transition-colors">
+          <button ref={closeRef} type="button" onClick={onClose} aria-label="关闭视频对比" className="flex h-11 w-11 items-center justify-center rounded hover:bg-white/10 transition-colors">
             <X className="w-4 h-4 text-gray-400" />
           </button>
         </div>
@@ -225,12 +261,14 @@ export default function VideoCompareDialog({
                   </div>
                   <div className="relative aspect-video rounded-lg overflow-hidden" style={{ border: `1px solid ${borderColor}` }}>
                     <video
+                      key={sourcePair}
                       ref={ref}
                       src={video.url}
                       playsInline
                       className="w-full h-full object-contain"
                       onTimeUpdate={handleTimeUpdate}
                       onLoadedMetadata={handleLoadedMetadata}
+                      onEnded={handlePlaybackEnded}
                       onClick={handlePlayPause}
                     />
                   </div>
@@ -243,6 +281,7 @@ export default function VideoCompareDialog({
           {mode === 'overlay' && (
             <div className="relative aspect-video rounded-lg overflow-hidden mx-auto" style={{ maxWidth: '800px', border: `1px solid ${borderColor}` }}>
               <video
+                key={`A:${sourcePair}`}
                 ref={videoARef}
                 src={videoA.url}
                 playsInline
@@ -250,14 +289,18 @@ export default function VideoCompareDialog({
                 style={{ opacity: 0.5, zIndex: 1 }}
                 onTimeUpdate={handleTimeUpdate}
                 onLoadedMetadata={handleLoadedMetadata}
+                onEnded={handlePlaybackEnded}
                 onClick={handlePlayPause}
               />
               <video
+                key={`B:${sourcePair}`}
                 ref={videoBRef}
                 src={videoB.url}
                 playsInline
                 className="w-full h-full object-contain absolute inset-0"
                 style={{ opacity: 0.5, zIndex: 2, mixBlendMode: 'difference' }}
+                onLoadedMetadata={handleLoadedMetadata}
+                onEnded={handlePlaybackEnded}
                 onClick={handlePlayPause}
               />
               <div className="absolute bottom-2 left-2 z-10 flex gap-2">
@@ -283,12 +326,13 @@ export default function VideoCompareDialog({
             >
               {/* Video B (full, behind) */}
               <video
+                key={sourcePair}
                 ref={videoBRef}
                 src={videoB.url}
                 playsInline
                 className="w-full h-full object-contain absolute inset-0"
-                onTimeUpdate={handleTimeUpdate}
                 onLoadedMetadata={handleLoadedMetadata}
+                onEnded={handlePlaybackEnded}
               />
               {/* Video A (clipped, front) */}
               <div
@@ -296,12 +340,15 @@ export default function VideoCompareDialog({
                 style={{ width: `${sliderPos}%` }}
               >
                 <video
+                  key={sourcePair}
                   ref={videoARef}
                   src={videoA.url}
                   playsInline
                   className="absolute inset-0 object-contain w-full h-full"
                   style={{ width: '100cqw', maxWidth: 'none' }}
                   onLoadedMetadata={handleLoadedMetadata}
+                  onTimeUpdate={handleTimeUpdate}
+                  onEnded={handlePlaybackEnded}
                 />
               </div>
               {/* Slider handle */}

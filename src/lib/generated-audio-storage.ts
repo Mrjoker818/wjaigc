@@ -4,6 +4,8 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { getServerDataRoot } from '@/lib/server-data-root';
+import { execSql, getPool } from '@/lib/db-client';
+import { isDeploymentDatabaseOnly } from '@/lib/deployment-database-mode';
 
 export type GeneratedAudioFormat = 'mp3' | 'wav';
 export interface GeneratedAudioArtifact {
@@ -131,15 +133,46 @@ async function audioDirectory(create: boolean): Promise<string> {
   if (!stats.isDirectory() || stats.isSymbolicLink() || await fs.realpath(directory) !== directory) invalid();
   return directory;
 }
-function describe(filename: string): { hash: string; format: GeneratedAudioFormat } {
-  const match = /^tts_\d{13}_[0-9a-f]{8}_([0-9a-f]{64})\.(mp3|wav)$/u.exec(filename);
-  if (!match || !isGeneratedAudioFormat(match[2])) invalid();
-  return { hash: match[1], format: match[2] };
+function describe(filename: string): { hash: string; format: GeneratedAudioFormat; database: boolean } {
+  const match = /^(tts|ttsdb)_\d{13}_[0-9a-f]{8}_([0-9a-f]{64})\.(mp3|wav)$/u.exec(filename);
+  if (!match || !isGeneratedAudioFormat(match[3])) invalid();
+  return { hash: match[2], format: match[3], database: match[1] === 'ttsdb' };
 }
-export async function persistGeneratedAudioResponse(response: Response, format: GeneratedAudioFormat, signal?: AbortSignal): Promise<GeneratedAudioArtifact> {
-  const bytes = await readResponse(response, format, signal); signal?.throwIfAborted();
-  const directory = await audioDirectory(true), hash = createHash('sha256').update(bytes).digest('hex');
-  const filename = 'tts_' + Date.now() + '_' + randomUUID().slice(0, 8) + '_' + hash + '.' + format;
+
+export function isPrivateGeneratedAudioFilename(filename: string): boolean {
+  return filename.startsWith('ttsdb_');
+}
+
+export async function ensureGeneratedAudioStorage(): Promise<void> {
+  if (isDeploymentDatabaseOnly()) {
+    await getPool().query('SELECT filename FROM wujie_generated_audio LIMIT 0');
+  } else {
+    await audioDirectory(true);
+  }
+}
+
+export async function persistGeneratedAudioResponse(
+  response: Response, format: GeneratedAudioFormat, ownerId: string, signal?: AbortSignal,
+): Promise<GeneratedAudioArtifact> {
+  const bytes = await readResponse(response, format, signal);
+  signal?.throwIfAborted();
+  const database = isDeploymentDatabaseOnly();
+  const hash = createHash('sha256').update(bytes).digest('hex');
+  const now = Date.now();
+  const filename = `${database ? 'ttsdb' : 'tts'}_${now}_${randomUUID().slice(0, 8)}_${hash}.${format}`;
+  const artifact = { filename, audioUrl: PREFIX + filename, format, mimeType: mime(format), size: bytes.length };
+  if (database) {
+    if (!ownerId) invalid();
+    const result = await getPool().query(
+      'INSERT INTO wujie_generated_audio (filename, owner_id, audio_bytes, created_at) VALUES ($1, $2, $3, $4)',
+      [filename, ownerId, bytes, now],
+    );
+    if (result.rowCount !== 1) throw new Error('AUDIO_STORAGE_WRITE_UNCONFIRMED');
+    signal?.throwIfAborted();
+    return artifact;
+  }
+
+  const directory = await audioDirectory(true);
   const target = path.join(directory, filename);
   const handle = await fs.open(target, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600);
   let owned: BigIntStats | undefined; let failure: unknown;
@@ -168,10 +201,26 @@ export async function persistGeneratedAudioResponse(response: Response, format: 
     try { await handle.close(); }
     catch (error) { if (failure !== undefined) throw new AggregateError([failure, error], '音频写入及关闭失败'); throw error; }
   }
-  return { filename, audioUrl: PREFIX + filename, format, mimeType: mime(format), size: bytes.length };
+  return artifact;
 }
-export async function readGeneratedAudio(filename: string, signal?: AbortSignal): Promise<GeneratedAudioBytes | null> {
+
+export async function readGeneratedAudio(filename: string, signal?: AbortSignal, ownerId?: string): Promise<GeneratedAudioBytes | null> {
   const descriptor = describe(filename);
+  if (descriptor.database) {
+    if (!ownerId || !isDeploymentDatabaseOnly()) return null;
+    signal?.throwIfAborted();
+    const { rows: [row] } = await execSql(
+      'SELECT audio_bytes FROM wujie_generated_audio WHERE filename = $1 AND owner_id = $2 AND octet_length(audio_bytes) <= $3',
+      [filename, ownerId, MAX_BYTES],
+    );
+    if (!row) return null;
+    signal?.throwIfAborted();
+    const bytes = row.audio_bytes;
+    if (!Buffer.isBuffer(bytes) || createHash('sha256').update(bytes).digest('hex') !== descriptor.hash) invalid();
+    await validateAudio(bytes, descriptor.format, signal);
+    return { buffer: bytes, filename, audioUrl: PREFIX + filename, format: descriptor.format, mimeType: mime(descriptor.format), size: bytes.length };
+  }
+
   let directory: string, target: string, before: BigIntStats;
   try {
     directory = await audioDirectory(false); target = path.join(directory, filename);
@@ -201,8 +250,8 @@ export async function readGeneratedAudio(filename: string, signal?: AbortSignal)
     catch (error) { if (failure !== undefined) throw new AggregateError([failure, error], '音频读取及关闭失败'); throw error; }
   }
 }
-export async function readGeneratedAudioFromUrl(url: string, signal?: AbortSignal): Promise<GeneratedAudioBytes | null> {
+export async function readGeneratedAudioFromUrl(url: string, signal?: AbortSignal, ownerId?: string): Promise<GeneratedAudioBytes | null> {
   if (!url.startsWith(PREFIX)) invalid();
-  return readGeneratedAudio(url.slice(PREFIX.length), signal);
+  return readGeneratedAudio(url.slice(PREFIX.length), signal, ownerId);
 }
 

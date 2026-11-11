@@ -164,6 +164,7 @@ function TaskSwitchingChatAreaHarness({
   return (
     <>
       <button type="button" onClick={() => setTask(nextTask)}>切换任务</button>
+      <button type="button" onClick={() => setTask(initialTask)}>返回任务</button>
       <ChatArea
         user={user}
         project={project}
@@ -175,7 +176,7 @@ function TaskSwitchingChatAreaHarness({
         onPersistTask={async () => {}}
         onUpdateProject={vi.fn()}
         onCreateTask={vi.fn()}
-        onSelectTask={vi.fn()}
+        onSelectTask={setTask}
         onUpdateAgent={vi.fn()}
         onDeleteAgent={vi.fn()}
         onSkillToAgent={vi.fn()}
@@ -297,6 +298,57 @@ describe('simple-chat request context integration', () => {
     fireEvent.click(container.querySelectorAll('header button[aria-haspopup="listbox"]')[1]);
   }
 
+  it('scrolls to the exact global search match in the current and newly selected conversation', async () => {
+    mockStartupRequests();
+    const scrolled: Array<string | undefined> = [];
+    vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) {
+      scrolled.push(this.dataset.chatMessageId);
+    });
+    const initialTask = createTask([
+      { id: 'matching-current', role: 'user', content: 'Current exact match', createdAt: 1 },
+      { id: 'current-tail', role: 'assistant', content: 'Current tail', createdAt: 2 },
+    ]);
+    const nextTask = {
+      ...createTask([
+        { id: 'matching-next', role: 'user', content: 'Other exact match', createdAt: 3 },
+        { id: 'other-tail', role: 'assistant', content: 'Other tail', createdAt: 4 },
+      ]), id: 'task-2',
+    };
+    render(<TaskSwitchingChatAreaHarness initialTask={initialTask} nextTask={nextTask} onUpdateTask={vi.fn()} />);
+    for (const [query, messageId] of [['Current exact match', 'matching-current'], ['Other exact match', 'matching-next']]) {
+      fireEvent.click(screen.getByTitle('全局搜索 (Ctrl+K)'));
+      fireEvent.change(screen.getByRole('textbox', { name: '搜索所有对话内容' }), { target: { value: query } });
+      fireEvent.click(screen.getByRole('button', { name: new RegExp(query) }));
+      await waitFor(() => expect(scrolled.at(-1)).toBe(messageId));
+    }
+  });
+
+  it('shows exact token estimates only in the conversation that incurred them', async () => {
+    mockStartupRequests();
+    const initialTask = createTask();
+    const nextTask = { ...createTask([{ id: 'other', role: 'user', content: 'Other', createdAt: 3 }]), id: 'task-2' };
+    render(<TaskSwitchingChatAreaHarness initialTask={initialTask} nextTask={nextTask} onUpdateTask={vi.fn()} />);
+    submitText('abcdefgh');
+    await screen.findByText('reply');
+    const openUsage = () => fireEvent.click(screen.getByTitle('用量统计'));
+    const total = () => screen.getByText('总 Tokens').previousElementSibling?.textContent;
+    openUsage();
+    await waitFor(() => expect(total()).toBe('4'));
+    fireEvent.click(screen.getByRole('button', { name: '关闭用量统计' }));
+    fireEvent.click(screen.getByTitle('开启临时聊天'));
+    openUsage();
+    expect(total()).toBe('4');
+    fireEvent.click(screen.getByRole('button', { name: '关闭用量统计' }));
+    fireEvent.click(screen.getByRole('button', { name: '切换任务' }));
+    openUsage();
+    expect(total()).toBe('0');
+    expect(screen.getByText('消息数').previousElementSibling?.textContent).toBe('1');
+    fireEvent.click(screen.getByRole('button', { name: '关闭用量统计' }));
+    fireEvent.click(screen.getByRole('button', { name: '返回任务' }));
+    openUsage();
+    expect(total()).toBe('4');
+  });
+
   it('persists the current chat snapshot before exposing a completed Canvas transfer', async () => {
     const onUpdateTask = vi.fn();
     const persistence = createDeferred<void>();
@@ -343,11 +395,12 @@ describe('simple-chat request context integration', () => {
 
   it('guards a workflow return from stale generic task synchronization until persistence settles', () => {
     expect(chatAreaSource).toContain('workflowReturnPersistenceGuardRef');
+    expect(chatAreaSource).toContain('const messageScope = JSON.stringify([user.id, project?.id ?? null, task?.id ?? null]);');
     expect(chatAreaSource).toMatch(
-      /workflowReturnPersistenceGuardRef\.current = \{\s*taskId: task\.id,\s*messageId: returned\.id,\s*\};[\s\S]*await onPersistTask/,
+      /workflowReturnPersistenceGuardRef\.current = \{\s*scope: messageScope,\s*messageId: returned\.id,\s*\};[\s\S]*await onPersistTask/,
     );
     expect(chatAreaSource).toMatch(
-      /const workflowReturnGuard = workflowReturnPersistenceGuardRef\.current;[\s\S]*if \(workflowReturnGuard\?\.taskId === task\.id\)[\s\S]*return;[\s\S]*onUpdateTask/,
+      /const workflowReturnGuard = workflowReturnPersistenceGuardRef\.current;[\s\S]*if \(workflowReturnGuard\?\.scope === messageScope\)[\s\S]*return;[\s\S]*onUpdateTask/,
     );
   });
 
@@ -582,7 +635,7 @@ describe('simple-chat request context integration', () => {
       nextTask={nextTask}
       onUpdateTask={onUpdateTask}
     />);
-    await waitFor(() => expect(onUpdateTask).toHaveBeenCalled());
+    await screen.findByText(historicalMessage.content);
     onUpdateTask.mockClear();
     submitText('continue the discussion');
 
@@ -639,7 +692,7 @@ describe('simple-chat request context integration', () => {
     taskB.name = 'Task B';
 
     render(<TaskSwitchingChatAreaHarness initialTask={taskA} nextTask={taskB} onUpdateTask={onUpdateTask} />);
-    await waitFor(() => expect(onUpdateTask).toHaveBeenCalled());
+    await screen.findByText('Task A historical question');
     onUpdateTask.mockClear();
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockClear();
     fireEvent.click(screen.getByTitle('品牌DNA注入 - 将品牌规范注入对话上下文'));
@@ -1038,6 +1091,7 @@ describe('simple-chat request context integration', () => {
     await waitFor(() => expect(requestPayloads('/api/simple-chat/chat')).toHaveLength(1));
 
     fireEvent.click(screen.getByRole('button', { name: '切换任务' }));
+    await screen.findByText('Task B persisted message');
     await act(async () => {
       canvasResponse.emit({ type: 'text', content: 'late Task A result' });
       canvasResponse.close();
@@ -1048,11 +1102,9 @@ describe('simple-chat request context integration', () => {
     const taskBUpdates = onUpdateTask.mock.calls
       .map(([updatedTask]) => updatedTask as SimpleChatTask)
       .filter(updatedTask => updatedTask.id === taskB.id);
-    expect(taskBUpdates.length).toBeGreaterThan(0);
-    expect(taskBUpdates.every(updatedTask => (
-      updatedTask.messages.some(message => message.id === 'task-b-message')
-      && updatedTask.messages.every(message => message.id !== 'task-a-message')
-    ))).toBe(true);
+    expect(screen.queryByText('Task B persisted message')).not.toBeNull();
+    expect(screen.queryByText('Task A persisted message')).toBeNull();
+    expect(taskBUpdates).toEqual([]);
   });
 
   it('does not apply a late CanvasEditor response after switching projects', async () => {

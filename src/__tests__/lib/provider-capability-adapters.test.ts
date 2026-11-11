@@ -221,10 +221,25 @@ describe('provider capability adapters', () => {
     });
     expect(caps('doubao-seedance-2-5-260628')?.allowedDurationsSeconds).toHaveLength(27);
     expect(caps('hailuo-2.3')).toMatchObject({
-      allowedDurationsSeconds: [6, 10], allowedSizes: ['768p'], supportedOperations: ['image-to-video'],
+      allowedDurationsSeconds: [6, 10], allowedSizes: ['768p'], supportedOperations: ['image-to-video'], maxReferenceImages: 1,
+    });
+    expect(caps('seedance-1.0-pro')).toMatchObject({
+      supportedOperations: ['text-to-video', 'image-to-video'], maxReferenceImages: 1,
+    });
+    expect(caps('doubao-seedance-2-0-mini-260615')).toMatchObject({
+      supportedOperations: ['text-to-video', 'image-to-video', 'multi-reference'], maxReferenceImages: 10,
     });
     expect(caps('minimax-h3')?.allowedSizes).toEqual(['768p', '2K', '480p', '720p']);
     const aiLink = provider('ai', 'https://api.ai-link.shop', 'video');
     expect(resolveProviderCapabilityAdapter(aiLink, model('ai', 'doubao-seedance-2-0-260128', 'video'))).toBeUndefined();
+  });
+
+  it('applies Pear video capabilities to a gateway explicitly using the Pear video profile', () => {
+    const gateway = provider('gateway', 'https://gateway.example', 'video', {
+      advancedParams: { compatProfile: 'pearapi-video' },
+    });
+    expect(resolveProviderCapabilityAdapter(gateway, model('gateway', 'hailuo-2.3', 'video'))).toMatchObject({
+      supportedOperations: ['image-to-video'], allowedDurationsSeconds: [6, 10],
+    });
   });
 });

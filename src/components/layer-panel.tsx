@@ -250,19 +250,29 @@ function LayerItem({
       {/* 信息区 */}
       <div className={`px-1 py-1 rounded-b-lg flex flex-col gap-0.5 ${isSelected ? (isMonochrome ? 'bg-gray-200' : 'bg-gold/10') : ''}`}>
         {isEditing ? (
-          <div ref={editorRef} className="flex flex-col gap-1">
+          <div
+            ref={editorRef}
+            className="flex flex-col gap-1"
+            onBlur={event => {
+              if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+              handleRenameSubmit();
+            }}
+            onKeyDown={event => {
+              if (event.key !== 'Escape' || event.nativeEvent.isComposing) return;
+              event.preventDefault();
+              event.stopPropagation();
+              handleRenameCancel();
+            }}
+          >
           <input
             type="text"
             value={editName}
             onChange={(e) => setEditName(e.target.value)}
-            onBlur={handleRenameSubmit}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') handleRenameSubmit();
-              if (e.key === 'Escape') {
-                e.preventDefault();
-                e.stopPropagation();
-                handleRenameCancel();
-              }
+              if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+              e.preventDefault();
+              e.stopPropagation();
+              handleRenameSubmit();
             }}
             aria-label={`重命名 ${displayName}`}
             className="w-full min-h-11 px-1 py-0.5 text-base bg-transparent border border-gold/30 rounded focus:outline-none focus:border-gold md:[@media(hover:hover)_and_(pointer:fine)]:min-h-0 md:[@media(hover:hover)_and_(pointer:fine)]:text-[11px]"

@@ -246,6 +246,165 @@ describe('poll-task authoritative direct recovery', () => {
     }
   });
 
+  it('recovers an already accepted Pear video through the historical GET after an endpoint mismatch', async () => {
+    const taskId = 'video-pre-migration';
+    const remoteTaskId = 'legacy-remote-1';
+    const providerId = 'pear';
+    const model = 'doubao-seedance-2-0-mini-260615';
+    const baseUrl = 'https://api.pearapi.ai';
+    const updatedAt = Date.now() - 60_000;
+    const task = { id: taskId, userId: 'user-a', type: 'video', status: 'processing', progress: 10,
+      remoteTaskId, providerId, model, createdAt: updatedAt, updatedAt, result: { thirdPartyTaskId: remoteTaskId } };
+    mocks.getCloudTaskForUser.mockResolvedValue(task);
+    mocks.findProviderById.mockResolvedValueOnce({ id: providerId, baseUrl, apiKey: 'synthetic-key' })
+      .mockResolvedValueOnce({ id: providerId, baseUrl, apiKey: 'synthetic-key' });
+    mocks.buildRecoveredTaskContext.mockReturnValueOnce({ ...task, taskId });
+    mocks.claimCloudTaskLease.mockResolvedValueOnce({ attemptCount: 1 });
+    mocks.registerTask.mockReturnValueOnce({ taskId });
+    mocks.getTaskInfo.mockImplementationOnce(() => undefined).mockImplementationOnce(() => ({
+      ...task, taskId, result: mocks.updateTaskProgress.mock.calls[0]?.[1]?.result,
+    }));
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('unexpected fetch'))
+      .mockResolvedValueOnce(Response.json({ error: { message: 'Endpoint not found' } }, { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ task_id: remoteTaskId, status: 'in_progress', progress: 45 }));
+    try {
+      const response = await POST(new Request('http://localhost/api/poll-task', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ taskId }),
+      }) as NextRequest);
+      expect(await response.json()).toMatchObject({ success: true, status: 'processing', progress: 45 });
+      expect(fetchSpy.mock.calls.map(([url, init]) => [url, init?.method, init?.body])).toEqual([
+        [`${baseUrl}/v1/videos/tasks/${remoteTaskId}`, 'GET', undefined],
+        [`${baseUrl}/v1/video/generations/${remoteTaskId}`, 'GET', undefined],
+      ]);
+      expect(mocks.after).not.toHaveBeenCalled();
+      expect(mocks.terminateCloudTaskAndRefund).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it.each(['venue-analyze', 'venue-proposals'])('returns an unconfirmed %s receipt as non-retryable to its owner', async type => {
+    const taskId = `fixture-${type}`;
+    mocks.getCloudTaskForUser.mockResolvedValue(null);
+    mocks.getTaskInfo.mockReturnValue({ taskId, type, status: 'failed', userId: 'user-a', progress: 10,
+      result: { venueSubmissionUnconfirmed: true }, error: '供应商受理状态待核实，请勿重复提交' });
+    const response = await POST(new Request('http://localhost/api/poll-task', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ taskId }),
+    }) as NextRequest);
+    expect(await response.json()).toMatchObject({ status: 'failed', taskId, code: 'VENUE_SUBMISSION_UNCONFIRMED',
+      requiresReconciliation: true, retryable: false });
+  });
+
+  it('recovers a durable display receipt with a GET on a fresh instance', async () => {
+    const taskId = 'd3d_accepted-fixture';
+    const remoteTaskId = 'display/remote';
+    const baseUrl = 'https://display.invalid/v1';
+    const imageUrl = 'https://images.invalid/result.png';
+    const createdAt = Date.now() - 20_000;
+    const receipt = { state: 'remote', acceptedAt: createdAt, configuredBase: baseUrl, pollBase: baseUrl,
+      pollPath: '/tasks/display%2Fremote' };
+    let task = { id: taskId, userId: 'user-a', type: 'display3d', status: 'processing', progress: 15,
+      providerId: 'display-provider', model: 'image-fixture', remoteTaskId, createdAt, updatedAt: createdAt,
+      creditStatus: 'not-applicable', result: { display3dReceipt: receipt, prompt: 'display fixture' } };
+    mocks.getCloudTaskById.mockResolvedValue(task);
+    mocks.getCloudTaskForUser.mockImplementation(async (id, user) => id === taskId && user === task.userId ? task : null);
+    mocks.findProviderById.mockResolvedValueOnce({ id: task.providerId, apiKey: 'synthetic-display-key', baseUrl });
+    mocks.claimCloudTaskLease.mockImplementationOnce(async (id, owner, ttl) => ({
+      taskId: id, owner, expiresAt: Date.now() + ttl, attemptCount: 1,
+    }));
+    mocks.releaseCloudTaskLease.mockResolvedValueOnce(true);
+    mocks.completeCloudTask.mockImplementationOnce(async (_id, result) => {
+      task = { ...task, status: 'completed', progress: 100, result: { ...task.result, ...result } };
+      return true;
+    });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('unexpected request'))
+      .mockResolvedValueOnce(Response.json({ status: 'completed', data: [{ url: imageUrl }] }));
+    try {
+      const response = await POST(new Request('http://localhost/api/poll-task', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ taskId, providerId: 'forged', apiBaseUrl: 'https://forged.invalid', apiKey: 'forged' }),
+      }) as NextRequest);
+      const payload = await response.json();
+      expect(payload).toMatchObject({ success: true, status: 'completed', imageUrls: [imageUrl],
+        result: { imageUrls: [imageUrl], prompt: 'display fixture', type: 'display3d' } });
+      expect(payload.result).not.toHaveProperty('display3dReceipt');
+      expect(fetchSpy).toHaveBeenCalledExactlyOnceWith(`${baseUrl}/tasks/display%2Fremote`, expect.objectContaining({
+        method: 'GET', redirect: 'manual', headers: { Authorization: 'Bearer synthetic-display-key' },
+      }));
+      expect(mocks.findProviderById).toHaveBeenCalledExactlyOnceWith('display-provider');
+      expect(mocks.after).not.toHaveBeenCalled();
+    } finally { fetchSpy.mockRestore(); }
+  });
+
+  it('never replays display submission when the durable dispatch has no receipt', async () => {
+    const taskId = 'd3d_unconfirmed-fixture';
+    const task = { id: taskId, type: 'display3d', userId: 'user-a', status: 'processing', progress: 10,
+      result: { display3dReceipt: { state: 'started' } } };
+    mocks.getCloudTaskById.mockResolvedValue(task);
+    mocks.getCloudTaskForUser.mockResolvedValue(task);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('unexpected request'));
+    try {
+      const response = await POST(new Request('http://localhost/api/poll-task', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ taskId }),
+      }) as NextRequest);
+      expect(await response.json()).toMatchObject({ status: 'processing', code: 'DISPLAY3D_OUTCOME_UNCONFIRMED',
+        retryable: false, requiresReconciliation: true });
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(mocks.claimCloudTaskLease).not.toHaveBeenCalled();
+      expect(mocks.after).not.toHaveBeenCalled();
+    } finally { fetchSpy.mockRestore(); }
+  });
+
+  it('settles a stored direct display result without contacting the provider', async () => {
+    const taskId = 'd3d_direct-fixture';
+    const imageUrls = ['https://images.invalid/direct.png'];
+    const result = { display3dReceipt: { state: 'direct' }, imageUrls, prompt: 'fixture' };
+    const task = { id: taskId, type: 'display3d', userId: 'user-a', status: 'processing', progress: 10, result };
+    mocks.getCloudTaskById.mockResolvedValue(task);
+    mocks.getCloudTaskForUser.mockResolvedValueOnce(task).mockResolvedValueOnce({ ...task, status: 'completed', progress: 100 });
+    mocks.claimCloudTaskLease.mockImplementationOnce(async (id, owner, ttl) => ({
+      taskId: id, owner, expiresAt: Date.now() + ttl, attemptCount: 1,
+    }));
+    mocks.completeCloudTask.mockResolvedValueOnce(true);
+    mocks.releaseCloudTaskLease.mockResolvedValueOnce(true);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('unexpected request'));
+    try {
+      const response = await POST(new Request('http://localhost/api/poll-task', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ taskId }),
+      }) as NextRequest);
+      expect(await response.json()).toMatchObject({ status: 'completed', imageUrls });
+      expect(mocks.completeCloudTask).toHaveBeenCalledWith(taskId, { imageUrls, prompt: 'fixture', type: 'display3d' },
+        expect.objectContaining({ leaseAttemptCount: 1 }));
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(mocks.findProviderById).not.toHaveBeenCalled();
+    } finally { fetchSpy.mockRestore(); }
+  });
+
+  it('does not query a saved display job with credentials from a reconfigured base', async () => {
+    const taskId = 'd3d_changed-base-fixture';
+    const baseUrl = 'https://original.invalid/v1';
+    const task = { id: taskId, type: 'display3d', userId: 'user-a', status: 'processing', progress: 15,
+      providerId: 'display-provider', remoteTaskId: 'remote', result: { display3dReceipt: {
+        state: 'remote', acceptedAt: Date.now(), configuredBase: baseUrl, pollBase: baseUrl, pollPath: '/tasks/remote',
+      } } };
+    mocks.getCloudTaskById.mockResolvedValue(task);
+    mocks.getCloudTaskForUser.mockResolvedValue(task);
+    mocks.claimCloudTaskLease.mockImplementationOnce(async (id, owner, ttl) => ({
+      taskId: id, owner, expiresAt: Date.now() + ttl, attemptCount: 1,
+    }));
+    mocks.findProviderById.mockResolvedValueOnce({ id: task.providerId, apiKey: 'new-fixture-key', baseUrl: 'https://changed.invalid/v1' });
+    mocks.releaseCloudTaskLease.mockResolvedValueOnce(true);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('unexpected request'));
+    try {
+      const response = await POST(new Request('http://localhost/api/poll-task', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ taskId }),
+      }) as NextRequest);
+      expect(await response.json()).toMatchObject({ success: true, status: 'processing' });
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(mocks.completeCloudTask).not.toHaveBeenCalled();
+    } finally { fetchSpy.mockRestore(); }
+  });
+
   it('returns a completed durable direct snapshot without rebuilding or remotely polling it', async () => {
     mocks.getCloudTaskForUser.mockResolvedValue({
       id: 'direct-task',

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -9,10 +10,14 @@ import {
   downloadPearPsd,
   resolveLayerSourceImage,
 } from '@/lib/layer-decomposition/source-image';
+import * as s3 from '@/lib/s3-storage';
+
+vi.mock('server-only', () => ({}));
 
 const temporaryRoots: string[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(temporaryRoots.splice(0).map((root) => rm(root, {
     recursive: true,
     force: true,
@@ -66,6 +71,21 @@ describe('layer source image loading', () => {
       dataRoot,
       workspaceRoot: dataRoot,
     })).resolves.toMatchObject({ width: 4, height: 5 });
+  });
+
+  it('reads an exact managed image from shared storage when this instance has no local copy', async () => {
+    const dataRoot = await mkdtemp(path.join(tmpdir(), 'wujie-layer-source-'));
+    temporaryRoots.push(dataRoot);
+    const png = await sharp({ create: { width: 4, height: 5, channels: 3, background: '#d4af37' } }).png().toBuffer();
+    const filename = `${createHash('sha256').update(png).digest('hex').slice(0, 16)}-collaborative.png`;
+    const read = vi.spyOn(s3, 'readBinaryFromS3Exact').mockResolvedValue(png);
+    const signal = new AbortController().signal;
+
+    await expect(resolveLayerSourceImage(`/api/serve-upload/exports/${filename}`, { dataRoot, signal }))
+      .resolves.toMatchObject({ buffer: png, width: 4, height: 5 });
+    expect(read).toHaveBeenCalledWith(`exports/${filename}`, expect.objectContaining({
+      maxBytes: 15 * 1024 * 1024, signal,
+    }));
   });
 
   it('uses the safe downloader for public images', async () => {

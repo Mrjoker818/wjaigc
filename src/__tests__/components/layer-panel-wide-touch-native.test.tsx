@@ -187,6 +187,17 @@ for(const e of MATRIX)it('ON '+e.theme+' '+e.width+'x'+e.height+' bottom layers 
       await touch(input);const cancelFocused=await input.evaluate(el=>document.activeElement===el);focusBeforeTyping.push(cancelFocused);expect(cancelFocused,'ON_CANCEL_INPUT_FOCUSED_BEFORE_FILL').toBe(true);await input.fill('不应保存的草稿');await touch(card.getByRole('button',{name:'取消重命名',exact:true}));
       expect((await s.page.evaluate(()=>window.onFixture.snapshot())).images[0].name).toBe(currentName);
       expect((await s.page.evaluate(()=>window.onFixture.snapshot())).actions.filter(a=>a.action==='rename').length).toBe(before.actions.filter(a=>a.action==='rename').length);
+      await touch(card.getByRole('button',{name:'图层 '+currentName+' 更多操作',exact:true}));
+      await touch(panel.getByRole('button',{name:'重命名',exact:true}));
+      await card.getByRole('textbox').fill('键盘取消的草稿');
+      await s.page.keyboard.press('Tab');
+      expect(await card.getByRole('button',{name:'保存重命名'}).evaluate(el=>document.activeElement===el)).toBe(true);
+      await s.page.keyboard.press('Tab');
+      expect(await card.getByRole('button',{name:'取消重命名'}).evaluate(el=>document.activeElement===el)).toBe(true);
+      await s.page.keyboard.press('Enter');
+      await card.getByRole('textbox').waitFor({state:'detached'});
+      expect((await s.page.evaluate(()=>window.onFixture.snapshot())).images[0].name).toBe(currentName);
+      expect((await s.page.evaluate(()=>window.onFixture.snapshot())).actions.filter(a=>a.action==='rename').length).toBe(before.actions.filter(a=>a.action==='rename').length);
       await touch(card.getByRole('button',{name:'图层 '+currentName+' 更多操作',exact:true}));await touch(panel.getByRole('button',{name:'重命名',exact:true}));
       const saveInput=card.getByRole('textbox');await touch(saveInput);const saveFocused=await saveInput.evaluate(el=>document.activeElement===el);focusBeforeTyping.push(saveFocused);expect(saveFocused,'ON_SAVE_INPUT_FOCUSED_BEFORE_FILL').toBe(true);await saveInput.fill('触控已保存 '+inset);
       await touch(card.getByRole('button',{name:'保存重命名',exact:true}));

@@ -115,6 +115,8 @@ function fixture(mode: 'document' | 'legacy' | 'unknown', options: {
     { status: options.forbidden ? 403 : 200 });
   });
   const manager = {
+    getProject: (projectId: string): typeof project.current | undefined =>
+      project.current.id === projectId ? project.current : undefined,
     updateProject: (projectId: string, value: { canvasImages: CanvasImage[] }): void => {
       updates.push({ projectId, value });
     },

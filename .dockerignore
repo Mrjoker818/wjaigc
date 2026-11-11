@@ -1,5 +1,9 @@
 node_modules
 data
+**/deploy-seed
+**/data/system/users.json
+**/data/system/api-providers.json
+**/data/system/auth-secret
 .git
 .env
 .env.local

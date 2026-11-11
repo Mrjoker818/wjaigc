@@ -1,12 +1,12 @@
 /**
  * 诊断包导出 API
  * GET /api/diagnostics/export
- * 收集应用状态、配置摘要、最近日志（脱敏API Key），打包为zip下载
+ * 收集应用状态、配置摘要和日志级别计数，打包为 zip 下载
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { join } from 'path';
-import { readFile, writeFile, mkdir } from 'fs/promises';
+import { open, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { requireAdminUser } from '@/lib/server-auth';
 
@@ -24,28 +24,32 @@ async function getJSZip(): Promise<JSZipConstructor> {
   return JSZip;
 }
 
-/** 脱敏字符串（保留首尾字符） */
-function maskString(s: string, keepStart = 4, keepEnd = 4): string {
-  if (!s || s.length < keepStart + keepEnd + 2) return '***';
-  return `${s.slice(0, keepStart)}${'*'.repeat(Math.max(4, s.length - keepStart - keepEnd))}${s.slice(-keepEnd)}`;
-}
+const LOG_SAMPLE_BYTES = 256 * 1024;
+const LOG_SAMPLE_LINES = 2000;
 
-/** 脱敏对象中的API Key等敏感字段 */
-function sanitizeObject(obj: Record<string, unknown>): Record<string, unknown> {
-  const sensitiveKeys = ['api_key', 'apikey', 'apiKey', 'key', 'secret', 'password', 'token', 'authorization'];
-  const result: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(obj)) {
-    if (sensitiveKeys.some(sk => k.toLowerCase().includes(sk.toLowerCase()))) {
-      result[k] = typeof v === 'string' ? maskString(v) : '***';
-    } else if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
-      result[k] = sanitizeObject(v as Record<string, unknown>);
-    } else if (Array.isArray(v)) {
-      result[k] = v.map(item => typeof item === 'object' && item !== null ? sanitizeObject(item as Record<string, unknown>) : item);
-    } else {
-      result[k] = v;
+async function summarizeLog(path: string) {
+  const file = await open(path, 'r');
+  try {
+    const stat = await file.stat();
+    if (!stat.isFile()) return undefined;
+    const start = Math.max(0, stat.size - LOG_SAMPLE_BYTES);
+    const buffer = Buffer.alloc(stat.size - start);
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, start);
+    const lines = buffer.toString('utf8', 0, bytesRead).split('\n');
+    if (start > 0) lines.shift();
+    const counts = { sampledLines: 0, error: 0, warn: 0, info: 0, debug: 0, other: 0 };
+    for (const line of lines.slice(-LOG_SAMPLE_LINES)) {
+      if (!line.trim()) continue;
+      counts.sampledLines += 1;
+      const level = line.match(/^(?:\d{4}-\d{2}-\d{2}T[\d:.]+Z\s+)?\[?(error|warn(?:ing)?|info|debug)\b/i)?.[1]?.toLowerCase();
+      if (level === 'warning' || level === 'warn') counts.warn += 1;
+      else if (level === 'error' || level === 'info' || level === 'debug') counts[level] += 1;
+      else counts.other += 1;
     }
+    return counts;
+  } finally {
+    await file.close();
   }
-  return result;
 }
 
 export async function GET(req: NextRequest) {
@@ -67,7 +71,6 @@ export async function GET(req: NextRequest) {
       platform: process.platform,
       arch: process.arch,
       env: process.env.NODE_ENV,
-      cozeEnv: process.env.COZE_PROJECT_ENV,
       // 关键环境变量（仅检查存在性，不泄露值）
       envVars: {
         PGDATABASE_URL: !!process.env.PGDATABASE_URL,
@@ -75,37 +78,29 @@ export async function GET(req: NextRequest) {
         GEMINI_API_KEY: !!process.env.GEMINI_API_KEY,
         APIMART_API_KEY: !!process.env.APIMART_API_KEY,
         COZE_API_KEY: !!process.env.COZE_API_KEY,
+        COZE_PROJECT_ENV: !!process.env.COZE_PROJECT_ENV,
         PY_VECTORIZE_ENDPOINT: process.env.PY_VECTORIZE_ENDPOINT ? '(set)' : '(not set)',
       },
     };
     zip.file('environment.json', JSON.stringify(envInfo, null, 2));
     
-    // 2. 最近应用日志（读取/app/work/logs/bypass/目录）
+    // 2. 最近日志的固定级别计数
     const logFiles = ['app.log', 'dev.log', 'console.log'];
     const logDir = '/app/work/logs/bypass/';
+    const logSummary: Record<string, NonNullable<Awaited<ReturnType<typeof summarizeLog>>>> = {};
     for (const logName of logFiles) {
       try {
-        const logPath = join(logDir, logName);
-        if (existsSync(logPath)) {
-          const content = await readFile(logPath, 'utf-8');
-          // 取最后2000行，避免过大
-          const lines = content.split('\n');
-          const tailLines = lines.slice(-2000).join('\n');
-          // 脱敏：替换可能的API Key（sk-xxx, key=xxx格式）
-          const sanitized = tailLines
-            .replace(/sk-[a-zA-Z0-9]{20,}/g, m => maskString(m, 6, 4))
-            .replace(/(api[_-]?key["']?\s*[:=]\s*["']?)([a-zA-Z0-9_-]{20,})/gi, (_, p1, p2) => p1 + maskString(p2, 4, 4))
-            .replace(/(Bearer\s+)([a-zA-Z0-9._-]{20,})/gi, (_, p1, p2) => p1 + maskString(p2, 6, 4));
-          zip.file(`logs/${logName}`, sanitized);
-        }
+        const summary = await summarizeLog(join(logDir, logName));
+        if (summary) logSummary[logName] = summary;
       } catch {
         // 忽略日志读取错误
       }
     }
+    zip.file('logs/summary.json', JSON.stringify(logSummary, null, 2));
     
     // 3. 工作区文件结构概览（仅列目录，不读文件内容）
     try {
-      const { readdirSync, statSync } = await import('fs');
+      const { readdirSync, lstatSync } = await import('fs');
       function listDir(dir: string, depth = 0, maxDepth = 2): string {
         if (depth > maxDepth) return '';
         let result = '';
@@ -115,12 +110,12 @@ export async function GET(req: NextRequest) {
             if (item === 'node_modules' || item === '.next' || item.startsWith('.')) continue;
             const fullPath = join(dir, item);
             try {
-              const stat = statSync(fullPath);
+              const stat = lstatSync(fullPath);
               const indent = '  '.repeat(depth);
               if (stat.isDirectory()) {
                 result += `${indent}${item}/\n`;
                 result += listDir(fullPath, depth + 1, maxDepth);
-              } else {
+              } else if (stat.isFile()) {
                 result += `${indent}${item} (${Math.round(stat.size / 1024)}KB)\n`;
               }
             } catch {}
@@ -148,7 +143,7 @@ export async function GET(req: NextRequest) {
     } catch {}
     
     // 5. 诊断元数据
-    zip.file('README.txt', `无界AI 诊断包\n生成时间: ${now.toLocaleString('zh-CN')}\n\n包含内容:\n- environment.json: 环境信息（已脱敏）\n- logs/: 最近日志（已脱敏API Key）\n- project-structure.txt: 源码目录结构\n- package-info.json: 依赖信息\n\n所有敏感信息已自动脱敏。\n`);
+    zip.file('README.txt', `无界AI 诊断包\n生成时间: ${now.toLocaleString('zh-CN')}\n\n包含内容:\n- environment.json: 环境信息和配置状态\n- logs/summary.json: 最近日志的级别计数\n- project-structure.txt: 源码目录结构\n- package-info.json: 依赖信息\n`);
     
     // 生成zip
     const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
@@ -157,13 +152,14 @@ export async function GET(req: NextRequest) {
       headers: {
         'Content-Type': 'application/zip',
         'Content-Disposition': `attachment; filename="wujie-diagnostics-${timestamp}.zip"`,
+        'Cache-Control': 'no-store',
       },
     });
-  } catch (error) {
-    console.error('[diagnostics/export] error:', error);
+  } catch {
+    console.error('[diagnostics/export] could not create archive');
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : '导出诊断包失败' },
-      { status: 500 }
+      { error: '导出诊断包失败' },
+      { status: 500, headers: { 'Cache-Control': 'no-store' } }
     );
   }
 }

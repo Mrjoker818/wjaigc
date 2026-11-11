@@ -10,6 +10,9 @@ import {
 } from '@/lib/safe-image-download';
 import { withLayerPsdMemorySlot } from '@/lib/layer-decomposition/memory-gate';
 import { getServerDataRoot } from '@/lib/server-data-root';
+import { exportMediaDescriptor } from '@/lib/asset-core/binary-media-contract';
+import { readServeUploadExportLocal } from '@/lib/serve-upload-local-storage';
+import { readBinaryFromS3Exact } from '@/lib/s3-storage';
 
 const MAX_SOURCE_BYTES = 15 * 1024 * 1024;
 const MAX_EXTRACTED_PSD_BYTES = 128 * 1024 * 1024;
@@ -298,6 +301,21 @@ async function readControlledMedia(
   options: ResolveLayerSourceOptions,
 ): Promise<Buffer> {
   const dataRoot = options.dataRoot || getServerDataRoot();
+  const exportPrefix = '/api/serve-upload/exports/';
+  if (imageUrl.startsWith(exportPrefix)) {
+    const filename = imageUrl.slice(exportPrefix.length);
+    const descriptor = exportMediaDescriptor(filename);
+    if (descriptor && SOURCE_MIME_TYPES.some(mime => mime === descriptor.mimeType)) {
+      const local = await readServeUploadExportLocal(dataRoot, filename, MAX_SOURCE_BYTES);
+      const bytes = local ?? await readBinaryFromS3Exact(`exports/${filename}`, {
+        maxBytes: MAX_SOURCE_BYTES, timeoutMs: 5000, signal: options.signal,
+      });
+      if (!bytes) throw new LayerSourceImageError('LAYER_SOURCE_NOT_FOUND', 'Layer source media was not found');
+      const { validateExportAssetBytes } = await import('@/lib/asset-core/binary-persistence');
+      await validateExportAssetBytes({ bytes, filename, mimeType: descriptor.mimeType, signal: options.signal });
+      return bytes;
+    }
+  }
   const workspaceRoot = options.workspaceRoot || process.env.COZE_WORKSPACE_PATH || process.cwd();
   let candidates: string[] = [];
   if (imageUrl.startsWith('/api/serve-upload/')) {

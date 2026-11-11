@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PROFILE_PEARAPI, adjustRequestForProfile } from '@/lib/api-compatibility';
+import { getPearImageModelSpec } from '@/lib/pear-image-models';
 
 // PearAPI 图像契约来源：https://pearapi.apifox.cn（gpt-image-2 图像生成 api-533519595，
 // 逐字核对请求体字段）：size 接受比例（"1:1"/"16:9"）或像素（"1024x1024"）；
@@ -8,6 +9,14 @@ import { PROFILE_PEARAPI, adjustRequestForProfile } from '@/lib/api-compatibilit
 // response_format url/b64_json。文档未定义 width/height/size_px 派生字段。
 
 describe('PearAPI image profile contract', () => {
+  it('treats unlisted model identifiers as generic even when they match an object member', () => {
+    expect(getPearImageModelSpec('constructor')).toBeUndefined();
+    const { body } = adjustRequestForProfile({
+      model: 'constructor', prompt: 'p', size: '1:1', resolution: '2K',
+    }, PROFILE_PEARAPI);
+    expect(body).toMatchObject({ model: 'constructor', size: '1:1', resolution: '2K' });
+  });
+
   it('keeps the ratio size and resolution fields the docs define', () => {
     const { body, endpoint } = adjustRequestForProfile({
       model: 'gpt-image-2', prompt: '一只穿宇航服的小猫', size: '16:9', resolution: '2K', quality: 'high',

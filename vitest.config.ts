@@ -5,6 +5,14 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    poolOptions: {
+      forks: {
+        // Let jsdom provide Web Storage. Vitest does not forward this flag from the launcher.
+        execArgv: process.allowedNodeEnvironmentFlags.has('--no-experimental-webstorage')
+          ? ['--no-experimental-webstorage']
+          : [],
+      },
+    },
     include: [
       'src/__tests__/**/*.test.ts',
       'src/__tests__/**/*.test.tsx',

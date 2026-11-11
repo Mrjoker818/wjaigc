@@ -401,6 +401,30 @@ describe.sequential('server authentication sessions', () => {
     });
   });
 
+  it('restores the default administrator’s existing canvas and chat defaults in the session', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(sessionNow);
+    configureServerAuth();
+    serverAuthMocks.dbReadUsers.mockResolvedValue([{
+      id: sessionUser.id,
+      name: sessionUser.name,
+      role: 'admin',
+      status: 'active',
+      product_type: null,
+    }]);
+    const { getSessionUser } = await import('@/lib/server-auth');
+    const token = signSessionPayload(sessionPayload({
+      kid: deriveAuthSecretKid(activeSecret),
+      exp: sessionNow + 60_000,
+    }), activeSecret);
+
+    await expect(getSessionUser(requestWithSession(token))).resolves.toMatchObject({
+      id: sessionUser.id,
+      productType: 'canvas,chat',
+    });
+    expect(serverAuthMocks.dbWriteUsers).not.toHaveBeenCalled();
+  });
+
   it('rejects expired previous sessions before reading the user store', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(sessionNow);

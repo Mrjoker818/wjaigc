@@ -2,12 +2,13 @@
  * 流程D：无限画布操作 E2E 测试
  * 覆盖: 缩放 / 平移 / 撤销 / 右键菜单 / 视图重置
  */
+import { requireTestCredential } from '../helpers/e2e-credentials';
 import { test, expect } from '@playwright/test';
 import { collectBrowserEvidence, saveBrowserEvidence } from '../helpers/evidence';
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:5000';
-const USERNAME = process.env.E2E_TEST_USERNAME || 'Mr.joker';
-const PASSWORD = process.env.E2E_TEST_PASSWORD || 'Wujie#2026Reset';
+const USERNAME = requireTestCredential('E2E_TEST_USERNAME');
+const PASSWORD = requireTestCredential('E2E_TEST_PASSWORD');
 
 async function login(page: import('@playwright/test').Page): Promise<void> {
   await page.goto(BASE_URL);

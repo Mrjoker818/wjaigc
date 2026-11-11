@@ -620,19 +620,24 @@ describe('real POST + PostgreSQL 302 request identity', (): void => {
             { angleMode: 'camera' }, { rotation: 30 }, { tilt: 5 }, { zoom: 2 },
             { originalWidth: 999 }, { originalHeight: 888 }, { scale: 3 },
             { model: '302-esrgan' }, { providerId: 'identity-native' }, { upscaleModel: 'esrgan' },
-            { eraseModel: 'lama' }, { removeBgModel: 'u2net' }, { originalPrompt: 'source texture' },
+            { originalPrompt: 'source texture' },
             { upscaleMode: 'ai-only' }, { outputFormat: 'webp' }, { compression: 75 },
             { engine: 'ai-only' }, { displayBackground: 'transparent' },
           ];
           for (const change of changes) await assertConflict(query, taskId, { ...requestBody, ...change }, 'matrix-key');
-          const before = await readTaskAndLedger(query, taskId);
-          const replay = await POST(makeRequest(requestBody, 'matrix-key'));
           const success = status === 'processing' || status === 'completed';
-          expect(replay.status).toBe(success ? 200 : 409);
-          expect(await replay.json()).toMatchObject({ success, reused: true, taskId,
-            ...(status === 'completed' ? { imageUrl: (persisted.result as { imageUrl: string }).imageUrl } : { status }) });
-          expect(await readTaskAndLedger(query, taskId)).toEqual(before);
-          expect(sentRequests).toHaveLength(1);
+          // The retired local selectors no longer affect the upscale request identity.
+          for (const ignoredFields of [{}, { eraseModel: 'lama' }, { removeBgModel: 'u2net' }]) {
+            const before = await readTaskAndLedger(query, taskId);
+            const reads = boundary.media.mock.calls.length;
+            const replay = await POST(makeRequest({ ...requestBody, ...ignoredFields }, 'matrix-key'));
+            expect(replay.status, JSON.stringify(ignoredFields)).toBe(success ? 200 : 409);
+            expect(await replay.json()).toMatchObject({ success, reused: true, taskId,
+              ...(status === 'completed' ? { imageUrl: (persisted.result as { imageUrl: string }).imageUrl } : { status }) });
+            expect(await readTaskAndLedger(query, taskId)).toEqual(before);
+            expect(sentRequests).toHaveLength(1);
+            expect(boundary.media).toHaveBeenCalledTimes(reads);
+          }
           const ledger = (await query('SELECT type, amount::int FROM wujie_credit_transactions ORDER BY amount')).rows;
           expect(ledger).toEqual(success ? [{ type: 'consume', amount: -7 }]
             : [{ type: 'consume', amount: -7 }, { type: 'refund', amount: 7 }]);

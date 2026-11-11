@@ -509,7 +509,13 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
     eventName: '', eventType: '品牌快闪', expectedCapacity: '',
     primaryGoal: '品牌曝光', budget: '', brandStyle: '', specialRequirements: '',
   });
-  const [proposals, setProposals] = useState<LayoutProposal[]>([]);
+  const [proposalBatch, setProposalBatch] = useState<{ proposals: LayoutProposal[]; requirementsKey: string } | null>(null);
+  const proposalRequest = useMemo(() => {
+    const requirements = { venueAnalysis, activityBrief, brandName, assets: assets.map(({ type, url }) => ({ type, url })) };
+    return { requirements, requirementsKey: JSON.stringify(requirements) };
+  }, [venueAnalysis, activityBrief, brandName, assets]);
+  const proposals = proposalBatch?.proposals ?? [];
+  const proposalsStale = proposalBatch !== null && proposalBatch.requirementsKey !== proposalRequest.requirementsKey;
   const [selectedProposalId, setSelectedProposalId] = useState<string | null>(null);
   const [designId, setDesignId] = useState<DesignID | null>(null);
   const [venueVersions, setVenueVersions] = useState<VenueVersion[]>([]);
@@ -896,6 +902,23 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
 
   // === 活动现场设计师 handlers ===
 
+  const advanceVenueScope = useCallback(() => {
+    const epoch = ++venueScopeEpochRef.current;
+    setIsAnalyzingVenue(false);
+    return epoch;
+  }, []);
+
+  const resetVenuePhoto = (imageUrl: string) => {
+    setVenueImageUrl(imageUrl);
+    setVenueAnalysis(null);
+    setProposalBatch(null);
+    setSelectedProposalId(null);
+    setDesignId(null);
+    setVenueVersions([]);
+    setQcHiddenVersionIds(new Set());
+    setActivityStep(1);
+  };
+
   // Step1: 上传场馆照片
   const handleVenueImageUpload = () => {
     const input = document.createElement('input');
@@ -904,20 +927,12 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
     input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
-      const uploadEpoch = ++venueScopeEpochRef.current;
+      const uploadEpoch = advanceVenueScope();
       // Convert to base64 for vision API
       const reader = new FileReader();
       reader.onload = (ev) => {
         if (venueScopeEpochRef.current !== uploadEpoch) return;
-        const dataUrl = ev.target?.result as string;
-        setVenueImageUrl(dataUrl);
-        setVenueAnalysis(null);
-        setProposals([]);
-        setSelectedProposalId(null);
-        setDesignId(null);
-        setVenueVersions([]);
-        setQcHiddenVersionIds(new Set());
-        setActivityStep(1);
+        resetVenuePhoto(ev.target?.result as string);
       };
       reader.readAsDataURL(file);
     };
@@ -928,6 +943,7 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
   const handleAnalyzeVenue = useCallback(async () => {
     if (!venueImageUrl) return;
     const venueEpoch = venueScopeEpochRef.current;
+    const isCurrentVenue = () => venueScopeEpochRef.current === venueEpoch;
     setIsAnalyzingVenue(true);
     setErrorMsg('');
     try {
@@ -942,7 +958,7 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
         }),
       });
       const data = await res.json();
-      if (venueScopeEpochRef.current !== venueEpoch) { setIsAnalyzingVenue(false); return; }
+      if (!isCurrentVenue()) return;
       if (!res.ok || data.error) {
         setErrorMsg(data.error || '场馆分析失败');
         setIsAnalyzingVenue(false);
@@ -952,14 +968,14 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
         const taskId = data.taskId;
         const poll = async () => {
           try {
-            if (venueScopeEpochRef.current !== venueEpoch) { setIsAnalyzingVenue(false); return; }
+            if (!isCurrentVenue()) return;
             const taskRes = await fetch('/api/poll-task', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ taskId }),
             });
             const taskData = await taskRes.json();
-            if (venueScopeEpochRef.current !== venueEpoch) { setIsAnalyzingVenue(false); return; }
+            if (!isCurrentVenue()) return;
             if (taskData.status === 'completed') {
               const analysis = taskData.result?.analysis;
               if (analysis) {
@@ -984,7 +1000,8 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
               setTimeout(poll, 3000);
             }
           } catch {
-            if (venueScopeEpochRef.current === venueEpoch) setErrorMsg('场馆分析轮询失败');
+            if (!isCurrentVenue()) return;
+            setErrorMsg('场馆分析轮询失败');
             setIsAnalyzingVenue(false);
           }
         };
@@ -993,14 +1010,16 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
         setIsAnalyzingVenue(false);
       }
     } catch (e) {
-      if (venueScopeEpochRef.current === venueEpoch) setErrorMsg(e instanceof Error ? e.message : '场馆分析失败');
+      if (!isCurrentVenue()) return;
+      setErrorMsg(e instanceof Error ? e.message : '场馆分析失败');
       setIsAnalyzingVenue(false);
     }
   }, [venueImageUrl, activityBrief, selectedChatModel, selectedChatProviderId]);
 
   // Step2: 生成布局方案
   const handleGenerateProposals = useCallback(async () => {
-    if (!venueAnalysis || !activityBrief.eventName.trim()) return;
+    const { requirements, requirementsKey } = proposalRequest;
+    if (!requirements.venueAnalysis || !requirements.activityBrief.eventName.trim()) return;
     const venueEpoch = venueScopeEpochRef.current;
     setIsGeneratingProposals(true);
     setErrorMsg('');
@@ -1009,8 +1028,7 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          venueAnalysis, activityBrief, brandName,
-          assets: assets.map(a => ({ type: a.type, url: a.url })),
+          ...requirements,
           model: selectedChatModel || undefined,
           providerId: selectedChatProviderId || undefined,
         }),
@@ -1036,7 +1054,7 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
             if (venueScopeEpochRef.current !== venueEpoch) { setIsGeneratingProposals(false); return; }
             if (taskData.status === 'completed') {
               const proposalList = taskData.result?.proposals || [];
-              setProposals(proposalList);
+              setProposalBatch({ proposals: proposalList, requirementsKey });
               setSuccessMsg(`已生成 ${proposalList.length} 套布局方案`);
               setTimeout(() => setSuccessMsg(''), 4000);
               setIsGeneratingProposals(false);
@@ -1059,12 +1077,12 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
       if (venueScopeEpochRef.current === venueEpoch) setErrorMsg(e instanceof Error ? e.message : '方案生成失败');
       setIsGeneratingProposals(false);
     }
-  }, [venueAnalysis, activityBrief, brandName, assets, selectedChatModel, selectedChatProviderId]);
+  }, [proposalRequest, selectedChatModel, selectedChatProviderId]);
 
   // Step3: 锁定方案为DesignID
   const handleLockDesign = useCallback(async () => {
-    const proposal = proposals.find(p => p.id === selectedProposalId);
-    if (!proposal) return;
+    const proposal = proposalBatch?.proposals.find(p => p.id === selectedProposalId);
+    if (!proposal || proposalsStale) return;
     const venueEpoch = venueScopeEpochRef.current;
     setIsLockingDesign(true);
     setErrorMsg('');
@@ -1082,7 +1100,7 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
         return;
       }
       if (data.designId) {
-        venueScopeEpochRef.current += 1;
+        advanceVenueScope();
         setDesignId(data.designId);
         setSuccessMsg(`DesignID ${data.designId.version} 已锁定`);
         setTimeout(() => setSuccessMsg(''), 4000);
@@ -1093,7 +1111,7 @@ export default function Display3DPanel({ isMonochrome = false, sourceImage = nul
       if (venueScopeEpochRef.current === venueEpoch) setErrorMsg(e instanceof Error ? e.message : '锁定失败');
       setIsLockingDesign(false);
     }
-  }, [proposals, selectedProposalId, brandName, venueAnalysis, activityBrief]);
+  }, [proposalBatch, selectedProposalId, proposalsStale, brandName, venueAnalysis, activityBrief, advanceVenueScope]);
 
   // Step4: 生成效果图（基于DesignID）
   const handleGenerateVenueRender = useCallback(async () => {
@@ -1504,7 +1522,7 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                             <div className="relative rounded-lg overflow-hidden" style={{ maxHeight: 180 }}>
                               <img src={venueImageUrl} className="w-full h-full object-cover" />
                               <button
-                                onClick={() => { venueScopeEpochRef.current += 1; setVenueImageUrl(''); setVenueAnalysis(null); setProposals([]); setSelectedProposalId(null); setDesignId(null); setVenueVersions([]); setQcHiddenVersionIds(new Set()); setActivityStep(1); }}
+                                onClick={() => { advanceVenueScope(); resetVenuePhoto(''); }}
                                 className="absolute top-1 right-1 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center"
                               >
                                 <X size={10} />
@@ -1627,10 +1645,13 @@ Professional 3D exhibition rendering, photorealistic, high quality, commercial g
                             </button>
                           ))}
                         </div>
+                        {proposalsStale && !designId && (
+                          <p className="mt-3 text-[11px]" style={{ color: textMuted }}>需求已变化，请重新生成方案后锁定。</p>
+                        )}
                         {selectedProposalId && !designId && (
                           <button
                             onClick={handleLockDesign}
-                            disabled={isLockingDesign}
+                            disabled={isLockingDesign || proposalsStale}
                             className={`w-full mt-3 rounded-lg py-2 text-xs font-medium cursor-pointer transition-colors disabled:opacity-50 ${
                               isMonochrome ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-[#d4af37] text-black hover:bg-[#c4a030]'
                             }`}

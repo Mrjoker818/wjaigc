@@ -47,7 +47,8 @@ import { DocumentStatus } from '@/components/collaboration/document-status';
 import { useCollaborativeCanvas, type CollaborativeCanvas } from '@/lib/collaboration/document-client';
 import { runDocumentHistoryCommand, readDocumentHistoryCommandJournal, runDocumentHistoryRestoration, confirmDocumentHistoryRestorationMetadata, recoverDocumentHistoryCommands, documentHistoryCommandStorageKey } from '@/lib/collaboration/document-history-command';
 import type { DocumentHistoryCommandItem } from '@/lib/collaboration/document-history-command';
-import { commitDocumentCanvasFile, DocumentCanvasUploadError, loadDocumentCanvasVideoSize, uniqueDocumentCanvasFiles } from '@/lib/collaboration/document-canvas-upload';
+import { commitDocumentCanvasFile, DocumentCanvasUploadError, loadDocumentCanvasVideoSize, readGeneratedVideoToolFiles, uniqueDocumentCanvasFiles } from '@/lib/collaboration/document-canvas-upload';
+import type { CanvasVideoToolOutput } from '@/components/infinite-canvas';
 import { canUseLegacyCanvasPersistence, routeCanvasWorkspaceChange, shouldKeepDirtyCanvasAnnotations } from '@/lib/collaboration/canvas-document-image-bridge';
 import {
   restoreAnnotations,
@@ -189,6 +190,7 @@ import { APP_FULL_VERSION_LABEL, APP_NAME } from '@/config/app-meta';
 import { fetchSessionPayload, resolveSessionUser } from '@/lib/auth-session';
 import {
   mergeWorkflowIntoProjectMetadata,
+  retainSavedProjectWorkflow,
   workflowFromProjectMetadata,
 } from '@/lib/project-workflow';
 import {
@@ -1134,6 +1136,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
   const projectLoadGateRef = useRef(createLatestProjectLoadGate());
   const canvasChatProjectLoadRef = useRef<object | null>(null);
   const projectLoadActiveRef = useRef(true);
+  const selectedHubWorkflowScopeRef = useRef('');
+  const pendingHubWorkflowRef = useRef<{ actorId: string; projectId: string } | null>(null);
   useLayoutEffect(() => {
     projectLoadActiveRef.current = true;
     return () => { projectLoadActiveRef.current = false; canvasChatProjectLoadRef.current = null; };
@@ -1145,19 +1149,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
     canvasChatProjectLoadRef.current = chatLoad;
     const isCurrentLoad = (): boolean => projectLoadActiveRef.current && canvasChatProjectLoadRef.current === chatLoad;
     try {
-      // ★ 加载项目前：清空 undo 历史 + 跳过 diff 记录，防止 Ctrl+Z 撤销到空画布
-      historyTransitionEpochRef.current += 1;
-      activeHistoryTransitionRef.current = null;
-      historyLifecyclePendingRef.current = false;
-      setHistoryTransitionPending(false);
-      queuedCanvasHistoryChangeRef.current = null;
-      historyProjectIdRef.current = projectId;
-      incrementalHistoryRef.current.clear();
-      prevImagesRef.current = [];
-      quickCreateCompileControllerRef.current?.abort();
-      quickCreateCompileControllerRef.current = null;
-      setQuickCreateCompileState(EMPTY_QUICK_CREATE_COMPILE_STATE);
-
       const userMgr = UserManagerCore.getInstance();
       const projects = userMgr.getProjects();
       const ownProject = projects.find((p: Project) => p.id === projectId);
@@ -1187,7 +1178,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
           ? {
               ...storedProject,
               canvasImages: [...(recoveredMedia?.images ?? recoveredCanvasSnapshot.images)],
-              metadata: recoveredCanvasSnapshot.metadata,
+              metadata: retainSavedProjectWorkflow(recoveredCanvasSnapshot.metadata, storedProject.metadata),
               updatedAt: Date.now(),
             }
           : storedProject;
@@ -1226,6 +1217,19 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
           buildProjectWorkspaceUrl(window.location, targetProject.id),
         );
         if (!isCurrentLoad() || !resolvedProject.isCurrent()) return;
+        // The previous canvas remains active until the replacement is ready.
+        selectedHubWorkflowScopeRef.current = '';
+        historyTransitionEpochRef.current += 1;
+        activeHistoryTransitionRef.current = null;
+        historyLifecyclePendingRef.current = false;
+        setHistoryTransitionPending(false);
+        queuedCanvasHistoryChangeRef.current = null;
+        historyProjectIdRef.current = targetProject.id;
+        incrementalHistoryRef.current.clear();
+        prevImagesRef.current = [];
+        quickCreateCompileControllerRef.current?.abort();
+        quickCreateCompileControllerRef.current = null;
+        setQuickCreateCompileState(EMPTY_QUICK_CREATE_COMPILE_STATE);
         setCurrentProject(targetProject);
         setNodeWorkflow(workflowFromProjectMetadata(targetProject.metadata));
         const restoredViewState = normalizeCanvasViewState(targetProject.metadata?.viewState);
@@ -1233,9 +1237,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
         setViewState(restoredViewState);
         // ★ 调试日志：追踪项目加载
         console.log('[page] loadProjectById:', targetProject.id, targetProject.name, 'canvasImages:', targetProject.canvasImages?.length || 0);
-        // An async project lookup can render the previous project and reset the
-        // history ref before hydration runs. Route the replacement as the target.
-        historyProjectIdRef.current = targetProject.id;
         if (targetProject.canvasImages && targetProject.canvasImages.length > 0) {
           setImages(visibleTargetImages.map(img => ({
             ...img,
@@ -1284,6 +1285,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
         }));
         groupsRef.current = loadedGroups;
         setInitialGroups(loadedGroups);
+        return true;
       }
 
     } catch (e) {
@@ -1544,7 +1546,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
                   ? {
                       ...storedProject,
                       canvasImages: [...(recoveredMedia?.images ?? recoveredCanvasSnapshot.images)],
-                      metadata: recoveredCanvasSnapshot.metadata,
+                      metadata: retainSavedProjectWorkflow(recoveredCanvasSnapshot.metadata, storedProject.metadata),
                       updatedAt: Date.now(),
                     }
                   : storedProject;
@@ -2018,9 +2020,14 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
   }), [nextCanvasPersistenceRevision]);
 
   if (!canvasPersistenceSchedulerRef.current) {
+    const retainWorkspaceWorkflow = (snapshot: CanvasPersistenceSnapshot) => {
+      const project = UserManagerCore.getInstance().getProject(snapshot.projectId);
+      return project ? retainSavedProjectWorkflow(snapshot.metadata, project.metadata) : snapshot.metadata;
+    };
     const prepareCanvasWorkspaceSnapshot = (snapshot: CanvasPersistenceSnapshot) => {
       const normalizedSnapshot: CanvasPersistenceSnapshot = {
         ...snapshot,
+        metadata: retainWorkspaceWorkflow(snapshot),
         images: serializeCanvasWorkspacePlacements(
           snapshot.images as unknown as CanvasImage[],
         ),
@@ -2099,7 +2106,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
         }
         const projectUpdates = {
           canvasImages: [...snapshot.images],
-          metadata: snapshot.metadata,
+          metadata: retainWorkspaceWorkflow(snapshot),
         };
         if (reason === 'immediate') {
           manager.updateProjectInMemory(snapshot.projectId, projectUpdates);
@@ -4689,7 +4696,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
     documentUploadControllerRef.current?.abort();
     documentUploadControllerRef.current = null;
   }, []);
-  const handleDocumentCanvasFiles = useCallback(async (files: File[]): Promise<void> => {
+  const handleDocumentCanvasFiles = useCallback(async (files: File[]): Promise<number> => {
     const projectId = currentProjectRef.current?.id;
     const actorId = currentUserRef.current?.id;
     const authority = collaborativeCanvasRef.current;
@@ -4717,6 +4724,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
       && authority.isWritable();
     let layoutImages = latestImagesRef.current;
     let pendingToastId: string | number | undefined;
+    let confirmedCount = 0;
     try {
       const batch = await uniqueDocumentCanvasFiles(files);
       if (!isCurrentProject()) throw new DocumentCanvasUploadError('stale-project');
@@ -4726,7 +4734,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
           : batch.rejected[0].code === 'too-large' ? '图片上限 32 MiB，视频上限 512 MiB' : '无法读取';
         toast.warning(`已跳过 ${batch.rejected.length} 个文件（${reason}）`);
       }
-      if (batch.files.length === 0) return;
+      if (batch.files.length === 0) return 0;
       pendingToastId = toast.loading(`正在导入 ${batch.files.length} 个媒体到协作文档…`, {
         action: { label: '停止等待', onClick: () => controller.abort() },
       });
@@ -4766,6 +4774,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
               }
             },
           });
+          confirmedCount += 1;
           toast.success(`已导入 ${file.name}`);
         } catch (error) {
           if (error instanceof DocumentCanvasUploadError && error.code === 'cancelled') {
@@ -4784,6 +4793,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
               unauthenticated: '登录状态已失效，请重新登录', forbidden: '当前账号无权编辑协作文档',
               conflict: '同一媒体的导入记录冲突，请检查原项目中的结果',
               busy: '协作文档导入繁忙，请稍后重试', network: '网络未确认导入结果，请重试同一文件',
+              'video-validator-unavailable': '服务器视频校验暂不可用，请联系管理员',
               'invalid-response': '导入响应无法确认，请重试同一文件',
             };
             toast.error(messages[error.code] || '协作文档媒体导入失败');
@@ -4793,12 +4803,54 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
           break;
         }
       }
+      return confirmedCount;
     } finally {
       if (pendingToastId !== undefined) toast.dismiss(pendingToastId);
       if (documentUploadControllerRef.current === controller) documentUploadControllerRef.current = null;
       documentUploadBusyRef.current = false;
     }
   }, [autoLayoutImages, isDocumentHistoryRecoveryPending]);
+
+  const captureVideoToolInsertion = useCallback(() => {
+    const authority = collaborativeCanvasRef.current;
+    if (authority?.authority !== 'document') {
+      const scope = captureCanvasInsertionScope();
+      const insert = async (output: CanvasVideoToolOutput): Promise<number> => {
+        if (output.format === 'video/mp4') {
+          scope.assertCurrent();
+          return setImages([...latestImagesRef.current, output.video]) ? 1 : 0;
+        }
+        await handleAddImages(output.urls, output.sourceImageId, {
+          scope, ...(output.modelName ? { modelName: output.modelName, apiProvider: 'local' } : {}),
+        });
+        return output.urls.length;
+      };
+      return { assertCurrent: scope.assertCurrent, insert };
+    }
+    const actorId = currentUserRef.current?.id;
+    const projectId = currentProjectRef.current?.id;
+    const epoch = historyTransitionEpochRef.current;
+    const assertCurrent = (): void => {
+      const current = collaborativeCanvasRef.current;
+      if (!actorId || !projectId || !isMountedRef.current || currentUserRef.current?.id !== actorId
+        || currentProjectRef.current?.id !== projectId || historyProjectIdRef.current !== projectId
+        || historyTransitionEpochRef.current !== epoch || current?.projectId !== projectId
+        || current.authority !== 'document' || current.refreshMedia !== authority.refreshMedia
+        || current.recordMediaHistory !== authority.recordMediaHistory) throw new Error('协作画布已切换');
+      if (!current.isWritable() || historyLifecyclePendingRef.current || isDocumentHistoryRecoveryPending()) {
+        throw new Error('协作画布当前不可写');
+      }
+    };
+    assertCurrent();
+    const insert = async (output: CanvasVideoToolOutput): Promise<number> => {
+      assertCurrent();
+      const urls = output.format === 'video/mp4' ? [output.video.videoUrl] : output.urls;
+      const files = await readGeneratedVideoToolFiles(urls, output.format, assertCurrent);
+      assertCurrent();
+      return handleDocumentCanvasFiles(files);
+    };
+    return { assertCurrent, insert };
+  }, [captureCanvasInsertionScope, handleAddImages, handleDocumentCanvasFiles, isDocumentHistoryRecoveryPending, setImages]);
 
   const documentMediaTransferIntentsRef = useRef(new Map<string, {
     isCurrent: () => boolean; request: Promise<DocumentMediaBatchRequest>;
@@ -5214,10 +5266,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
     assertCurrent();
     if (!setImages(nextImages)) throw new Error('当前画布未接受反拆源图');
     const manager = UserManagerCore.getInstance();
+    const latestProject = manager.getProject(projectId) ?? project;
     manager.updateProject(projectId, {
       canvasImages: persistableCanvasImages,
       metadata: {
-        ...(project.metadata || {}),
+        ...latestProject.metadata,
         groups: groupsRef.current,
         viewState: viewStateRef.current,
         annotationsV2: annotationRecordsRef.current,
@@ -7415,6 +7468,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
   // Workflow state for node mode
   const [nodeWorkflow, setNodeWorkflow] = useState<Workflow | null>(null);
   const [loadedDocumentWorkflowScope, setLoadedDocumentWorkflowScope] = useState('');
+  const [failedDocumentWorkflowScope, setFailedDocumentWorkflowScope] = useState('');
+  const [documentWorkflowRetry, setDocumentWorkflowRetry] = useState(0);
   const workspaceLocationSearch = useWorkspaceLocationSearch();
   useEffect(() => {
     if (!currentProject?.id || !currentUser?.id || collaborativeCanvas.projectId !== currentProject.id
@@ -7492,15 +7547,18 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
   nodeWorkflowRef.current = nodeEditorWorkflow;
   const [handoffRetryRevision, setHandoffRetryRevision] = useState(0);
   useEffect(() => {
+    if (selectedHubWorkflowScopeRef.current !== documentWorkflowScope) selectedHubWorkflowScopeRef.current = '';
     if (!currentUser?.id || !currentProject?.id || collaborativeCanvas.projectId !== currentProject.id
       || collaborativeCanvas.authority !== 'document') return;
     const actorId = currentUser.id, projectId = currentProject.id;
+    if (selectedHubWorkflowScopeRef.current === `${actorId}:${projectId}`) return;
     const controller = new AbortController();
     const epoch = historyTransitionEpochRef.current;
     const isCurrent = (): boolean => !controller.signal.aborted && isMountedRef.current
       && currentUserRef.current?.id === actorId && currentProjectRef.current?.id === projectId
       && historyTransitionEpochRef.current === epoch;
     const initialWorkflow = nodeWorkflowRef.current;
+    setFailedDocumentWorkflowScope('');
     const projectSnapshot = currentProjectRef.current;
     const ownedProject = projectSnapshot?.id === projectId && projectSnapshot.userId === actorId
       ? { id: projectId, userId: actorId, metadata: projectSnapshot.metadata } : undefined;
@@ -7510,52 +7568,87 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
       setNodeWorkflow(workflow);
       setLoadedDocumentWorkflowScope(`${actorId}:${projectId}`);
     }).catch(error => {
-      if (isCurrent()) { console.error('共享项目个人工作流加载失败:', error); toast.error('工作流加载失败，请刷新重试'); }
+      if (isCurrent()) {
+        setFailedDocumentWorkflowScope(`${actorId}:${projectId}`);
+        console.error('共享项目个人工作流加载失败:', error);
+      }
     });
     return () => controller.abort();
-  }, [currentUser?.id, currentProject?.id, collaborativeCanvas.projectId, collaborativeCanvas.authority,
-    workspaceLocationSearch]);
+  }, [currentUser?.id, currentProject?.id, collaborativeCanvas.projectId, collaborativeCanvas.authority, documentWorkflowScope,
+    workspaceLocationSearch, documentWorkflowRetry]);
 
   const persistNodeWorkflow = useCallback(async (
     workflow: Workflow,
     expectedProjectId = currentProjectRef.current?.id,
+    assertSaveScope?: () => void,
+    saveStandalone = false,
   ): Promise<void> => {
     if (!expectedProjectId || currentProjectRef.current?.id !== expectedProjectId) {
       throw new Error('工作流保存已取消：当前项目已发生变化');
+    }
+    if (workflow.projectId && workflow.projectId !== expectedProjectId) {
+      throw new Error('工作流属于其他项目，请从工作流中心打开对应项目');
     }
     const actorId = currentUserRef.current?.id;
     const authority = collaborativeCanvasRef.current;
     if (!actorId || authority?.projectId !== expectedProjectId || authority.authority === 'unknown') {
       throw new Error('工作流保存已取消：当前身份或项目权限未确认');
     }
-    if (authority.authority === 'document') {
+    const assertCurrent = (): void => {
+      assertSaveScope?.();
+      if (currentUserRef.current?.id !== actorId || currentProjectRef.current?.id !== expectedProjectId
+        || collaborativeCanvasRef.current?.projectId !== expectedProjectId
+        || collaborativeCanvasRef.current.authority !== authority.authority) {
+        throw new Error('工作流保存已取消：当前身份或项目已发生变化');
+      }
+    };
+    const boundWorkflow = { ...workflow, projectId: expectedProjectId };
+    const writeStandalone = async (): Promise<void> => {
       const response = await fetch('/api/workflow/save', {
         method: 'POST', credentials: 'include', cache: 'no-store',
         headers: { 'Content-Type': 'application/json', 'x-wujie-expected-actor-id': actorId },
-        body: JSON.stringify({ userId: actorId, workflow: { ...workflow, projectId: expectedProjectId } }),
+        body: JSON.stringify({ userId: actorId, workflow: boundWorkflow }),
       });
-      if (currentUserRef.current?.id !== actorId || currentProjectRef.current?.id !== expectedProjectId) {
-        throw new Error('工作流保存已取消：当前身份或项目已发生变化');
-      }
       if (!response.ok) throw new Error('工作流保存失败');
+    };
+    assertCurrent();
+    if (authority.authority === 'document') {
+      await writeStandalone();
+      assertCurrent();
       return;
     }
 
     await canvasPersistenceScheduler.flush('immediate');
-    if (currentUserRef.current?.id !== actorId || currentProjectRef.current?.id !== expectedProjectId) {
-      throw new Error('工作流保存已取消：当前项目已发生变化');
-    }
+    assertCurrent();
     const manager = UserManagerCore.getInstance();
-    const latestProject = manager.getProject(expectedProjectId) || currentProjectRef.current;
+    if (saveStandalone) {
+      await writeStandalone();
+      // Finish the acknowledged save in its original project even if another
+      // workflow is now open. A different account may not finish this write.
+      if (!projectLoadActiveRef.current || currentUserRef.current?.id !== actorId || manager.getCurrentUserId() !== actorId) {
+        throw new Error('工作流保存已取消：当前身份已发生变化');
+      }
+    }
+    const latestProject = manager.getProject(expectedProjectId) ?? (saveStandalone ? null : currentProjectRef.current);
+    if (!latestProject) throw new Error('当前项目不存在，无法绑定工作流');
     const updatedProject = manager.updateProjectInMemory(expectedProjectId, {
-      metadata: mergeWorkflowIntoProjectMetadata(latestProject.metadata, workflow),
+      metadata: mergeWorkflowIntoProjectMetadata(latestProject.metadata, boundWorkflow),
     });
     if (!updatedProject) throw new Error('当前项目不存在，无法绑定工作流');
 
     await manager.flushProjectsToServerWithConflictRecovery();
-    if (currentUserRef.current?.id !== actorId || currentProjectRef.current?.id !== expectedProjectId) return;
-    currentProjectRef.current = updatedProject;
-    setCurrentProject(updatedProject);
+    if (!manager.hasAcknowledgedProjectWorkflow(expectedProjectId, boundWorkflow)) {
+      throw new Error('工作流保存未获确认，请从工作流中心核对保存结果');
+    }
+    try { assertCurrent(); }
+    catch (error) {
+      if (saveStandalone) return;
+      throw error;
+    }
+    const savedProject = manager.getProject(expectedProjectId);
+    if (!savedProject) throw new Error('当前项目不存在，无法恢复工作流');
+    currentProjectRef.current = savedProject;
+    setCurrentProject(savedProject);
   }, [canvasPersistenceScheduler]);
 
   const handoffRunGuardRef = useRef(createSimpleChatWorkspaceHandoffRunGuard());
@@ -7565,27 +7658,31 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
   ): Promise<void> => {
     const expectedProjectId = currentProjectRef.current?.id;
     const expectedActorId = currentUserRef.current?.id;
+    const expectedEpoch = historyTransitionEpochRef.current;
+    const expectedWorkflowId = requestedWorkflow.id;
     if (!expectedProjectId) throw new Error('当前项目不存在，无法保存工作流');
-    await handoffProjectQueueRef.current.enqueue(expectedProjectId, async () => {
-      if (!expectedActorId || currentUserRef.current?.id !== expectedActorId || currentProjectRef.current?.id !== expectedProjectId) {
+    const assertSaveScope = (): void => {
+      if (!projectLoadActiveRef.current || !expectedActorId || currentUserRef.current?.id !== expectedActorId
+        || currentProjectRef.current?.id !== expectedProjectId || historyTransitionEpochRef.current !== expectedEpoch) {
         throw new Error('工作流保存已取消：当前项目已发生变化');
       }
+      if (nodeWorkflowRef.current && nodeWorkflowRef.current.id !== expectedWorkflowId) {
+        throw new Error('工作流保存已取消：当前工作流已发生变化');
+      }
       assertBeforePersist?.();
+    };
+    await handoffProjectQueueRef.current.enqueue(expectedProjectId, async () => {
+      assertSaveScope();
+      const currentWorkflow = nodeWorkflowRef.current ?? requestedWorkflow;
+      if (currentWorkflow.projectId && currentWorkflow.projectId !== expectedProjectId) {
+        throw new Error('工作流属于其他项目，请从工作流中心打开对应项目');
+      }
       const workflow = {
-        ...(nodeWorkflowRef.current ?? requestedWorkflow),
+        ...currentWorkflow,
+        projectId: expectedProjectId,
         updatedAt: requestedWorkflow.updatedAt,
       };
-      if (collaborativeCanvasRef.current?.authority !== 'legacy') {
-        await persistNodeWorkflow(workflow, expectedProjectId);
-        return;
-      }
-      const response = await fetch('/api/workflow/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: expectedActorId, workflow }),
-      });
-      if (!response.ok) throw new Error('工作流保存失败');
-      await persistNodeWorkflow(workflow, expectedProjectId);
+      await persistNodeWorkflow(workflow, expectedProjectId, assertSaveScope, true);
     });
     // Preserve the existing actor-change invalidation; the callback reads live actor refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -7684,8 +7781,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
         return transferSimpleChatImageToWorkflow(request, { ...scope, documentReference: reference });
       },
       persist: workflow => {
-        if (!isCurrent()) throw new Error('HANDOFF_SCOPE_CHANGED');
-        return persistNodeWorkflow(workflow, expectedProjectId);
+        return persistNodeWorkflow(workflow, expectedProjectId, () => {
+          if (!isCurrent()) throw new Error('HANDOFF_SCOPE_CHANGED');
+        });
       },
       applyWorkflow: workflow => {
         if (!isCurrent()) return;
@@ -7736,13 +7834,61 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
       : image), { history: 'skip' });
   }, [setImages]);
 
+  const handleOpenWorkflowFromHub = useCallback(async (workflow: Workflow): Promise<void> => {
+    const actorId = currentUserRef.current?.id;
+    if (!actorId || pendingHubWorkflowRef.current) return;
+    const activeProjectId = currentProjectRef.current?.id;
+    const originalProjects = workflow.projectId ? [] : UserManagerCore.getInstance().getProjects()
+      .filter(project => project.userId === actorId && workflowFromProjectMetadata(project.metadata)?.id === workflow.id);
+    if (originalProjects.length > 1) {
+      toast.error('该旧工作流关联多个项目，请在对应项目中打开节点模式');
+      return;
+    }
+    const projectId = workflow.projectId || originalProjects[0]?.id || activeProjectId;
+    if (!projectId) {
+      toast.error('请从工作台打开一个已保存项目，再使用工作流');
+      return;
+    }
+    const request = { actorId, projectId };
+    pendingHubWorkflowRef.current = request;
+    const ready = activeProjectId === projectId || await loadProjectById(projectId);
+    if (pendingHubWorkflowRef.current !== request || currentUserRef.current?.id !== actorId
+      || !projectLoadActiveRef.current) return;
+    pendingHubWorkflowRef.current = null;
+    if (!ready) {
+      toast.error('无法打开工作流所属项目，请确认该项目仍可访问');
+      return;
+    }
+    const selected = { ...workflow, projectId };
+    const scope = `${actorId}:${projectId}`;
+    selectedHubWorkflowScopeRef.current = scope;
+    nodeWorkflowRef.current = selected;
+    setNodeWorkflow(selected);
+    setLoadedDocumentWorkflowScope(scope);
+    setFailedDocumentWorkflowScope('');
+    setAppMode('node');
+  }, [loadProjectById]);
+
   // CanvasWorkspace is only mounted when authenticated, so no auth gate here.
 
   // Mode switching - early return for non-canvas modes
   if (appMode === 'node') {
     if (collaborativeCanvas.projectId !== currentProject?.id || collaborativeCanvas.authority === 'unknown'
       || (collaborativeCanvas.authority === 'document' && loadedDocumentWorkflowScope !== documentWorkflowScope)) {
-      return <div role="status" className="flex h-screen items-center justify-center">正在加载当前项目工作流…</div>;
+      const projectUnavailable = !currentProject || (collaborativeCanvas.authority === 'unknown'
+        && collaborativeCanvas.status === 'unavailable');
+      const workflowFailed = !projectUnavailable && failedDocumentWorkflowScope === documentWorkflowScope;
+      return (
+        <main className="flex min-h-dvh flex-col items-center justify-center gap-4 p-6 text-center">
+          <p role="status">{projectUnavailable ? '请从工作台打开可访问的已保存项目。'
+            : workflowFailed ? '工作流加载失败。' : '正在加载当前项目工作流…'}</p>
+          <div className="flex flex-wrap justify-center gap-2">
+            <button type="button" className="min-h-11 rounded-md border px-4" onClick={() => setAppMode('canvas')}>返回画布</button>
+            {workflowFailed && <button type="button" className="min-h-11 rounded-md border px-4"
+              onClick={() => setDocumentWorkflowRetry(previous => previous + 1)}>重新加载工作流</button>}
+          </div>
+        </main>
+      );
     }
     const currentAnnotationModel = getCurrentImageModel();
     const preferredAnnotationModelId = currentAnnotationModel.model.includes('::')
@@ -7793,7 +7939,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
     );
   }
   if (appMode === 'workflow-hub') {
-    return <WorkflowHub userId={currentUser?.id} onBack={() => setAppMode('canvas')} onEditWorkflow={(wf) => { setNodeWorkflow(wf); setAppMode('node'); }} themeStyle={themeStyle} />;
+    return <WorkflowHub userId={currentUser?.id} onBack={() => {
+      if (pendingHubWorkflowRef.current) canvasChatProjectLoadRef.current = null;
+      pendingHubWorkflowRef.current = null;
+      setAppMode('canvas');
+    }} onEditWorkflow={handleOpenWorkflowFromHub} themeStyle={themeStyle} />;
   }
 
   if (appMode === 'dashboard') {
@@ -7906,13 +8056,14 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
                   processing: img.processing,
                 }))
                 .filter(image => shouldPersistCanvasPlacement(image) || shouldPersistProcessingPlaceholder(image)) as PersistableCanvasImage[];
+              const latestProject = mgr.getProject(currentProject.id) ?? currentProject;
               mgr.updateProject(currentProject.id, {
                 canvasImages: persistableCanvasImages,
-              metadata: {
-                ...(currentProject.metadata || {}),
-                groups: groupsRef.current,
-                viewState: viewStateRef.current,
-                annotationsV2: annotationRecordsRef.current,
+                metadata: {
+                  ...latestProject.metadata,
+                  groups: groupsRef.current,
+                  viewState: viewStateRef.current,
+                  annotationsV2: annotationRecordsRef.current,
                 },
               });
             }
@@ -8226,6 +8377,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
           onDeleteImages={handleDeleteCanvasImages}
           canRetryPendingDelete={canRetryPendingDocumentDelete}
           onUploadFiles={handleDocumentCanvasFiles}
+          captureVideoToolInsertion={captureVideoToolInsertion}
           uploadAuthority={!currentProject?.id ? 'legacy'
             : collaborativeCanvas.projectId === currentProject.id ? collaborativeCanvas.authority : 'unknown'}
           onCaptureCropHistory={captureCropHistory}

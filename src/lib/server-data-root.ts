@@ -14,6 +14,7 @@ import path from 'path';
 import fs from 'fs';
 import { randomUUID } from 'node:crypto';
 import { pathExistsSync } from './runtime-path-exists';
+import { isDeploymentDatabaseOnly } from './deployment-database-mode';
 
 const PROJECT_ROOT = process.env.COZE_WORKSPACE_PATH || process.cwd();
 const PERSISTENT_DIR = '/space/wujie-data';
@@ -70,7 +71,6 @@ export function getServerDataRoot(): string {
   if (getWritableDir(LOCAL_DATA_DIR)) {
     _dataRoot = LOCAL_DATA_DIR;
     console.log(`[DataRoot] Using local data dir: ${_dataRoot} (data will NOT survive redeployment!)`);
-    seedBundledSystemFiles(_dataRoot);
     return _dataRoot;
   }
 
@@ -78,39 +78,7 @@ export function getServerDataRoot(): string {
   _dataRoot = '/tmp/wujie-data';
   fs.mkdirSync(_dataRoot, { recursive: true });
   console.warn(`[DataRoot] WARNING: Using /tmp/wujie-data - data will be lost on restart!`);
-  seedBundledSystemFiles(_dataRoot);
   return _dataRoot;
-}
-
-/**
- * 部署种子：veFaas 等无持久卷 + 独立空库的部署形态下，数据根回落到临时目录，
- * 启动期 file→DB 迁移将读取不到任何用户/提供商文件，导致管理员无法登录、
- * 模型配置为空。把随部署包携带的 deploy-seed/system 种子文件复制到数据根
- * （仅复制缺失文件，绝不覆盖已有数据）后，现有迁移逻辑即可完成播种。
- * 持久卷（/space 或 WUJIE_DATA_DIR）可用时不进入非持久分支，不会执行。
- */
-export function seedBundledSystemFiles(
-  dataRoot: string,
-  seedDir: string = path.join(PROJECT_ROOT, 'deploy-seed', 'system'),
-): void {
-  try {
-    if (!pathExistsSync(seedDir)) return;
-    const targetDir = path.join(dataRoot, 'system');
-    let copied = 0;
-    for (const entry of fs.readdirSync(seedDir, { withFileTypes: true })) {
-      if (!entry.isFile()) continue;
-      const target = path.join(targetDir, entry.name);
-      if (pathExistsSync(target)) continue;
-      fs.mkdirSync(targetDir, { recursive: true });
-      fs.copyFileSync(path.join(seedDir, entry.name), target);
-      copied++;
-    }
-    if (copied > 0) {
-      console.log(`[DataRoot] Seeded ${copied} file(s) from bundled deploy-seed into ${targetDir}`);
-    }
-  } catch (err) {
-    console.warn(`[DataRoot] deploy-seed skipped:`, err instanceof Error ? err.message : err);
-  }
 }
 
 export function isServerDataRootDurable(dataRoot: string = getServerDataRoot()): boolean {
@@ -147,7 +115,10 @@ export function migrateLocalDataIfNeeded(localDir: string, persistentDir: string
 
     // 迁移 system 目录
     if (pathExistsSync(localSystemDir)) {
-      copyDirRecursive(localSystemDir, persistentSystemDir);
+      const excluded = isDeploymentDatabaseOnly()
+        ? new Set(['users.json', 'api-providers.json', 'auth-secret'])
+        : undefined;
+      copyDirRecursive(localSystemDir, persistentSystemDir, excluded);
       console.log(`[DataRoot] Migrated system/`);
     }
 
@@ -163,11 +134,12 @@ export function migrateLocalDataIfNeeded(localDir: string, persistentDir: string
   }
 }
 
-function copyDirRecursive(src: string, dest: string): void {
+function copyDirRecursive(src: string, dest: string, excluded?: ReadonlySet<string>): void {
   fs.mkdirSync(dest, { recursive: true });
   const entries = fs.readdirSync(src, { withFileTypes: true });
   
   for (const entry of entries) {
+    if (excluded?.has(entry.name)) continue;
     const srcPath = path.join(src, entry.name);
     const destPath = path.join(dest, entry.name);
     

@@ -217,7 +217,41 @@ async function capture(s:Session,name:string):Promise<void>{const directory=path
 describe('canvas shell help layout',()=>{it.each(THEMES.flatMap(theme=>[[320,640],[390,844],[640,320]].map(([width,height])=>({theme,width,height}))))('$theme $width x $height keeps help and its close control inside the viewport',async({theme,width,height})=>{await withSession(theme,width,height,{},async s=>{await keyboardHelp(s);const r=await helpPanel(s).boundingBox();expect(r!.x,'help left margin').toBeGreaterThanOrEqual(8);expect(r!.y,'help top margin').toBeGreaterThanOrEqual(8);expect(r!.x+r!.width,'help right margin').toBeLessThanOrEqual(width-8);expect(r!.y+r!.height,'help bottom margin').toBeLessThanOrEqual(height-8);await target(helpClose(s));expect(await helpClose(s).getAttribute('aria-label'),'help close name').toBe('关闭画布帮助');expect(await helpPanel(s).evaluate(e=>e.scrollWidth<=e.clientWidth+1),'help does not leak horizontally').toBe(true);await capture(s,theme+'-help-'+width+'x'+height);if(width===390){await s.page.setViewportSize({width:1440,height:900});await settle(s.page);await target(helpClose(s));await capture(s,theme+'-help-desktop');}});},25000);});
 describe('canvas shell empty targets',()=>{it.each(THEMES)('%s gives both empty actions complete touch targets',async theme=>{await withSession(theme,390,844,{},async s=>{const actions=s.page.locator('[data-canvas-empty-state]');expect(await actions.getByRole('button').count(),'exactly two empty actions').toBe(2);for(const name of ['上传图片','使用说明']){const b=actions.getByRole('button',{name,exact:true});expect(await b.count(),'expected named empty action '+name).toBe(1);await target(b);}});},25000);});
 describe('canvas shell help scroll',()=>{it.each(THEMES)('%s scrolls instructions without panning the canvas',async theme=>{await withSession(theme,390,844,{},async s=>{await keyboardHelp(s);const scroll=helpPanel(s).locator(':scope > div').nth(1),r=await scroll.boundingBox();const before=await view(s);await s.page.mouse.move(r!.x+r!.width/2,r!.y+r!.height/2);await s.page.mouse.wheel(0,500);await expect.poll(()=>scroll.evaluate(e=>e.scrollTop),{timeout:1500}).toBeGreaterThan(0);await settle(s.page);expect(await view(s),'help scroll keeps canvas view').toEqual(before);});},25000);});
-describe('canvas shell history empty',()=>{it.each(THEMES)('%s shows a zero empty count and a touch-sized close control',async theme=>{await withSession(theme,390,844,{},async s=>{await s.page.getByRole('button',{name:'全部工具',exact:true}).click();await s.page.getByRole('button',{name:'版本历史',exact:true}).click();const p=s.page.getByRole('dialog',{name:'版本历史',exact:true});await p.waitFor();console.log('CANVAS_UI_EMPTY_HISTORY',await p.innerText());expect(await p.getByText('可撤销 0 步',{exact:true}).count(),'empty undo count is zero').toBe(1);const close=p.getByRole('button',{name:'关闭版本历史',exact:true});await target(close);await s.page.setViewportSize({width:640,height:320});await settle(s.page);const geometry=await p.evaluate(e=>{const rect=(node:Element)=>{const r=node.getBoundingClientRect();return {top:r.top,bottom:r.bottom,height:r.height};};const panel=rect(e),header=rect(e.children[0]),footer=rect(e.children[2]),caption=rect([...e.querySelectorAll('span')].find(n=>n.textContent==='暂无历史记录')!);return {panel,header,footer,caption,good:header.top>=panel.top&&caption.top>=header.bottom&&caption.bottom<=footer.top&&footer.bottom<=panel.bottom};});console.log('CANVAS_UI_SHORT_HISTORY',JSON.stringify(geometry));expect(geometry.good,'short history content fits without overlap').toBe(true);await target(close);await close.click();await settle(s.page);expect(await p.count(),'history native close responds').toBe(0);});},25000);});
+describe('canvas shell history empty', () => {
+  it.each(THEMES)('%s shows a zero empty count and a touch-sized close control', async theme => {
+    await withSession(theme, 390, 844, {}, async s => {
+      await s.page.getByRole('button', { name: '全部工具', exact: true }).click();
+      await s.page.getByRole('button', { name: '版本历史', exact: true }).click();
+      const panel = s.page.getByRole('dialog', { name: '版本历史', exact: true });
+      await panel.waitFor();
+      const undoCount = s.page.getByText('可撤销 0 步', { exact: true });
+      expect(await panel.getByText('可撤销 0 步', { exact: true }).count(), 'empty undo count is zero').toBe(1);
+      const closeControl = s.page.getByRole('button', { name: '关闭版本历史', exact: true });
+      const close = panel.getByRole('button', { name: '关闭版本历史', exact: true });
+      await target(close);
+      await s.page.setViewportSize({ width: 640, height: 320 });
+      await settle(s.page);
+      const regions = panel.locator(':scope > div');
+      const [panelBox, headerBox, footerBox, captionBox] = await Promise.all([
+        panel.boundingBox(),
+        regions.filter({ has: closeControl }).boundingBox(),
+        regions.filter({ has: undoCount }).boundingBox(),
+        panel.getByText('暂无历史记录', { exact: true }).boundingBox(),
+      ]);
+      const good = Boolean(panelBox && headerBox && footerBox && captionBox
+        && headerBox.y >= panelBox.y
+        && captionBox.y >= headerBox.y + headerBox.height
+        && captionBox.y + captionBox.height <= footerBox.y
+        && footerBox.y + footerBox.height <= panelBox.y + panelBox.height);
+      console.log('CANVAS_UI_SHORT_HISTORY', JSON.stringify({ panelBox, headerBox, footerBox, captionBox, good }));
+      expect(good, 'short history content fits without overlap').toBe(true);
+      await target(close);
+      await close.click();
+      await settle(s.page);
+      expect(await panel.count(), 'history native close responds').toBe(0);
+    });
+  }, 25000);
+});
 
 async function reveal(s:Session,scroll:Locator,control:Locator):Promise<void>{for(let i=0;i<8;i++){const b=await scroll.boundingBox(),r=await control.boundingBox();if(!b||!r)throw Error('CANVAS_UI_FIXTURE_SCROLL_RECT');if(r.y>=b.y+1&&r.y+r.height<=b.y+b.height-1)return;const delta=r.y<b.y+1?r.y-b.y-3:r.y+r.height-b.y-b.height+3;await s.page.mouse.move(b.x+b.width/2,b.y+b.height/2);await s.page.mouse.wheel(0,delta);await settle(s.page);}expect(false,'native navigation scroll reaches last action').toBe(true);}
 describe('canvas shell nav collapsed',()=>{it.each(THEMES)('%s keeps collapsed navigation reachable above the mobile toolbar',async theme=>{await withSession(theme,640,320,{},async s=>{const scroll=s.page.locator('[data-toolbar="left-toolbar"] > div'),r=await scroll.boundingBox();expect(r!.y+r!.height,'navigation bottom reserve').toBeLessThanOrEqual(248);const b=scroll.getByRole('button',{name:'展开工具栏',exact:true});await reveal(s,scroll,b);await target(b);await capture(s,theme+'-navigation-collapsed');await b.click();await settle(s.page);expect(await s.page.locator('[data-toolbar="left-toolbar"]').getByText('无界AI',{exact:true}).count(),'native expand responds').toBe(1);expect(await view(s)).toEqual({offsetX:0,offsetY:0,zoom:1});});},25000);});

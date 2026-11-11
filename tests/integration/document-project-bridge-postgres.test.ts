@@ -324,9 +324,10 @@ describe('collaborative project authority on isolated PostgreSQL', () => {
 
       const { executeLegacyCanvasProjectSync } = await import('../../src/lib/asset-core/canvas-project-sync');
       const changedOther = { ...otherProject, name: 'Other updated', updatedAt: 2 };
+      const openedEmptyDocument = { ...originalProject, metadata: { groups: [], annotationsV2: [] } };
       const result = await executeLegacyCanvasProjectSync({
         actorUserId: 'owner-a',
-        projects: [originalProject, changedOther],
+        projects: [openedEmptyDocument, changedOther],
         expectedRevision: 0,
       });
       expect(result.revision).toBe(1);
@@ -334,6 +335,12 @@ describe('collaborative project authority on isolated PostgreSQL', () => {
         `SELECT data_value FROM wujie_user_data WHERE user_id = 'owner-a' AND data_key = 'projects'`,
       );
       expect(stored.rows[0]?.data_value).toEqual([originalProject, changedOther]);
+      const nonemptyGroup = { id: 'unexpected-group', name: 'Unexpected', note: '', imageIds: [], x: 0, y: 0 };
+      await expect(executeLegacyCanvasProjectSync({
+        actorUserId: 'owner-a',
+        projects: [{ ...openedEmptyDocument, metadata: { groups: [nonemptyGroup] } }, changedOther],
+        expectedRevision: 1,
+      })).rejects.toMatchObject({ code: 'DOCUMENT_AUTHORITY_CONFLICT' });
 
       await query(`INSERT INTO wujie_assets (id, owner_id, project_id, kind)
         VALUES ('asset-a', 'owner-a', 'project-a', 'image')`);

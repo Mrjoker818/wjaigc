@@ -3,9 +3,10 @@ import { getSessionUser } from '@/lib/server-auth';
 import { dbGetCredits, dbAdjustCredits, dbGetCreditTransactions, dbGetAllCredits, dbInitCredits } from '@/lib/db-storage';
 import { execSql, isDatabaseConfigured } from '@/lib/db-client';
 import { CREDITS_TO_CNY, CNY_TO_CREDITS, IMAGE_MODEL_CREDITS, VIDEO_MODEL_CREDITS, CHAT_MODEL_CREDITS, RECHARGE_PACKAGES, getModelPricingInfo } from '@/lib/credits';
-import { getPaymentStatus } from '@/lib/payment-config';
+import { getPaymentStatus, type PaymentStatus } from '@/lib/payment-config';
 import { loadCreditPricingConfig, resolveConfiguredCreditCost } from '@/lib/credit-pricing';
 import { normalizePaymentTimestamp } from '@/lib/payment-order-time';
+import { settleRechargeOrder } from '@/lib/recharge-order-transaction';
 
 type RechargeOrder = {
   order_id: string;
@@ -47,7 +48,7 @@ export async function GET(request: NextRequest) {
     const txLimit = parseInt(searchParams.get('limit') || '50', 10);
     const txOffset = parseInt(searchParams.get('offset') || '0', 10);
 
-    // Admin: get self-confirmed orders for audit (auto-credited, admin can reverse fraudulent ones)
+    // Admin: get paid and reversed orders for audit
     if (action === 'audit-orders' && isAdmin) {
       if (!isDatabaseConfigured()) {
         return NextResponse.json({ success: true, orders: [], storageUnavailable: true });
@@ -232,7 +233,7 @@ export async function GET(request: NextRequest) {
  * - action=confirm-paid: User confirms they've paid (submits for admin review, NO auto-credits)
  * - action=admin-confirm: Admin confirms payment received → adds credits, marks paid
  * - action=admin-reject: Admin rejects an order (marks as rejected)
- * - action=reverse-order: Admin reverses a self-confirmed order (deducts credits back)
+ * - action=reverse-order: Admin reverses a paid order (deducts credits back)
  * - action=admin_adjust / action=admin-recharge: Admin adjusts any user's credits
  */
 export async function POST(request: NextRequest) {
@@ -269,7 +270,16 @@ export async function POST(request: NextRequest) {
       }
 
       // Read server-side payment configuration directly, without a loopback HTTP request.
-      const paymentStatusData = await getPaymentStatus();
+      let paymentStatusData: PaymentStatus;
+      try {
+        paymentStatusData = await getPaymentStatus({ throwOnReadError: true });
+      } catch {
+        return NextResponse.json({
+          success: false,
+          error: '支付配置暂时不可用，请稍后重试。',
+          errorCode: 'PAYMENT_CONFIG_UNAVAILABLE',
+        }, { status: 503 });
+      }
       if (!paymentStatusData.canRecharge) {
         return NextResponse.json({
           success: false,
@@ -426,43 +436,16 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: false, error: '缺少订单号' }, { status: 400 });
       }
       try {
-        // Use SELECT FOR UPDATE to prevent concurrent admin-confirm race condition
-        const result = await execSql(
-          'SELECT * FROM wujie_recharge_orders WHERE id = $1 FOR UPDATE',
-          [orderId]
-        );
-        if (result.rows.length === 0) {
+        const result = await settleRechargeOrder(orderId, { kind: 'approve' });
+        if (result.status === 'not-found') {
           return NextResponse.json({ success: false, error: '订单不存在' }, { status: 404 });
         }
-        const order = result.rows[0] as Record<string, unknown>;
-        if (order.payment_status === 'paid') {
+        if (result.status === 'already-paid') {
           return NextResponse.json({ success: false, error: '订单已处理' }, { status: 400 });
         }
-        if (!['pending', 'submitted', 'pending_paid'].includes(String(order.payment_status))) {
+        if (result.status !== 'settled') {
           return NextResponse.json({ success: false, error: '订单不是可确认到账的待审核状态' }, { status: 409 });
         }
-
-        // Add credits to user
-        const orderAmount = Number(order.amount) || 0;
-        const userId = order.user_id as string;
-        const adjustResult = await dbAdjustCredits(userId, orderAmount, 'recharge', `充值 ${orderAmount} 积分（订单${orderId}）`);
-
-        if (!adjustResult.success) {
-          return NextResponse.json({ success: false, error: '积分到账失败' }, { status: 500 });
-        }
-
-        // Update order status atomically with status check to prevent double-confirm
-        const nowTs2 = Date.now();
-        const updateResult = await execSql(
-          `UPDATE wujie_recharge_orders SET payment_status = 'paid', paid_at = $2, updated_at = $3 WHERE id = $1 AND payment_status != 'paid'`,
-          [orderId, nowTs2, nowTs2]
-        );
-        if ((updateResult.rowCount ?? 0) === 0) {
-          // Order was already confirmed by another admin concurrently, reverse the credit
-          await dbAdjustCredits(userId, -orderAmount, 'admin_adjust', `并发确认回退（订单${orderId}）`);
-          return NextResponse.json({ success: false, error: '订单已被其他管理员处理' }, { status: 409 });
-        }
-
         return NextResponse.json({ success: true, message: '订单已确认，积分已到账' });
       } catch (dbErr) {
         console.error('[credits] admin confirm error:', dbErr);
@@ -493,49 +476,23 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ===== Admin: Reverse a self-confirmed order (deduct credits back) =====
+    // ===== Admin: Reverse a paid order (deduct credits back) =====
     if (action === 'reverse-order' && isAdmin) {
       if (!orderId) {
         return NextResponse.json({ success: false, error: '缺少订单号' }, { status: 400 });
       }
-      const reason = (body as Record<string, unknown>).reason as string || '管理员撤销：未收到付款';
       try {
-        // Claim the paid order before touching credits so concurrent admins cannot deduct twice.
-        const claimResult = await execSql(
-          `UPDATE wujie_recharge_orders
-           SET payment_status = 'reversing', updated_at = $2
-           WHERE id = $1 AND payment_status = 'paid'
-           RETURNING user_id, amount`,
-          [orderId, Date.now()]
-        );
-        if ((claimResult.rowCount ?? 0) === 0 || claimResult.rows.length === 0) {
+        const result = await settleRechargeOrder(orderId, {
+          kind: 'reverse',
+          reason: reason || '管理员撤销：未收到付款',
+        });
+        if (result.status === 'insufficient-credits') {
+          return NextResponse.json({ success: false, error: '扣除积分失败: Insufficient credits' }, { status: 500 });
+        }
+        if (result.status !== 'settled') {
           return NextResponse.json({ success: false, error: '订单不是可撤销的已到账状态，或正在被其他管理员处理' }, { status: 409 });
         }
-        const order = claimResult.rows[0] as Record<string, unknown>;
-
-        // Deduct credits from user
-        const orderAmount = Number(order.amount) || 0;
-        const targetUser = order.user_id as string;
-        const deductResult = await dbAdjustCredits(targetUser, -orderAmount, 'admin_adjust', `${reason}（撤销订单${orderId}）`);
-
-        if (!deductResult.success) {
-          await execSql(
-            `UPDATE wujie_recharge_orders SET payment_status = 'paid', updated_at = $2 WHERE id = $1 AND payment_status = 'reversing'`,
-            [orderId, Date.now()]
-          );
-          return NextResponse.json({ success: false, error: '扣除积分失败: ' + (deductResult.message || '') }, { status: 500 });
-        }
-
-        // Update order status to reversed
-        const finishResult = await execSql(
-          `UPDATE wujie_recharge_orders SET payment_status = 'reversed', updated_at = $2 WHERE id = $1 AND payment_status = 'reversing'`,
-          [orderId, Date.now()]
-        );
-        if ((finishResult.rowCount ?? 0) === 0) {
-          return NextResponse.json({ success: false, error: '撤销积分已扣除，但订单状态更新失败，请在审计记录中人工处理' }, { status: 500 });
-        }
-
-        return NextResponse.json({ success: true, message: '订单已撤销，积分已扣回', balance: deductResult.balance });
+        return NextResponse.json({ success: true, message: '订单已撤销，积分已扣回', balance: result.balance });
       } catch (dbErr) {
         console.error('[credits] reverse order error:', dbErr);
         return NextResponse.json({ success: false, error: '撤销失败' }, { status: 500 });

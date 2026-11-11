@@ -126,10 +126,32 @@ describe('POST /api/simple-chat/chat Brief to video intent', () => {
     expect(mocks.findProviderForModel).not.toHaveBeenCalled();
   });
 
-  it('asks the first missing field and does not create a Run', async () => {
+  it('terminates one-shot clarification text without creating a Run or calling a provider', async () => {
     const response = await POST(request('根据这份 Brief 生成最终视频', false));
 
-    expect(await response.text()).toContain('请提供具体 Brief 或脚本内容');
+    expect(response.headers.get('content-type')).toContain('text/event-stream');
+    const frames = (await response.text()).trim().split('\n\n').map(frame => JSON.parse(frame.slice(6)));
+    expect(frames).toEqual([
+      { type: 'text', content: expect.stringContaining('请提供具体 Brief 或脚本内容') },
+      { type: 'done' },
+    ]);
+    expect(mocks.createSkillRun).not.toHaveBeenCalled();
+    expect(mocks.findProviderForModel).not.toHaveBeenCalled();
+  });
+
+  it('terminates the exact project-selection guidance sent to a comparison request', async () => {
+    const response = await POST(new NextRequest('http://localhost/api/simple-chat/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'chat-model-1', providerId: 'chat-provider-1',
+        messages: [{ role: 'user', content: '根据这份 Brief 生成最终视频' }],
+      }),
+    }));
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(
+      'data: {"type":"text","content":"请先选择目标画布项目。"}\n\ndata: {"type":"done"}\n\n',
+    );
     expect(mocks.createSkillRun).not.toHaveBeenCalled();
     expect(mocks.findProviderForModel).not.toHaveBeenCalled();
   });

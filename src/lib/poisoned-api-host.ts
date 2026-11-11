@@ -20,7 +20,8 @@ export function poisonedApiHost(value: string): string | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
   try {
-    const hostname = new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`).hostname.toLowerCase();
+    const hostname = new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`)
+      .hostname.toLowerCase().replace(/\.$/, '');
     return POISONED_API_HOSTS.find(host => hostname === host || hostname.endsWith(`.${host}`)) ?? null;
   } catch {
     return null;

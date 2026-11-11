@@ -502,12 +502,15 @@ export async function assertLegacyCanvasWriteAllowed(
 
 function documentOwnedState(project: Project, ignoreCreatedAt = false): unknown {
   const images = project.canvasImages;
+  const groups = project.metadata?.groups;
+  const annotations = project.metadata?.annotationsV2;
   return JSON.parse(JSON.stringify({
     canvasImages: ignoreCreatedAt && Array.isArray(images)
       ? images.map(({ createdAt: _createdAt, ...image }) => image as CanvasImage)
       : images,
     legacyImages: (project as Project & { images?: unknown }).images,
-    groups: project.metadata?.groups,
-    annotationsV2: project.metadata?.annotationsV2,
+    // Opening an empty canvas can add these arrays to a client snapshot.
+    groups: Array.isArray(groups) && groups.length === 0 ? undefined : groups,
+    annotationsV2: Array.isArray(annotations) && annotations.length === 0 ? undefined : annotations,
   })) as unknown;
 }

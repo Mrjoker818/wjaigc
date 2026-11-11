@@ -14,4 +14,4 @@ validate = [ "bash", "./scripts/validate.sh" ]
 
 [deploy]
 build = [ "bash", "./scripts/coze-deploy-build.sh" ]
-run = [ "bash", "./scripts/coze-start.sh" ]
+run = [ "bash", "./scripts/coze-start.sh", "--deployment" ]

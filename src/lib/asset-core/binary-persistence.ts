@@ -12,7 +12,7 @@ import { uploadBinaryToS3, type S3BinaryUploadResult } from '@/lib/s3-storage';
 import type { AssetFile } from './types';
 import { assetBinaryFileOps } from './binary-file-ops';
 import { drainPendingAssetCleanup, recordAssetCleanupFailure } from './cleanup-outbox';
-import { binaryExtensions, binaryByteLimit, EXPORT_FILENAME, EXPORT_KEY, MAX_ASSET_VIDEO_BYTES } from './binary-media-contract';
+import { AssetVideoValidatorUnavailableError, binaryExtensions, binaryByteLimit, EXPORT_FILENAME, EXPORT_KEY, MAX_ASSET_VIDEO_BYTES } from './binary-media-contract';
 import { inspectNewBinaryMedia, type VerifiedMediaDimensions } from './binary-media-validation';
 import {
   bindExportDirectory, assertExportDirectoryBinding, identityOfCreatedFile,
@@ -95,6 +95,7 @@ async function inspectAssetBinaryFormat(bytes: Buffer, mimeType: string, signal?
     return { width: metadata.width, height: metadata.height };
   } catch (error) {
     signal?.throwIfAborted();
+    if (error instanceof AssetVideoValidatorUnavailableError) throw error;
     if (error instanceof TypeError && error.message === 'ASSET_BINARY_FORMAT_INVALID') throw error;
     fail('ASSET_BINARY_FORMAT_INVALID');
   }

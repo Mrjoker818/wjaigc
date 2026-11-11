@@ -15,12 +15,12 @@
 - **差异化生成**: `src/lib/brand-ip-generation.ts` 的 `BRAND_IP_ASSET_TYPES` 定义标准角色图、单色版、小尺寸、表情包四类输出。生成请求必须携带合法 `assetType`，并由提示词编译器加入对应产出约束，最终写入资产元数据。
 - **策略模型选择**: `POST /api/brand-ip/strategy` 以 `providerId + model` 精确匹配用户已授权的聊天模型；未授权选择必须返回 SSE 错误，不能静默降级到其他模型。
 
-## 认证与隔离部署种子
+## 认证与部署
 
-- **持久化模式**: `resolveAuthPersistenceMode`（`src/lib/auth/auth-persistence.ts`）在 DB 已配置时强制 `DB_ONLY`，用户只从 `wujie_users` 表读取；生产环境禁止 `FILE_ONLY`。
-- **密钥环自举**: `resolveDatabaseSecretRing`（`src/lib/auth/auth-repository.ts`）在库内无环行、无 legacy `auth_secret` 行、且无 `WUJIE_AUTH_SECRET` 时，生成 48 字节随机密钥建环并持久化到 `wujie_system_settings`（`auth_secret_ring_v1`），不再 fail-closed 抛 `AUTH_CONFIGURATION_UNAVAILABLE`。会话签名密钥因此跨冷启动稳定；legacy 口令哈希校验恒定包含代码常量 `LEGACY_AUTH_SECRETS`，与环内容无关。
-- **部署种子**: veFaas 部署形态无持久卷（数据根回落 `/tmp/wujie-data`）且使用独立空库。`deploy-seed/system/{users.json,api-providers.json}` 随包携带，`server-data-root.seedBundledSystemFiles` 仅在解析到非持久数据根时把它们复制进数据根，供启动期 file→DB 迁移播种（`ON CONFLICT DO NOTHING`，绝不覆盖库内更新数据）。
-- **种子生成与安全**: `node scripts/export-deploy-seed.mjs` 从当前库导出种子；users 仅含持 scrypt 凭据的启用账号且 `passwordHash` 一律置空（scrypt 校验独立于口令哈希），providers 含 API Key（属主私有仓库，可在管理界面轮换）。持久卷可用（/space 或 WUJIE_DATA_DIR）时播种逻辑不执行，本地开发不受影响。
+- **持久化模式**：Coze 发布入口启用 `WUJIE_DEPLOYMENT_DB_ONLY=1`，使用绑定的 PostgreSQL 保存和读取账号、模型配置及会话密钥环。开发和本地运行通过 `resolveAuthPersistenceMode` 选择模式，配置 PostgreSQL 时默认为 `DB_ONLY`。
+- **冷启动**：重新部署沿用已有的生产数据库绑定。账号身份和模型配置由 `wujie_users` 和 `wujie_api_providers` 保持，会话密钥环保存在 `wujie_system_settings`。数据库尚无环时，服务端生成并持久化密钥环。
+- **首次安装**：只有空用户表才用 Coze 生产环境变量 `WUJIE_ADMIN_USERNAME` 和 `WUJIE_ADMIN_PASSWORD` 创建初始管理员。空模型表可通过生产环境变量 `WUJIE_BOOTSTRAP_PROVIDERS_JSON` 初始化，或在管理员界面配置。模型初始化在单一事务中执行，完成后由数据库中的设置记录确认。
+- **发布包**：凭据留在 Coze 生产环境配置和运行时数据库。首启并验证后撤下初始化用变量。旧包中的凭据通过供应商控制台和账号管理界面单独轮换。构建检查按路径检查发布包及文件追踪清单。
 
 ## 项目概览
 
@@ -80,12 +80,10 @@ src/
 │       │   ├── models/route.ts      # 工作流模型列表API (动态加载管理员配置的模型)
 │       │   ├── save/route.ts        # 工作流保存API (持久化到数据库)
 │       │   └── ai-build/route.ts    # AI自然语言建图API (LLM解析→自动生成节点图)
-│       ├── upscayl/route.ts        # [旧] 无损放大 API (向后兼容)
 │       ├── image/
 │       │   ├── health/route.ts     # 本地图像工具健康检测 API
-│       │   ├── upscale/route.ts    # 无损放大 API (upscayl-node)
-│       │   ├── upscale-pro/route.ts # 无损放大Pro API (PearAPI+ONNX+AI精修, 多策略降级)
-│       │   └── inpaint/route.ts    # 涂抹消除/蒙版修图 API (IOPaint+LaMa)
+│       │   ├── upscale/route.ts    # 普通放大（AI）
+│       │   └── upscale-pro/route.ts # 云端放大、可选本地 ONNX、AI 精修
 │       ├── admin/
 │       │   ├── api-balance/route.ts   # API 余额与用量分析 API
 │       │   └── op-log/route.ts        # 操作日志 API (查询/统计/AI分析/修复/批量删除/导出)
@@ -133,15 +131,13 @@ src/
 │       ├── config.ts               # 本地图像工具配置 (环境变量/目录/超时)
 │       ├── file.ts                 # 文件工具 (读取/缩放/保存/清理)
 │       ├── mask.ts                 # 蒙版工具 (校验/归一化/反转)
-│       ├── upscayl.ts              # upscayl-node 放大引擎
-│       └── iopaint-client.ts       # IOPaint 客户端 (多模型擦除LaMa/ZITS/Anime-Lama + RemoveBG 3模型, Python子进程+HTTP双模式)
+│       ├── local-erase-client.ts   # 可选 IOPaint 擦除 worker
+│       └── rembg-client.ts         # 可选 BiRefNet 去背景 worker
 ├── types/
 │   └── image-tools.ts              # 本地图像工具类型定义
 scripts/
-├── start-iopaint-lama.sh           # IOPaint LaMa 启动脚本（兼容旧版 HTTP 服务模式）
-├── iopaint_erase.py               # IOPaint 擦除脚本 (LaMa/ZITS/Anime-Lama, Python 子进程模式)
-├── iopaint_removebg.py            # IOPaint RemoveBG 去背景脚本（Python 子进程模式）
-└── download-iopaint-models.sh     # IOPaint 模型下载脚本 (LaMa/ZITS/Anime-Lama + RemoveBG)
+├── download-upscale-models.sh     # 手动校验或预置固定 SHA-256 的 FP32 ONNX 权重
+└── upscale_onnx.py                # Real-ESRGAN CPU 分块推理
 ```
 
 ## 核心功能说明
@@ -165,7 +161,7 @@ scripts/
 - **图片操作工具栏** (选中图片后顶部显示):
   - 放大、移除背景、SVG智能描摹、擦除、蒙版、编辑元素、扩展、图生图、裁切、下载
 - **编辑模式**:
-  - 擦除: 画笔大小+确认擦除，IOPaint 多模型优先（LaMa/ZITS/Anime-Lama），AI模型智能修复兜底，BFS边界扩散最终兜底
+  - 擦除: 画笔大小+确认擦除，云端 AI 优先，随后尝试已配置的 IOPaint worker，最后使用 BFS 边界扩散
   - 蒙版: 画笔+提示词输入+生成，AI模型优先生成+后端精确蒙版合成
   - 扩展: 缩放比例选项(原始比例/1x/1.5x/2x/3x/4x) + 画面比例(原始比例+固定比例) + 确认扩展
   - 图生图: 黑金配色浮动面板，详见下方
@@ -334,56 +330,52 @@ scripts/
 
 ### 11. 图片编辑 API (image-edit/route.ts)
 
-统一架构的图片编辑能力，AI 模型优先 + 本地算法兜底，支持异步提交+轮询模式。
+- **擦除**：云端 AI → 可选 IOPaint 本地推理（自动模式）→ BFS。擦除和蒙版修图均通过原始蒙版合成结果，保留蒙版外像素。
+- **移除背景**：云端模型 → 可选 rembg 本地推理 → 本地透明化。显式 AI 模式失败时返回错误。透明图经质量检查后保存，蒙版取自透明图的 alpha 通道。
+- **放大**：普通放大使用 AI。Pro 放大保留云端策略，随后尝试可选 CPU Real-ESRGAN，再按请求配置选择 AI 兜底或画质精修。
+- **扩展画面**：AI 模型向四周延伸，支持缩放比例和画面比例选择。
+- **异步任务**：通过任务 ID 和 `/api/poll-task` 查询异步结果。
 
-- **擦除功能**: IOPaint 多模型优先（LaMa 通用/ZITS 结构保持/Anime-Lama 动漫），AI 模型兜底（全图发送+蒙版合成避免变形），BFS 边界扩散最终兜底
-- **蒙版修图**: AI 模型优先生成 + 后端精确蒙版合成（仅替换蒙版区域）
-- **无损放大**: upscayl-node (NCNN) + AI 整图放大兜底
-- **无损放大Pro**: PearAPI Real-ESRGAN 云端 → 本地 ONNX Real-ESRGAN (CPU) → AI 重绘兜底，放大后自动 AI 画质精修（补细节/消噪点/还原质感，保持原图内容不变）
-- **移除背景**: IOPaint RemoveBG 优先（支持 3 个模型：BiRefNet通用 + U2Net轻量快速 + Silueta轻量人像），默认 birefnet-general-lite，AI 模型兜底，本地透明化最终兜底
-  - 同时生成透明背景图和黑白蒙版图（白色=主体，黑色=背景），两图并排添加到画布
-  - Python 端完成所有蒙版处理（膨胀+模糊+应用），Node.js 端仅保存文件
-- **扩展画面**: AI 模型向四周延伸，支持缩放比例和画面比例选择
-- **异步任务**: 擦除/蒙版/放大/扩展均支持提交+轮询模式（`taskId` + `/api/poll-task`）
-- **持久化**: `persistImageBuffer` 三级 fallback（S3 → save-image API → base64 data URL）
-- **蒙版合成**: `compositeAIResultToOriginal` 精确合成 AI 结果到原图蒙版区域
-- **API 接口**:
-  - POST `/api/image-edit` - 图片编辑（action: erase/mask/upscale/extend/removebg）
-  - GET `/api/image/health` - 本地图像工具健康检测
-  - POST `/api/image/upscale-pro` - 无损放大Pro（PearAPI+ONNX+AI精修，多策略降级）
+### 12. 可选本地图像推理
 
-### 12. 本地图像编辑 (image-editor/ + image-tools/)
+- 启用时显式设置 `LOCAL_AI_ENABLED=true`。可用 `PYTHON_BIN` 指定已安装依赖的 Python。单个服务进程最多同时运行一个本地推理或探测子进程，繁忙时沿用现有兜底。
+- **Real-ESRGAN**：配置 `ONNX_MODELS_DIR`（默认 `onnx-models`）和从可信来源独立取得的 `ONNX_MODEL_SHA256`，预置 `realesrgan-x4plus.onnx`（FP32）。使用 `bash scripts/download-upscale-models.sh --check` 核对已预置文件，或以本地文件路径或 HTTPS URL 为参数手动预置。Python 环境需有 Pillow、NumPy 和 CPU ONNX Runtime。每次加载前核对权重摘要。
+- **IOPaint**：设置可信 worker 的绝对路径 `IOPAINT_WORKER`、绝对权重目录 `IOPAINT_MODELS_DIR`、模型 `IOPAINT_MODEL`（默认 `lama`，另有 `zits`、`anime-lama`）。worker 接收输入 PNG、蒙版 PNG、输出 PNG 路径及模型名，成功时在 stdout 输出 `method=<模型名>`。
+- **rembg**：设置可信 worker 的绝对路径 `REMBG_WORKER`、绝对权重目录 `REMOVEBG_MODELS_DIR`、模型 `REMOVEBG_MODEL`（默认 `birefnet-general-lite`，另有 `birefnet-general`、`birefnet-portrait`、`birefnet-massive`）。权重文件名为 `<模型名>.onnx`。worker 从 stdin 读取 JSON（`image` 为 base64，另有 `model`），并在 stdout 返回 `{success:true,model,rgbaBase64}`。
+- IOPaint 和 rembg worker 及权重由部署方提供。worker 必须使用预置的可信权重，推理和探测期间禁止下载，并支持 `--check <模型名>`。完成运行时和权重自检后，探测返回单行 JSON `{success:true,model}`。
+- 管理员可通过 `GET /api/image/health` 查询各本地策略的 readiness。禁用、缺少配置、探测失败或子进程繁忙时，相关策略显示 `available: false`。按需探测，无启动下载。
 
-统一架构的本地图像编辑能力，不依赖云端 API，使用 upscayl-node (放大) 和 IOPaint+LaMa (涂抹消除/蒙版修图)。
+#### 发布运行时挂载
 
-- **入口**: 无限画布图片选中后顶部工具栏中的"放大"、"擦除"、"蒙版"
-- **无损放大 (UpscaleDialog)**:
-  - 弹窗选择放大模型、倍率(2x/4x)、输出格式(PNG/JPG/WEBP)
-  - 后端调用 upscayl-node (NCNN 二进制)，大图先用 sharp 缩小再放大
-  - 成功后新图片添加到原图右侧（不覆盖原图）
-  - 旧 `/api/upscayl` 入口保留向后兼容
-- **涂抹消除 / 蒙版修图 (ImageEditPanel)**:
-  - 基于 react-konva 的蒙版画布 (MaskBrushCanvas)
-  - 支持画笔/橡皮擦模式、画笔大小调整、撤销、清空
-  - 白色笔迹=擦除区域，黑色背景=保留区域
-  - 导出蒙版尺寸与原图原始尺寸一致
-  - 后端调用 IOPaint+LaMa 本地修复服务
-  - 修复结果替换原图
-- **健康检测**:
-  - GET `/api/image/health` - 检查 IOPaint 和 upscayl 可用性
-  - 前端根据状态显示服务未启动提示
-- **API 接口**:
-  - POST `/api/image/upscale` - 无损放大 (imageUrl, model, scale, outputFormat, compression)
-  - POST `/api/image/inpaint` - 涂抹消除/蒙版修图 (imageUrl, maskDataUrl, prompt)
-  - GET `/api/image/health` - 健康检测
-- **配置**: 通过环境变量控制 (LOCAL_AI_ENABLED, IOPAINT_BASE_URL, UPSCAYL_MODELS_DIR 等)
-- **启动脚本**: `scripts/start-iopaint-lama.sh` (HTTP 服务模式，兼容旧版)
-- **Python 子进程模式** (推荐):
-  - `scripts/iopaint_erase.py` — 多模型擦除（LaMa/ZITS/Anime-Lama），被 Node.js child_process 调用
-  - `scripts/iopaint_removebg.py` — RemoveBG 去背景（3个模型：BiRefNet/U2Net/Silueta），被 Node.js child_process 调用
-  - `scripts/download-iopaint-models.sh` — 下载擦除+去背景模型
-- **擦除模型**: LaMa (默认推荐) / ZITS (结构保持) / Anime-Lama (动漫专用)
-- **降级策略**: IOPaint 本地 → AI API → 本地算法兜底
+- **源码目录启动（含 Coze 的 `next start` 入口）**：应用工作目录保留 `scripts/upscale_onnx.py` 时可使用默认 worker。发布产物只含编译结果时，从部署方的只读目录挂载脚本，并把 `ONNX_WORKER` 设置为脚本在运行容器内的绝对路径。显式配置的脚本缺失时，ONNX readiness 为 `false`。
+- **Docker runner**：当前 Dockerfile 的最终阶段未复制 `scripts/`，基础镜像为 Alpine。可在已有可启动的应用镜像上使用下方 Compose 覆盖文件。部署方预置与容器 CPU 架构和 musl ABI 匹配的完整 Python 运行时、标准库、原生库及已装依赖，或提供自带兼容加载器和库的运行时。挂载后 Python 的解释器、符号链接目标和动态库均须在容器内可解析。当前仓库 Dockerfile 还要求 `/app/server.js`，检出的源码及构建入口没有提供该文件，镜像构建和容器启动需单独验收。
+- **只读挂载**：挂载包仅包含可信 runtime、worker 和权重。权重与脚本不进入镜像构建上下文、`public`、`.next` 或业务数据目录。沿用既有凭据注入和部署包检查，运行时临时文件使用容器可写的临时目录，输出继续使用应用的持久化数据目录。
+
+将覆盖文件放在构建上下文之外，并将 `/srv/wujie-inference` 替换为部署主机预置目录。下面配置启用 ONNX。需要 IOPaint 或 rembg 时，再添加对应的绝对路径与模型配置。
+
+```yaml
+services:
+  wujieai:
+    volumes:
+      - type: bind
+        source: /srv/wujie-inference
+        target: /opt/wujie-inference
+        read_only: true
+    environment:
+      LOCAL_AI_ENABLED: "true"
+      PYTHON_BIN: /opt/wujie-inference/python/bin/python3
+      ONNX_WORKER: /opt/wujie-inference/workers/upscale_onnx.py
+      ONNX_MODELS_DIR: /opt/wujie-inference/models/onnx
+      ONNX_MODEL_SHA256: "${ONNX_MODEL_SHA256:?set an independently approved digest}"
+      # IOPAINT_WORKER: /opt/wujie-inference/workers/iopaint_erase.py
+      # IOPAINT_MODELS_DIR: /opt/wujie-inference/models/iopaint
+      # REMBG_WORKER: /opt/wujie-inference/workers/rembg_remove_background.py
+      # REMOVEBG_MODELS_DIR: /opt/wujie-inference/models/removebg
+```
+
+确认基础镜像已单独通过启动检查后，使用 `docker compose -f docker-compose.yml -f /srv/wujie-compose/inference.override.yml up -d --no-build` 启动现有镜像。提前在 Compose 插值环境提供已批准的 `ONNX_MODEL_SHA256`。
+
+在具备同样挂载能力的 Coze 运行环境中，将上述变量设为实际挂载路径。发布后用管理员会话读取 `GET /api/image/health` 确认各工具就绪。运行时未挂载、解释器无法启动、依赖缺失或摘要不匹配时，相应本地策略不可用，现有云端路径仍按请求配置运行。Coze 环境无法提供这些挂载时，保持 `LOCAL_AI_ENABLED=false`。
 
 ### 13. 语言修图 (image-editor.tsx + api/edit)
 
@@ -655,24 +647,15 @@ PY_VECTORIZE_ENDPOINT=http://localhost:8000/vectorize
 # Inpainting 擦除/蒙版服务 (使用 AI 生成 API + 蒙版合成策略)
 # 擦除和蒙版均通过 AI 模型生成内容，后端自动做蒙版合成确保非编辑区域像素级保留
 
-# ========== 本地图像工具 ==========
-# 是否启用本地 AI 工具 (upscayl / IOPaint)
-LOCAL_AI_ENABLED=true
-
-# IOPaint (LaMa + RemoveBG) 本地图像工具
-# 支持 Python 子进程模式（推荐，无需启动独立服务）和 HTTP 服务模式（兼容旧版）
-IOPAINT_BASE_URL=http://127.0.0.1:8080
-IOPAINT_TIMEOUT_MS=300000
+# ========== 可选本地图像推理 ==========
+LOCAL_AI_ENABLED=false
+# PYTHON_BIN=/path/to/python3
+# ONNX_MODELS_DIR=/path/to/onnx-models
+# ONNX_MODEL_SHA256=<可信 FP32 权重的 SHA-256>
 
 # 图片上传限制
 IMAGE_MAX_SIZE_MB=20
 IMAGE_MAX_EDGE=2048
-
-# 无损放大
-UPSCAYL_MODELS_DIR=./upscayl-models
-UPSCALE_DEFAULT_SCALE=2
-UPSCALE_MAX_SCALE=4
-UPSCALE_TIMEOUT_MS=300000
 ```
 
 ## 安全注意事项
@@ -824,12 +807,10 @@ UPSCALE_TIMEOUT_MS=300000
 - Chaikin 平滑迭代次数建议 ≤ 5 次
 - 大图(>2000px)处理时间较长属正常现象
 
-### IOPaint 擦除/去背景不工作
-- 检查 `LOCAL_AI_ENABLED` 是否为 `true`（开发环境默认开启，生产环境默认关闭）
-- 检查 LaMa 模型文件是否存在且 >1MB：`~/.cache/torch/hub/checkpoints/big-lama.pt`
-- 运行 `bash scripts/download-iopaint-models.sh` 下载模型
-- RemoveBG 模型（u2net）首次使用时自动下载，需网络连接
-- IOPaint 不可用时会自动降级到 AI API → 本地算法兜底
+### 本地图像推理不可用
+
+- 管理员可查看 `GET /api/image/health`。确认已启用本地推理、解释器可运行、对应 worker 和权重均已配置，再在空闲时重试探测。
+- ONNX 权重可用 `bash scripts/download-upscale-models.sh --check` 验证。
 
 ## 更新日志
 
@@ -1022,8 +1003,7 @@ UPSCALE_TIMEOUT_MS=300000
 - 修复 `authSecret()` 安全警告刷屏：添加缓存机制 `_authSecretCache`，仅首次输出警告（之前每个请求都输出，生产日志被严重刷屏）
 - 修复 `authSecret()` 可见性：从 `export` 改为模块内部 `function`（避免外部误用导致循环依赖）
 - 修复 `readStore` 数据库回退逻辑：当 DB 读取失败回退文件系统时，不再将文件数据写回 DB（避免 stale 数据覆盖生产数据）
-- 孤立用户恢复：临时密码 `wujie_reset_2024`，管理员应在恢复后重置用户密码
-- 恢复的生产用户：zhnude / iw3qca / btcwsm（管理员可在面板中修改为原始用户名）
+- 孤立账号由管理员按账号恢复流程重置密码。
 
 ### v3.3.0
 
