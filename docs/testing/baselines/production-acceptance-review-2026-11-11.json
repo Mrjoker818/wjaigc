@@ -2774,12 +2774,13 @@
     {
       "path": "src/components/infinite-canvas.tsx",
       "reviewArea": "ui",
-      "reviewedBlob": "d8c1b0fa28e42496529c99c4f037631e4e3b6da1",
+      "reviewedBlob": "1288ce76f8347942e959c17cb4bde6dbaffdef59",
       "disposition": "reviewed",
-      "summary": "Active touch pan is retained until its state commits. Video edit and extend keep rejection and late acceptance scoped to the owning editor. Existing derived media uses confirmed document placement.",
+      "summary": "Content fitting uses the visible desktop toolbar's measured position. Active touch pan is retained until its state commits. Video edit, extend, and derived media retain their established projection rules.",
       "evidence": [
         "release-blank-touch-final.log passes the eight previous empty-canvas failures. Native video edit and extend regression passes six cases.",
-        "Earlier exact 1.0 second and verified placement evidence in resume.md."
+        "Earlier exact 1.0 second and verified placement evidence in resume.md.",
+        "At 1280 by 720 the old build had zero reachable points on the last card of the 300-node fixture. The patched production build exposed all five points with 48 pixels above the toolbar. Edge drag produced a scoped save in synthetic fixtures at 1280 by 720, 1920 by 1080 and 375 by 812. Twenty view and dock tests and ten native toolbar tests passed."
       ]
     },
     {
@@ -2946,6 +2947,15 @@
       "summary": "Finds the uploaded Simple Chat thumbnail by its accessible filename before continuing the unchanged workflow chain.",
       "evidence": [
         "All five browser jobs failed at the obsolete empty-alt selector. The exact production candidate in isolated Edge showed zero matches for the old selector and a visible decoded 37 by 23 PNG by the new filename selector. The full workflow chain remains to be rerun."
+      ]
+    },
+    {
+      "path": "src/__tests__/components/canvas-project-reopen-contract.test.ts",
+      "disposition": "reviewed",
+      "reviewedBlob": "2305cad310c7f4293dffe7ffa2576a8d219a375d",
+      "summary": "Supplies the existing inactive pointer ref to the viewport initialization fixture.",
+      "evidence": [
+        "The previous fixture failed with a ReferenceError before all three viewport assertions. All nine existing tests passed after supplying the ref; original assertions and application logic were retained."
       ]
     },
     {

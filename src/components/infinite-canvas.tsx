@@ -953,6 +953,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   // View state. Legacy remains authoritative until the authenticated mode enables canvas-v2.
   const normalizedInitialViewState = normalizeCanvasViewState(initialViewState);
   const canvasContainerRef = useRef<HTMLDivElement | null>(null);
+  const bottomToolbarRef = useRef<HTMLDivElement | null>(null);
   const canvasTransformRef = useRef<HTMLDivElement | null>(null);
   const canvasKernelMode = UserManager.getInstance().getCanvasKernelMode();
   const [isPanning, setIsPanning] = useState(false);
@@ -1096,10 +1097,17 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
 
   const resetViewToContent = useCallback(() => {
     const viewport = canvasContainerRef.current?.getBoundingClientRect();
+    const toolbar = bottomToolbarRef.current?.getBoundingClientRect();
+    const bottomInset = viewport && toolbar
+      && toolbar.width > 0 && toolbar.height > 0
+      && toolbar.left < viewport.right && toolbar.right > viewport.left
+      && toolbar.top >= viewport.top && toolbar.top < viewport.bottom
+      ? viewport.bottom - toolbar.top
+      : 0;
     const usableViewport = resolveCanvasUsableViewportSize({
       width: viewport?.width || canvasSize.width || window.innerWidth,
       height: viewport?.height || canvasSize.height || window.innerHeight,
-    }, { right: canvasOccupiedRight });
+    }, { right: canvasOccupiedRight, bottom: bottomInset });
     fitViewportContent(
       imagesRef.current.filter((image) => !image.isProcessingPlaceholder),
       usableViewport,
@@ -1732,7 +1740,6 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   const [leftToolbarExpanded, setLeftToolbarExpanded] = useState(false);
   const [bottomBarHovered, setBottomBarHovered] = useState(false);
   const [bottomToolbarDrawerOpen, setBottomToolbarDrawerOpen] = useState(false);
-  const bottomToolbarRef = useRef<HTMLDivElement | null>(null);
   const minimapHostRef = useRef<HTMLDivElement | null>(null);
   const previousBottomPanelsRef = useRef({ minimapOpen: false, showLayerPanel: false, showVersionHistory: false });
   const lastOpenedBottomPanelRef = useRef<CanvasBottomDockPanel>('dock');

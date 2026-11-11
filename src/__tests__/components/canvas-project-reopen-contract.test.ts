@@ -94,6 +94,7 @@ describe('canvas project reopen contract', () => {
         useEffect: (effect: () => void) => effect(),
         requestAnimationFrame: (effect: () => void) => effect(),
         canvasContainerRef: { current: {} },
+        viewportPanPointerIdRef: { current: null },
         projectId: 'collaboration-test-project',
         images: [] as Array<{ isProcessingPlaceholder: boolean }>,
         zoom: 1,

@@ -981,5 +981,6 @@
   "src/__tests__/lib/s3-storage-bounded-read.test.ts",
   "src/__tests__/lib/legacy-managed-image-read.test.ts",
   "tests/e2e/generation-progressive-slots.spec.ts",
-  "tests/e2e/stage-4-node-chat-agent.spec.ts"
+  "tests/e2e/stage-4-node-chat-agent.spec.ts",
+  "src/__tests__/components/canvas-project-reopen-contract.test.ts"
 ]
