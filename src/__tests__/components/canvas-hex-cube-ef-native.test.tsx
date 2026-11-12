@@ -241,8 +241,16 @@ async function efAbandonClose(s:Session,root:Locator,close:Locator):Promise<void
  let active=false;
  try{
   for(const end of ['touchCancel','touchEnd'] as const){
+   await close.evaluate(el=>{
+    el.removeAttribute('data-ef-close-press');
+    el.addEventListener('pointerdown',event=>{
+     const pointer=event as PointerEvent;
+     if(pointer.isTrusted&&pointer.isPrimary&&pointer.pointerType==='touch')el.setAttribute('data-ef-close-press','trusted-touch');
+    },{once:true});
+   });
    await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y,id:1,force:1}]});
    active=true;
+   expect(await close.getAttribute('data-ef-close-press'),'real pointerdown reached Close').toBe('trusted-touch');
    if(end==='touchEnd'){
     await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x-bounds.width,y,id:1,force:1}]});
    }
@@ -250,6 +258,8 @@ async function efAbandonClose(s:Session,root:Locator,close:Locator):Promise<void
    active=false;
    await settle(s.page);
    expect(await root.isVisible(),'cancelled or moved close press must keep the panel open').toBe(true);
+   await close.evaluate(el=>el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,detail:1})));
+   expect(await root.isVisible(),'compatibility click must not undo the abandoned press').toBe(true);
   }
  }finally{
   try{if(active)await cdp.send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});}

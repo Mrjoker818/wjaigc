@@ -3109,6 +3109,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   const hexCube3dDragRef = useRef<{ groupId: string; startX: number; startY: number; startRotY: number; startTiltX: number } | null>(null);
   const hexCubeTouchDragRef = useRef<{ pointerId: number; groupId: string; element: HTMLDivElement; startX: number; startY: number; startRotY: number; startTiltX: number } | null>(null);
   const hexCubeClosePress = useRef<{ groupId: string; pointerId: number; x: number; y: number } | null>(null);
+  const hexCubeCloseTouchGroup = useRef<string | null>(null);
   const clearHexCubeClosePress = (event: React.PointerEvent<HTMLButtonElement>): void => {
     if (hexCubeClosePress.current?.pointerId === event.pointerId) hexCubeClosePress.current = null;
   };
@@ -18146,11 +18147,12 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                     <button
                       className="p-2 min-h-[44px] min-w-[44px] rounded-md transition-colors"
                       onPointerDown={event => {
-                        if (event.pointerType === 'touch' && event.isPrimary) {
-                          hexCubeClosePress.current = {
-                            groupId: hcg.id, pointerId: event.pointerId, x: event.clientX, y: event.clientY,
-                          };
-                        }
+                        if (!event.isPrimary) return;
+                        const touch = event.pointerType === 'touch';
+                        hexCubeCloseTouchGroup.current = touch ? hcg.id : null;
+                        hexCubeClosePress.current = touch
+                          ? { groupId: hcg.id, pointerId: event.pointerId, x: event.clientX, y: event.clientY }
+                          : null;
                       }}
                       onPointerMove={event => {
                         const press = hexCubeClosePress.current;
@@ -18176,7 +18178,9 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       }}
                       onClick={event => {
                         event.stopPropagation();
-                        if (event.detail > 0 && (event.nativeEvent as PointerEvent).pointerType === 'touch') return;
+                        // Compatibility mouse clicks can follow an abandoned touch without a new pointerdown.
+                        if (event.detail > 0 && (hexCubeCloseTouchGroup.current === hcg.id
+                          || (event.nativeEvent as PointerEvent).pointerType === 'touch')) return;
                         deleteHexCubeGroup(hcg.id);
                       }}
                       title="关闭"
