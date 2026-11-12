@@ -9,14 +9,14 @@ const state = vi.hoisted(() => ({ mode: 'initial', release: null as null | ((res
 vi.mock('@/lib/simple-chat-sync-storage', () => ({ createIndexedDbSimpleChatEnvelopeStore: () => state.store! }));
 const user = (id = 'A') => ({ id, name: id, productType: 'chat', createdAt: 1, updatedAt: 1 });
 const props = (id = 'A') => ({ user: user(id), onOpenProject: () => {}, onNewProject: () => {} });
-const response = (name: string) => Response.json({ success: true, value: [{ ...project('same'), name }], syncRevision: 1 });
+const response = (name: string, userId = 'A') => Response.json({ success: true, userId, value: [{ ...project('same'), name }], syncRevision: 1 });
 beforeEach(() => {
   state.mode = 'initial'; state.release = null; state.store = createMemorySimpleChatEnvelopeStore();
   const values = new Map<string,string>(); vi.stubGlobal('localStorage', { get length() { return values.size; }, key: (i:number) => [...values.keys()][i] ?? null, getItem: (k:string) => values.get(k) ?? null, setItem: (k:string,v:string) => values.set(k,v), removeItem: (k:string) => values.delete(k), clear: () => values.clear() });
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     if (!String(input).includes('chat_simple_projects')) return Response.json({ success: false });
     if (state.mode === 'hold') return new Promise<Response>(resolve => { state.release = resolve; });
-    return response(state.mode === 'B' ? 'B项目' : '初始项目');
+    return state.mode === 'B' ? response('B项目', 'B') : response('初始项目');
   }));
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
 });

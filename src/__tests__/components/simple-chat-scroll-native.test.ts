@@ -24,7 +24,7 @@ async function run(mode: string): Promise<string> {
 
 describe('simple chat mobile scroll follows intent', () => {
   it.each([
-    { mode: 'green', cases: 9, checks: 71 },
+    { mode: 'green', cases: 9, checks: 72 },
     { mode: 'scroll-user-green', cases: 1, checks: 10 },
     { mode: 'scroll-touch-green', cases: 1, checks: 10 },
     { mode: 'motion-reduce', cases: 1, checks: 8 },

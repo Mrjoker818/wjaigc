@@ -2548,7 +2548,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   // Video tools handler
   const handleVideoTool = async (action: 'to-gif' | 'extract-cover' | 'compress', image: CanvasImage) => {
     if (action === 'extract-cover') {
-      await handleVideoExtractFrames(image, 'single', 1, 0);
+      await handleVideoExtractFrames(image, 'single', 1, 0, 'cover');
       return;
     }
     if (!image.videoUrl) { toast.error('这不是视频文件'); return; }
@@ -11690,7 +11690,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
 
   // 视频批量抽帧
   const handleVideoExtractFrames = useCallback(async (
-    img: CanvasImage, mode = 'uniform', count = 8, timestamp?: number,
+    img: CanvasImage, mode = 'uniform', count = 8, timestamp?: number, feedback: 'frame' | 'cover' = 'frame',
   ): Promise<boolean> => {
     if (!img.videoUrl) { toast.error('这不是视频文件'); return false; }
     const tid = toast.loading('正在从视频中提取帧...');
@@ -11702,8 +11702,10 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'extract-frames', videoUrl: img.videoUrl, mode, frameCount: count, fps: 1, timestamp }),
       });
-      if (!res.ok) throw new Error('抽帧失败');
-      const data: { frames?: Array<{ url?: unknown }> } = await res.json();
+      if (!res.ok) {
+        throw new Error(mode === 'single' && res.status === 400 ? '指定时间无效或超出视频时长' : '抽帧失败');
+      }
+      const data: { frames?: Array<{ url?: unknown; timestamp?: unknown }> } = await res.json();
       if (!Array.isArray(data.frames) || data.frames.length === 0 || data.frames.length > 30) {
         throw new Error('未能提取到帧');
       }
@@ -11721,7 +11723,12 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       } else {
         onAddImages(frameUrls);
       }
-      toast.success(`成功提取 ${frameUrls.length} 帧`, { id: tid });
+      const extractedTime = data.frames[0].timestamp;
+      const message = feedback === 'cover' ? '已提取视频封面'
+        : mode === 'single' && typeof extractedTime === 'number' && Number.isFinite(extractedTime) && extractedTime >= 0
+          ? `已提取帧 @ ${extractedTime}s`
+          : `成功提取 ${frameUrls.length} 帧`;
+      toast.success(message, { id: tid });
       return true;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '抽帧失败', { id: tid });
@@ -17352,8 +17359,8 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                 event.preventDefault();
                 const panel = videoExtractPanelSessionRef.current;
                 if (!img.videoUrl || panel.processing) return;
-                const timestamp = videoExtractMode === 'single' ? Number(videoExtractTimestamp) : undefined;
-                if (timestamp !== undefined && (!videoExtractTimestamp.trim() || !Number.isFinite(timestamp) || timestamp < 0)) {
+                const timestamp = videoExtractMode === 'single' ? Number(videoExtractTimestamp.replace(',', '.')) : undefined;
+                if (timestamp !== undefined && (!event.currentTarget.checkValidity() || !Number.isFinite(timestamp) || timestamp < 0)) {
                   toast.error('请输入有效的非负时间（秒）');
                   return;
                 }
@@ -17417,10 +17424,9 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                   <label className="block space-y-1 text-xs text-white/60">
                     <span>提取时间点（秒）</span>
                     <input
-                      type="number"
+                      type="text"
                       inputMode="decimal"
-                      min="0"
-                      step="any"
+                      pattern="[0-9]+([.,][0-9]+)?|[.,][0-9]+"
                       required
                       value={videoExtractTimestamp}
                       disabled={videoExtractProcessing}

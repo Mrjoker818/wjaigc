@@ -5,6 +5,7 @@ import { createHash, webcrypto } from 'node:crypto';
 import { JSDOM } from 'jsdom';
 import { createBrowserPendingUpdateStore } from '@/lib/collaboration/document-client';
 import { createDocumentHttpBrowserStorage } from '@/lib/collaboration/document-http-browser-storage';
+import { documentBrowserCrypto } from '../fixtures/document-browser-crypto';
 
 const token='t'.repeat(43), hash=(s:string|Uint8Array)=>createHash('sha256').update(s).digest('hex');
 const descriptor={sessionToken:token,sessionFingerprint:hash(token),actorId:'actor-a',ownerId:'owner-a',projectId:'project-a',grantGeneration:'1',expiresAt:'2030-01-01T00:00:00.000Z',retainUntil:'2030-02-01T00:00:00.000Z'};
@@ -20,7 +21,12 @@ function faultStorage(changes: Partial<Storage>): Storage {
   const backing=window.localStorage;
   return new Proxy(backing,{get(target,key){if(key in changes){const value=Reflect.get(changes,key);return typeof value==='function'?value.bind(changes):value;}const value=Reflect.get(target,key,target);return typeof value==='function'?value.bind(target):value;}});
 }
-beforeEach(()=>{const dom=new JSDOM('',{url:'https://fixture.invalid/'});vi.stubGlobal('localStorage',dom.window.localStorage);vi.stubGlobal('sessionStorage',dom.window.sessionStorage);vi.stubGlobal('crypto',webcrypto);});
+beforeEach(() => {
+  const dom = new JSDOM('', { url: 'https://fixture.invalid/' });
+  vi.stubGlobal('localStorage', dom.window.localStorage);
+  vi.stubGlobal('sessionStorage', dom.window.sessionStorage);
+  vi.stubGlobal('crypto', documentBrowserCrypto);
+});
 afterEach(()=>{window.localStorage.clear();window.sessionStorage.clear();vi.restoreAllMocks();vi.unstubAllGlobals();});
 
 describe('explicit empty descriptor rotation',()=>{

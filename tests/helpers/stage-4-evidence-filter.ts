@@ -6,6 +6,8 @@ import {
 
 export type Stage4RuntimeEvidenceEntry = Stage3EvidenceEntry;
 
+const AGENT_EVENTS_PATH = /^\/api\/agent-runs\/[^/]+\/events$/;
+
 type Stage4BrowserFailure = 'aborted' | 'connection-refused' | 'connection-closed'
   | 'timeout' | 'name-resolution' | 'failed';
 
@@ -41,6 +43,7 @@ function summaryRoute(url: string | undefined): string {
   try {
     const pathname = new URL(url).pathname;
     if (SUMMARY_ROUTES.has(pathname)) return pathname;
+    if (AGENT_EVENTS_PATH.test(pathname)) return '/api/agent-runs/[runId]/events';
     if (pathname.startsWith('/api/serve-upload/')) return '/api/serve-upload/[file]';
     if (pathname.startsWith('/_next/static/')) return '/_next/static/[file]';
   } catch {
@@ -90,12 +93,25 @@ export function summarizeStage4RuntimeFailures(
 function isRecoveredIdempotentGetAbort(
   entry: Stage4RuntimeEvidenceEntry,
   evidence: Stage4RuntimeEvidenceEntry[],
+  supersededAgentPolls?: ReadonlySet<Stage4RuntimeEvidenceEntry>,
 ): boolean {
   if (
     entry.method !== 'GET'
     || !entry.url
     || !/ERR_ABORTED|NS_ERROR_ABORT|NS_BINDING_ABORTED|Load request cancelled/i.test(entry.text ?? '')
   ) return false;
+  if (entry.text === 'NS_BINDING_ABORTED') {
+    try {
+      const url = new URL(entry.url);
+      if (AGENT_EVENTS_PATH.test(url.pathname)) {
+        return entry.status === undefined
+          && /^[1-9]\d*$/.test(url.searchParams.get('after') ?? '')
+          && supersededAgentPolls?.has(entry) === true;
+      }
+    } catch {
+      return false;
+    }
+  }
   return evidence.some(candidate => (
     candidate.method === 'GET'
     && candidate.url === entry.url
@@ -186,6 +202,7 @@ function isRecoveredProjectSyncConflictConsole(
 export function stage4RuntimeEvidenceFailures(
   consoleEntries: Stage4RuntimeEvidenceEntry[],
   networkEntries: Stage4RuntimeEvidenceEntry[],
+  supersededAgentPolls?: ReadonlySet<Stage4RuntimeEvidenceEntry>,
 ): {
   consoleFailures: Stage4RuntimeEvidenceEntry[];
   networkFailures: Stage4RuntimeEvidenceEntry[];
@@ -203,7 +220,7 @@ export function stage4RuntimeEvidenceFailures(
         && !isBenignStage3RequestAbort(entry)
         && !isRecoveredStage3RequestAbort(entry, networkEntries)
         && !isRecoveredWorkflowStatusAbort(entry, networkEntries)
-        && !isRecoveredIdempotentGetAbort(entry, networkEntries))
+        && !isRecoveredIdempotentGetAbort(entry, networkEntries, supersededAgentPolls))
     )),
   };
 }

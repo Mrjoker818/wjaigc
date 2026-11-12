@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { createCanvas } from '@napi-rs/canvas';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  assertOwnedSketchSchema, readOwnedSketchFixture, withOwnedSketchPostgres,
+  assertSketchPostgresSchema, readSketchPostgresFixture, withSketchPostgres,
 } from '../helpers/owned-sketch-postgres-fixture';
 import type { IsolatedPostgresContext, QueryFn } from '../helpers/postgres-test-database';
 import { ensureCoreTables } from '@/lib/db-storage';
@@ -161,7 +161,7 @@ async function originalTask(taskId: string): Promise<PersistedCloudTask> {
   return task;
 }
 async function seed(context: IsolatedPostgresContext): Promise<void> {
-  assertOwnedSketchSchema(context.databaseUrl);
+  assertSketchPostgresSchema(context.databaseUrl);
   const migrations = spawnSync(process.execPath, [resolve('scripts/run-migrations.mjs')], {
     encoding: 'utf8', windowsHide: true, timeout: 30_000,
     env: { ...process.env, DATABASE_URL: context.databaseUrl, PGDATABASE_URL: context.databaseUrl },
@@ -202,15 +202,14 @@ async function seed(context: IsolatedPostgresContext): Promise<void> {
 }
 async function ownedCase(name: string,
   run: (context: IsolatedPostgresContext, files: PersistedAssetFile[]) => Promise<void>): Promise<void> {
-  // Mandatory proof BEFORE calling a helper whose historical no-receipt branch
-  // otherwise permits generic PG. No skip, legacy-cluster or business fallback.
-  const receipt = readOwnedSketchFixture();
-  if (!receipt) throw new Error('TASK6 explicit owned sketch receipt is required for image PG acceptance');
+  // Both the historical and GitHub fixtures require proof before opening a database connection.
+  const ownedFixture = readSketchPostgresFixture();
+  if (!ownedFixture) throw new Error('TASK6 explicit owned sketch receipt is required for image PG acceptance');
   const files: PersistedAssetFile[] = [];
   let failed = false, operationError: unknown;
   try {
-    await withOwnedSketchPostgres(name, async (context): Promise<void> => {
-      assertOwnedSketchSchema(context.databaseUrl); await seed(context); await run(context, files);
+    await withSketchPostgres(name, async (context): Promise<void> => {
+      assertSketchPostgresSchema(context.databaseUrl); await seed(context); await run(context, files);
     });
   } catch (error) { failed = true; operationError = error; }
   // The original helper has already drained/closed pools and dropped only this

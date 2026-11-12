@@ -53,7 +53,7 @@ describe('media toolbar video contracts', () => {
       canvasSource.indexOf('VIDEO EXTRACT FRAMES PANEL') + 8000);
     expect(panel).toContain('提取时间点（秒）');
     expect(panel).toContain('inputMode="decimal"');
-    expect(panel).toContain('step="any"');
+    expect(panel).toContain('pattern="[0-9]+([.,][0-9]+)?|[.,][0-9]+"');
     expect(canvasSource).toContain("handleVideoExtractFrames(img, 'single', 1, timestamp)");
   });
 

@@ -1,7 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { isAbsolute, join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { isAbsolute, join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import {
   createTask7EvidenceRepositoryFixture,
@@ -115,10 +114,11 @@ it('constructs its own repository without changing an inherited external Git con
   const externalConfig = join(owner.fixtureRoot, 'external.gitconfig');
   const original = '[boundary]\n\tvalue = retained\n';
   await writeFile(externalConfig, original, 'utf8');
-  const moduleUrl = pathToFileURL(resolve('tests/helpers/task7-evidence-repository-fixture.ts')).href;
+  const moduleUrl = new URL('../helpers/task7-evidence-repository-fixture.ts', import.meta.url).href;
   const program = `
     import { spawnSync } from 'node:child_process';
-    const { createTask7EvidenceRepositoryFixture, createTask7FixtureGitEnvironment } = await import(process.argv[1]);
+    const fixtureModule = await import(process.argv[1]);
+    const { createTask7EvidenceRepositoryFixture, createTask7FixtureGitEnvironment } = fixtureModule.default ?? fixtureModule;
     let owned;
     try {
       owned = await createTask7EvidenceRepositoryFixture();
@@ -132,8 +132,11 @@ it('constructs its own repository without changing an inherited external Git con
     finally { if (owned) await owned.dispose(); }
   `;
   // The hostile target is another file owned by this test, never user configuration.
-  const result = spawnSync(process.execPath, ['--input-type=module', '-e', program, moduleUrl, externalConfig],
-    { encoding: 'utf8', windowsHide: true, env: { ...process.env, GIT_CONFIG: externalConfig } });
+  const result = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', program, moduleUrl, externalConfig], {
+    encoding: 'utf8',
+    windowsHide: true,
+    env: { ...createTask7FixtureGitEnvironment(), GIT_CONFIG: externalConfig },
+  });
   expect(await readFile(externalConfig, 'utf8')).toBe(original);
   expect(result.status).toBe(0);
   expect(JSON.parse(result.stdout)).toMatchObject({ head: expect.stringMatching(/^[a-f0-9]{40}$/u), parentConfigUnchanged: true });

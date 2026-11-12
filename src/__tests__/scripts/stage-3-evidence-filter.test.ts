@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { isRecoveredStage3CanvasSkillCatalogAbort } from '../../../tests/helpers/stage-3-e2e';
 import {
   isBenignStage3RequestAbort,
   isRecoveredStage3RequestAbort,
@@ -25,6 +26,57 @@ describe('Stage 3 browser evidence request filtering', () => {
       url: 'http://127.0.0.1:5000/api/user-data/record',
       text: 'server error',
     })).toBe(false);
+  });
+
+  describe('Canvas skill catalog recovery', () => {
+    const aborted = {
+      method: 'GET',
+      url: 'http://127.0.0.1:5000/api/skills?surface=canvas',
+      text: 'NS_BINDING_ABORTED',
+      canvasCatalogNavigation: 1,
+    };
+    const completed = {
+      method: 'GET',
+      url: aborted.url,
+      status: 200,
+      canvasCatalogNavigation: 1,
+    };
+
+    it('accepts an abort followed by a completed catalog read on the same page navigation', () => {
+      expect(isRecoveredStage3CanvasSkillCatalogAbort(aborted, [aborted, completed])).toBe(true);
+      expect(isBenignStage3RequestAbort(aborted)).toBe(false);
+    });
+
+    it('requires a later catalog completion', () => {
+      expect(isRecoveredStage3CanvasSkillCatalogAbort(aborted, [aborted])).toBe(false);
+      expect(isRecoveredStage3CanvasSkillCatalogAbort(aborted, [completed, aborted])).toBe(false);
+    });
+
+    it.each([
+      { status: 204 },
+      { status: 503 },
+      { status: undefined, text: 'NS_BINDING_ABORTED' },
+      { method: 'POST' },
+      { url: 'http://127.0.0.1:5000/api/skills?surface=workflow' },
+      { url: 'http://localhost:5000/api/skills?surface=canvas' },
+      { canvasCatalogNavigation: 2 },
+      { canvasCatalogNavigation: undefined },
+    ])('rejects a replacement with %j', change => {
+      expect(isRecoveredStage3CanvasSkillCatalogAbort(aborted, [aborted, { ...completed, ...change }])).toBe(false);
+    });
+
+    it.each([
+      { text: 'NS_ERROR_NET_TIMEOUT' },
+      { text: 'NS_BINDING_ABORTED with an unrelated error' },
+      { status: 503 },
+      { method: 'POST' },
+      { url: 'http://127.0.0.1:5000/api/skills?surface=workflow' },
+      { canvasCatalogNavigation: undefined },
+    ])('still fails the original request with %j', change => {
+      const failure = { ...aborted, ...change };
+      const matchingCompletion = { ...completed, method: failure.method, url: failure.url };
+      expect(isRecoveredStage3CanvasSkillCatalogAbort(failure, [failure, matchingCompletion])).toBe(false);
+    });
   });
 
   it('accepts a project revision conflict only when a later project sync succeeds', () => {

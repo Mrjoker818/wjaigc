@@ -6,7 +6,7 @@ import { createCanvas } from '@napi-rs/canvas';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PoolClient } from 'pg';
 import type { QueryFn } from '../helpers/postgres-test-database';
-import { withOwnedSketchPostgres as withIsolatedPostgres, assertOwnedSketchSchema } from '../helpers/owned-sketch-postgres-fixture';
+import { withSketchPostgres as withIsolatedPostgres, assertSketchPostgresSchema } from '../helpers/owned-sketch-postgres-fixture';
 import { ensureCoreTables } from '@/lib/db-storage';
 import { getPool } from '@/lib/db-client';
 import { ensureCloudTaskTables, getCloudTaskById, claimCloudTaskLease, terminateCloudTaskAndRefund } from '@/lib/cloud-task-storage';
@@ -27,9 +27,9 @@ vi.mock('@/lib/s3-storage', async importOriginal => ({
   ...await importOriginal<typeof import('@/lib/s3-storage')>(), uploadBinaryToS3: async () => null,
 }));
 const fixture = resolve('output/sketch-token-pg-20261009-97af41');
-const ownedFixture = await vi.hoisted(async (): Promise<import('../helpers/owned-sketch-postgres-fixture').OwnedSketchFixture | undefined> => {
-  const { readOwnedSketchFixture } = await import('../helpers/owned-sketch-postgres-fixture');
-  return readOwnedSketchFixture();
+const ownedFixture = await vi.hoisted(async () => {
+  const { readSketchPostgresFixture } = await import('../helpers/owned-sketch-postgres-fixture');
+  return readSketchPostgresFixture();
 });
 const png = createCanvas(2, 2).toDataURL('image/png');
 const generation: SketchGenerationDependencies = {
@@ -42,7 +42,7 @@ const generation: SketchGenerationDependencies = {
 };
 async function seed(query: QueryFn, databaseUrl: string): Promise<void> {
   if (ownedFixture) {
-    assertOwnedSketchSchema(databaseUrl);
+    assertSketchPostgresSchema(databaseUrl);
   } else {
   const manifest = JSON.parse(readFileSync(resolve(fixture, 'cluster.json'), 'utf8')) as {
     databaseUrl: string; systemIdentifier: string; data: string; started: boolean; stopped: boolean;
@@ -506,23 +506,49 @@ describe('Token atomic settlement on original full PostgreSQL schema', () => {
     }, 30_000);
   it.each(['task', 'grant', 'version', 'credit'] as const)('token real %s lock crosses lease then DB-time gate forbids late settlement', async lock => {
     await withIsolatedPostgres('token_lock_expiry', async ({ query, databaseUrl }) => {
-      await seed(query, databaseUrl); const value = await publication(await tokenAdmission(7, 1, 'shared', 'editor'), usage(), 1500);
+      await seed(query, databaseUrl);
+      let value = await publication(await tokenAdmission(7, 1, 'shared', 'editor'), usage(), lock === 'version' ? undefined : 1500);
       if (lock === 'version') expect(await publishSketchTask(value)).toBe(true);
-      const before = await accounting(query); const blocker = await getPool().connect(); await blocker.query('BEGIN');
-      if (lock === 'task') await blocker.query('SELECT id FROM cloud_tasks WHERE id=$1 FOR UPDATE', [value.task.id]);
-      if (lock === 'grant') await blocker.query("SELECT project_id FROM wujie_project_document_editors WHERE member_user_id='editor' FOR UPDATE");
-      if (lock === 'version') await blocker.query('SELECT id FROM wujie_asset_versions WHERE task_id=$1 FOR UPDATE', [value.task.id]);
-      if (lock === 'credit') await blocker.query("SELECT id FROM wujie_credits WHERE user_id='editor' FOR UPDATE");
+      let before = lock === 'version' ? undefined : await accounting(query);
+      const blocker = await getPool().connect();
       let pid = 0; const statements: string[] = [];
-      const pending = publishSketchTask(value, { connect: async () => {
-        const client = await getPool().connect(); pid = (await client.query<{ pid: number }>('SELECT pg_backend_pid() pid')).rows[0].pid;
-        return intercept(client, async sql => { statements.push(sql); });
-      } });
+      let pending: Promise<boolean> | undefined;
       try {
+        await blocker.query('BEGIN');
+        if (lock === 'task') await blocker.query('SELECT id FROM cloud_tasks WHERE id=$1 FOR UPDATE', [value.task.id]);
+        if (lock === 'grant') await blocker.query("SELECT project_id FROM wujie_project_document_editors WHERE member_user_id='editor' FOR UPDATE");
+        if (lock === 'credit') await blocker.query("SELECT id FROM wujie_credits WHERE user_id='editor' FOR UPDATE");
+        if (lock === 'version') {
+          await blocker.query('SELECT id FROM wujie_asset_versions WHERE task_id=$1 FOR UPDATE', [value.task.id]);
+          // Start the short lease for replay only, after initial publication and lock setup.
+          const { rows: [shortLease] } = await query<{ lease_expires_at: string }>(`UPDATE cloud_tasks
+            SET lease_expires_at = (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::bigint + 1500
+            WHERE id=$1 AND status='completed' AND lease_expires_at=$2 RETURNING lease_expires_at`,
+          [value.task.id, value.lease.expiresAt]);
+          const expiresAt = Number(shortLease?.lease_expires_at);
+          expect(Number.isSafeInteger(expiresAt)).toBe(true);
+          value = { ...value, task: { ...value.task, leaseExpiresAt: expiresAt }, lease: { ...value.lease, expiresAt } };
+          before = await accounting(query);
+        }
+        pending = publishSketchTask(value, { connect: async () => {
+          const client = await getPool().connect(); pid = (await client.query<{ pid: number }>('SELECT pg_backend_pid() pid')).rows[0].pid;
+          return intercept(client, async sql => { statements.push(sql); });
+        } });
+        void pending.catch(() => undefined);
         while (!pid) await new Promise<void>(resolveTurn => setImmediate(resolveTurn));
         await until(query, 'SELECT cardinality(pg_blocking_pids($1::int))>0 ok', [pid]);
         await until(query, 'SELECT (EXTRACT(EPOCH FROM clock_timestamp())*1000)::bigint >= $1::bigint ok', [value.lease.expiresAt]);
-      } finally { await blocker.query('ROLLBACK'); blocker.release(); }
+      } finally {
+        let discard = true;
+        try {
+          await blocker.query('ROLLBACK');
+          discard = false;
+        } finally {
+          try { blocker.release(discard); }
+          // The publisher must finish before schema cleanup, even if observation failed.
+          finally { await pending?.catch(() => undefined); }
+        }
+      }
       expect(await pending).toBe(false); expect(await accounting(query)).toEqual(before);
       if (lock === 'credit') {
         const creditIndex = statements.findIndex(sql => sql.includes('FROM wujie_credits') && sql.includes('FOR UPDATE'));

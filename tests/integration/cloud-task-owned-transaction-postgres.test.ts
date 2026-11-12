@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { PoolClient } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
-import { readOwnedSketchFixture, withOwnedSketchPostgres } from '../helpers/owned-sketch-postgres-fixture';
+import { readSketchPostgresFixture, withSketchPostgres } from '../helpers/owned-sketch-postgres-fixture';
 import type { IsolatedPostgresContext, QueryFn } from '../helpers/postgres-test-database';
 import { getPool } from '@/lib/db-client';
 
@@ -14,8 +14,8 @@ interface Outcome { value?: unknown; error?: unknown }
 interface ObservationOptions { commit?: boolean; connect?: () => Promise<PoolClient>; observe?: QueryFn }
 
 async function ownedCase(name: string, run: (context: IsolatedPostgresContext) => Promise<void>): Promise<void> {
-  if (!readOwnedSketchFixture()) throw new Error('Explicit owned fixture required for cold transaction acceptance');
-  await withOwnedSketchPostgres(`image_pg_cold_${name}`, run);
+  if (!readSketchPostgresFixture()) throw new Error('Explicit owned fixture required for cold transaction acceptance');
+  await withSketchPostgres(`image_pg_cold_${name}`, run);
 }
 
 async function warmSchema(): Promise<Storage> {

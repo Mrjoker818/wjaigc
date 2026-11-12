@@ -218,7 +218,7 @@ async function clearPropertyHw(s:Session):Promise<boolean>{const button=s.page.g
 async function closeBackdropHw(s:Session):Promise<void>{if(s.page.viewportSize()!.width<1000)await s.page.touchscreen.tap(4,4);else await s.page.mouse.click(4,4);await settle(s.page);}
 
 describe('IV N13 element shapes and nonempty compatibility',()=>{
- it.each(CASES)('$theme $width x $height rejects malformed entries before mutation and preserves nonempty native extensions',async({theme,width,height})=>{
+ it.each(CASES)('$theme $width x $height rejects malformed and unlisted entries before mutation and preserves nonempty native extensions',async({theme,width,height})=>{
   await withSession(theme,width,height,{nodeType:'input-image'},async s=>{
    let primary:unknown;const faults:{name:string;message:string;stack:string}[]=[];let overflow=false;
    const observe=(error:Error):void=>{if(faults.length>=8){overflow=true;return;}const row={name:error.name,message:error.message.slice(0,1000),stack:String(error.stack??'').slice(0,3000)};faults.push(row);console.log('IV_PAGE_ERROR',JSON.stringify(row));};
@@ -247,18 +247,19 @@ describe('IV N13 element shapes and nonempty compatibility',()=>{
      {id:'connection-endpoint-object',text:text([node],[{...edge,toNodeId:{bad:true}}])},{id:'connection-type-object',text:text([node],[{...edge,type:{bad:true}}])},
      {id:'node-infinite-x',text:text([{...node,x:20}]).replace('"x":20','"x":1e999')},
     ];
-    expect(payloads.length,'named shape inputs').toBe(20);console.log('IV_JSON_CHECKPOINT',JSON.stringify({stage:'opened',payloadIds:payloads.map(p=>p.id),noSemanticGraphPolicy:true}));
-    for(const payload of payloads){
+    expect(payloads.length,'named shape inputs').toBe(20);console.log('IV_JSON_CHECKPOINT',JSON.stringify({stage:'opened',payloadIds:payloads.map(p=>p.id)}));
+    const verifyRejection=async(payload:{id:string;text:string},previousWorkflow:string):Promise<void>=>{
      await input.fill(payload.text);expect(await dialog.getByRole('alert').count(),'editing clears prior error').toBe(0);await target(apply);await activateHw(s,apply);
-     const unchanged=JSON.stringify(await workflow(s))===baseline;
+     const unchanged=JSON.stringify(await workflow(s))===previousWorkflow;
      console.log('IV_JSON_OBSERVATION',JSON.stringify({id:payload.id,dialogCount:await dialog.count(),callbackAndGraphUnchanged:unchanged,pageErrors:s.errors.length,observedPageErrors:faults.length,observerOverflow:overflow}));
-     expect(await dialog.count(),'malformed entry retains the editor instead of losing the workspace').toBe(1);
-     expect(await input.inputValue(),'malformed entry text is retained').toBe(payload.text);expect(unchanged,'malformed entry never mutates the last legitimate workflow').toBe(true);
-     const alert=dialog.getByRole('alert');expect(await alert.count(),'malformed entry gives visible feedback before updateWorkflow').toBe(1);
-     expect(await alert.isVisible(),'shape feedback is visible').toBe(true);expect((await alert.innerText()).trim().length).toBeGreaterThan(0);
+     expect(await dialog.count(),'rejected entry retains the editor').toBe(1);
+     expect(await input.inputValue(),'rejected entry text is retained').toBe(payload.text);expect(unchanged,'rejected entry leaves the last legitimate workflow intact').toBe(true);
+     const alert=dialog.getByRole('alert');expect(await alert.count(),'rejected entry gives feedback before updateWorkflow').toBe(1);
+     expect(await alert.isVisible(),'validation feedback is visible').toBe(true);expect((await alert.innerText()).trim().length).toBeGreaterThan(0);
      expect(await input.getAttribute('aria-invalid')).toBe('true');const id=await alert.getAttribute('id');expect(id).toBeTruthy();expect((await input.getAttribute('aria-describedby')??'').split(/\s+/)).toContain(id);
      console.log('IV_JSON_REJECTED',JSON.stringify({id:payload.id,textRetained:true,graphUnchanged:true,visibleAssociatedError:true}));
-    }
+    };
+    for(const payload of payloads) await verifyRejection(payload,baseline);
     const imageUrl=String(initial.nodes.find(n=>n.id==='hw-result')?.config.imageUrl??'');expect(imageUrl.startsWith('data:image/png;base64,')).toBe(true);
     const source=createWorkflowNode('input-image',20,10,'IV 原图扩展');source.id='iv-source';source.config={...source.config,imageUrl,source:'url',customNested:{empty:'',zero:0,flag:false,items:[1,'x']}};
     const output=createWorkflowNode('output-image',20,280,'IV 输出扩展');output.id='iv-output';
@@ -266,11 +267,9 @@ describe('IV N13 element shapes and nonempty compatibility',()=>{
     const extended={...source,customNode:{retained:true},ports:source.ports.map(p=>({...p,customPort:{retained:true}}))};
     const edit=createWorkflowNode('ai-edit',20,10,'IV 旧蒙版端口');edit.id='iv-legacy-edit';edit.ports=edit.ports.filter(p=>p.id!=='in-mask');
     const legacyExpected={...edit,ports:[...edit.ports,{id:'in-mask',label:'蒙版',type:'mask',direction:'in'}]};
-    const fallback={...node,id:'iv-fallback',type:'iv-unlisted-extension',label:'IV 未列名字符串扩展',config:{...node.config,customNested:{flag:false,zero:0,empty:''}}};
     const positives=[
      {id:'native-extensions',payload:{nodes:[extended,output],connections:[link]},expected:{nodes:[extended,output],connections:[link]}},
      {id:'legacy-edit-mask',payload:{nodes:[edit],connections:[]},expected:{nodes:[legacyExpected],connections:[]}},
-     {id:'unlisted-string-fallback',payload:{nodes:[fallback],connections:[]},expected:{nodes:[fallback],connections:[]}},
     ];
     const withoutSize=(value:{nodes:unknown[];connections:unknown[]}):unknown=>({...value,nodes:value.nodes.map(value=>{const {width:_width,height:_height,...fields}=value as Record<string,unknown>;return fields;})});
     for(const positive of positives){
@@ -283,12 +282,15 @@ describe('IV N13 element shapes and nonempty compatibility',()=>{
      expect(JSON.parse(await input.inputValue()),'reopen reads actual verified graph').toEqual({nodes:applied.nodes,connections:applied.connections});expect(await dialog.getByRole('alert').count()).toBe(0);
      console.log('IV_JSON_ACCEPTED',JSON.stringify({id:positive.id,callbackAndRenderedGraphMatched:true,outerIdentityHeld:true,sameMountReopen:true}));
     }
+    const unlisted={...node,id:'iv-fallback',type:'iv-unlisted-extension',label:'IV 未列名字符串扩展',config:{...node.config,customNested:{flag:false,zero:0,empty:''}}};
+    await verifyRejection({id:'unlisted-node-type',text:JSON.stringify({nodes:[unlisted],connections:[]},null,2)},JSON.stringify(await workflow(s)));
+    expect(await s.page.locator('[data-node-id]').evaluateAll(elements=>elements.map(element=>element.getAttribute('data-node-id'))),'unlisted node type leaves the rendered graph intact').toEqual([edit.id]);
     expect(overflow,'readonly page-error observer did not overflow').toBe(false);expect(faults.length,'no page errors may be allowed').toBe(0);
    }catch(error){primary=error;}
    try{await capture(s,'iv-'+theme+'-'+width+'-'+height+'-json-elements-final');}catch(error){s.page.off('pageerror',observe);if(primary!==undefined)throw new AggregateError([primary,error],'IV_PRIMARY_AND_CAPTURE');throw error;}
    s.page.off('pageerror',observe);console.log('IV_PAGE_OBSERVER_FINAL',JSON.stringify({count:faults.length,overflow,errorsRemainOriginalFailures:true}));
    if(primary!==undefined)throw primary;
   });
-  console.log('IV_JSON_COMPLETE',JSON.stringify({theme,width,height,cleanupCompleted:true,elementCases:20,positiveControls:3,onlySameMountRetention:true,databasePersistenceProven:false,fullN13Accepted:false,wholeMobileAccepted:false,physicalAndroid:false}));
+  console.log('IV_JSON_COMPLETE',JSON.stringify({theme,width,height,cleanupCompleted:true,elementCases:20,positiveControls:2,unlistedTypeRejected:true,onlySameMountRetention:true,databasePersistenceProven:false,fullN13Accepted:false,wholeMobileAccepted:false,physicalAndroid:false}));
  },25000);
 });

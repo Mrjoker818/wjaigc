@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
+import { prepareGitHubSketchPostgres, readGitHubSketchPostgresFixture } from './github-sketch-postgres-fixture';
 import type { IsolatedPostgresContext, QueryFn } from './postgres-test-database';
 import { withIsolatedPostgres } from './postgres-test-database';
 
@@ -157,12 +159,16 @@ export function assertOwnedSketchSchema(databaseUrl: string): void {
   const base = process.env.POSTGRES_TEST_DATABASE_URL;
   const fixture = readOwnedSketchFixture({ ...process.env, DATABASE_URL: base, PGDATABASE_URL: base });
   if (!fixture) return;
+  assertBoundSchema(databaseUrl, fixture.databaseUrl);
+}
+
+function assertBoundSchema(databaseUrl: string, baseUrl: string): void {
   requireProof(databaseUrl === process.env.DATABASE_URL && databaseUrl === process.env.PGDATABASE_URL);
   const url = new URL(databaseUrl);
   requireProof(url.searchParams.size === 1 && !url.hash
     && /^-csearch_path=test_[a-z0-9_]{1,58}$/.test(url.searchParams.get('options') || ''));
   url.searchParams.delete('options');
-  requireProof(url.toString() === new URL(fixture.databaseUrl).toString());
+  requireProof(url.toString() === new URL(baseUrl).toString());
 }
 
 async function proveServerIdentity(query: QueryFn, fixture: OwnedSketchFixture): Promise<void> {
@@ -195,4 +201,33 @@ export async function withOwnedSketchPostgres<T>(
       await proveServerIdentity(query, fixture);
     },
   } : undefined);
+}
+
+// Only suites that opt into the GitHub fixture use these entry points.
+export function readSketchPostgresFixture(environment: NodeJS.ProcessEnv = process.env) {
+  return readGitHubSketchPostgresFixture(environment) ?? readOwnedSketchFixture(environment);
+}
+
+export function assertSketchPostgresSchema(databaseUrl: string): void {
+  const base = process.env.POSTGRES_TEST_DATABASE_URL;
+  const fixture = readSketchPostgresFixture({ ...process.env, DATABASE_URL: base, PGDATABASE_URL: base });
+  requireProof(fixture);
+  assertBoundSchema(databaseUrl, fixture.databaseUrl);
+}
+
+export async function withSketchPostgres<T>(
+  testName: string,
+  callback: (context: IsolatedPostgresContext) => Promise<T>,
+): Promise<T> {
+  const fixture = readGitHubSketchPostgresFixture();
+  if (!fixture) return withOwnedSketchPostgres(testName, callback);
+
+  const proveIdentity = prepareGitHubSketchPostgres(fixture);
+  return withIsolatedPostgres(testName, callback, {
+    beforeCreateSchema: async ({ connectionString, query }) => {
+      requireProof(connectionString === fixture.databaseUrl
+        && isDeepStrictEqual(readGitHubSketchPostgresFixture(), fixture));
+      await proveIdentity(query);
+    },
+  });
 }

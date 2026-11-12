@@ -1085,8 +1085,11 @@ describe('Task6 N1 ordinary retry uses the original parent dispatch fence', () =
     }));
     const started = await post({ action: 'start', projectId: 'project-a', nodes, connections: [] });
     expect(started.status).toBe(200); const { executionId } = await started.json();
-    await vi.waitFor(() => expect(tasks.get(executionId)?.result?.workflowStatus).toBe(hasSketch ? 'paused' : 'completed'), { timeout: 4000 });
-    await vi.waitFor(() => expect(tasks.get(executionId)?.leaseOwner).toBeUndefined(), { timeout: 4000 });
+    await vi.waitFor(() => {
+      const parent = tasks.get(executionId);
+      expect(parent?.result?.workflowStatus).toBe(hasSketch ? 'paused' : 'completed');
+      expect(parent?.leaseOwner).toBeUndefined();
+    }, workflowReadinessWait);
     const sketches = [...tasks.values()].filter(t => t.type === 'sketch-to-code');
     if (hasSketch) {
       expect(sketches).toHaveLength(2); expect(sketches[0]).toMatchObject({ status: 'completed', creditStatus: 'charged', creditCost: 14 });
@@ -1094,6 +1097,30 @@ describe('Task6 N1 ordinary retry uses the original parent dispatch fence', () =
       expect(paid).toEqual([]); expect(mocks.bill).toHaveBeenCalledTimes(2);
     }
     return { executionId: executionId as string, nodes, ordinary, sketches, paid };
+  }
+  function retryWithDispatchParentRead(
+    { executionId, ordinary, nodes }: Awaited<ReturnType<typeof retryParent>>,
+    readAtDispatch: (read: () => Promise<CloudTask | null>) => Promise<CloudTask | null>,
+  ): () => Promise<Response> {
+    const retryContext = new AsyncLocalStorage<{ dispatchReadPending: boolean }>();
+    const getHeaders = mocks.headers.getMockImplementation()!;
+    const getTask = mocks.get.getMockImplementation()!;
+    // Skill approval reads the parent before headers. Arm the dispatch read for each retry independently.
+    mocks.headers.mockImplementation(async (...args) => {
+      const headers = await getHeaders(...args);
+      const retry = retryContext.getStore();
+      if (retry) retry.dispatchReadPending = true;
+      return headers;
+    });
+    mocks.get.mockImplementation(async (...args) => {
+      const retry = retryContext.getStore();
+      if (args[0] !== executionId || !retry?.dispatchReadPending) return getTask(...args);
+      retry.dispatchReadPending = false;
+      return readAtDispatch(() => getTask(...args));
+    });
+    return () => retryContext.run({ dispatchReadPending: false }, () => post({
+      action: 'retry', executionId, nodeId: ordinary.id, nodes, connections: [],
+    }));
   }
   const stoppedCases = (['ai-llm', 'ai-edit'] as const).flatMap(kind =>
     (['same-provider', 'same-headers', 'other-stopped', 'other-headers'] as const).map(boundary => ({ kind, boundary })));
@@ -1168,18 +1195,15 @@ describe('Task6 N1 ordinary retry uses the original parent dispatch fence', () =
     expect(mocks.bill).toHaveBeenCalledTimes(2); expect(mocks.terminate).not.toHaveBeenCalled();
     expect(tasks.get(graph.sketches[0].id)).toMatchObject({ status: 'completed', creditStatus: 'charged', creditCost: 14 });
   });
-  it.each(['ai-llm', 'ai-edit'] as const)('N2 rejects cached %s retry after a failed parent read recovers until original status restores it', async kind => {
+  it.each(['ai-llm', 'ai-edit'] as const)('N2 rejects cached %s retry after a failed parent read recovers until original status restores it', workflowReadinessCase, async kind => {
     const { tasks, requests, checkpoints } = fixtureScope.owner();
     const graph = await retryParent(kind);
     const originalParent = structuredClone(tasks.get(graph.executionId)!);
-    const get = mocks.get.getMockImplementation()!;
     let unavailable = true;
-    mocks.get.mockImplementation(async (...args) => {
-      if (args[0] === graph.executionId && unavailable) throw new Error('PARENT_READ_UNAVAILABLE');
-      return get(...args);
+    const retry = retryWithDispatchParentRead(graph, async read => {
+      if (unavailable) throw new Error('PARENT_READ_UNAVAILABLE');
+      return read();
     });
-    const retry = (): Promise<Response> => post({ action: 'retry', executionId: graph.executionId,
-      nodeId: graph.ordinary.id, nodes: graph.nodes, connections: [] });
     const first = await (await retry()).json();
     expect(first).toMatchObject({ success: false, error: 'WORKFLOW_EXECUTION_FENCE_LOST' });
     expect(graph.paid).toEqual([]); expect(tasks.get(graph.executionId)).toEqual(originalParent);
@@ -1219,11 +1243,10 @@ describe('Task6 N1 ordinary retry uses the original parent dispatch fence', () =
   });
   const lateLossCases = (['ai-llm', 'ai-edit'] as const).flatMap(kind =>
     (['provider', 'headers', 'parent-read'] as const).map(boundary => ({ kind, boundary })));
-  it.each(lateLossCases)('N2 late loss fences in-flight $kind retry at $boundary after another retry loses the shared parent', async ({ kind, boundary }) => {
+  it.each(lateLossCases)('N2 late loss fences in-flight $kind retry at $boundary after another retry loses the shared parent', workflowReadinessCase, async ({ kind, boundary }) => {
     const { tasks, requests, checkpoints } = fixtureScope.owner();
     const graph = await retryParent(kind);
     const originalParent = structuredClone(tasks.get(graph.executionId)!);
-    const get = mocks.get.getMockImplementation()!;
     const manualGate = fixtureScope.gate(); const release = manualGate.release; let entered = false; let failed = false;
     const waiting = manualGate.wait();
     if (boundary !== 'parent-read') {
@@ -1234,17 +1257,14 @@ describe('Task6 N1 ordinary retry uses the original parent dispatch fence', () =
         return original(...args);
       });
     }
-    mocks.get.mockImplementation(async (...args) => {
-      if (args[0] !== graph.executionId) return get(...args);
+    const retry = retryWithDispatchParentRead(graph, async read => {
       if (boundary === 'parent-read' && !entered) {
-        const snapshot = structuredClone(await get(...args));
+        const snapshot = structuredClone(await read());
         entered = true; await waiting; return snapshot;
       }
       if (!failed) { failed = true; throw new Error('PARENT_READ_UNAVAILABLE'); }
-      return get(...args);
+      return read();
     });
-    const retry = (): Promise<Response> => post({ action: 'retry', executionId: graph.executionId,
-      nodeId: graph.ordinary.id, nodes: graph.nodes, connections: [] });
     const pending = retry();
     try {
       await vi.waitFor(() => expect(entered).toBe(true), { timeout: 4000 });

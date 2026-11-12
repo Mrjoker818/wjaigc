@@ -5,12 +5,22 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { compile } from 'tailwindcss';
 import { Scanner } from '@tailwindcss/oxide';
-import { chromium, type Browser, type BrowserContext, type Page, type Locator, type Request, type Dialog } from '@playwright/test';
-import { afterAll, beforeAll, expect, it } from 'vitest';
+import { chromium, type Browser, type BrowserContext, type Page, type Locator, type Request } from '@playwright/test';
+import { afterAll, beforeAll, expect, it, vi } from 'vitest';
+import { CANVAS_FRAME_SOURCE, createCanvasFrameServerFixture } from '../helpers/canvas-frame-server-fixture';
+
+const owned = vi.hoisted(() => ({ root: '' }));
+vi.mock('@/lib/api-auth', () => ({
+  requireApiAuthOrReject: async () => ({ userId: 'omp-mobile-user', userRole: 'user' }),
+}));
+vi.mock('@/lib/server-data-root', () => ({ getServerDataRoot: () => owned.root }));
+type FrameServer = Awaited<ReturnType<typeof createCanvasFrameServerFixture>>;
+let frameServer: FrameServer | undefined;
+let post: typeof import('@/app/api/video/tools/route').POST;
 type Theme='gold'|'mono';
 interface Options {admin?:boolean; requireMissing?:boolean; touch?:boolean;holdRecovery?:boolean;catalogLoading?:boolean}
 interface FixtureWindow extends Window {canvasUi:{png:string;mount(theme:Theme,options:Options):void;unmount():void;state:{mounts:number;disposed:boolean;scopeChecks:number;images:unknown[];groups:unknown[];actions:string[];view:{offsetX:number;offsetY:number;zoom:number}|null;events:Array<{type:string;target:string}>}}}
-interface Session {frAudits:FRActivity[];frSaves:FRSave[];faExpected:FADialogExpectation[];faSeen:FADialogObservation[];context:BrowserContext;page:Page;options:Options;errors:string[];counts:Map<string,number>;handlers:Set<Promise<void>>;mounted:boolean;pending:Set<Request>;completed:Set<Request>;failed:Set<Request>;refused:Set<Request>;responseStatus:Map<Request,number>;nativeWaiters:Set<()=>void>;png:Buffer;releaseRecovery:()=>void;recoveryCalls:number}
+interface Session {frAudits:FRActivity[];frResults:Array<Awaited<ReturnType<FrameServer['extract']>>>;context:BrowserContext;page:Page;options:Options;errors:string[];counts:Map<string,number>;handlers:Set<Promise<void>>;mounted:boolean;pending:Set<Request>;completed:Set<Request>;failed:Set<Request>;refused:Set<Request>;responseStatus:Map<Request,number>;nativeWaiters:Set<()=>void>;png:Buffer;releaseRecovery:()=>void;recoveryCalls:number}
 const ORIGIN='https://canvas-shell-mobile.invalid';
 const HELP_FILES=['canvas-overview.jpeg','erase-tool.jpeg','mask-tool.jpeg','remove-bg.jpeg','upscale.jpeg','lang-edit.jpeg','svg-trace.jpeg','extend.jpeg','oh-my-prompt.jpeg'];
 const ENTRY=String.raw`
@@ -33,10 +43,17 @@ const bxDescriptor={providerId:'bx-provider',modelId:'bx-image',kind:'image' as 
 const bxUnsupported={...bxDescriptor,modelId:'bx-no-reference',supportsReferenceImages:false,maxReferenceImages:0};
 const bySecond={...bxDescriptor,providerId:'by-provider-b',maxReferenceImages:2,allowedRatios:['1:1','16:9'],allowedSizes:['1536x1024'],qualityOptions:['hd'],maxOutputs:1};
 function Entry({theme,admin,catalogLoading}:{theme:'gold'|'mono';admin:boolean;catalogLoading:boolean}):React.ReactElement{
- const [images,setImages]=useState<CanvasImage[]>([{id:'br-A',url:png,mediaType:'video' as const,videoUrl:"data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAM4bW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAA+gAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAmJ0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAA+gAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAKAAAABaAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAPoAAAAAAABAAAAAAHabWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAAAoAAAAKABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABhW1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAUVzdGJsAAAAuXN0c2QAAAAAAAAAAQAAAKlhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAKAAWgBIAAAASAAAAAAAAAABFUxhdmM2Mi4yOC4xMDAgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAAL2F2Y0MBQsAK/+EAF2dCwArcKN+TARAAAAMAEAAAAwFA8SJ4AQAFaM4CPIAAAAAQcGFzcAAAAAEAAAABAAAAFGJ0cnQAAAAAAAAogAAAAAAAAAAYc3R0cwAAAAAAAAABAAAACgAABAAAAAAcc3RzYwAAAAAAAAABAAAAAQAAAAoAAAABAAAAPHN0c3oAAAAAAAAAAAAAAAoAAAKaAAAARgAAAEYAAABGAAAARgAAAEYAAABGAAAARgAAAEYAAABGAAAAFHN0Y28AAAAAAAAAAQAAA2gAAABidWR0YQAAAFptZXRhAAAAAAAAACFoZGxyAAAAAAAAAABtZGlyYXBwbAAAAAAAAAAAAAAAAC1pbHN0AAAAJal0b28AAAAdZGF0YQAAAAEAAAAATGF2ZjYyLjEyLjEwMAAAAAhmcmVlAAAFGG1kYXQAAAJRBgX//03cRem95tlIt5Ys2CDZI+7veDI2NCAtIGNvcmUgMTY1IHIzMjIzIDA0ODBjYjAgLSBILjI2NC9NUEVHLTQgQVZDIGNvZGVjIC0gQ29weWxlZnQgMjAwMy0yMDI1IC0gaHR0cDovL3d3dy52aWRlb2xhbi5vcmcveDI2NC5odG1sIC0gb3B0aW9uczogY2FiYWM9MCByZWY9MSBkZWJsb2NrPTA6MDowIGFuYWx5c2U9MDowIG1lPWRpYSBzdWJtZT0wIHBzeT0xIHBzeV9yZD0xLjAwOjAuMDAgbWl4ZWRfcmVmPTAgbWVfcmFuZ2U9MTYgY2hyb21hX21lPTEgdHJlbGxpcz0wIDh4OGRjdD0wIGNxbT0wIGRlYWR6b25lPTIxLDExIGZhc3RfcHNraXA9MSBjaHJvbWFfcXBfb2Zmc2V0PTAgdGhyZWFkcz0zIGxvb2thaGVhZF90aHJlYWRzPTEgc2xpY2VkX3RocmVhZHM9MCBucj0wIGRlY2ltYXRlPTEgaW50ZXJsYWNlZD0wIGJsdXJheV9jb21wYXQ9MCBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9MCB3ZWlnaHRwPTAga2V5aW50PTEga2V5aW50X21pbj0xIHNjZW5lY3V0PTAgaW50cmFfcmVmcmVzaD0wIHJjPWNyZiBtYnRyZWU9MCBjcmY9MTguMCBxY29tcD0wLjYwIHFwbWluPTAgcXBtYXg9NjkgcXBzdGVwPTQgaXBfcmF0aW89MS40MCBhcT0wAIAAAABBZYiEOhGKAAIxscAAQi44AAjuScnJycnJycnJ111111111111111111111111111111111111111111111111114AAABCZYiCA2hGKAAKi8cAAR9Y4AAsIScnJycnJycnJ111111111111111111111111111111111111111111111111114AAAAQmWIhA2hGKAAKi8cAAR9Y4AAsIScnJycnJycnJ111111111111111111111111111111111111111111111111114AAAAEJliIIDaEYoAAqLxwABH1jgACwhJycnJycnJycnXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXgAAABCZYiEDaEYoAAqLxwABH1jgACwhJycnJycnJycnXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXgAAAAQmWIggNoRigADMTHAAFhCOAAIbMnJycnJycnJyddddddddddddddddddddddddddddddddddddddddddddddddddeAAAAEJliIQNoRigADMTHAAFhCOAAIbMnJycnJycnJyddddddddddddddddddddddddddddddddddddddddddddddddddeAAAABCZYiCA2hGKAAMxMcAAWEI4AAhsycnJycnJycnJ111111111111111111111111111111111111111111111111114AAAAQmWIhA2hGKAAMxMcAAWEI4AAhsycnJycnJycnJ111111111111111111111111111111111111111111111111114AAAAEJliIIDaEYoAAzExwABYQjgACGzJycnJycnJycnXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXg=",videoDuration:1,x:40,y:120,width:240,height:135,name:'BW A',prompt:'BR成员A'},{id:'br-B',url:png,x:100,y:270,width:56,height:56,name:'BW B',prompt:'BR成员B'},{id:'br-keep',url:png,x:100,y:380,width:56,height:56,name:'BW 保留',prompt:'BR组外素材'}]);const [selected,setSelected]=useState<CanvasImage|null>(null);state.images=images;const [groups,setGroups]=useState<Array<{id:string;name:string;note:string;imageIds:string[];x:number;y:number;collapsed:boolean}>>([]);state.groups=groups;
+ const [images,setImages]=useState<CanvasImage[]>([{id:'br-A',url:png,mediaType:'video' as const,videoUrl:"${CANVAS_FRAME_SOURCE}",videoDuration:1.5,x:40,y:120,width:240,height:135,name:'BW A',prompt:'BR成员A'},{id:'br-B',url:png,x:100,y:270,width:56,height:56,name:'BW B',prompt:'BR成员B'},{id:'br-keep',url:png,x:100,y:380,width:56,height:56,name:'BW 保留',prompt:'BR组外素材'}]);const [selected,setSelected]=useState<CanvasImage|null>(null);state.images=images;const [groups,setGroups]=useState<Array<{id:string;name:string;note:string;imageIds:string[];x:number;y:number;collapsed:boolean}>>([]);state.groups=groups;
  return <><OperationAuditClient/><Toaster position="top-center" toastOptions={{className:theme==='mono'?'bg-white border border-gray-200 text-gray-900 shadow-lg shadow-gray-200/50':'bg-[#1a1a1a] border border-[#2a2a2a] text-white shadow-lg shadow-black/30',style:{borderRadius:'12px',fontSize:'13px'}}}/><InfiniteCanvas images={images} selectedImage={selected} projectId="canvas-ui-project" isPanelCollapsed={false} isAdmin={admin}
  taskModelCatalog={[bxDescriptor,bxUnsupported,bySecond]} taskModelOptions={[{id:'bx-image',providerId:'bx-provider',providerName:'BX 合成供应商',name:'BX 图像',type:'image'},{id:'bx-no-reference',providerId:'bx-provider',providerName:'BX 合成供应商',name:'BX 不支持参考图',type:'image'},{id:'bx-image',providerId:'by-provider-b',providerName:'BY 合成供应商乙',name:'BY 图像乙',type:'image'}]} themeStyle={theme==='mono'?'monochrome':'gold'} initialViewState={{offsetX:0,offsetY:0,zoom:1}} onViewStateChange={view=>{state.view=view;}}
- initialGroups={groups} onGroupsChange={next=>{setGroups(next);}} versionHistoryManager={manager} sketchImageEnabled={true} sketchContext={sketchContext} catalogStatus={{loading:catalogLoading,error:null}} onImagesChange={setImages} onSelectImage={setSelected} onPreviewImage={action('preview')} onGenerateVariation={action('variation')} onExtractKeywords={action('keywords')} onSendToChat={image=>{state.actions.push('chat:'+image.id);}} onFusion={action('fusion')} onAddImages={(urls,sourceId,meta)=>{scope.assertCurrent(true);if(urls.length!==1||sourceId!==undefined||!meta||meta.modelName!=='frame-extract'||meta.apiProvider!=='local'||Object.keys(meta).sort().join(',')!=='apiProvider,modelName'||!urls[0].startsWith('data:image/png;base64,')||state.frReceipts.length!==0)throw Error('FR_EXACT_PUBLIC_MEMORY_PUBLICATION');state.frReceipts.push({urls:[...urls],metadata:{modelName:meta.modelName,apiProvider:meta.apiProvider}});state.actions.push('fr-local-frame');setImages(current=>[...current,{id:'fr-output',url:urls[0],x:300,y:120,width:160,height:90,name:'OWN extracted frame'}]);}}
+ initialGroups={groups} onGroupsChange={next=>{setGroups(next);}} versionHistoryManager={manager} sketchImageEnabled={true} sketchContext={sketchContext} catalogStatus={{loading:catalogLoading,error:null}} onImagesChange={setImages} onSelectImage={setSelected} onPreviewImage={action('preview')} onGenerateVariation={action('variation')} onExtractKeywords={action('keywords')} onSendToChat={image=>{state.actions.push('chat:'+image.id);}} onFusion={action('fusion')} onAddImages={action('unexpected-legacy-insertion')} captureVideoToolInsertion={()=>({assertCurrent:scope.assertCurrent,insert:async output=>{
+   scope.assertCurrent(true);
+   if(output.format!=='image/png'||output.modelName!=='frame-extract'||output.urls.length!==1||!output.urls[0].startsWith('/api/serve-upload/generated-videos/')||state.frReceipts.length!==0)throw Error('FR_EXACT_PUBLIC_MEMORY_PUBLICATION');
+   state.frReceipts.push({urls:[...output.urls],metadata:{modelName:output.modelName,apiProvider:'local'}});
+   state.actions.push('fr-server-frame');
+   setImages(current=>[...current,{id:'fr-output',url:output.urls[0],x:44,y:456,width:160,height:90,name:'OWN extracted frame'}]);
+   return 1;
+ }})}
  onSwitchToDashboard={action('dashboard')} onToggleVisionPrompt={action('omp')} onToggleSettings={action('settings')} onToggleTheme={action('theme')} onToggleUserManager={action('users')} onToggleAdminSystem={action('admin')} onToggleProjectData={action('projects')} onToggleFavorites={action('favorites')} onTogglePromptTemplate={action('templates')} onToggleHelp={action('external-help')} onSwitchToNodeMode={action('node')} onSwitchToWorkflowHub={action('workflow')}/></>;
 }
 Object.assign(window,{canvasUi:{state,png,mount(theme:'gold'|'mono',options:{admin?:boolean;catalogLoading?:boolean}){if(state.mounts||state.disposed)throw Error('CANVAS_UI_FIXTURE_REMOUNT');state.mounts++;for(const type of ['pointerdown','pointerup','gotpointercapture','lostpointercapture','click'])document.addEventListener(type,observe,true);document.documentElement.classList.add(theme==='mono'?'theme-monochrome':'theme-gold');root.render(<Entry theme={theme} admin={options.admin===true} catalogLoading={options.catalogLoading===true}/>);},unmount(){if(!state.disposed){state.disposed=true;root.unmount();}taskEventsClient.disconnect();for(const type of ['pointerdown','pointerup','gotpointercapture','lostpointercapture','click'])document.removeEventListener(type,observe,true);}}});
@@ -90,6 +107,9 @@ beforeAll(async () => {
       return { path: file, base: path.dirname(file), content: await readFile(file, 'utf8') };
     } });
   css = compiler.build(new Scanner({}).scanFiles(sources));
+  frameServer = await createCanvasFrameServerFixture();
+  owned.root = frameServer.root;
+  ({ POST: post } = await import('@/app/api/video/tools/route'));
   browser = await chromium.launch({ headless: true });
 }, 30000);
 
@@ -97,7 +117,7 @@ afterAll(async () => {
   const errors: string[] = [];
   for (const s of live) { try { await dispose(s); } catch (error) { errors.push(String(error)); } }
   for (const context of contexts) { try { await context.close(); contexts.delete(context); } catch (error) { errors.push(String(error)); } }
-  try { await browser?.close(); } finally { browser = undefined; }
+  try { await browser?.close(); } finally { browser = undefined; await frameServer?.close(); }
   if (errors.length) throw Error(errors.join('\n'));
 }, 15000);
 
@@ -116,38 +136,47 @@ async function session(theme: Theme = 'gold', width: number = 390, height: numbe
   try {
     const page = await context.newPage(); page.setDefaultTimeout(1500);
     let releaseRecovery:()=>void=()=>{};const recoveryGate=options.holdRecovery?new Promise<void>(resolve=>{releaseRecovery=resolve;}):Promise.resolve();
-    const s: Session = { frAudits:[],frSaves:[],faExpected:[],faSeen:[],context, page, options, errors: [], counts: new Map(), handlers: new Set(), mounted: false,
+    const s: Session = { frAudits:[],frResults:[],context, page, options, errors: [], counts: new Map(), handlers: new Set(), mounted: false,
       pending: new Set(), completed: new Set(), failed: new Set(), refused: new Set(), responseStatus: new Map(), nativeWaiters: new Set(), png: Buffer.alloc(0),releaseRecovery,recoveryCalls:0 }; value = s; live.add(s);
     context.on('request', request => s.pending.add(request));
     context.on('response', response => { s.responseStatus.set(response.request(),response.status());if(response.url()===ORIGIN+'/api/task-events')console.log('FD_SSE_NATIVE_RESPONSE',JSON.stringify({url:response.url(),status:response.status(),contentType:response.headers()['content-type']??null})); });
     context.on('requestfinished', request => { s.pending.delete(request); s.completed.add(request); for (const notify of s.nativeWaiters) notify(); });
     context.on('requestfailed', request => { s.pending.delete(request); s.failed.add(request); for (const notify of s.nativeWaiters) notify(); });
     page.on('pageerror', error => s.errors.push(String(error)));
-    page.on('dialog', dialog => { const operation:Promise<void>=faObserveDialog(s,dialog).catch(async error=>{s.errors.push(String(error));try{await dialog.dismiss();}catch(cleanup){s.errors.push(String(cleanup));}}).finally(()=>s.handlers.delete(operation));s.handlers.add(operation); });
+    page.on('dialog', dialog => { s.errors.push('FR_UNEXPECTED_NATIVE_DIALOG'); void dialog.dismiss(); });
     await context.routeWebSocket('**/*', socket => { s.errors.push('CANVAS_UI_FIXTURE_UNKNOWN_WS'); socket.close({ code: 1008, reason: 'Offline fixture forbids WebSockets' }); });
     await context.route('**/*', async route => {
       const operation = (async (): Promise<void> => {
         const request = route.request(), url = new URL(request.url()), headers = request.headers();
-        if (url.origin===ORIGIN && url.pathname==='/api/activity' && url.search==='' && request.method()==='POST') {
-          if(url.username||url.password||headers.authorization||headers.cookie||headers['x-api-key']||headers['api-key']||headers['idempotency-key']||headers['content-type']!=='application/json'||request.isNavigationRequest())throw Error('FS_EXACT_MEMORY_AUDIT_BOUNDARY');
-          const count=(s.counts.get('/api/activity')??0)+1;s.counts.set('/api/activity',count);if(count!==1||s.frSaves.length!==1||s.frAudits.length!==0)throw Error('FS_AUDIT_REQUIRES_EXACT_SINGLE_SAVE');const raw=request.postData();if(raw===null||Buffer.byteLength(raw)>512)throw Error('FS_MEMORY_AUDIT_BODY_BOUND');const p=JSON.parse(raw) as Record<string,unknown>;
-          if(!p||typeof p!=='object'||Object.keys(p).sort().join(',')!=='action,durationMs,method,path,status'||p.action!=='post_api_request'||p.method!=='POST'||p.path!=='/api/save-image'||p.status!==200||typeof p.durationMs!=='number'||!Number.isSafeInteger(p.durationMs)||p.durationMs<0||p.durationMs>25000)throw Error('FS_EXACT_SAVE_AUDIT_SCHEMA');
-          s.frAudits.push({action:'post_api_request',method:'POST',path:'/api/save-image',status:200,durationMs:p.durationMs});console.log('FS_REAL_AUDIT_RECEIVED_IN_MEMORY',JSON.stringify({count,...p,noBusinessAuditWrite:true}));await route.fulfill({json:{success:true}});return;
-        }
-        if (url.origin===ORIGIN && url.pathname==='/api/save-image' && url.search==='' && request.method()==='POST') {
-          if(url.username||url.password||headers.authorization||headers.cookie||headers['x-api-key']||headers['api-key']||headers['idempotency-key']||headers['content-type']!=='application/json'||request.isNavigationRequest())throw Error('FR_EXACT_MEMORY_SAVE_BOUNDARY');
-          const count=(s.counts.get('/api/save-image')??0)+1;s.counts.set('/api/save-image',count);if(count!==1)throw Error('FR_SINGLE_MEMORY_SAVE_ONLY');
-          const raw=request.postData();if(raw===null||Buffer.byteLength(raw)>40000)throw Error('FR_MEMORY_SAVE_BODY_BOUND');const payload=JSON.parse(raw) as Record<string,unknown>;
-          if(!payload||typeof payload!=='object'||Object.keys(payload).sort().join(',')!=='dataUrl,filename'||typeof payload.dataUrl!=='string'||!/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(payload.dataUrl)||typeof payload.filename!=='string'||!/^frame-\d{13}\.png$/.test(payload.filename))throw Error('FR_MEMORY_SAVE_SCHEMA');
-          const buffer=Buffer.from(payload.dataUrl.split(',')[1],'base64');if(buffer.length<80||buffer.length>24000||buffer.toString('base64')!==payload.dataUrl.split(',')[1]||buffer.subarray(0,8).toString('hex')!=='89504e470d0a1a0a')throw Error('FR_REAL_PNG_BOUND');
-          const sharp=createRequire(import.meta.url)('sharp') as typeof import('sharp').default,image=sharp(buffer),meta=await image.metadata();if(meta.format!=='png'||meta.width!==160||meta.height!==90)throw Error('FR_EXACT_OWN_CLIP_FRAME_DIMENSIONS');const decoded=await image.ensureAlpha().raw().toBuffer({resolveWithObject:true}),index=(45*160+80)*4;
-          if(decoded.info.width!==160||decoded.info.height!==90||decoded.info.channels!==4||decoded.data[index+3]!==255)throw Error('FR_OPAQUE_REAL_DECODED_FRAME');const center:[number,number,number]=[decoded.data[index],decoded.data[index+1],decoded.data[index+2]];
-          s.frSaves.push({filename:payload.filename,dataUrl:payload.dataUrl,width:160,height:90,center});console.log('FR_REAL_PNG_SAVED_IN_MEMORY',JSON.stringify({filename:payload.filename,bytes:buffer.length,width:160,height:90,center,noDiskBusinessStoreOrModel:true}));await route.fulfill({json:{success:true,url:payload.dataUrl}});return;
+        if (url.origin === ORIGIN && url.search === '' && request.method() === 'POST'
+          && (url.pathname === '/api/activity' || url.pathname === '/api/video/tools')) {
+          if (url.username || url.password || headers.authorization || headers.cookie || headers['x-api-key']
+            || headers['api-key'] || headers['idempotency-key'] || headers['content-type'] !== 'application/json'
+            || request.isNavigationRequest()) throw Error('FR_EXACT_OFFLINE_POST_BOUNDARY');
+          const count = (s.counts.get(url.pathname) ?? 0) + 1;
+          s.counts.set(url.pathname, count);
+          const raw = request.postData();
+          if (count !== 1 || raw === null || Buffer.byteLength(raw) > 512) throw Error('FR_EXACT_OFFLINE_POST_COUNT');
+          if (url.pathname === '/api/video/tools') {
+            if (!frameServer) throw Error('FR_OWNED_SERVER_FIXTURE_REQUIRED');
+            const result = await frameServer.extract(post, ORIGIN, raw);
+            s.frResults.push(result);
+            await route.fulfill({ status: result.status, json: result.body });
+          } else {
+            const result = s.frResults[0], p: FRActivity = JSON.parse(raw);
+            if (!result || Object.keys(p).sort().join(',') !== 'action,durationMs,method,path,status'
+              || p.action !== 'post_api_request' || p.method !== 'POST' || p.path !== '/api/video/tools'
+              || p.status !== result.status || !Number.isSafeInteger(p.durationMs) || p.durationMs < 0)
+              throw Error('FR_EXACT_EXTRACT_AUDIT_SCHEMA');
+            s.frAudits.push(p);
+            await route.fulfill({ json: { success: true } });
+          }
+          return;
         }
         if (url.origin !== ORIGIN || url.username || url.password || request.method() !== 'GET' || request.postData() !== null
           || headers.authorization || headers.cookie || headers['x-api-key'] || headers['api-key'] || headers['idempotency-key']) throw Error('CANVAS_UI_FIXTURE_HTTP_BOUNDARY');
         const key = url.pathname + url.search, count = (s.counts.get(key) ?? 0) + 1; s.counts.set(key, count);
-        if (count > (['/api/session','/api/auth/me','/api/task-events'].includes(key)?6:HELP_FILES.some(file=>key==='/api/help-image?file='+file)?3:1)) throw Error('CANVAS_UI_FIXTURE_HTTP_COUNT ' + key);
+        if (count > (['/api/session','/api/auth/me','/api/task-events'].includes(key)?6:(key===CANVAS_FRAME_SOURCE||HELP_FILES.some(file=>key==='/api/help-image?file='+file))?3:1)) throw Error('CANVAS_UI_FIXTURE_HTTP_COUNT ' + key);
         if (key === '/' && request.isNavigationRequest()) {
           await route.fulfill({ contentType: 'text/html', body: `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style></head><body style="margin:0;width:100vw;height:100dvh;overflow:hidden"><div id="fixture-root" style="position:relative;width:100%;height:100%"></div></body></html>` }); return;
         }
@@ -158,6 +187,13 @@ async function session(theme: Theme = 'gold', width: number = 390, height: numbe
         if (key === '/api/upscayl' || key === '/api/models?type=upscaler' || key === '/api/models?type=removebg') { await route.fulfill({json:key==='/api/upscayl'?{available:false,models:[]}:{success:true,providers:[],models:[]}});return; }
         if (HELP_FILES.some(file => key === '/api/help-image?file=' + file)) { await route.fulfill({contentType:'image/png',body:s.png});return; }
         if (key === '/logo.png') { await route.fulfill({contentType:'image/png',body:s.png});return; }
+        if (key === CANVAS_FRAME_SOURCE && frameServer) {
+          await route.fulfill({ contentType: 'video/mp4', body: frameServer.clip }); return;
+        }
+        const frame = s.frResults[0]?.frame;
+        if (frame && key === frame.url) {
+          await route.fulfill({ contentType: 'image/png', body: frame.buffer }); return;
+        }
         throw Error('CANVAS_UI_FIXTURE_UNKNOWN_HTTP ' + key);
       })().catch(async error => { s.errors.push(String(error)); s.refused.add(route.request()); await route.abort('blockedbyclient'); });
       s.handlers.add(operation); try { await operation; } finally { s.handlers.delete(operation); }
@@ -199,8 +235,7 @@ async function dispose(s: Session, expectedRefusal?: 'http' | 'websocket', clean
   // Cleanup/lifecycle/allowlist failures can never share the expected-refusal
   // prefix. A boundary selftest must not succeed merely because close failed.
   const invalid=(code:string):never=>{if(failures.length)throw new AggregateError([Error(code),...failures],'CANVAS_UI_FIXTURE_VALIDATION_AND_CLEANUP');throw Error(code);};
-  if(s.faExpected.length) invalid('FA_DECLARED_DIALOG_NOT_OBSERVED');
-  const allowed=['/api/activity','/api/save-image','/','/api/session','/api/auth/me','/api/task-events','/api/upscayl','/api/models?type=upscaler','/api/models?type=removebg','/api/models?type=3d','/logo.png','/api/tasks/recover?projectId=canvas-ui-project',...HELP_FILES.map(file=>'/api/help-image?file='+file)];
+  const allowed=['/api/activity','/api/video/tools',CANVAS_FRAME_SOURCE,...s.frResults.flatMap(result => result.frame ? [result.frame.url] : []),'/','/api/session','/api/auth/me','/api/task-events','/api/upscayl','/api/models?type=upscaler','/api/models?type=removebg','/api/models?type=3d','/logo.png','/api/tasks/recover?projectId=canvas-ui-project',...HELP_FILES.map(file=>'/api/help-image?file='+file)];
   const keys=[...s.counts.keys()];
   if(s.options.requireMissing || s.counts.get('/')!==1 || keys.some(k=>!allowed.includes(k)&&!(expectedRefusal==='http'&&k==='/unexpected'))){
     console.log('CANVAS_UI_FIXTURE_REQUEST_DIAGNOSTIC',JSON.stringify({counts:[...s.counts],errors:s.errors}));
@@ -236,36 +271,74 @@ async function withSession(theme:Theme,width:number,height:number,options:Option
 
 
 
-interface FRActivity {action:'post_api_request';method:'POST';path:'/api/save-image';status:200;durationMs:number}
-interface FRSave {filename:string;dataUrl:string;width:number;height:number;center:[number,number,number]}
+interface FRActivity {action:'post_api_request';method:'POST';path:'/api/video/tools';status:number;durationMs:number}
 interface FRReceipt {urls:string[];metadata:{modelName:string;apiProvider:string}}
 interface FRWindow extends Window {canvasUi:{state:FixtureWindow['canvasUi']['state']&{frReceipts:FRReceipt[]}}}
-interface FADialogExpectation {type:'prompt';message:'输入提取时间点（秒）';defaultValue:'0';value:string}
-interface FADialogObservation extends FADialogExpectation {nativeType:string;nativeMessage:string;nativeDefaultValue:string}
-async function faObserveDialog(s:Session,dialog:Dialog):Promise<void>{const e=s.faExpected.shift();if(!e||e.type!=='prompt'||e.message!=='输入提取时间点（秒）'||e.defaultValue!=='0'||dialog.type()!==e.type||dialog.message()!==e.message||dialog.defaultValue()!==e.defaultValue){s.errors.push('FR_EXACT_NATIVE_TIME_PROMPT_REFUSED');await dialog.dismiss();return;}const actual={nativeType:dialog.type(),nativeMessage:dialog.message(),nativeDefaultValue:dialog.defaultValue()};await dialog.accept(e.value);s.faSeen.push({...e,...actual});console.log('FR_ACTUAL_NATIVE_TIME',JSON.stringify({...actual,acceptedLiteral:e.value}));}
-interface FUViewport {width:number;height:number;view:{offsetX:number;offsetY:number;zoom:number};center:{x:number;y:number}}
-interface FUValue {label:string;literal:string|null;menu:'提取帧'|'提取封面';message:string;color:'red'|'blue'}
-const fuViewports:FUViewport[]=[{width:375,height:812,view:{offsetX:-192.5,offsetY:241,zoom:1},center:{x:187.5,y:406}},{width:320,height:700,view:{offsetX:-220,offsetY:185,zoom:1},center:{x:160,y:350}}];
-const fuValues:FUValue[]=[{label:'zero',literal:'0',menu:'提取帧',message:'已提取帧 @ 0s',color:'red'},{label:'quarter',literal:'0.25',menu:'提取帧',message:'已提取帧 @ 0.25s',color:'red'},{label:'three-quarter',literal:'0.75',menu:'提取帧',message:'已提取帧 @ 0.75s',color:'blue'},{label:'duration',literal:'1',menu:'提取帧',message:'已提取帧 @ 0.9s',color:'blue'},{label:'beyond-duration',literal:'2',menu:'提取帧',message:'已提取帧 @ 0.9s',color:'blue'},{label:'cover',literal:null,menu:'提取封面',message:'已提取视频封面',color:'red'}];
+interface FUViewport {width:number;height:number}
+interface FUValue {label:string;literal:string|null;menu:'提取帧'|'提取封面';message:string;color:'red'|'blue'|null}
+const fuViewports:FUViewport[]=[{width:375,height:812},{width:320,height:700}];
+const fuValues:FUValue[]=[{label:'zero',literal:'0',menu:'提取帧',message:'已提取帧 @ 0s',color:'red'},{label:'quarter',literal:'0.25',menu:'提取帧',message:'已提取帧 @ 0.25s',color:'red'},{label:'three-quarter',literal:'0.75',menu:'提取帧',message:'已提取帧 @ 0.75s',color:'blue'},{label:'duration',literal:'1.5',menu:'提取帧',message:'指定时间无效或超出视频时长',color:null},{label:'beyond-duration',literal:'2',menu:'提取帧',message:'指定时间无效或超出视频时长',color:null},{label:'cover',literal:null,menu:'提取封面',message:'已提取视频封面',color:'red'}];
 async function fuState(s:Session):Promise<FRWindow['canvasUi']['state']>{return s.page.evaluate(()=>(window as unknown as FRWindow).canvasUi.state);}
 async function fuMenu(s:Session):Promise<Locator>{const point={x:128,y:198};expect(await s.page.evaluate(p=>Boolean(document.elementFromPoint(p.x,p.y)?.closest('[data-canvas-image-id="br-A"]')),point)).toBe(true);const c=await s.context.newCDPSession(s.page);try{await c.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...point,id:1,force:1}]});try{await s.page.locator('[data-popup="context-menu"]').waitFor({state:'visible'});}finally{await c.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});}}finally{await c.detach();}await settle(s.page);const menu=s.page.locator('[data-popup="context-menu"]');await menu.waitFor({state:'visible'});return menu;}
 interface FURect {x:number;y:number;width:number;height:number;right:number;bottom:number}
 interface FUToast {message:string;toast:FURect;title:FURect;close:FURect;titleScrollWidth:number;titleClientWidth:number;scrollWidth:number;clientWidth:number;coarse:boolean}
 async function fuToast(toast:Locator):Promise<FUToast>{return toast.evaluate(el=>{const title=el.querySelector('[data-title]'),close=el.querySelector('[data-close-button]');if(!(el instanceof HTMLElement)||!(title instanceof HTMLElement)||!(close instanceof HTMLElement))throw Error('FU_REAL_SUCCESS_TOAST_ELEMENTS');const rect=(node:Element):FURect=>{const r=node.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom};};return{message:title.textContent??'',toast:rect(el),title:rect(title),close:rect(close),titleScrollWidth:title.scrollWidth,titleClientWidth:title.clientWidth,scrollWidth:el.scrollWidth,clientWidth:el.clientWidth,coarse:matchMedia('(pointer: coarse)').matches};});}
-for(const theme of ['gold','mono'] as const)for(const vp of fuViewports)for(const value of fuValues)it(`FU ${theme} ${vp.width}x${vp.height} ${value.label} actual position success feedback`,async()=>{
+for(const theme of ['gold','mono'] as const)for(const vp of fuViewports)for(const value of fuValues)it(`FU ${theme} ${vp.width}x${vp.height} ${value.label} actual position feedback`,async()=>{
  await withSession(theme,vp.width,vp.height,{touch:true},async s=>{
-  const before=await fuState(s);expect(before.images.length).toBe(3);expect(before.frReceipts).toEqual([]);const menu=await fuMenu(s);expect(s.faExpected).toEqual([]);
-  if(value.literal!==null)s.faExpected.push({type:'prompt',message:'输入提取时间点（秒）',defaultValue:'0',value:value.literal});
-  await menu.getByRole('button',{name:value.menu,exact:true}).tap();await menu.waitFor({state:'detached'});expect(s.faExpected).toEqual([]);expect(s.faSeen.length).toBe(value.literal===null?0:1);
-  await expect.poll(async()=>{const state=await fuState(s);return{receipts:state.frReceipts.length,images:state.images.length};},{timeout:1500,message:'real frame and committed public parent before feedback assertions'}).toEqual({receipts:1,images:4});
-  await nativeRequestsFinished(s);await expect.poll(async()=>(await fuState(s)).view,{timeout:1500,message:'existing new frame auto-center'}).toEqual(vp.view);
-  const toast=s.page.locator('[data-sonner-toast][data-type="success"]');await toast.waitFor({state:'visible'});expect(await toast.count()).toBe(1);await expect.poll(()=>toast.getAttribute('data-mounted'),{timeout:1500}).toBe('true');await settle(s.page);
-  const observed=await fuToast(toast),after=await fuState(s);console.log('FU_OBSERVED',JSON.stringify({theme,vp,value,observed,actualPixels:s.frSaves.map(({dataUrl,...p})=>({...p,dataUrlBytes:dataUrl.length})),receipts:after.frReceipts.length,images:after.images.length,audits:s.frAudits,view:after.view,bodyNotGate:true}));
-  expect.soft(observed.message,'success reports selected video position, not floored/requested input').toBe(value.message);
+  const before=await fuState(s);
+  expect(before.images).toHaveLength(3);
+  expect(before.frReceipts).toEqual([]);
+  const menu=await fuMenu(s);
+  await menu.getByRole('button',{name:value.menu,exact:true}).tap();
+  await menu.waitFor({state:'detached'});
+  const form=s.page.getByRole('dialog',{name:'视频抽帧',exact:true});
+  if(value.literal!==null){
+    const time=form.getByRole('textbox',{name:'提取时间点（秒）',exact:true});
+    await time.fill(value.literal);
+    await expect.poll(()=>form.locator('video').evaluate(el=>(el as HTMLVideoElement).duration)).toBe(1.5);
+    await form.getByRole('button',{name:'开始抽帧',exact:true}).tap();
+  }
+  const type=value.color===null?'error':'success';
+  const toast=s.page.locator('[data-sonner-toast][data-type="'+type+'"]');
+  await toast.waitFor({state:'visible'});
+  expect(await toast.count()).toBe(1);
+  await expect.poll(()=>toast.getAttribute('data-mounted')).toBe('true');
+  await nativeRequestsFinished(s);
+  await settle(s.page);
+  const observed=await fuToast(toast),after=await fuState(s);
+  expect.soft(observed.message,'feedback matches the confirmed timestamp or rejection').toBe(value.message);
   expect.soft(observed.coarse).toBe(true);expect.soft(observed.toast.x).toBeGreaterThanOrEqual(8);expect.soft(observed.toast.y).toBeGreaterThanOrEqual(0);expect.soft(observed.toast.right).toBeLessThanOrEqual(vp.width-8);expect.soft(observed.toast.bottom).toBeLessThanOrEqual(vp.height);expect.soft(observed.scrollWidth).toBeLessThanOrEqual(observed.clientWidth+1);expect.soft(observed.titleScrollWidth).toBeLessThanOrEqual(observed.titleClientWidth+1);expect.soft(observed.title.x).toBeGreaterThanOrEqual(observed.toast.x);expect.soft(observed.title.right).toBeLessThanOrEqual(observed.toast.right);expect.soft(observed.title.right<=observed.close.x||observed.title.x>=observed.close.right||observed.title.bottom<=observed.close.y||observed.title.y>=observed.close.bottom,'success text is not under close control').toBe(true);expect.soft(observed.close.width).toBeGreaterThanOrEqual(44);expect.soft(observed.close.height).toBeGreaterThanOrEqual(44);
-  expect(s.frSaves.length).toBe(1);expect(s.frAudits.length).toBe(1);expect(after.frReceipts).toEqual([{urls:[s.frSaves[0].dataUrl],metadata:{modelName:'frame-extract',apiProvider:'local'}}]);expect(after.groups).toEqual(before.groups);expect(after.images.slice(0,3)).toEqual(before.images);expect(after.images.length).toBe(4);expect(after.actions).toEqual([...before.actions,'fr-local-frame']);expect(await s.page.locator('[data-sonner-toast][data-type="error"]').count()).toBe(0);
-  const [r,g,b]=s.frSaves[0].center;if(value.color==='red'){expect(r).toBeGreaterThan(200);expect(g).toBeLessThan(30);expect(b).toBeLessThan(30);}else{expect(b).toBeGreaterThan(200);expect(g).toBeLessThan(30);expect(r).toBeLessThan(30);}
-  const output=s.page.locator('[data-canvas-image-id="fr-output"] img');await expect.poll(()=>output.evaluate(el=>(el as HTMLImageElement).complete&&(el as HTMLImageElement).naturalWidth),{timeout:1500}).toBe(160);expect(await output.evaluate(el=>(el as HTMLImageElement).naturalHeight)).toBe(90);expect(await output.getAttribute('src')).toBe(s.frSaves[0].dataUrl);const painted=await output.evaluate(el=>{const r=el.closest('[data-canvas-image-id]')!.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height};});expect(Math.abs(painted.x+painted.width/2-vp.center.x)).toBeLessThan(1);expect(Math.abs(painted.y+painted.height/2-vp.center.y)).toBeLessThan(1);
+  expect(s.frResults).toHaveLength(1);
+  expect(s.frAudits).toHaveLength(1);
+  const [result]=s.frResults;
+  expect(result.timestamp).toBe(value.literal===null?0:Number(value.literal));
+  expect(after.groups).toEqual(before.groups);
+  expect(after.view).toEqual(before.view);
+  expect(after.images.slice(0,3)).toEqual(before.images);
+  if(value.color===null){
+    expect(result.status).toBe(400);
+    expect(result.frame).toBeUndefined();
+    expect(after.frReceipts).toEqual([]);
+    expect(after.images).toEqual(before.images);
+    expect(after.actions).toEqual(before.actions);
+    expect(await form.isVisible()).toBe(true);
+  }else{
+    expect(result.status).toBe(200);
+    const frame=result.frame!;
+    expect(after.frReceipts).toEqual([{urls:[frame.url],metadata:{modelName:'frame-extract',apiProvider:'local'}}]);
+    expect(after.images).toHaveLength(4);
+    expect(after.actions).toEqual([...before.actions,'fr-server-frame']);
+    expect(await s.page.locator('[data-sonner-toast][data-type="error"]').count()).toBe(0);
+    const [r,g,b]=frame.center;
+    expect(g).toBeLessThan(30);
+    expect(value.color==='red'?r:b).toBeGreaterThan(200);
+    expect(value.color==='red'?b:r).toBeLessThan(30);
+    const output=s.page.locator('[data-canvas-image-id="fr-output"] img');
+    await expect.poll(()=>output.evaluate(el=>(el as HTMLImageElement).naturalWidth)).toBe(160);
+    expect(await output.evaluate(el=>(el as HTMLImageElement).naturalHeight)).toBe(90);
+    expect(await output.getAttribute('src')).toBe(ORIGIN+frame.url);
+    expect(await output.isVisible()).toBe(true);
+  }
   const dir=path.resolve('output/playwright/frame-label-fu-20261020',String(process.pid));await mkdir(dir,{recursive:true});const file=path.join(dir,`${theme}-${vp.width}x${vp.height}-${value.label}.png`);await s.page.screenshot({path:file});console.log('FU_CAPTURE',JSON.stringify({path:file,bodyNotGate:true}));console.log('FU_COMPLETE',JSON.stringify({theme,width:vp.width,height:vp.height,label:value.label,onlyTimePositionNotExactDecodedFrameIndex:true,bodyNotGate:true}));
  });
 },25000);

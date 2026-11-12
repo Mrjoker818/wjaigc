@@ -408,7 +408,9 @@ async function handleRoute(s: Session, route: Route): Promise<void> {
 async function open(kind: Kind, suite: Suite): Promise<Session> {
   if (!browser) throw new Error('A_FIXTURE_BROWSER_NOT_INITIALIZED');
   const context = await browser.newContext({ serviceWorkers: 'block', viewport: { width: 1440, height: 900 } });
-  const page = await context.newPage(); page.setDefaultTimeout(2000);
+  const page = await context.newPage();
+  // Headless CI renders this scene with software WebGL at desktop size.
+  page.setDefaultTimeout(kind === 'scene' ? 5000 : 2000);
   const s: Session = { kind, suite, context, page, media: { original: '', results: [] }, mounted: false, closing: false,
     directions: 0, faults: [], requests: [], submissions: [], cancels: [], keys: [], runs: [], handlers: new Set(), inFlight: new Set() };
   live.add(s);
@@ -899,7 +901,7 @@ describe('mobile additional-a probe', () => {
 });
 
 describe('mobile additional-a acceptance', () => {
-  it.each(ACCEPTANCE)('$kind $theme $width x $height keeps controls horizontal/reachable', async ({ kind, theme, width, height }) => {
+  for (const scenario of ACCEPTANCE) it.each([scenario])('$kind $theme $width x $height keeps controls horizontal/reachable', async ({ kind, theme, width, height }) => {
     await withSession(kind, 'acceptance', async s => {
       await mount(s, theme); await prepare(s);
       const run = kind === 'agent' ? await start(s) : undefined;
@@ -912,11 +914,11 @@ describe('mobile additional-a acceptance', () => {
       } else await keyboardControls(s, 'input', width, height);
       await closeNormally(s);
     });
-  }, 25000);
+  }, scenario.kind === 'scene' ? 45_000 : 25_000);
 });
 
 describe('mobile additional-a continuity', () => {
-  it.each(CONTINUITY)('$kind $theme retains one mounted session and original pending/result controls', async ({ kind, theme }) => {
+  for (const scenario of CONTINUITY) it.each([scenario])('$kind $theme retains one mounted session and original pending/result controls', async ({ kind, theme }) => {
     await withSession(kind, 'continuity', async s => {
       await mount(s, theme); await prepare(s);
       const before = await snapshot(s); await minimizeRestore(s);
@@ -994,7 +996,7 @@ describe('mobile additional-a continuity', () => {
       if (kind === 'agent' || kind === 'ecommerce') expect(new Set(s.keys).size).toBe(s.submissions.length);
       else expect(s.keys).toEqual([]);
     });
-  }, 45000);
+  }, scenario.kind === 'scene' ? 75_000 : 45_000);
 });
 
 // A native-scroll regression: scrollIntoView can move overflow:hidden main

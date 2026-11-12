@@ -155,7 +155,7 @@ for (const theme of ['gold', 'mono'] as const) it('PB ' + theme + ' 320x640 popu
     await run('bundle', () => currentPage.addScriptTag({content: bundle})); mounted = true;
     await run('show', () => currentPage.evaluate(theme => window.pb.show(theme), theme)); await settle(page);
     const dock = page.getByRole('dialog', {name: '版本历史', exact: true});
-    const entry = dock.getByRole('button', {name: '从此节点创建分支', exact: true}).first();
+    const entry = dock.getByRole('button', {name: '从 PB 原始版本 创建分支', exact: true});
     await run('ready', () => entry.waitFor({state: 'visible'}));
     row.device = await run('device', () => currentPage.evaluate(() => ({width: innerWidth, height: innerHeight, touch: navigator.maxTouchPoints, coarse: matchMedia('(pointer:coarse)').matches, hover: matchMedia('(hover:hover)').matches})));
     assert.deepEqual(row.device, {width: 320, height: 640, touch: 1, coarse: true, hover: false});

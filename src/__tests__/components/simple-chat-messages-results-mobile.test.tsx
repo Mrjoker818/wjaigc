@@ -247,7 +247,14 @@ describe('messages results copy ui',()=>{
 });
 describe('messages results interactions',()=>{
  it.each(THEMES)('%s user message edit fits and cancel preserves original content',async theme=>{await withSession(theme,320,640,{surface:'messages'},async s=>{const message=s.page.locator('[data-chat-message-id="user-long"]');await click(s,message.getByTitle('编辑',{exact:true}));const input=message.getByRole('textbox');expect(await input.evaluate(e=>parseFloat(getComputedStyle(e).fontSize)),'message results edit input font').toBeGreaterThanOrEqual(16);await panelBounds(frame(s));await input.fill('仅本地草稿，不触发生成');await click(s,message.getByRole('button',{name:'取消',exact:true}));expect(await message.innerText()).toContain(DATA.longWord);});},25000);
- it.each(THEMES)('%s copies complete code bytes via native clipboard',async theme=>{await withSession(theme,390,844,{surface:'markdown'},async s=>{await click(s,frame(s).getByRole('button').first());expect(await s.page.evaluate(()=>navigator.clipboard.readText())).toBe(DATA.code.slice(0,-1).replaceAll('\n','\r\n'));});},25000);
+ it.each(THEMES)('%s copies complete code bytes via native clipboard', async theme => {
+   await withSession(theme, 390, 844, { surface: 'markdown' }, async s => {
+     await click(s, frame(s).getByRole('button').first());
+     const copied = await s.page.evaluate(() => navigator.clipboard.readText());
+     // The native clipboard can return CRLF on Windows.
+     expect(copied.replaceAll('\r\n', '\n')).toBe(DATA.code.slice(0, -1));
+   });
+ }, 25000);
  it.each(THEMES)('%s lightbox keyboard navigation wraps and resets bounded zoom',async theme=>{await withSession(theme,390,844,{surface:'lightbox'},async s=>{await s.page.keyboard.press('ArrowRight');await settle(s.page);expect(await s.page.locator('img').getAttribute('src')).toBe('/fixture/image-b.png');await s.page.keyboard.press('ArrowRight');await settle(s.page);expect(await s.page.locator('img').getAttribute('src')).toBe('/fixture/image-a.png');for(let i=0;i<12;i++)await click(s,s.page.getByTitle('放大',{exact:true}));expect(await preview(s).getByText('400%',{exact:true}).count()).toBe(1);await s.page.keyboard.press('ArrowLeft');await settle(s.page);expect(await preview(s).getByText('100%',{exact:true}).count()).toBe(1);});},25000);
  it.each(THEMES)('%s copies the selected original image URL',async theme=>{await withSession(theme,390,844,{surface:'lightbox'},async s=>{await click(s,s.page.getByTitle('复制链接',{exact:true}));expect(await s.page.evaluate(()=>navigator.clipboard.readText())).toBe('/fixture/image-a.png');});},25000);
  it.each(THEMES)('%s downloads the exact original PNG bytes',async theme=>{await withSession(theme,390,844,{surface:'lightbox',ops:['download-image']},async s=>{await expectNativeDownload(s,s.page.getByTitle('下载',{exact:true}),pngA,'image-1.png');});},25000);

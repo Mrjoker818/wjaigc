@@ -8,6 +8,7 @@ import { compile } from 'tailwindcss';
 import { Scanner } from '@tailwindcss/oxide';
 import { chromium, type Browser, type BrowserContext, type Page, type Locator, type Request } from '@playwright/test';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { isCompletedCanvasFixtureEventStream } from '../helpers/canvas-fixture-event-stream';
 
 type Theme = 'gold' | 'mono';
 interface FixtureWindow extends Window {
@@ -130,7 +131,12 @@ async function session(theme: Theme, width: number, height: number, synthetic = 
     context.on('request', request => s.pending.add(request));
     context.on('response', response => s.responseStatus.set(response.request(),response.status()));
     context.on('requestfinished', request => { s.pending.delete(request); s.completed.add(request); for (const notify of s.nativeWaiters) notify(); });
-    context.on('requestfailed', request => { s.pending.delete(request); s.failed.add(request); for (const notify of s.nativeWaiters) notify(); });
+    context.on('requestfailed', request => {
+      s.pending.delete(request);
+      const completed = isCompletedCanvasFixtureEventStream(request, s.responseStatus.get(request), ORIGIN);
+      (completed ? s.completed : s.failed).add(request);
+      for (const notify of s.nativeWaiters) notify();
+    });
     page.on('pageerror', error => s.errors.push(String(error)));
     page.on('dialog', dialog => { s.errors.push('OMP_FIXTURE_UNEXPECTED_DIALOG'); void dialog.dismiss().catch(error => s.errors.push(String(error))); });
     await context.routeWebSocket('**/*', socket => { s.errors.push('OMP_FIXTURE_UNKNOWN_WS'); socket.close({ code: 1008, reason: 'Offline fixture forbids WebSockets' }); });

@@ -1,11 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { runInThisContext } from 'node:vm';
 import type { Pool, PoolClient } from 'pg';
 import { runDocumentExecution, getDocumentExecutionScope, reserveDocumentExecutionActor, getDocumentExecutionStats, documentExecutionHttpFailure } from '@/lib/collaboration/document-execution-scope';
+import { loadDocumentCommonJs } from '../fixtures/document-commonjs';
 
 function deferred<T>(){let resolve!:(value:T)=>void,reject!:(cause:unknown)=>void;const promise=new Promise<T>((ok,fail)=>{resolve=ok;reject=fail});return {promise,resolve,reject};}
 class FakeClient extends EventEmitter {
@@ -29,32 +27,47 @@ class PromiseClient extends EventEmitter {
 class PromisePool {readonly client=new PromiseClient();readonly _clients=[this.client];ending=false;connect():Promise<PromiseClient>{return Promise.resolve(this.client);}}
 const resolvePool=(raw:FakePool):Pool=>{const resolve=(globalThis as unknown as Record<symbol,unknown>)[Symbol.for('wujie.documentRequestPoolScope.v1')] as (pool:Pool)=>Pool;return resolve(raw as unknown as Pool);};
 const tick=async():Promise<void>=>{for(let i=0;i<8;i++)await Promise.resolve();};
-function loadSyntheticDbClient(raw:FakePool):{execSql:(query:string)=>Promise<{rows:unknown[]}>}{
-  const require=createRequire('J:/无界本地版/projects/_upstream-wjaigc-restore/package.json'),ts=require('typescript') as typeof import('typescript');
-  const source=readFileSync('C:/Users/Administrator/.codex/visualizations/2026/09/19/01a0b95f-913f-7473-97ed-1362f0253b04/stage7-resume-20261101/work/src/lib/db-client.ts','utf8');
-  const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
-  const box:{exports:Record<string,unknown>}={exports:{}};const loader=runInThisContext(`(function(exports,require,module){${compiled}\n})`) as (exports:Record<string,unknown>,require:(name:string)=>unknown,module:typeof box)=>void;
-  class SyntheticPool {constructor(){return raw;}}
-  loader(box.exports,name=>name==='pg'?{Pool:SyntheticPool}:require(name),box);return box.exports as unknown as {execSql:(query:string)=>Promise<{rows:unknown[]}>};
+function loadSyntheticDbClient(raw: FakePool): typeof import('@/lib/db-client') {
+  class SyntheticPool {
+    constructor() { return raw; }
+  }
+  return loadDocumentCommonJs(new URL('../../lib/db-client.ts', import.meta.url), {
+    pg: { Pool: SyntheticPool },
+  });
 }
-function loadSyntheticTicketService(raw:FakePool):{issueDocumentTicket:(actor:string,project:string)=>Promise<string>;consumeDocumentTicket:(ticket:string)=>Promise<unknown>}{
-  const require=createRequire('J:/无界本地版/projects/_upstream-wjaigc-restore/package.json'),ts=require('typescript') as typeof import('typescript');
-  const source=readFileSync('C:/Users/Administrator/.codex/visualizations/2026/09/19/01a0b95f-913f-7473-97ed-1362f0253b04/stage7-resume-20261101/work/src/lib/collaboration/document-tickets.ts','utf8');
-  const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
-  const box:{exports:Record<string,unknown>}={exports:{}};const loader=runInThisContext(`(function(exports,require,module){${compiled}\n})`) as (exports:Record<string,unknown>,require:(name:string)=>unknown,module:typeof box)=>void;
-  class AccessError extends Error{}class DisabledError extends Error{}class NotEnabledError extends Error{}
-  loader(box.exports,name=>name==='server-only'?{}:name==='@/lib/db-client'?{getPool:()=>resolvePool(raw)}:name==='./document-access'?{
-    assertDocumentEditor:async(actor:string)=>({ownerId:actor}),assertDocumentProjectEnabled:async()=>{},DocumentAccessError:AccessError,DocumentFeatureDisabledError:DisabledError,DocumentProjectNotEnabledError:NotEnabledError}:require(name),box);
-  return box.exports as unknown as {issueDocumentTicket:(actor:string,project:string)=>Promise<string>;consumeDocumentTicket:(ticket:string)=>Promise<unknown>};
+function loadSyntheticTicketService(raw: FakePool): typeof import('@/lib/collaboration/document-tickets') {
+  return loadDocumentCommonJs(new URL('../../lib/collaboration/document-tickets.ts', import.meta.url), {
+    'server-only': {},
+    './document-exchange-maintenance': {},
+    '@/lib/db-client': { getPool: () => resolvePool(raw) },
+    './document-access': {
+      assertDocumentEditor: async (actor: string) => ({ ownerId: actor }),
+      assertDocumentProjectEnabled: async () => {},
+      DocumentAccessError: class extends Error {},
+      DocumentFeatureDisabledError: class extends Error {},
+      DocumentProjectNotEnabledError: class extends Error {},
+    },
+  });
 }
-function loadSyntheticProjectBridge(raw:FakePool):{readCollaborativeProject:(actor:string,project:string)=>Promise<{projectId:string}>}{
-  const require=createRequire('J:/无界本地版/projects/_upstream-wjaigc-restore/package.json'),ts=require('typescript') as typeof import('typescript');
-  const source=readFileSync('C:/Users/Administrator/.codex/visualizations/2026/09/19/01a0b95f-913f-7473-97ed-1362f0253b04/stage7-resume-20261101/work/src/lib/collaboration/document-project-bridge.ts','utf8');
-  const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
-  const box:{exports:Record<string,unknown>}={exports:{}};const loader=runInThisContext(`(function(exports,require,module){${compiled}\n})`) as (exports:Record<string,unknown>,require:(name:string)=>unknown,module:typeof box)=>void;
-  loader(box.exports,name=>name==='server-only'?{}:name==='@/lib/db-client'?{getPool:()=>resolvePool(raw)}:name==='@/lib/collaboration/document-access'?{assertDocumentEditor:async()=>({ownerId:'owner-a'}),DocumentProjectNotEnabledError:class extends Error{}}:
-    name==='@/lib/collaboration/document-store'?{loadDocumentInTransaction:async()=>({doc:{},sequence:1})}:name==='@/lib/collaboration/canvas-document'?{readCanvasDocument:()=>({placements:{}})}:name.startsWith('@/')?{}:require(name),box);
-  return box.exports as unknown as {readCollaborativeProject:(actor:string,project:string)=>Promise<{projectId:string}>};
+function loadSyntheticProjectBridge(raw: FakePool): typeof import('@/lib/collaboration/document-project-bridge') {
+  return loadDocumentCommonJs(new URL('../../lib/collaboration/document-project-bridge.ts', import.meta.url), {
+    'server-only': {},
+    '@/lib/db-client': { getPool: () => resolvePool(raw) },
+    '@/lib/collaboration/document-access': {
+      assertDocumentEditor: async () => ({ ownerId: 'owner-a' }),
+      DocumentProjectNotEnabledError: class extends Error {},
+    },
+    '@/lib/collaboration/document-store': { loadDocumentInTransaction: async () => ({ doc: {}, sequence: 1 }) },
+    '@/lib/collaboration/canvas-document': { readCanvasDocument: () => ({ placements: {} }) },
+    '@/features/annotations/annotation-bundle': {},
+    '@/features/annotations/annotation-source-version': {},
+    '@/lib/asset-core/storage': {},
+    '@/lib/asset-core/canvas-project-sync': {},
+    '@/lib/asset-core/legacy-migration': {},
+    '@/lib/asset-core/project-readers': {},
+    '@/lib/collaboration/document-enable-media': {},
+    '@/lib/collaboration/document-assets': {},
+  });
 }
 const receipt={operationId:'12345678-1234-4234-8234-123456789abc',sessionFingerprint:'a'.repeat(64),updateDigest:'b'.repeat(64),documentSequence:3};
 const sessionToken='t'.repeat(43),descriptor={sessionToken,sessionFingerprint:createHash('sha256').update(sessionToken).digest('hex'),actorId:'a',projectId:'p',ownerId:'o',grantGeneration:'1',expiresAt:'2030-01-01T00:00:00.000Z',retainUntil:'2030-02-01T00:00:00.000Z'};
@@ -72,11 +85,9 @@ describe('document request execution scope',()=>{
     expect(getDocumentExecutionScope()).toBeNull();expect(getDocumentExecutionStats().activeScopes).toBe(0);
   });
   it('shares the same ALS and resolver with an independently evaluated CommonJS copy',async()=>{
-    const require=createRequire('J:/无界本地版/projects/_upstream-wjaigc-restore/package.json'),ts=require('typescript') as typeof import('typescript');
-    const source=readFileSync('C:/Users/Administrator/.codex/visualizations/2026/09/19/01a0b95f-913f-7473-97ed-1362f0253b04/stage7-resume-20261101/work/src/lib/collaboration/document-execution-scope.ts','utf8');
-    const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
-    const box:{exports:Record<string,unknown>}={exports:{}};const loader=runInThisContext(`(function(exports,require,module){${compiled}\n})`) as (exports:Record<string,unknown>,require:NodeRequire,module:typeof box)=>void;
-    loader(box.exports,require,box);const copy=box.exports as unknown as {getDocumentExecutionScope:typeof getDocumentExecutionScope;runDocumentExecution:typeof runDocumentExecution};
+    const copy = loadDocumentCommonJs<typeof import('@/lib/collaboration/document-execution-scope')>(
+      new URL('../../lib/collaboration/document-execution-scope.ts', import.meta.url),
+    );
     await runDocumentExecution({},async scope=>{expect(copy.getDocumentExecutionScope()).toBe(scope);await copy.runDocumentExecution({},async nested=>expect(nested).toBe(scope));});
   });
   it('uses owned connects for pool.query with Promise, config and callbacks',async()=>{

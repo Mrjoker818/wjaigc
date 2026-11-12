@@ -11,7 +11,7 @@ vi.mock('@/lib/simple-chat-sync-storage', () => ({ createIndexedDbSimpleChatEnve
 }) }));
 const user = (id = 'A') => ({ id, name: id, productType: 'chat', createdAt: 1, updatedAt: 1 });
 const props = (id = 'A') => ({ user: user(id), onOpenProject: () => {}, onNewProject: () => {} });
-const response = (name: string) => Response.json({ success: true, value: [{ ...project('same'), name }], syncRevision: 1 });
+const response = (name: string, userId = 'A') => Response.json({ success: true, userId, value: [{ ...project('same'), name }], syncRevision: 1 });
 
 beforeEach(async () => {
   state.mode = 'network'; state.resolveFetch = null; state.resolveLocal = null; state.oldSignal = null;
@@ -23,7 +23,7 @@ beforeEach(async () => {
     if (!String(input).includes('chat_simple_projects')) return Response.json({ success: false });
     if (state.mode === 'network') { state.oldSignal = init?.signal ?? null; return new Promise<Response>(resolve => { state.resolveFetch = resolve; }); }
     if (state.mode === 'local') throw Error('synthetic offline');
-    return response(state.mode === 'B' ? 'B新项目' : '重试新项目');
+    return state.mode === 'B' ? response('B新项目', 'B') : response('重试新项目');
   }));
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
 });

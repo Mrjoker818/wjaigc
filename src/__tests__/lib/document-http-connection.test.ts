@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
-import {createHash,webcrypto} from 'node:crypto';
+import {createHash} from 'node:crypto';
 // @ts-expect-error The existing jsdom dependency has no installed declarations.
 import {JSDOM} from 'jsdom';
 import * as Y from 'yjs';
@@ -8,6 +8,7 @@ import {createBrowserPendingUpdateStore,createCanvasDocumentSession} from '@/lib
 import {applyCanvasImagePatch,createCanvasDocument} from '@/lib/collaboration/canvas-document';
 import {createDocumentHttpBrowserStorage} from '@/lib/collaboration/document-http-browser-storage';
 import {openDocumentHttpConnection} from '@/lib/collaboration/document-http-connection';
+import { documentBrowserCrypto } from '../fixtures/document-browser-crypto';
 
 const token='t'.repeat(43),ticket='k'.repeat(43),hash=(s:string|Uint8Array)=>createHash('sha256').update(s).digest('hex');
 const descriptor={sessionToken:token,sessionFingerprint:hash(token),actorId:'actor-a',ownerId:'owner-a',projectId:'project-a',grantGeneration:'1',expiresAt:'2030-01-01T00:00:00.000Z',retainUntil:'2030-02-01T00:00:00.000Z'};
@@ -15,7 +16,7 @@ const digest=(bytes:Uint8Array)=>createHash('sha256').update('wujie-document-upd
 const frame=(seq:number,bytes:Uint8Array):Uint8Array<ArrayBuffer>=>{const result=new Uint8Array(9+bytes.length);result[0]=0x11;new DataView(result.buffer).setBigUint64(1,BigInt(seq));result.set(bytes,9);return result};
 function locks(){const held=new Map<string,symbol>();const request=vi.fn((name:string,_options:LockOptions,callback:(lock:Lock|null)=>Promise<void>)=>{if(held.has(name))return Promise.resolve().then(()=>callback(null));const id=Symbol(name);held.set(name,id);return Promise.resolve().then(()=>callback({name,mode:'exclusive'} as Lock)).finally(()=>{if(held.get(name)===id)held.delete(name)});});return {held,request};}
 const active:Array<()=>Promise<void>>=[];let platform:ReturnType<typeof locks>;
-beforeEach(()=>{const dom=new JSDOM('',{url:'https://fixture.invalid/'});vi.stubGlobal('localStorage',dom.window.localStorage);vi.stubGlobal('sessionStorage',dom.window.sessionStorage);vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('WebSocket',{OPEN:1});platform=locks();vi.stubGlobal('navigator',{locks:platform});vi.stubGlobal('isSecureContext',true);});
+beforeEach(()=>{const dom=new JSDOM('',{url:'https://fixture.invalid/'});vi.stubGlobal('localStorage',dom.window.localStorage);vi.stubGlobal('sessionStorage',dom.window.sessionStorage);vi.stubGlobal('crypto',documentBrowserCrypto);vi.stubGlobal('WebSocket',{OPEN:1});platform=locks();vi.stubGlobal('navigator',{locks:platform});vi.stubGlobal('isSecureContext',true);});
 afterEach(async()=>{while(active.length)await active.pop()?.();vi.useRealTimers();vi.restoreAllMocks();vi.unstubAllGlobals();});
 function setup(){
   const server=createCanvasDocument();applyCanvasImagePatch(server,{placementId:'p1',assetVersionId:'v1',x:1,y:2,width:80,height:60,rotation:0,zIndex:0},'seed');

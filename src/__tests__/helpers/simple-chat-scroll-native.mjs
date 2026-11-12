@@ -6,6 +6,7 @@ const root=process.cwd(), own=path.join(root,'output/playwright/simple-chat-scro
 const mode=process.argv[2]; if(!['green','scroll-user-green','scroll-touch-green','motion-reduce'].includes(mode)) throw Error('USE_RED_OR_GREEN');
 const scrollTouch=mode.startsWith('scroll-touch-'),scrollUser=mode.startsWith('scroll-user-')||scrollTouch;
 const retained=mode.startsWith('return-'), workflow=mode==='workflow'||retained, identity=mode.startsWith('identity-')||workflow, edge=mode.endsWith('-edge')||identity;
+const replyText = '合成回复'.repeat(100);
 const hash=s=>crypto.createHash('sha256').update(s).digest('hex');
 async function main(){
  await mkdir(own,{recursive:true});
@@ -38,7 +39,7 @@ async function main(){
    }
    if(req.method()==='POST'&&key==='/api/simple-chat/chat'){
     const body=req.postDataJSON(); if(++postCount!==1||body.projectId!=='synthetic-a'||body.taskId!=='synthetic-a-long'||body.model!=='synthetic-model'||body.providerId!=='synthetic-provider'||body.messages.at(-1).content!=='合成新消息'||body.idempotencyKey!==headers['idempotency-key']||!body.responseMessageId||!body.idempotencyKey.startsWith('simple-chat-retry:synthetic-a-long:')||body.webSearch)throw Error('SYNTHETIC_POST_IDENTITY');
-    if(scrollUser)await chatGate;return route.fulfill({status:200,contentType:'text/event-stream',body:'data: '+JSON.stringify({type:'text',content:'合成回复'.repeat(100)})+'\n\ndata: [DONE]\n\n'});
+    if(scrollUser)await chatGate;return route.fulfill({status:200,contentType:'text/event-stream',body:'data: '+JSON.stringify({type:'text',content:replyText})+'\n\ndata: [DONE]\n\n'});
    }
    if(req.method()!=='GET'||req.postData()!==null||headers['idempotency-key'])throw Error('HTTP_METHOD_BOUNDARY');
    if(key==='/')return route.fulfill({contentType:'text/html',body:'<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div></body></html>'});
@@ -105,11 +106,80 @@ async function main(){
    await page.locator('#to-a-long').click();await page.locator('[data-chat-message-id="synthetic-a-message-29"]').waitFor({state:'attached'});await page.waitForTimeout(950);
    const back=await page.evaluate(()=>{const first=document.querySelector('[data-chat-message-id="synthetic-a-message-0"]');if(!first)throw Error('CURRENT_MESSAGE_MISSING');const current=first.parentElement.parentElement;window.__scroll=current;return {top:current.scrollTop,max:current.scrollHeight-current.clientHeight,count:document.querySelectorAll('[data-chat-message-id]').length};});
    check('切回非空会话自动滚到底并保留消息',back.max>100&&back.top>=back.max-2&&back.count===30,back);
+   if (mode === 'green' && test.height === 844) {
+     const resized = await page.evaluate(async () => {
+       const container = window.__scroll;
+       const last = container.querySelector('[data-chat-message-id="synthetic-a-message-29"]');
+       const position = () => ({ top: container.scrollTop, max: container.scrollHeight - container.clientHeight });
+       const before = position();
+       // Model a message that gains height after the initial scroll has finished.
+       last.style.minHeight = `${last.offsetHeight + 180}px`;
+       for (let frame = 0; frame < 3; frame++) await new Promise(resolve => requestAnimationFrame(resolve));
+       const after = position();
+       last.style.minHeight = '';
+       return { before, after };
+     });
+     check('消息布局增长后继续跟随到底', resized.after.max > resized.before.max && resized.after.top >= resized.after.max - 2, resized);
+   }
    if(mode==='trace'){await page.waitForTimeout(1500);const trace=await page.evaluate(()=>({samples:window.__trace.slice(0,12).concat(window.__trace.filter((_,i)=>i>12&&i%30===0)),calls:window.__scrollCalls}));check('滚动轨迹已采集',trace.samples.length>10,trace);}
    await page.evaluate(()=>{window.__scroll.scrollTop=100;});
    const textarea=page.getByPlaceholder('输入消息，Enter 发送，支持 Ctrl+V 粘贴图片',{exact:true});await textarea.fill('合成新消息');await textarea.press('Enter');
    await page.getByText('合成新消息',{exact:true}).waitFor({state:'attached'});await page.waitForTimeout(1200);
-   if(scrollUser){const measure=()=>page.evaluate(()=>{const s=window.__scroll,r=s.getBoundingClientRect(),items=[...s.querySelectorAll('[data-chat-message-id]')],e=items.find(x=>x.getBoundingClientRect().bottom>r.top+1),b=e?.getBoundingClientRect();return {top:s.scrollTop,max:s.scrollHeight-s.clientHeight,anchor:e?.getAttribute('data-chat-message-id'),anchorTop:b?.top-r.top};});const pos=await page.evaluate(()=>{const r=window.__scroll.getBoundingClientRect();return {x:(r.left+r.right)/2,y:(r.top+r.bottom)/2,top:r.top,height:r.height,before:window.__scroll.scrollTop,max:window.__scroll.scrollHeight-window.__scroll.clientHeight};});check('发送消息后先自动滚到底',pos.before>=pos.max-2,pos);if(scrollTouch){const cdp=await context.newCDPSession(page);const start=pos.top+pos.height*.2;await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:pos.x,y:start}]});for(let i=1;i<=8;i++)await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:pos.x,y:start+pos.height*.6*i/8}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await cdp.detach();}else{await page.mouse.move(pos.x,pos.y);await page.mouse.wheel(0,-800);}await page.waitForTimeout(350);const before=await measure();check('用户滚轮已向上移动消息',before.top<pos.before-100,{input:scrollTouch?'CDP touch swipe':'mouse wheel',initial:pos.before,before});releaseChat();await page.waitForTimeout(1200);const after=await measure();check('回复到达时不抢用户滚动',after.top<after.max-100,{before,after});check('回复到达后查看的消息保持位置',after.anchor===before.anchor&&Math.abs(after.anchorTop-before.anchorTop)<=2,{before,after});}
+   if (scrollUser) {
+     const measure = () => page.evaluate(() => {
+       const container = window.__scroll;
+       const top = container.getBoundingClientRect().top;
+       const anchor = [...container.querySelectorAll('[data-chat-message-id]')]
+         .find(message => message.getBoundingClientRect().bottom > top + 1);
+       return {
+         top: container.scrollTop,
+         max: container.scrollHeight - container.clientHeight,
+         anchor: anchor?.getAttribute('data-chat-message-id'),
+         anchorTop: anchor?.getBoundingClientRect().top - top,
+       };
+     });
+     const pos = await page.evaluate(() => {
+       const container = window.__scroll;
+       const rect = container.getBoundingClientRect();
+       return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, top: rect.top,
+         height: rect.height, before: container.scrollTop, max: container.scrollHeight - container.clientHeight };
+     });
+     check('发送消息后先自动滚到底', pos.before >= pos.max - 2, pos);
+     if (scrollTouch) {
+       const cdp = await context.newCDPSession(page);
+       const start = pos.top + pos.height * .2;
+       await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: pos.x, y: start }] });
+       for (let i = 1; i <= 8; i++) {
+         await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: pos.x, y: start + pos.height * .6 * i / 8 }] });
+       }
+       await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+       await cdp.detach();
+     } else {
+       await page.mouse.move(pos.x, pos.y);
+       await page.mouse.wheel(0, -800);
+     }
+     // Wait for both scrolling and layout to settle before measuring the anchor.
+     await page.waitForFunction(initialTop => {
+       const container = window.__scroll;
+       const top = container.scrollTop;
+       const max = container.scrollHeight - container.clientHeight;
+       const previous = window.__gesturePosition;
+       const now = performance.now();
+       if (!previous || previous.top !== top || previous.max !== max) {
+         window.__gesturePosition = { top, max, changedAt: now };
+         return false;
+       }
+       return top < initialTop - 100 && now - previous.changedAt >= 300;
+     }, pos.before);
+     const before = await measure();
+     check('用户操作已向上移动消息', before.top < pos.before - 100, { input: scrollTouch ? 'CDP touch swipe' : 'mouse wheel', initial: pos.before, before });
+     releaseChat();
+     await page.getByText(replyText, { exact: true }).waitFor({ state: 'attached' });
+     await page.waitForTimeout(1200);
+     const after = await measure();
+     check('回复到达时不抢用户滚动', after.top < after.max - 100, { before, after });
+     check('回复到达后查看的消息保持位置', after.anchor === before.anchor && Math.abs(after.anchorTop - before.anchorTop) <= 2, { before, after });
+   }
    const added=await page.evaluate(()=>({top:window.__scroll.scrollTop,max:window.__scroll.scrollHeight-window.__scroll.clientHeight,count:document.querySelectorAll('[data-chat-message-id]').length,updates:window.fixtureState.updates}));
    if(!scrollUser)check('合成新消息沿用自动滚动',added.count===32&&added.max>100&&added.top>=added.max-2&&postCount===1,added);
    if(mode==='motion-reduce'){const motion=await page.evaluate(()=>({matches:matchMedia('(prefers-reduced-motion: reduce)').matches,calls:window.__motionCalls}));check('减少动态效果不使用平滑滚动',motion.matches&&motion.calls.length>0&&motion.calls.every(value=>value!=='smooth'),motion);}

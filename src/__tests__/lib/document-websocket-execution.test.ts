@@ -1,10 +1,8 @@
 import { EventEmitter } from 'node:events';
-import { createRequire } from 'node:module';
-import { readFileSync } from 'node:fs';
-import { runInThisContext } from 'node:vm';
 import type { Pool, PoolClient } from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as execution from '@/lib/collaboration/document-execution-scope';
+import { loadDocumentCommonJs } from '../fixtures/document-commonjs';
 
 type Scope=execution.DocumentExecutionScope;
 type Run=<T>(work:(scope:Scope)=>Promise<T>|T)=>Promise<T>;
@@ -92,14 +90,9 @@ describe('WebSocket execution uses the shared owned-resource context',()=>{
     await expect(task).resolves.toBe('done');expect(execution.getDocumentExecutionStats().activeScopes).toBe(0);
   });
   it('shares ALS and the sole pool resolver with a separately evaluated CommonJS copy',async()=>{
-    const require=createRequire('J:/无界本地版/projects/_upstream-wjaigc-restore/package.json');
-    const ts=require('typescript') as typeof import('typescript');
-    const file='C:/Users/Administrator/.codex/visualizations/2026/09/19/01a0b95f-913f-7473-97ed-1362f0253b04/stage7-resume-20261101/work/src/lib/collaboration/document-execution-scope.ts';
-    const compiled=ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
-    const box:{exports:Record<string,unknown>}={exports:{}};
-    const loader=runInThisContext(`(function(exports,require,module){${compiled}\n})`) as (exports:Record<string,unknown>,require:NodeRequire,module:typeof box)=>void;
-    loader(box.exports,require,box);
-    const copy=box.exports as unknown as {getDocumentExecutionScope:typeof execution.getDocumentExecutionScope;runDocumentWebSocketExecution:Run};
+    const copy = loadDocumentCommonJs<typeof execution>(
+      new URL('../../lib/collaboration/document-execution-scope.ts', import.meta.url),
+    );
     const raw=new FakePool();
     await copy.runDocumentWebSocketExecution(async scope=>{expect(execution.getDocumentExecutionScope()).toBe(scope);expect(copy.getDocumentExecutionScope()).toBe(scope);expect(poolProxy(raw)===(raw as unknown as Pool)).toBe(false);});
     await run(async scope=>{expect(copy.getDocumentExecutionScope()).toBe(scope);});

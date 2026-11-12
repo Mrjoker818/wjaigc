@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createCanvas } from '@napi-rs/canvas';
 import { describe, expect, it, vi } from 'vitest';
 import type { QueryFn } from '../helpers/postgres-test-database';
-import { withOwnedSketchPostgres as withIsolatedPostgres, readOwnedSketchFixture, assertOwnedSketchSchema } from '../helpers/owned-sketch-postgres-fixture';
+import { withSketchPostgres as withIsolatedPostgres, readSketchPostgresFixture, assertSketchPostgresSchema } from '../helpers/owned-sketch-postgres-fixture';
 import { ensureCoreTables } from '@/lib/db-storage';
 import { getPool } from '@/lib/db-client';
 import { claimCloudTaskLease, ensureCloudTaskTables, getCloudTaskById, terminateCloudTaskAndRefund,
@@ -17,9 +17,9 @@ import type { SketchGenerationDependencies } from '@/lib/sketch-to-code/generati
 // SQL, billing, leases, auth and terminal settlement are real. Only the import
 // sentinel is replaced; no provider HTTP is dispatched by this fixture.
 vi.mock('server-only', () => ({}));
-const ownedFixture = await vi.hoisted(async (): Promise<import('../helpers/owned-sketch-postgres-fixture').OwnedSketchFixture | undefined> => {
-  const { readOwnedSketchFixture } = await import('../helpers/owned-sketch-postgres-fixture');
-  return readOwnedSketchFixture();
+const ownedFixture = await vi.hoisted(async () => {
+  const { readSketchPostgresFixture } = await import('../helpers/owned-sketch-postgres-fixture');
+  return readSketchPostgresFixture();
 });
 const input = { projectId: 'project-a', imageDataUrl: createCanvas(2, 2).toDataURL('image/png'), instruction: '还原草图',
   providerId: 'p1', modelId: 'vision-1', idempotencyKey: 'nonce-1' };
@@ -27,7 +27,7 @@ const access = { kind: 'personal' as const, actorUserId: 'user-a', ownerId: 'use
 
 function requireOwnedLoopback(): void {
   if (ownedFixture) {
-    if (!readOwnedSketchFixture()) throw new Error('Explicit owned sketch fixture mode lost');
+    if (!readSketchPostgresFixture()) throw new Error('Explicit owned sketch fixture mode lost');
     return;
   }
   const value = process.env.POSTGRES_TEST_DATABASE_URL;
@@ -45,7 +45,7 @@ function requireOwnedLoopback(): void {
     || url.username !== 'sketch_exec_test' || url.pathname !== '/postgres') throw new Error('Only the master-provided fix1 loopback fixture is allowed');
 }
 async function seed(query: QueryFn, databaseUrl: string, schemaName: string): Promise<SketchTaskAdmission> {
-  if (ownedFixture) assertOwnedSketchSchema(databaseUrl);
+  if (ownedFixture) assertSketchPostgresSchema(databaseUrl);
   if (!ownedFixture && process.env.SKETCH_TOKEN_OWNED_FIXTURE === '97af41') {
     requireOwnedLoopback();
     expect((await query<{ id: string }>('SELECT system_identifier::text AS id FROM pg_control_system()')).rows[0].id).toBe('7694645594810926408');

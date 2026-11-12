@@ -25,7 +25,7 @@ describe('production dependency security baseline', () => {
       '@supabase/supabase-js': '2.110.7',
       'coze-coding-dev-sdk': '^0.7.24',
       'drizzle-orm': '^0.45.2',
-      next: '16.3.8',
+      next: '16.4.6',
       openai: '^6.48.0',
       sharp: '^0.35.5',
       svgo: '^4.1.0',

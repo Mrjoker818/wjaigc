@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { isCompletedCanvasFixtureEventStream } from '../helpers/canvas-fixture-event-stream';
 import { readOwnedOneSecondVideo } from '../../../tests/helpers/owned-media-fixture';
 // Real InfiniteCanvas and shipped CSS. Public props only; no paid/business I/O.
 import { readFile, mkdir } from 'node:fs/promises';
@@ -122,7 +123,12 @@ async function session(theme: Theme = 'gold', width: number = 390, height: numbe
     context.on('request', request => s.pending.add(request));
     context.on('response', response => s.responseStatus.set(response.request(),response.status()));
     context.on('requestfinished', request => { s.pending.delete(request); s.completed.add(request); for (const notify of s.nativeWaiters) notify(); });
-    context.on('requestfailed', request => { s.pending.delete(request); s.failed.add(request); for (const notify of s.nativeWaiters) notify(); });
+    context.on('requestfailed', request => {
+      s.pending.delete(request);
+      const completed = isCompletedCanvasFixtureEventStream(request, s.responseStatus.get(request), ORIGIN);
+      (completed ? s.completed : s.failed).add(request);
+      for (const notify of s.nativeWaiters) notify();
+    });
     page.on('pageerror', error => s.errors.push(String(error)));
     page.on('dialog', dialog => { s.errors.push('CANVAS_UI_FIXTURE_UNEXPECTED_DIALOG'); void dialog.dismiss().catch(error => s.errors.push(String(error))); });
     await context.routeWebSocket('**/*', socket => { s.errors.push('CANVAS_UI_FIXTURE_UNKNOWN_WS'); socket.close({ code: 1008, reason: 'Offline fixture forbids WebSockets' }); });

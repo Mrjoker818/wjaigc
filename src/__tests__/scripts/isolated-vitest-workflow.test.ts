@@ -1,7 +1,8 @@
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
 import path from 'node:path';
 import YAML from 'yaml';
 import { afterEach, describe, expect, it, type TestContext } from 'vitest';
@@ -32,6 +33,7 @@ interface Workflow {
 
 const expectedUrl = 'postgresql://postgres:postgres@127.0.0.1:5432/wujie_bridge_test_ci';
 const aliases = ['DATABASE_URL', 'PGDATABASE_URL', 'POSTGRES_TEST_DATABASE_URL', 'TEST_POSTGRES_URL'];
+const execFileAsync = promisify(execFile);
 
 function loadWorkflow(workflowPath: string): Workflow {
   const contents = readFileSync(path.resolve(process.cwd(), workflowPath), 'utf8');
@@ -59,15 +61,17 @@ describe('full Vitest CI database boundary', () => {
     expect(service).toMatchObject({
       image: 'postgres:16-alpine',
       env: { POSTGRES_DB: 'wujie_bridge_test_ci' },
-      ports: ['5432:5432'],
+      ports: ['127.0.0.1:5432:5432'],
     });
-    expect(step?.run).toBe('pnpm test:ci --shard=${{ matrix.shard }}/4');
+    expect(step?.run).toBe('pnpm test:ci --shard=${{ matrix.shard }}/8');
     for (const alias of aliases) expect(step?.env?.[alias]).toBe(expectedUrl);
+    expect(step?.env?.WUJIE_CI_SKETCH_POSTGRES_CONTAINER).toBe('${{ job.services.postgres.id }}');
+    expect(step?.env?.WUJIE_CI_SKETCH_POSTGRES_NETWORK).toBe('${{ job.services.postgres.network }}');
     const mediaRoot = '${{ runner.temp }}/wujie-bridge-test-ci';
     expect(step?.env?.WUJIE_DATA_DIR).toBe(mediaRoot);
     const mediaPreparation = job.steps.find(candidate => candidate.name === 'Prepare isolated Vitest media root');
     expect(mediaPreparation?.env?.WUJIE_DATA_DIR).toBe(mediaRoot);
-    expect(mediaPreparation?.run).toBe('mkdir -p "$WUJIE_DATA_DIR"');
+    expect(mediaPreparation?.run).toBe('mkdir -p "$WUJIE_DATA_DIR/exports"');
     expect(job.steps.indexOf(mediaPreparation!)).toBeLessThan(job.steps.indexOf(step!));
   });
 });
@@ -90,9 +94,13 @@ const shardWorkflows = [
 // command boundary; they are not calculated by the command under test.
 const fixtureShards = [
   [1, 'src/__tests__/scripts/stage-3-evidence-filter.test.ts'],
-  [2, 'src/__tests__/scripts/stage-1-release-gate-contract.test.ts'],
-  [3, 'src/__tests__/api/upscale-onnx-output-boundary.test.ts'],
-  [4, 'src/__tests__/scripts/stage-4-runtime-failure-summary.test.ts'],
+  [2, 'src/__tests__/lib/dependency-security-contract.test.ts'],
+  [3, 'src/__tests__/scripts/stage-1-release-gate-contract.test.ts'],
+  [4, 'src/__tests__/scripts/stage-3-release-gate-contract.test.ts'],
+  [5, 'src/__tests__/scripts/stage-3-runtime-failure-summary.test.ts'],
+  [6, 'src/__tests__/api/upscale-onnx-output-boundary.test.ts'],
+  [7, 'src/__tests__/helpers/canvas-fixture-event-stream.test.ts'],
+  [8, 'src/__tests__/scripts/stage-4-runtime-failure-summary.test.ts'],
 ] as const;
 
 interface HistoryPhase {
@@ -180,23 +188,21 @@ describe.each(shardWorkflows)('%s full-suite shard execution', (workflowPath, ga
         recordHistoryPhase('whole-history-case', fixtureStartedAt);
       }
     }
-  });
+  }, 45_000);
 
-  it.each(fixtureShards)('executes shard %i with exactly its expected real test file', (shard, expectedFile) => {
+  it.each(fixtureShards)('executes shard %i with exactly its expected real test file', async (shard, expectedFile) => {
     const workflow = loadWorkflow(workflowPath);
     const job = workflow.jobs[shardName];
     const step = job.steps.find(candidate => candidate.name === stepName);
     expect(step).toBeDefined();
     const command = step!.run!.replace(/\$\{\{\s*matrix\.shard\s*\}\}/g, String(shard)).trim().split(/\s+/);
     expect(command.slice(0, 2)).toEqual(['pnpm', 'test:ci']);
-    const result = spawnSync(process.execPath,
+    const { stdout } = await execFileAsync(process.execPath,
       ['scripts/run-isolated-vitest.mjs', ...command.slice(2), ...fixtureShards.map(row => row[1]), '--reporter=json'], {
         cwd: process.cwd(), encoding: 'utf8', timeout: 20_000, windowsHide: true,
-        env: { ...process.env, ...step!.env, NODE_OPTIONS: '', WUJIE_DATA_DIR: process.env.WUJIE_DATA_DIR },
+        env: { ...process.env, NODE_OPTIONS: '', ...Object.fromEntries(aliases.map(alias => [alias, step!.env![alias]])) },
       });
-    expect(result.error).toBeUndefined();
-    expect(result.status, result.stderr).toBe(0);
-    const report = JSON.parse(result.stdout) as VitestReport;
+    const report = JSON.parse(stdout) as VitestReport;
     expect(report.success).toBe(true);
     expect(report.numFailedTests).toBe(0);
     expect(report.numPendingTests).toBe(0);
@@ -207,8 +213,8 @@ describe.each(shardWorkflows)('%s full-suite shard execution', (workflowPath, ga
       expect(row.status).toBe('passed');
     }
     expect(job.strategy?.['fail-fast']).toBe(false);
-    expect(job.strategy?.matrix.shard).toEqual([1, 2, 3, 4]);
-  });
+    expect(job.strategy?.matrix.shard).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  }, 30_000);
 
   it.each([
     ['success', 'success', 0],

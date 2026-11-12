@@ -1,5 +1,6 @@
 // @vitest-environment node
 // Real InfiniteCanvas and shipped CSS. Public props only; no paid/business I/O.
+import { isCompletedCanvasFixtureEventStream } from '../helpers/canvas-fixture-event-stream';
 import { readFile, mkdir } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -118,7 +119,12 @@ async function session(theme: Theme = 'gold', width: number = 390, height: numbe
     context.on('request', request => s.pending.add(request));
     context.on('response', response => s.responseStatus.set(response.request(),response.status()));
     context.on('requestfinished', request => { s.pending.delete(request); s.completed.add(request); for (const notify of s.nativeWaiters) notify(); });
-    context.on('requestfailed', request => { s.pending.delete(request); s.failed.add(request); for (const notify of s.nativeWaiters) notify(); });
+    context.on('requestfailed', request => {
+      s.pending.delete(request);
+      const completed = isCompletedCanvasFixtureEventStream(request, s.responseStatus.get(request), ORIGIN);
+      (completed ? s.completed : s.failed).add(request);
+      for (const notify of s.nativeWaiters) notify();
+    });
     page.on('pageerror', error => s.errors.push(String(error)));
     page.on('dialog', dialog => { s.errors.push('CANVAS_UI_FIXTURE_UNEXPECTED_DIALOG'); void dialog.dismiss().catch(error => s.errors.push(String(error))); });
     await context.routeWebSocket('**/*', socket => { s.errors.push('CANVAS_UI_FIXTURE_UNKNOWN_WS'); socket.close({ code: 1008, reason: 'Offline fixture forbids WebSockets' }); });
@@ -213,7 +219,19 @@ const drawer=(s:Session):Locator=>s.page.getByRole('dialog',{name:'图片工具'
 const more=(s:Session):Locator=>bar(s).getByRole('button',{name:'更多',exact:true});
 async function click(s:Session,control:Locator):Promise<void>{const r=await control.boundingBox();if(!r)throw Error('BC_NATIVE_RECT');expect(await control.evaluate(e=>{const r=e.getBoundingClientRect();return e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));}),'native center hit').toBe(true);await s.page.mouse.click(r.x+r.width/2,r.y+r.height/2);await settle(s.page);}
 async function target(control:Locator):Promise<void>{const r=await control.evaluate(e=>{const r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;return {width:r.width,height:r.height,inside:r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight,hit:[[x,y],[r.left+8,y],[r.right-8,y],[x,r.top+8],[x,r.bottom-8]].every(([a,b])=>e.contains(document.elementFromPoint(a,b)))};});expect.soft(r.width,'target width44').toBeGreaterThanOrEqual(44);expect.soft(r.height,'target height44').toBeGreaterThanOrEqual(44);expect.soft(r.inside&&r.hit,'whole target five point native hit').toBe(true);}
-async function readable(control:Locator):Promise<void>{const value=await control.locator('span').last().evaluate(e=>{const range=document.createRange();range.selectNodeContents(e);const b=e.getBoundingClientRect(),rects=[...range.getClientRects()];return {literal:e.textContent,untruncated:e.scrollWidth<=e.clientWidth,inside:rects.every(r=>r.left>=b.left-.5&&r.right<=b.right+.5&&r.top>=b.top-.5&&r.bottom<=b.bottom+.5),lines:rects.length};});expect.soft(value.untruncated&&value.inside,'whole action label readable '+value.literal).toBe(true);expect.soft(value.lines,'single horizontal label '+value.literal).toBe(1);}
+async function readable(control:Locator):Promise<void>{
+ const value=await control.locator('span').last().evaluate(e=>{
+  const range=document.createRange();
+  range.selectNodeContents(e);
+  const b=e.getBoundingClientRect(),rects=[...range.getClientRects()];
+  // Latin and CJK font runs can produce separate rectangles on the same line.
+  const sameLine=rects.length>0&&Math.max(...rects.map(r=>r.top))<Math.min(...rects.map(r=>r.bottom));
+  return {literal:e.textContent,untruncated:e.scrollWidth<=e.clientWidth,
+   inside:rects.every(r=>r.left>=b.left-.5&&r.right<=b.right+.5&&r.top>=b.top-.5&&r.bottom<=b.bottom+.5),sameLine};
+ });
+ expect.soft(value.untruncated&&value.inside,'whole action label readable '+value.literal).toBe(true);
+ expect.soft(value.sameLine,'single horizontal label '+value.literal).toBe(true);
+}
 async function reveal(s:Session,control:Locator):Promise<void>{for(let i=0;i<8;i++){const b=await drawer(s).boundingBox(),r=await control.boundingBox();if(!b||!r)throw Error('BC_SCROLL_RECT');if(r.y>=b.y+1&&r.y+r.height<=b.y+b.height-1)return;const delta=r.y<b.y+1?r.y-b.y-3:r.y+r.height-b.y-b.height+3;await s.page.mouse.move(b.x+b.width-5,b.y+b.height/2);await s.page.mouse.wheel(0,delta);await settle(s.page);}throw Error('BC_BOUNDED_NATIVE_SCROLL');}
 async function capture(s:Session,entry:BCEntry,label:string):Promise<void>{const dir=path.resolve('output/playwright/canvas-image-bc-native-20261019',String(process.pid));await mkdir(dir,{recursive:true});const file=path.join(dir,`${entry.theme}-${entry.width}x${entry.height}-${++captureIndex}-${label}.png`);await s.page.screenshot({path:file});console.log('BC_CAPTURE',JSON.stringify({path:file,label,physicalAndroid:false,coze:false}));}
 async function check(entry:BCEntry,run:(s:Session)=>Promise<void>):Promise<void>{await withSession(entry.theme,entry.width,entry.height,{},async s=>{try{const image=s.page.locator('[data-canvas-image-id="bc-synthetic-image"]');await click(s,image);await bar(s).waitFor();expect(await image.getAttribute('data-canvas-selected')).toBe('true');await run(s);expect(await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state.view)).toEqual({offsetX:0,offsetY:0,zoom:1});const images=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state.images);expect(images).toHaveLength(1);await capture(s,entry,'end');}catch(error){await capture(s,entry,'failure');throw error;}});}

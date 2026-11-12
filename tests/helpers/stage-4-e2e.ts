@@ -2,7 +2,7 @@ import { copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
-import { expect, test as base, type Page, type TestInfo } from '@playwright/test';
+import { expect, test as base, type Page, type Request, type TestInfo } from '@playwright/test';
 import { Pool } from 'pg';
 
 import type { Workflow } from '../../src/lib/workflow-engine';
@@ -28,6 +28,7 @@ export interface Stage4Evidence {
   directory: string;
   console: Stage4EvidenceEntry[];
   network: Stage4EvidenceEntry[];
+  confirmSupersededAgentPoll(request: Request): void;
 }
 
 interface Stage4FixtureUser {
@@ -169,7 +170,15 @@ async function readJson(response: import('@playwright/test').APIResponse): Promi
 export const test = base.extend<{ stage4Evidence: Stage4Evidence }>({
   stage4Evidence: [async ({ page }, useFixture, testInfo) => {
     const directory = evidenceDirectory(testInfo);
-    const evidence: Stage4Evidence = { directory, console: [], network: [] };
+    const failedRequests = new WeakMap<Request, Stage4EvidenceEntry>();
+    const supersededAgentPolls = new Set<Stage4EvidenceEntry>();
+    const evidence: Stage4Evidence = {
+      directory, console: [], network: [],
+      confirmSupersededAgentPoll(request) {
+        const failure = failedRequests.get(request);
+        if (failure) supersededAgentPolls.add(failure);
+      },
+    };
     const sourceStateAtStart = stage3SourceState();
     await mkdir(directory, { recursive: true });
     await writeFile(
@@ -196,13 +205,15 @@ export const test = base.extend<{ stage4Evidence: Stage4Evidence }>({
       });
     });
     page.on('requestfailed', request => {
-      evidence.network.push({
+      const failure: Stage4EvidenceEntry = {
         method: request.method(),
         requestDigest: stage3RequestFingerprint(request.postData()),
         text: redact(request.failure()?.errorText ?? 'request failed'),
         url: sanitizeUrl(request.url()),
         occurredAt: Date.now(),
-      });
+      };
+      failedRequests.set(request, failure);
+      evidence.network.push(failure);
     });
     page.on('response', response => {
       if (response.status() >= 400 || response.url().includes('/api/')) {
@@ -277,7 +288,7 @@ export const test = base.extend<{ stage4Evidence: Stage4Evidence }>({
         body: Buffer.from(JSON.stringify(evidence.network, null, 2)),
         contentType: 'application/json',
       });
-      const runtimeFailures = stage4RuntimeEvidenceFailures(evidence.console, evidence.network);
+      const runtimeFailures = stage4RuntimeEvidenceFailures(evidence.console, evidence.network, supersededAgentPolls);
       if (runtimeFailures.consoleFailures.length > 0 || runtimeFailures.networkFailures.length > 0) {
         console.error(`STAGE4_RUNTIME_FAILURES ${JSON.stringify(summarizeStage4RuntimeFailures(runtimeFailures))}`);
       }

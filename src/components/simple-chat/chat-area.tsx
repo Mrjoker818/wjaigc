@@ -1140,6 +1140,35 @@ export default function ChatArea({
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [messageScope, messagesScope, draftScope, draftReadyScope]);
+  const hasMessages = messages.length > 0;
+  useEffect(() => {
+    const container = messagesScrollRef.current;
+    const content = messagesEndRef.current?.parentElement;
+    if (!hasMessages || !container || !content || typeof ResizeObserver === 'undefined') return;
+
+    // Lazy message layout and composer resizing can move the bottom after a scroll.
+    let maxScrollTop = container.scrollHeight - container.clientHeight;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      const nextMax = container.scrollHeight - container.clientHeight;
+      if (nextMax === maxScrollTop) return;
+      maxScrollTop = nextMax;
+      if (!followMessagesRef.current) return;
+      const scrollVersion = userScrollVersionRef.current;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (followMessagesRef.current && userScrollVersionRef.current === scrollVersion) {
+          container.scrollTop = container.scrollHeight;
+        }
+      });
+    });
+    observer.observe(container);
+    observer.observe(content);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [hasMessages, messageScope, messagesScope, draftScope, draftReadyScope]);
   useEffect(() => {
     if (showGlobalSearch || !searchTarget || searchTarget.scope !== messageScope || messagesScope !== messageScope) return;
     const target = Array.from(messagesScrollRef.current?.querySelectorAll<HTMLElement>('[data-chat-message-id]') ?? [])

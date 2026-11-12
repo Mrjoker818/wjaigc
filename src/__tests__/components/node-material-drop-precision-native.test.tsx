@@ -400,7 +400,8 @@ describe('material drop geometry and history',()=>{
   });
  },25000);
  it('preserves a one-pixel user width edit while the asset reply is pending',async()=>{
-  await withSession('gold',390,844,{nodeType:'input-image',asset:'hold'},async s=>{
+  // The shared seed links to a missing input port. This JSON edit starts with a valid empty graph.
+  await withSession('gold',390,844,{nodeType:'input-image',asset:'hold',emptyGraph:true},async s=>{
    await hyCloseDirectory(s);const before=await workflow(s);const drag=s.page.getByRole('button',{name:'拖动素材 离线规范素材 到画布',exact:true});await drag.scrollIntoViewIfNeeded();const rect=await drag.boundingBox();if(!rect)throw Error('MATERIAL_DRAG_BOUNDS');
    await swipeHw(s,{x:rect.x+rect.width/2,y:rect.y+rect.height/2},{x:330,y:320});await expect.poll(()=>s.counts.get('POST /api/assets'),{timeout:5000}).toBe(1);
    const node=(await workflow(s)).nodes.find(item=>!before.nodes.some(old=>old.id===item.id));if(!node)throw Error('INSERTED_NODE_MISSING');

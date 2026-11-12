@@ -2774,13 +2774,14 @@
     {
       "path": "src/components/infinite-canvas.tsx",
       "reviewArea": "ui",
-      "reviewedBlob": "1288ce76f8347942e959c17cb4bde6dbaffdef59",
+      "reviewedBlob": "2980eae0c1c4307041cd2820e19bb00136d37cdb",
       "disposition": "reviewed",
       "summary": "Content fitting uses the visible desktop toolbar's measured position. Active touch pan is retained until its state commits. Video edit, extend, and derived media retain their established projection rules.",
       "evidence": [
         "release-blank-touch-final.log passes the eight previous empty-canvas failures. Native video edit and extend regression passes six cases.",
         "Earlier exact 1.0 second and verified placement evidence in resume.md.",
-        "At 1280 by 720 the old build had zero reachable points on the last card of the 300-node fixture. The patched production build exposed all five points with 48 pixels above the toolbar. Edge drag produced a scoped save in synthetic fixtures at 1280 by 720, 1920 by 1080 and 375 by 812. Twenty view and dock tests and ten native toolbar tests passed."
+        "At 1280 by 720 the old build had zero reachable points on the last card of the 300-node fixture. The patched production build exposed all five points with 48 pixels above the toolbar. Edge drag produced a scoped save in synthetic fixtures at 1280 by 720, 1920 by 1080 and 375 by 812. Twenty view and dock tests and ten native toolbar tests passed.",
+        "2026-11-12: verified in-page exact 1.0-second selection against real FFmpeg (blue frame, 160×90 PNG), duration rejection, and cancellation without a request. The authorized parent insertion path is preserved. Report the timestamp returned by the server and reject invalid pasted input before submit."
       ]
     },
     {
@@ -2836,21 +2837,23 @@
     {
       "path": ".github/workflows/quality.yml",
       "reviewArea": "infra",
-      "reviewedBlob": "b5ac9f7671578f9faa2fbdfde6d05c9d5eda7fa0",
+      "reviewedBlob": "22fe9d28181bd1f1e89204c41c14e06dc30c633e",
       "disposition": "reviewed",
       "summary": "Pins the four Playwright jobs to Ubuntu 24.04, which supports the repository's locked Playwright release.",
       "evidence": [
-        "GitHub runner log confirms Ubuntu 26.04 rejected Playwright 1.60.0. YAML comparison verified all existing job triggers, commands, and required checks."
+        "GitHub runner log confirms Ubuntu 26.04 rejected Playwright 1.60.0. YAML comparison verified all existing job triggers, commands, and required checks.",
+        "2026-11-12: the eight Vitest shard mappings and GitHub-owned loopback PostgreSQL binding passed the offline workflow contract. No release job, paid-generation check, or fail-closed aggregate was removed. The hosted service identity still needs the candidate Actions run."
       ]
     },
     {
       "path": ".github/workflows/stage-0-quality.yml",
       "reviewArea": "infra",
-      "reviewedBlob": "79f935254c1d55a1239d8ea38ebac97ad34c7c1d",
+      "reviewedBlob": "0377f5030c990a0efd476063cab34e5fa370776a",
       "disposition": "reviewed",
       "summary": "Pins the internal and external Playwright job runners to Ubuntu 24.04.",
       "evidence": [
-        "Parsed YAML differed only in the two browser runner labels. Existing release gate contracts remain in place."
+        "Parsed YAML differed only in the two browser runner labels. Existing release gate contracts remain in place.",
+        "2026-11-12: reviewed 8-way Vitest split after the previous four-shard runs timed out. Local contract exercised all eight shard commands, historical baseline lookup, and PostgreSQL service context."
       ]
     },
     {
@@ -2943,10 +2946,12 @@
     {
       "path": "tests/e2e/stage-4-node-chat-agent.spec.ts",
       "disposition": "reviewed",
-      "reviewedBlob": "5def6da8f94adaea75e5f01e33d20343b2e9a26c",
+      "reviewedBlob": "bf8c2fabb21b33be3a8bf5f7dd04bbb18800b0c0",
       "summary": "Finds the uploaded Simple Chat thumbnail by its accessible filename before continuing the unchanged workflow chain.",
       "evidence": [
-        "All five browser jobs failed at the obsolete empty-alt selector. The exact production candidate in isolated Edge showed zero matches for the old selector and a visible decoded 37 by 23 PNG by the new filename selector. The full workflow chain remains to be rerun."
+        "All five browser jobs failed at the obsolete empty-alt selector. The exact production candidate in isolated Edge showed zero matches for the old selector and a visible decoded 37 by 23 PNG by the new filename selector. The full workflow chain remains to be rerun.",
+        "2026-11-12: the previous CI mobile Chromium trace showed the node library obscuring the image output handoff. Test closes the visible directory before clicking; the original workflow handoff and durable asset lineage checks remain. The local Firefox and mobile Chromium handoff passed; hosted full matrix pending.",
+        "2026-11-12: Firefox evidence separately verifies completed ordinary/vision streams and the exact Agent cancellation. A superseded poll is classified only after client abort, matching cancelled run, and complete cursor-zero terminal replay; raw network evidence remains."
       ]
     },
     {
@@ -2993,6 +2998,15 @@
       "summary": "Asserts the exact ranged request binds storage MIME only when inspection reported it.",
       "evidence": [
         "Three valid legacy S3 cases fail on the earlier candidate then pass alongside three MIME conflict checks."
+      ]
+    },
+    {
+      "path": "src/components/simple-chat/chat-area.tsx",
+      "disposition": "reviewed",
+      "reviewedBlob": "e741b4ead8502659b048c468045ff44002499727",
+      "summary": "Keep the bottom anchored on content or viewport resize only while the reader is following the latest messages.",
+      "evidence": [
+        "2026-11-12: native mobile scroll QE now stays at the bottom on viewport shrink and preserves the prior-history position on expansion. The follow-mode guard and manual scroll version prevent a late resize from moving a reader."
       ]
     }
   ]

@@ -3,6 +3,7 @@ import type { AddressInfo, Socket } from 'node:net';
 import type { Page } from '@playwright/test';
 import { Pool } from 'pg';
 
+import { SimpleChatSseDecoder } from '../../src/lib/simple-chat-sse';
 import {
   ensureStage4Session,
   expect,
@@ -23,6 +24,7 @@ import {
   shouldEnforceWorkflowFpsGate,
 } from '../helpers/workflow-performance';
 import { dragPointerAcrossFrames } from '../helpers/canvas-performance';
+import { cancelFirefoxAgentRun, observeFirefoxAgentPollAborts } from '../helpers/stage-4-firefox-agent-cancel';
 import { finalizeStage4SelectionDiagnostic } from '../helpers/stage-4-selection-diagnostics';
 
 test.describe.configure({ mode: 'serial', timeout: 120_000 });
@@ -90,6 +92,13 @@ function sse(response: import('node:http').ServerResponse, chunks: Record<string
   response.writeHead(200, { 'Content-Type': 'text/event-stream' });
   chunks.forEach(chunk => response.write(`data: ${JSON.stringify(chunk)}\n\n`));
   response.end('data: [DONE]\n\n');
+}
+
+function readCompleteSseFrames(body: Uint8Array): string[] {
+  const decoder = new SimpleChatSseDecoder();
+  const frames = decoder.push(body);
+  expect(decoder.finish(), 'SSE response ended mid-frame').toEqual([]);
+  return frames.map(frame => frame.data);
 }
 
 test.beforeAll(async () => {
@@ -211,6 +220,7 @@ async function sampleRawFps(page: Page, durationMs = 1_000): Promise<number> {
 }
 
 test('executes ordinary chat, vision stop, agent cancel, and refresh recovery', async ({ page, stage4Evidence }, testInfo) => {
+  const firefox = testInfo.project.name === 'firefox';
   await writeStage4Metrics(stage4Evidence, testInfo, 'agent-runtime-mode', {
     expectedAgentMode,
   });
@@ -231,7 +241,21 @@ test('executes ordinary chat, vision stop, agent cancel, and refresh recovery', 
   const measuredCeilingFps = await sampleRawFps(page);
   const chatInput = page.getByPlaceholder(/输入消息/);
   await chatInput.fill(`ORDINARY_CHAT_E2E E2E_PROFILE:${fixture.browserProfile}`);
-  await chatInput.press('Enter');
+  if (firefox) {
+    const [response] = await Promise.all([
+      page.waitForResponse(candidate => candidate.request().method() === 'POST'
+        && new URL(candidate.url()).pathname === '/api/simple-chat/chat'),
+      chatInput.press('Enter'),
+    ]);
+    expect(response.status()).toBe(200);
+    expect(response.headers()['content-type']).toMatch(/^text\/event-stream(?:;|$)/i);
+    expect(await response.finished()).toBeNull();
+    const events = readCompleteSseFrames(await response.body()).map(frame => JSON.parse(frame) as { type?: string });
+    expect(events.at(-1), 'Ordinary chat must send its terminal SSE frame').toMatchObject({ type: 'done' });
+    expect(events.some(event => event.type === 'error')).toBe(false);
+  } else {
+    await chatInput.press('Enter');
+  }
   await expect(page.getByText('Controlled ordinary chat completion', { exact: true }))
     .toBeVisible({ timeout: 20_000 });
   const rawAverageFps = await sampleRawFps(page);
@@ -245,7 +269,7 @@ test('executes ordinary chat, vision stop, agent cancel, and refresh recovery', 
     const response = await fetch('/api/chat', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
     });
-    return { status: response.status, text: await response.text() };
+    return { status: response.status, mediaType: response.headers.get('content-type'), text: await response.text() };
   }, {
     model: 'stage4-gemini-vision-model', providerId: 'stage4-chat-provider',
     messages: [{ role: 'user', content: `VISION_FAILURE_E2E E2E_PROFILE:${fixture.browserProfile}` }],
@@ -256,6 +280,13 @@ test('executes ordinary chat, vision stop, agent cancel, and refresh recovery', 
     sourceVersionIds: [asset.sourceVersionId], selectedEntityIds: [asset.selectedEntityId],
   });
   expect(vision.status).toBe(200);
+  if (firefox) {
+    expect(vision.mediaType).toMatch(/^text\/event-stream(?:;|$)/i);
+    const frames = readCompleteSseFrames(new TextEncoder().encode(vision.text));
+    expect(frames.at(-1), 'Vision chat must send its terminal SSE marker').toBe('[DONE]');
+    const events = frames.slice(0, -1).map(frame => JSON.parse(frame) as { type?: string; error?: string });
+    expect(events.some(event => event.type === 'error' || (!event.type && event.error))).toBe(false);
+  }
   expect(vision.text).toContain('"success":false');
   expect(vision.text).not.toContain('CONTROLLED_CONTINUATION_SHOULD_NOT_EXIST');
   expect(counts(fixture.browserProfile), vision.text).toMatchObject({ ordinary: 1, visionMain: 1, visionProvider: 1 });
@@ -403,6 +434,9 @@ test('executes ordinary chat, vision stop, agent cancel, and refresh recovery', 
     await expect(page.getByText('Agent 编排', { exact: true })).toBeVisible({ timeout: 20_000 });
   };
   await openAgentEditor();
+  const firefoxPollObserver = firefox && expectedAgentMode === 'agent-v2'
+    ? await observeFirefoxAgentPollAborts(page)
+    : null;
   if (expectedAgentMode === 'shadow') {
     await page.evaluate(key => localStorage.setItem(key, 'stale-agent-v2-run-before-shadow-rollback'), runStorageKey);
     await expect.poll(() => page.evaluate(key => localStorage.getItem(key), runStorageKey))
@@ -512,7 +546,13 @@ test('executes ordinary chat, vision stop, agent cancel, and refresh recovery', 
     expect(runId).toBe(submission.runId);
     await expect.poll(() => page.evaluate(key => localStorage.getItem(key), legacyTaskStorageKey), { timeout: 20_000 })
       .toBeNull();
-    await cancel.click();
+    if (firefoxPollObserver) {
+      const { supersededPolls, ...proof } = await cancelFirefoxAgentRun(page, runId!, () => cancel.click(), firefoxPollObserver);
+      for (const request of supersededPolls) stage4Evidence.confirmSupersededAgentPoll(request);
+      await writeStage4Metrics(stage4Evidence, testInfo, 'firefox-agent-cancellation', proof);
+    } else {
+      await cancel.click();
+    }
     await expect(page.getByText('已取消', { exact: true })).toBeVisible({ timeout: 20_000 });
     const durable = await page.evaluate(async id => {
       const response = await fetch(`/api/agent-runs/${encodeURIComponent(id)}`);
@@ -775,10 +815,11 @@ test('completes chat to canvas to workflow to chat with durable lineage and refr
   const workflowExecutionId = String(workflowSubmission.executionId);
   const sendToChat = outputNode.getByRole('button', { name: '发送到智能对话', exact: true });
   if (isMobileViewport) {
-    const nodeLibraryToggle = page.getByRole('button', { name: '切换节点库面板', exact: true });
-    if (await nodeLibraryToggle.getAttribute('aria-pressed') === 'true') {
-      await nodeLibraryToggle.click();
+    const closeDirectory = page.getByRole('button', { name: '关闭目录面板', exact: true });
+    if (await closeDirectory.isVisible()) {
+      await closeDirectory.click();
     }
+    await expect(closeDirectory).toBeHidden();
     await page.getByRole('button', { name: '关闭节点属性', exact: true }).click();
   }
   await expect(sendToChat).toBeVisible({ timeout: 60_000 });

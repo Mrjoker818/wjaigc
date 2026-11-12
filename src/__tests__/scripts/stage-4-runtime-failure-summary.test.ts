@@ -66,6 +66,42 @@ describe('Stage 4 safe CI runtime failure diagnostics', () => {
     expect(failures.networkFailures).toEqual([denied]);
   });
 
+  it('requires proof for the specific Firefox Agent poll that was superseded', () => {
+    const aborted = {
+      method: 'GET', text: 'NS_BINDING_ABORTED',
+      url: 'https://fixture.invalid/api/agent-runs/private-run/events?after=3',
+    };
+    const earlierResponse = { method: 'GET', status: 200, url: aborted.url };
+    const unverifiedAbort = { ...aborted };
+    const network = [earlierResponse, aborted, unverifiedAbort];
+    const raw = JSON.stringify(network);
+
+    expect(evidenceFilter.stage4RuntimeEvidenceFailures([], network).networkFailures)
+      .toEqual([aborted, unverifiedAbort]);
+    const recovered = evidenceFilter.stage4RuntimeEvidenceFailures([], network, new Set([aborted]));
+    expect(recovered.networkFailures).toEqual([unverifiedAbort]);
+    expect(summarize?.(recovered)).toMatchObject({
+      network: [{ method: 'GET', route: '/api/agent-runs/[runId]/events', failure: 'aborted' }],
+    });
+    expect(JSON.stringify(network)).toBe(raw);
+  });
+
+  it('keeps HTTP failures, incomplete responses, and failed chat streams actionable', () => {
+    const poll = {
+      method: 'GET', text: 'NS_BINDING_ABORTED',
+      url: 'https://fixture.invalid/api/agent-runs/private-run/events?after=3',
+    };
+    const failed = [
+      { ...poll, status: 503 },
+      { ...poll, status: 200 },
+      { ...poll, url: poll.url.replace('after=3', 'after=0') },
+      { ...poll, text: 'net::ERR_CONNECTION_CLOSED' },
+      { ...poll, method: 'POST', url: 'https://fixture.invalid/api/simple-chat/chat' },
+    ];
+    expect(evidenceFilter.stage4RuntimeEvidenceFailures([], failed, new Set(failed)).networkFailures)
+      .toEqual(failed);
+  });
+
   it.each([
     ['/api/collaboration/document-enable?projectId=do-not-log', '/api/collaboration/document-enable'],
     ['/?projectId=do-not-log', '/'],
