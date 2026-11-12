@@ -799,6 +799,32 @@ export async function addApiProvider(input: AddProviderInput): Promise<ApiProvid
   return provider;
 }
 
+/**
+ * 合并一次模型发现的结果。
+ *
+ * 当重新发现没有拿到任何模型（密钥刚换、提供商不暴露 /models、请求超时）时，
+ * 保留已有的模型列表，避免一次失败的发现把可用配置清空。
+ *
+ * @param keepWhenEmpty 发现结果为空时是否保留旧列表
+ */
+export function mergeDiscoveryModels(
+  currentModels: ModelInfo[] | undefined,
+  discovered: ModelInfo[],
+  providerId: string,
+  keepWhenEmpty: boolean,
+): ModelInfo[] {
+  const existingModels = currentModels || [];
+  if (discovered.length === 0 && keepWhenEmpty) return existingModels;
+
+  const existingById = new Map(existingModels.map(model => [model.id, model]));
+  return discovered.map(model => ({
+    ...model,
+    providerId,
+    // 保留用户手动修改过的 displayName
+    displayName: existingById.get(model.id)?.displayName || model.displayName,
+  }));
+}
+
 export async function updateApiProvider(providerId: string, updates: Partial<ApiProvider>): Promise<ApiProvider | null> {
   const config = await readConfig();
   const index = config.providers.findIndex(provider => provider.id === providerId);
@@ -818,17 +844,15 @@ export async function updateApiProvider(providerId: string, updates: Partial<Api
   const apiKeyChanged = updates.apiKey && updates.apiKey !== current.apiKey;
   if (baseUrlChanged || apiKeyChanged) {
     const discovery = await discoverModelsForCredentials(next.baseUrl, next.apiKey, next.modelType || 'universal');
-    // 合并：保留用户手动修改的 displayName
-    const existingModelMap = new Map((current.discoveredModels || []).map(m => [m.id, m]));
-    next.discoveredModels = discovery.models.map(model => {
-      const existing = existingModelMap.get(model.id);
-      return {
-        ...model,
-        providerId: next.id,
-        // 如果用户手动修改过 displayName，保留用户的修改
-        displayName: existing?.displayName || model.displayName,
-      };
-    });
+    // 仅换密钥时，若重新发现拿不到模型（密钥刚生效、提供商不暴露 /models、请求超时），
+    // 保留已保存的模型列表，避免一次失败的发现把可用配置清空。
+    // baseUrl 变更时旧模型不再可信，仍按发现结果整体替换。
+    next.discoveredModels = mergeDiscoveryModels(
+      current.discoveredModels,
+      discovery.models,
+      next.id,
+      Boolean(apiKeyChanged && !baseUrlChanged),
+    );
     next.connectionStatus = discovery.success ? 'success' : 'failed';
     next.lastTestedAt = Date.now();
   } else if (updates.discoveredModels) {
@@ -892,7 +916,8 @@ export async function refreshApiProvider(providerId: string): Promise<ApiProvide
   const discovery = await discoverModelsForCredentials(provider.baseUrl, provider.apiKey, provider.modelType || 'universal');
   const balance = await refreshProviderBalance(provider);
   return updateApiProvider(providerId, {
-    discoveredModels: discovery.models.map(model => ({ ...model, providerId })),
+    // 刷新失败时保留已有模型，避免手动刷新把列表清空
+    discoveredModels: mergeDiscoveryModels(provider.discoveredModels, discovery.models, providerId, true),
     connectionStatus: discovery.success ? 'success' : 'failed',
     lastTestedAt: Date.now(),
     balance,
