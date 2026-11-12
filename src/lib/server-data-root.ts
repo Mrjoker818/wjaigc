@@ -82,7 +82,7 @@ export function getServerDataRoot(): string {
 }
 
 export function isServerDataRootDurable(dataRoot: string = getServerDataRoot()): boolean {
-  const resolvedRoot = path.resolve(dataRoot);
+  const resolvedRoot = path.resolve(/* turbopackIgnore: true */ dataRoot);
   if (resolvedRoot === path.resolve(PERSISTENT_DIR)) return true;
   const configuredRoot = process.env.WUJIE_DATA_DIR?.trim();
   return Boolean(

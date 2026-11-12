@@ -29,6 +29,7 @@ export interface Stage4Evidence {
   console: Stage4EvidenceEntry[];
   network: Stage4EvidenceEntry[];
   confirmSupersededAgentPoll(request: Request): void;
+  confirmAcknowledgedWorkflowSaveAbort(request: Request): void;
 }
 
 interface Stage4FixtureUser {
@@ -172,11 +173,16 @@ export const test = base.extend<{ stage4Evidence: Stage4Evidence }>({
     const directory = evidenceDirectory(testInfo);
     const failedRequests = new WeakMap<Request, Stage4EvidenceEntry>();
     const supersededAgentPolls = new Set<Stage4EvidenceEntry>();
+    const acknowledgedWorkflowSaveAborts = new Set<Stage4EvidenceEntry>();
     const evidence: Stage4Evidence = {
       directory, console: [], network: [],
       confirmSupersededAgentPoll(request) {
         const failure = failedRequests.get(request);
         if (failure) supersededAgentPolls.add(failure);
+      },
+      confirmAcknowledgedWorkflowSaveAbort(request) {
+        const failure = failedRequests.get(request);
+        if (failure) acknowledgedWorkflowSaveAborts.add(failure);
       },
     };
     const sourceStateAtStart = stage3SourceState();
@@ -288,7 +294,9 @@ export const test = base.extend<{ stage4Evidence: Stage4Evidence }>({
         body: Buffer.from(JSON.stringify(evidence.network, null, 2)),
         contentType: 'application/json',
       });
-      const runtimeFailures = stage4RuntimeEvidenceFailures(evidence.console, evidence.network, supersededAgentPolls);
+      const runtimeFailures = stage4RuntimeEvidenceFailures(
+        evidence.console, evidence.network, supersededAgentPolls, acknowledgedWorkflowSaveAborts,
+      );
       if (runtimeFailures.consoleFailures.length > 0 || runtimeFailures.networkFailures.length > 0) {
         console.error(`STAGE4_RUNTIME_FAILURES ${JSON.stringify(summarizeStage4RuntimeFailures(runtimeFailures))}`);
       }

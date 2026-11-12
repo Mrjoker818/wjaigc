@@ -1836,14 +1836,15 @@
       "source": "main",
       "sourceCommit": "d5a8866dcaf8a61263ef0984a57c3548100f58db",
       "sourceBlob": "cd0f98fea49bda34d90d9b28969c9a6403590a4b",
-      "reviewedBlob": "b771a232508ee89bce553213d3b522d6e497df02",
+      "reviewedBlob": "181df9160643c330704e165b8187e058213ece39",
       "disposition": "reviewed",
       "summary": "Local inference is opt-in. An absolute mounted worker may be configured for deployment; model provenance and bounded execution are required.",
       "evidence": [
         "local-inference-guard-tests-20261111.log covers disabled and invalid readiness. Synthetic process execution passed on Windows.",
         "Pinned base→HEAD modification. Last reachable source commit d5a8866dcaf8a61263ef0984a57c3548100f58db. HEAD Git blob cd0f98fea49bda34d90d9b28969c9a6403590a4b. No tracked working-tree delta.",
         "config.ts:9–39 derives production outputs from SERVER_DATA_ROOT or the persistent default. src/lib/server-data-root.ts:45–80 can select WUJIE_DATA_DIR or the nonpersistent root. src/app/api/image/upscale-pro/route.ts:16 and src/lib/image-tools/file.ts:23,51–53 use the config output paths. The media-serving route resolves getServerDataRoot instead.",
-        "The pinned delta drops LOCAL_AI_ENABLED, IOPaint and rembg model directory/timeout options and local upscaler controls. resume.md:53 records the prior deployed nonpersistent root. A shared formal write/read location and the local settings retirement were not verified."
+        "The pinned delta drops LOCAL_AI_ENABLED, IOPaint and rembg model directory/timeout options and local upscaler controls. resume.md:53 records the prior deployed nonpersistent root. A shared formal write/read location and the local settings retirement were not verified.",
+        "2026-11-12: Limits tracing at the runtime ONNX model directory argument only. Default and configured path values are unchanged in the compiled route and direct checks; required static runtime assets remain traced."
       ]
     },
     {
@@ -2839,23 +2840,25 @@
     {
       "path": ".github/workflows/quality.yml",
       "reviewArea": "infra",
-      "reviewedBlob": "1d664d0436897936b762c5b66d6266abcac32e7b",
+      "reviewedBlob": "29d1f6059e8697ffc80ee5e351c0fa5150ac54f1",
       "disposition": "reviewed",
       "summary": "Pins the four Playwright jobs to Ubuntu 24.04, which supports the repository's locked Playwright release.",
       "evidence": [
         "GitHub runner log confirms Ubuntu 26.04 rejected Playwright 1.60.0. YAML comparison verified all existing job triggers, commands, and required checks.",
-        "2026-11-12: the eight Vitest shard mappings and GitHub-owned loopback PostgreSQL binding passed the offline workflow contract. No release job, paid-generation check, or fail-closed aggregate was removed. The hosted service identity still needs the candidate Actions run."
+        "2026-11-12: the eight Vitest shard mappings and GitHub-owned loopback PostgreSQL binding passed the offline workflow contract. No release job, paid-generation check, or fail-closed aggregate was removed. The hosted service identity still needs the candidate Actions run.",
+        "2026-11-12: Sets twelve shards at the same 45-minute job budget after the last old shard exceeded it in Stage 1. The real Vitest sequencer covered 1,464 files without omission or duplication. The static build also enforces the existing strict root-file trace audit."
       ]
     },
     {
       "path": ".github/workflows/stage-0-quality.yml",
       "reviewArea": "infra",
-      "reviewedBlob": "8cdc464cb46c782b1cadbc7980101a23635cb1ac",
+      "reviewedBlob": "17aa60a64391f6da92cdc3538a243a804bc19d84",
       "disposition": "reviewed",
       "summary": "Pins the internal and external Playwright job runners to Ubuntu 24.04.",
       "evidence": [
         "Parsed YAML differed only in the two browser runner labels. Existing release gate contracts remain in place.",
-        "2026-11-12: reviewed 8-way Vitest split after the previous four-shard runs timed out. Local contract exercised all eight shard commands, historical baseline lookup, and PostgreSQL service context."
+        "2026-11-12: reviewed 8-way Vitest split after the previous four-shard runs timed out. Local contract exercised all eight shard commands, historical baseline lookup, and PostgreSQL service context.",
+        "2026-11-12: Uses the same twelve-shard partition and unchanged per-test budgets. Direct command fixtures validated every shard and the aggregate still fails on an incomplete or failed shard."
       ]
     },
     {
@@ -2948,12 +2951,13 @@
     {
       "path": "tests/e2e/stage-4-node-chat-agent.spec.ts",
       "disposition": "reviewed",
-      "reviewedBlob": "bf8c2fabb21b33be3a8bf5f7dd04bbb18800b0c0",
+      "reviewedBlob": "d7697d4b581428b5e8f234fd3583ac44b523e91b",
       "summary": "Finds the uploaded Simple Chat thumbnail by its accessible filename before continuing the unchanged workflow chain.",
       "evidence": [
         "All five browser jobs failed at the obsolete empty-alt selector. The exact production candidate in isolated Edge showed zero matches for the old selector and a visible decoded 37 by 23 PNG by the new filename selector. The full workflow chain remains to be rerun.",
         "2026-11-12: the previous CI mobile Chromium trace showed the node library obscuring the image output handoff. Test closes the visible directory before clicking; the original workflow handoff and durable asset lineage checks remain. The local Firefox and mobile Chromium handoff passed; hosted full matrix pending.",
-        "2026-11-12: Firefox evidence separately verifies completed ordinary/vision streams and the exact Agent cancellation. A superseded poll is classified only after client abort, matching cancelled run, and complete cursor-zero terminal replay; raw network evidence remains."
+        "2026-11-12: Firefox evidence separately verifies completed ordinary/vision streams and the exact Agent cancellation. A superseded poll is classified only after client abort, matching cancelled run, and complete cursor-zero terminal replay; raw network evidence remains.",
+        "2026-11-12: Hosted Chromium traces show one successful persisted save with a later response-body abort after the matched chat navigation started. The updated test verifies the exact server graph, transfer identity, five asset placements and refreshed state; targeted desktop and mobile Chromium pass. Mobile uses the supported zoom control to clear the port legend before a normal hit."
       ]
     },
     {
@@ -2977,11 +2981,12 @@
     {
       "path": "src/lib/asset-core/managed-media-read.ts",
       "disposition": "reviewed",
-      "reviewedBlob": "01e630c8e6659044b32231bcdb0bad84642b5fa7",
+      "reviewedBlob": "66c259b5fca8ab5e1e10115eb9d0315774aa28a8",
       "summary": "Binds managed range reads to verified media type while preserving legacy byte recognition when the storage has no MIME.",
       "evidence": [
         "Managed share snapshot, legacy image and document enable test files passed with the same range, size, identity, and byte protections.",
-        "Independent review caught an empty legacy MIME being forwarded. Legacy null, generic and PNG metadata pass exact bound-read and actual byte validation, and three inconsistent types still fail."
+        "Independent review caught an empty legacy MIME being forwarded. Legacy null, generic and PNG metadata pass exact bound-read and actual byte validation, and three inconsistent types still fail.",
+        "2026-11-12: Limits tracing at the runtime data-root argument only. The pinned Turbopack contrast removes source-root references while the compiled route keeps authorized local media behavior and its traced static runtime asset."
       ]
     },
     {
@@ -3009,6 +3014,15 @@
       "summary": "Keep the bottom anchored on content or viewport resize only while the reader is following the latest messages.",
       "evidence": [
         "2026-11-12: native mobile scroll QE now stays at the bottom on viewport shrink and preserves the prior-history position on expansion. The follow-mode guard and manual scroll version prevent a late resize from moving a reader."
+      ]
+    },
+    {
+      "path": "src/lib/server-data-root.ts",
+      "disposition": "reviewed",
+      "reviewedBlob": "7d28092c005c94611dec0657b9db1a38e02ccae6",
+      "summary": "Restricts tracing for the runtime durability path resolution without changing data-root selection or authorization.",
+      "evidence": [
+        "The pinned Next.js 16.4.6 comparison retained the same compiled durability result while dropping the accidental source-root references. Existing durable and temporary-root behavior passed targeted tests."
       ]
     }
   ]

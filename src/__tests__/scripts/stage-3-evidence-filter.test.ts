@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { isRecoveredStage3CanvasSkillCatalogAbort } from '../../../tests/helpers/stage-3-e2e';
+import {
+  isRecoveredStage3CanvasSkillCatalogAbort,
+  isRecoveredStage3OwnerStatusReloadAbort,
+} from '../../../tests/helpers/stage-3-e2e';
 import {
   isBenignStage3RequestAbort,
   isRecoveredStage3RequestAbort,
@@ -76,6 +79,56 @@ describe('Stage 3 browser evidence request filtering', () => {
       const failure = { ...aborted, ...change };
       const matchingCompletion = { ...completed, method: failure.method, url: failure.url };
       expect(isRecoveredStage3CanvasSkillCatalogAbort(failure, [failure, matchingCompletion])).toBe(false);
+    });
+  });
+
+  describe('owner status recheck during a Stage 3 project reload', () => {
+    const beforeReload = {
+      method: 'GET',
+      url: 'http://127.0.0.1:5000/api/collaboration/document-enable?projectId=stage3-project',
+      status: 200,
+      ownerStatusNavigation: 1,
+      legacyOwnerStatus: true as const,
+    };
+    const interrupted = {
+      method: 'GET',
+      url: beforeReload.url,
+      text: 'net::ERR_ABORTED',
+      ownerStatusNavigation: 1,
+      ownerStatusInterruptedByReload: true as const,
+    };
+    const afterReload = { ...beforeReload, ownerStatusNavigation: 2 };
+
+    it('accepts a reload cancellation between confirmed legacy reads in consecutive documents', () => {
+      expect(isRecoveredStage3OwnerStatusReloadAbort(interrupted, [beforeReload, interrupted, afterReload])).toBe(true);
+      expect(isBenignStage3RequestAbort(interrupted)).toBe(false);
+    });
+
+    it('requires completed legacy reads both before and after the cancellation', () => {
+      expect(isRecoveredStage3OwnerStatusReloadAbort(interrupted, [interrupted, afterReload])).toBe(false);
+      expect(isRecoveredStage3OwnerStatusReloadAbort(interrupted, [beforeReload, interrupted])).toBe(false);
+      expect(isRecoveredStage3OwnerStatusReloadAbort(interrupted, [beforeReload, afterReload, interrupted])).toBe(false);
+    });
+
+    it.each([
+      { text: 'net::ERR_CONNECTION_CLOSED' },
+      { status: 503 },
+      { method: 'POST' },
+      { ownerStatusInterruptedByReload: undefined },
+    ])('keeps a failed request with %j', change => {
+      const failure = { ...interrupted, ...change };
+      expect(isRecoveredStage3OwnerStatusReloadAbort(failure, [beforeReload, failure, afterReload])).toBe(false);
+    });
+
+    it.each([
+      { status: 503 },
+      { legacyOwnerStatus: undefined },
+      { ownerStatusNavigation: 1 },
+      { ownerStatusNavigation: 3 },
+      { url: beforeReload.url.replace('stage3-project', 'different-project') },
+      { url: beforeReload.url.replace('127.0.0.1', 'localhost') },
+    ])('does not recover from a replacement with %j', change => {
+      expect(isRecoveredStage3OwnerStatusReloadAbort(interrupted, [beforeReload, interrupted, { ...afterReload, ...change }])).toBe(false);
     });
   });
 

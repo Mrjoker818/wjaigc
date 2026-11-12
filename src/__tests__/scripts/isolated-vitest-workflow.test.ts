@@ -63,7 +63,7 @@ describe('full Vitest CI database boundary', () => {
       env: { POSTGRES_DB: 'wujie_bridge_test_ci' },
       ports: ['127.0.0.1:5432:5432'],
     });
-    expect(step?.run).toBe('pnpm test:ci --shard=${{ matrix.shard }}/8');
+    expect(step?.run).toBe('pnpm test:ci --shard=${{ matrix.shard }}/12');
     for (const alias of aliases) expect(step?.env?.[alias]).toBe(expectedUrl);
     expect(step?.env?.WUJIE_CI_SKETCH_POSTGRES_CONTAINER).toBe('${{ job.services.postgres.id }}');
     expect(step?.env?.WUJIE_CI_SKETCH_POSTGRES_NETWORK).toBe('${{ job.services.postgres.network }}');
@@ -94,13 +94,17 @@ const shardWorkflows = [
 // command boundary; they are not calculated by the command under test.
 const fixtureShards = [
   [1, 'src/__tests__/scripts/stage-3-evidence-filter.test.ts'],
-  [2, 'src/__tests__/lib/dependency-security-contract.test.ts'],
-  [3, 'src/__tests__/scripts/stage-1-release-gate-contract.test.ts'],
-  [4, 'src/__tests__/scripts/stage-3-release-gate-contract.test.ts'],
-  [5, 'src/__tests__/scripts/stage-3-runtime-failure-summary.test.ts'],
-  [6, 'src/__tests__/api/upscale-onnx-output-boundary.test.ts'],
-  [7, 'src/__tests__/helpers/canvas-fixture-event-stream.test.ts'],
-  [8, 'src/__tests__/scripts/stage-4-runtime-failure-summary.test.ts'],
+  [2, 'src/__tests__/helpers/stage-4-workflow-chat-handoff.test.ts'],
+  [3, 'src/__tests__/lib/dependency-security-contract.test.ts'],
+  [4, 'src/__tests__/helpers/video-plan-bj-post-contract.test.ts'],
+  [5, 'src/__tests__/scripts/stage-1-release-gate-contract.test.ts'],
+  [6, 'src/__tests__/scripts/stage-3-release-gate-contract.test.ts'],
+  [7, 'src/__tests__/token-pricing.test.ts'],
+  [8, 'src/__tests__/helpers/jsdom-browser-apis.test.ts'],
+  [9, 'src/__tests__/scripts/stage-3-runtime-failure-summary.test.ts'],
+  [10, 'src/__tests__/api/upscale-onnx-output-boundary.test.ts'],
+  [11, 'src/__tests__/helpers/canvas-fixture-event-stream.test.ts'],
+  [12, 'src/__tests__/scripts/stage-4-runtime-failure-summary.test.ts'],
 ] as const;
 
 interface HistoryPhase {
@@ -213,7 +217,7 @@ describe.each(shardWorkflows)('%s full-suite shard execution', (workflowPath, ga
       expect(row.status).toBe('passed');
     }
     expect(job.strategy?.['fail-fast']).toBe(false);
-    expect(job.strategy?.matrix.shard).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(job.strategy?.matrix.shard).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
   }, 30_000);
 
   it.each([

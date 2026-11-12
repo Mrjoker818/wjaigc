@@ -136,10 +136,12 @@ describe('actual hook through actual document HTTP routes with controlled servic
   it('retries the same operation explicitly after the route succeeded but its response was lost', async () => {
     const f = mount(); await waitFor(() => expect(f.result.current.status).toBe('saved'));
     loseResponse = true; act(() => f.result.current.applyLocalChange({ placementId: 'p1', x: 62 }));
-    await waitFor(() => expect(f.result.current.status).toBe('recovery'), { timeout: 3_500 });
+    await waitFor(() => {
+      expect(f.result.current.status).toBe('recovery');
+      expect(f.result.current.recoveryRetryReady).toBe(true);
+    }, { timeout: 3_500 });
     expect(writes).toBe(1); expect(operations).toHaveLength(1);
     expect(createBrowserPendingUpdateStore('project-a', 'actor-a').load()).toHaveLength(1);
-    expect(f.result.current.recoveryRetryReady).toBe(true);
     act(() => f.result.current.retryRecovered());
     await waitFor(() => expect(f.result.current.status).toBe('saved'));
     expect(operations).toEqual([operations[0], operations[0]]); expect(writes).toBe(1);

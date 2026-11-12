@@ -102,6 +102,37 @@ describe('Stage 4 safe CI runtime failure diagnostics', () => {
       .toEqual(failed);
   });
 
+  it('accepts only the acknowledged workflow save whose exact request was interrupted by navigation', () => {
+    const aborted = {
+      method: 'POST', text: 'net::ERR_ABORTED', requestDigest: 'workflow-snapshot',
+      url: 'https://fixture.invalid/api/workflow/save',
+    };
+    const headers = { method: 'POST', status: 200, requestDigest: aborted.requestDigest, url: aborted.url };
+    const duplicate = { ...aborted };
+    const network = [headers, aborted, duplicate];
+    const raw = JSON.stringify(network);
+
+    expect(evidenceFilter.stage4RuntimeEvidenceFailures([], network).networkFailures).toEqual([aborted, duplicate]);
+    expect(evidenceFilter.stage4RuntimeEvidenceFailures([], network, undefined, new Set([aborted])).networkFailures)
+      .toEqual([duplicate]);
+    expect(JSON.stringify(network)).toBe(raw);
+  });
+
+  it('keeps rejected saves, other transport failures, and unrelated requests actionable', () => {
+    const save = {
+      method: 'POST', text: 'net::ERR_ABORTED', requestDigest: 'workflow-snapshot',
+      url: 'https://fixture.invalid/api/workflow/save',
+    };
+    const failures = [
+      { ...save, status: 503 },
+      { ...save, text: 'net::ERR_CONNECTION_CLOSED' },
+      { ...save, requestDigest: undefined },
+      { ...save, url: 'https://fixture.invalid/api/assets/transfer' },
+    ];
+    expect(evidenceFilter.stage4RuntimeEvidenceFailures([], failures, undefined, new Set(failures)).networkFailures)
+      .toEqual(failures);
+  });
+
   it.each([
     ['/api/collaboration/document-enable?projectId=do-not-log', '/api/collaboration/document-enable'],
     ['/?projectId=do-not-log', '/'],

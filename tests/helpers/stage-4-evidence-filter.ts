@@ -148,6 +148,20 @@ function isRecoveredWorkflowStatusAbort(
   ));
 }
 
+function isAcknowledgedWorkflowSaveAbort(
+  entry: Stage4RuntimeEvidenceEntry,
+  acknowledgedWorkflowSaveAborts?: ReadonlySet<Stage4RuntimeEvidenceEntry>,
+): boolean {
+  if (entry.method !== 'POST' || entry.text !== 'net::ERR_ABORTED' || entry.status !== undefined
+    || !entry.requestDigest || !entry.url || !acknowledgedWorkflowSaveAborts?.has(entry)) return false;
+  try {
+    const url = new URL(entry.url);
+    return url.pathname === '/api/workflow/save' && url.search === '';
+  } catch {
+    return false;
+  }
+}
+
 function isRecoveredProjectSyncConflict(
   entry: Stage4RuntimeEvidenceEntry,
   evidence: Stage4RuntimeEvidenceEntry[],
@@ -203,6 +217,7 @@ export function stage4RuntimeEvidenceFailures(
   consoleEntries: Stage4RuntimeEvidenceEntry[],
   networkEntries: Stage4RuntimeEvidenceEntry[],
   supersededAgentPolls?: ReadonlySet<Stage4RuntimeEvidenceEntry>,
+  acknowledgedWorkflowSaveAborts?: ReadonlySet<Stage4RuntimeEvidenceEntry>,
 ): {
   consoleFailures: Stage4RuntimeEvidenceEntry[];
   networkFailures: Stage4RuntimeEvidenceEntry[];
@@ -220,6 +235,7 @@ export function stage4RuntimeEvidenceFailures(
         && !isBenignStage3RequestAbort(entry)
         && !isRecoveredStage3RequestAbort(entry, networkEntries)
         && !isRecoveredWorkflowStatusAbort(entry, networkEntries)
+        && !isAcknowledgedWorkflowSaveAbort(entry, acknowledgedWorkflowSaveAborts)
         && !isRecoveredIdempotentGetAbort(entry, networkEntries, supersededAgentPolls))
     )),
   };

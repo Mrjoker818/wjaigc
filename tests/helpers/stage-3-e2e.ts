@@ -16,13 +16,18 @@ export interface Stage3Evidence {
   directory: string;
   console: Stage3EvidenceEntry[];
   network: Stage3NetworkEntry[];
+  trackProjectReload(projectId: string): () => Promise<void>;
 }
 
 interface Stage3NetworkEntry extends Stage3EvidenceEntry {
   canvasCatalogNavigation?: number;
+  ownerStatusNavigation?: number;
+  ownerStatusInterruptedByReload?: true;
+  legacyOwnerStatus?: true;
 }
 
 const SECRET_PATTERN = /((?:api[-_]?key|access[-_]?token|refresh[-_]?token|session[-_]?token|password|credential|secret))(["'=:\s]+)(?:"[^"]*"|'[^']*'|[^\r\n,}]+)/gi;
+const OWNER_STATUS_PATH = '/api/collaboration/document-enable';
 
 function safe(value: string): string {
   return value.trim().replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
@@ -81,6 +86,28 @@ export function isRecoveredStage3CanvasSkillCatalogAbort(
   ));
 }
 
+export function isRecoveredStage3OwnerStatusReloadAbort(
+  entry: Stage3NetworkEntry,
+  evidence: Stage3NetworkEntry[],
+): boolean {
+  const navigation = entry.ownerStatusNavigation;
+  if (navigation === undefined || !entry.ownerStatusInterruptedByReload
+    || entry.method !== 'GET' || !entry.url || entry.status !== undefined
+    || entry.text !== 'net::ERR_ABORTED') return false;
+
+  const abortIndex = evidence.indexOf(entry);
+  const confirmedRead = (candidate: Stage3NetworkEntry, document: number): boolean => (
+    candidate.method === 'GET'
+    && candidate.url === entry.url
+    && candidate.ownerStatusNavigation === document
+    && candidate.status === 200
+    && candidate.legacyOwnerStatus === true
+  );
+  return abortIndex >= 0
+    && evidence.some((candidate, index) => index < abortIndex && confirmedRead(candidate, navigation))
+    && evidence.some((candidate, index) => index > abortIndex && confirmedRead(candidate, navigation + 1));
+}
+
 function evidenceDirectory(testInfo: TestInfo): string {
   return join(
     process.cwd(),
@@ -101,9 +128,28 @@ function evidenceDirectory(testInfo: TestInfo): string {
 export const test = base.extend<{ stage3Evidence: Stage3Evidence }>({
   stage3Evidence: [async ({ page }, useFixture, testInfo) => {
     const directory = evidenceDirectory(testInfo);
-    const evidence: Stage3Evidence = { directory, console: [], network: [] };
     const canvasCatalogNavigations = new WeakMap<Request, number>();
+    const ownerStatusNavigations = new WeakMap<Request, number>();
+    const ownerStatusChecks: Promise<void>[] = [];
+    let ownerStatusEvidenceOpen = true;
+    let ownerStatusPath: string | undefined;
+    let projectReload: { url: string; navigation: number } | undefined;
     let mainFrameNavigation = 0;
+    const evidence: Stage3Evidence = {
+      directory, console: [], network: [],
+      trackProjectReload(projectId) {
+        const path = `${OWNER_STATUS_PATH}?projectId=${encodeURIComponent(projectId)}`;
+        ownerStatusPath = path;
+        return async (): Promise<void> => {
+          projectReload = { url: new URL(path, page.url()).href, navigation: mainFrameNavigation };
+          try {
+            await page.reload({ waitUntil: 'domcontentloaded' });
+          } finally {
+            projectReload = undefined;
+          }
+        };
+      },
+    };
     await mkdir(directory, { recursive: true });
     page.on('console', message => {
       if (message.type() === 'error' || message.type() === 'warning') {
@@ -125,17 +171,23 @@ export const test = base.extend<{ stage3Evidence: Stage3Evidence }>({
       if (frame === page.mainFrame()) mainFrameNavigation += 1;
     });
     page.on('request', request => {
-      if (request.resourceType() === 'fetch'
-        && isCanvasSkillCatalogRead(request.method(), request.url())
-        && !request.serviceWorker()
-        && request.frame() === page.mainFrame()
-        && new URL(request.url()).origin === new URL(page.url()).origin) {
+      if (request.resourceType() !== 'fetch' || request.method() !== 'GET'
+        || request.serviceWorker() || request.frame() !== page.mainFrame()) return;
+      const url = new URL(request.url());
+      if (url.origin !== new URL(page.url()).origin) return;
+      if (isCanvasSkillCatalogRead(request.method(), request.url())) {
         canvasCatalogNavigations.set(request, mainFrameNavigation);
+      } else if (`${url.pathname}${url.search}` === ownerStatusPath) {
+        ownerStatusNavigations.set(request, mainFrameNavigation);
       }
     });
     page.on('requestfailed', request => {
+      const ownerStatusNavigation = ownerStatusNavigations.get(request);
       evidence.network.push({
         canvasCatalogNavigation: canvasCatalogNavigations.get(request),
+        ownerStatusNavigation,
+        ownerStatusInterruptedByReload: !request.existingResponse() && projectReload?.url === request.url()
+          && projectReload.navigation === ownerStatusNavigation ? true : undefined,
         method: request.method(),
         occurredAt: Date.now(),
         requestDigest: stage3RequestFingerprint(request.postData()),
@@ -145,15 +197,29 @@ export const test = base.extend<{ stage3Evidence: Stage3Evidence }>({
     });
     page.on('requestfinished', request => {
       const canvasCatalogNavigation = canvasCatalogNavigations.get(request);
-      // A response whose body was cancelled cannot establish catalog recovery.
-      if (canvasCatalogNavigation === undefined || request.existingResponse()?.status() !== 200) return;
-      evidence.network.push({
+      const ownerStatusNavigation = ownerStatusNavigations.get(request);
+      if (canvasCatalogNavigation === undefined && ownerStatusNavigation === undefined) return;
+      const response = request.existingResponse();
+      if (response?.status() !== 200) return;
+      const entry: Stage3NetworkEntry = {
         canvasCatalogNavigation,
+        ownerStatusNavigation,
         method: request.method(),
         occurredAt: Date.now(),
         status: 200,
         url: sanitizeUrl(request.url()),
-      });
+      };
+      evidence.network.push(entry);
+      if (ownerStatusNavigation !== undefined) {
+        const projectId = new URL(request.url()).searchParams.get('projectId');
+        // Read while this document's response body is still available to Chromium.
+        ownerStatusChecks.push(response.json().then((body: Record<string, unknown> | null) => {
+          if (ownerStatusEvidenceOpen && body?.success === true && body.projectId === projectId
+            && body.featureEnabled === false && body.enabled === false
+            && typeof body.currentRevision === 'number' && Number.isSafeInteger(body.currentRevision)
+            && body.currentRevision >= 0) entry.legacyOwnerStatus = true;
+        }, () => undefined));
+      }
     });
     page.on('response', response => {
       const request = response.request();
@@ -185,6 +251,18 @@ export const test = base.extend<{ stage3Evidence: Stage3Evidence }>({
         await page.context().tracing.stop({ path: join(directory, 'trace.zip') });
       } catch (error) {
         artifactErrors.push(`trace: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      let ownerStatusDeadline: ReturnType<typeof setTimeout> | undefined;
+      try {
+        if (ownerStatusChecks.length > 0) {
+          await Promise.race([
+            Promise.all(ownerStatusChecks),
+            new Promise<void>(resolve => { ownerStatusDeadline = setTimeout(resolve, 1_000); }),
+          ]);
+        }
+      } finally {
+        ownerStatusEvidenceOpen = false;
+        if (ownerStatusDeadline) clearTimeout(ownerStatusDeadline);
       }
       const video = page.video();
       let contextClosed = false;
@@ -232,6 +310,7 @@ export const test = base.extend<{ stage3Evidence: Stage3Evidence }>({
         || (!entry.status
           && !isBenignStage3RequestAbort(entry)
           && !isRecoveredStage3CanvasSkillCatalogAbort(entry, evidence.network)
+          && !isRecoveredStage3OwnerStatusReloadAbort(entry, evidence.network)
           && !isRecoveredStage3RequestAbort(entry, evidence.network))
       ));
       if (consoleErrors.length > 0 || networkErrors.length > 0) {

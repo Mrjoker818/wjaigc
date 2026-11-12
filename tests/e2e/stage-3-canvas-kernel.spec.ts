@@ -958,6 +958,7 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
 
   test('commits move and resize as one undo step each', async ({ page, stage3Evidence }, testInfo) => {
     const projectId = stage3ProjectId(testInfo.project.name, 1);
+    const reloadProject = stage3Evidence.trackProjectReload(projectId);
     let syncSequence = 0;
     let syncTruncated = false;
     let hydrationReads = 0;
@@ -1196,7 +1197,7 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
     }).toBeLessThanOrEqual(4);
 
     const resizedBeforeImmediateReload = await captureCanvasGeometry(page, nodeId);
-    await page.reload({ waitUntil: 'domcontentloaded' });
+    await reloadProject();
     await waitForStage3Node(page, nodeId);
     const resizedAfterImmediateReload = await captureCanvasGeometry(page, nodeId);
     expect(resizedAfterImmediateReload).toMatchObject({

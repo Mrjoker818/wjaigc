@@ -20,7 +20,10 @@ let post: typeof import('@/app/api/video/tools/route').POST;
 type Theme='gold'|'mono';
 interface Options {admin?:boolean; requireMissing?:boolean; touch?:boolean;holdRecovery?:boolean;catalogLoading?:boolean}
 interface FixtureWindow extends Window {canvasUi:{png:string;mount(theme:Theme,options:Options):void;unmount():void;state:{mounts:number;disposed:boolean;scopeChecks:number;images:unknown[];groups:unknown[];actions:string[];view:{offsetX:number;offsetY:number;zoom:number}|null;events:Array<{type:string;target:string}>}}}
-interface Session {frAudits:FRActivity[];frResults:Array<Awaited<ReturnType<FrameServer['extract']>>>;context:BrowserContext;page:Page;options:Options;errors:string[];counts:Map<string,number>;handlers:Set<Promise<void>>;mounted:boolean;pending:Set<Request>;completed:Set<Request>;failed:Set<Request>;refused:Set<Request>;responseStatus:Map<Request,number>;nativeWaiters:Set<()=>void>;png:Buffer;releaseRecovery:()=>void;recoveryCalls:number}
+type NativePhase = 'setup' | 'case' | 'unmount' | 'drain' | 'context-close';
+type NativeEvent = 'started' | 'routed' | 'response' | 'terminal' | 'routeSettled';
+type NativeLifecycle = Partial<Record<NativeEvent, { sequence: number; phase: NativePhase }>>;
+interface Session {frAudits:FRActivity[];frResults:Array<Awaited<ReturnType<FrameServer['extract']>>>;context:BrowserContext;page:Page;options:Options;errors:string[];counts:Map<string,number>;handlers:Set<Promise<void>>;mounted:boolean;pending:Set<Request>;completed:Set<Request>;failed:Set<Request>;refused:Set<Request>;responseStatus:Map<Request,number>;nativeWaiters:Set<()=>void>;png:Buffer;releaseRecovery:()=>void;recoveryCalls:number;nativePhase:NativePhase;nativeLifecycle:WeakMap<Request,NativeLifecycle>;verifiedFrameUrl?:string}
 const ORIGIN='https://canvas-shell-mobile.invalid';
 const HELP_FILES=['canvas-overview.jpeg','erase-tool.jpeg','mask-tool.jpeg','remove-bg.jpeg','upscale.jpeg','lang-edit.jpeg','svg-trace.jpeg','extend.jpeg','oh-my-prompt.jpeg'];
 const ENTRY=String.raw`
@@ -137,17 +140,26 @@ async function session(theme: Theme = 'gold', width: number = 390, height: numbe
     const page = await context.newPage(); page.setDefaultTimeout(1500);
     let releaseRecovery:()=>void=()=>{};const recoveryGate=options.holdRecovery?new Promise<void>(resolve=>{releaseRecovery=resolve;}):Promise.resolve();
     const s: Session = { frAudits:[],frResults:[],context, page, options, errors: [], counts: new Map(), handlers: new Set(), mounted: false,
-      pending: new Set(), completed: new Set(), failed: new Set(), refused: new Set(), responseStatus: new Map(), nativeWaiters: new Set(), png: Buffer.alloc(0),releaseRecovery,recoveryCalls:0 }; value = s; live.add(s);
-    context.on('request', request => s.pending.add(request));
-    context.on('response', response => { s.responseStatus.set(response.request(),response.status());if(response.url()===ORIGIN+'/api/task-events')console.log('FD_SSE_NATIVE_RESPONSE',JSON.stringify({url:response.url(),status:response.status(),contentType:response.headers()['content-type']??null})); });
-    context.on('requestfinished', request => { s.pending.delete(request); s.completed.add(request); for (const notify of s.nativeWaiters) notify(); });
-    context.on('requestfailed', request => { s.pending.delete(request); s.failed.add(request); for (const notify of s.nativeWaiters) notify(); });
+      pending: new Set(), completed: new Set(), failed: new Set(), refused: new Set(), responseStatus: new Map(), nativeWaiters: new Set(), png: Buffer.alloc(0),releaseRecovery,recoveryCalls:0,
+      nativePhase: 'setup', nativeLifecycle: new WeakMap() }; value = s; live.add(s);
+    let nativeSequence = 0;
+    const recordNativeEvent = (request: Request, event: NativeEvent): void => {
+      const lifecycle = s.nativeLifecycle.get(request) ?? {};
+      lifecycle[event] = { sequence: ++nativeSequence, phase: s.nativePhase };
+      s.nativeLifecycle.set(request, lifecycle);
+    };
+    context.on('request', request => { recordNativeEvent(request, 'started'); s.pending.add(request); });
+    context.on('response', response => { recordNativeEvent(response.request(), 'response'); s.responseStatus.set(response.request(),response.status());if(response.url()===ORIGIN+'/api/task-events')console.log('FD_SSE_NATIVE_RESPONSE',JSON.stringify({url:response.url(),status:response.status(),contentType:response.headers()['content-type']??null})); });
+    context.on('requestfinished', request => { recordNativeEvent(request, 'terminal'); s.pending.delete(request); s.completed.add(request); for (const notify of s.nativeWaiters) notify(); });
+    context.on('requestfailed', request => { recordNativeEvent(request, 'terminal'); s.pending.delete(request); s.failed.add(request); for (const notify of s.nativeWaiters) notify(); });
     page.on('pageerror', error => s.errors.push(String(error)));
     page.on('dialog', dialog => { s.errors.push('FR_UNEXPECTED_NATIVE_DIALOG'); void dialog.dismiss(); });
     await context.routeWebSocket('**/*', socket => { s.errors.push('CANVAS_UI_FIXTURE_UNKNOWN_WS'); socket.close({ code: 1008, reason: 'Offline fixture forbids WebSockets' }); });
     await context.route('**/*', async route => {
+      const request = route.request();
+      recordNativeEvent(request, 'routed');
       const operation = (async (): Promise<void> => {
-        const request = route.request(), url = new URL(request.url()), headers = request.headers();
+        const url = new URL(request.url()), headers = request.headers();
         if (url.origin === ORIGIN && url.search === '' && request.method() === 'POST'
           && (url.pathname === '/api/activity' || url.pathname === '/api/video/tools')) {
           if (url.username || url.password || headers.authorization || headers.cookie || headers['x-api-key']
@@ -176,7 +188,12 @@ async function session(theme: Theme = 'gold', width: number = 390, height: numbe
         if (url.origin !== ORIGIN || url.username || url.password || request.method() !== 'GET' || request.postData() !== null
           || headers.authorization || headers.cookie || headers['x-api-key'] || headers['api-key'] || headers['idempotency-key']) throw Error('CANVAS_UI_FIXTURE_HTTP_BOUNDARY');
         const key = url.pathname + url.search, count = (s.counts.get(key) ?? 0) + 1; s.counts.set(key, count);
-        if (count > (['/api/session','/api/auth/me','/api/task-events'].includes(key)?6:(key===CANVAS_FRAME_SOURCE||HELP_FILES.some(file=>key==='/api/help-image?file='+file))?3:1)) throw Error('CANVAS_UI_FIXTURE_HTTP_COUNT ' + key);
+        const frame = s.frResults[0]?.frame;
+        const ownedFrameImage = frame?.url === key && request.resourceType() === 'image' && !request.isNavigationRequest();
+        const limit = ['/api/session','/api/auth/me','/api/task-events'].includes(key) ? 6
+          : (key === CANVAS_FRAME_SOURCE || HELP_FILES.some(file => key === '/api/help-image?file=' + file)) ? 3
+          : ownedFrameImage ? 2 : 1;
+        if (count > limit) throw Error('CANVAS_UI_FIXTURE_HTTP_COUNT ' + key);
         if (key === '/' && request.isNavigationRequest()) {
           await route.fulfill({ contentType: 'text/html', body: `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style></head><body style="margin:0;width:100vw;height:100dvh;overflow:hidden"><div id="fixture-root" style="position:relative;width:100%;height:100%"></div></body></html>` }); return;
         }
@@ -190,13 +207,12 @@ async function session(theme: Theme = 'gold', width: number = 390, height: numbe
         if (key === CANVAS_FRAME_SOURCE && frameServer) {
           await route.fulfill({ contentType: 'video/mp4', body: frameServer.clip }); return;
         }
-        const frame = s.frResults[0]?.frame;
         if (frame && key === frame.url) {
           await route.fulfill({ contentType: 'image/png', body: frame.buffer }); return;
         }
         throw Error('CANVAS_UI_FIXTURE_UNKNOWN_HTTP ' + key);
-      })().catch(async error => { s.errors.push(String(error)); s.refused.add(route.request()); await route.abort('blockedbyclient'); });
-      s.handlers.add(operation); try { await operation; } finally { s.handlers.delete(operation); }
+      })().catch(async error => { s.errors.push(String(error)); s.refused.add(request); await route.abort('blockedbyclient'); });
+      s.handlers.add(operation); try { await operation; } finally { recordNativeEvent(request, 'routeSettled'); s.handlers.delete(operation); }
     });
     await context.addInitScript(() => { const actor='omp-mobile-user',user={id:actor,username:'离线用户',password:'',role:'user',status:'active',createdAt:1,updatedAt:1};localStorage.setItem('unbounded_ai_current_user',actor);localStorage.setItem('wujie_selected_model',JSON.stringify({model:'bx-provider::bx-image',providerId:'bx-provider'}));localStorage.setItem('unbounded_ai_user_data',JSON.stringify({users:[user],userData:{[actor]:{user,projects:[],apiKeys:[],usageStats:[]}}})); });
     await page.goto(ORIGIN); await page.addScriptTag({ content: bundle });
@@ -224,13 +240,18 @@ async function nativeRequestsFinished(s: Session): Promise<void> {
 }
 async function dispose(s: Session, expectedRefusal?: 'http' | 'websocket', cleanupProbe?: () => void): Promise<void> {
   const failures: unknown[] = [];
+  s.nativePhase = 'unmount';
   try {
     if (s.mounted) await bounded('unmount', () => s.page.evaluate(() => (window as unknown as FixtureWindow).canvasUi.unmount()));
     cleanupProbe?.(); // Used only by the cleanup-fault selftest, after real unmount.
   } catch (error) { failures.push(error); }
+  s.nativePhase = 'drain';
   try { await bounded('routes', () => Promise.all([...s.handlers])); } catch (error) { failures.push(String(error)); }
   try { await nativeRequestsFinished(s); await bounded('final routes', () => Promise.all([...s.handlers])); } catch (error) { failures.push(String(error)); }
-  const unresolvedBeforeClose = s.pending.size !== 0 || s.handlers.size !== 0;
+  const pendingBeforeClose = [...s.pending];
+  const routesBeforeClose = s.handlers.size;
+  const unresolvedBeforeClose = pendingBeforeClose.length !== 0 || routesBeforeClose !== 0;
+  s.nativePhase = 'context-close';
   try { await s.context.close(); contexts.delete(s.context); live.delete(s); } catch (error) { failures.push(String(error)); }
   // Cleanup/lifecycle/allowlist failures can never share the expected-refusal
   // prefix. A boundary selftest must not succeed merely because close failed.
@@ -245,8 +266,37 @@ async function dispose(s: Session, expectedRefusal?: 'http' | 'websocket', clean
   const expectedCompleted=[...s.counts].filter(([k])=>k!=='/unexpected').flatMap(([k,n])=>Array.from({length:n},()=>ORIGIN+k));
   const failed=[...s.failed];
   const validFailures=expectedRefusal==='http'?failed.length===1&&failed[0].url()===ORIGIN+'/unexpected'&&s.refused.has(failed[0]):failed.length===0;
-  if(unresolvedBeforeClose||s.pending.size||!validFailures||JSON.stringify(completed.sort())!==JSON.stringify(expectedCompleted.sort())){
-    console.log('CANVAS_UI_NATIVE_REQUEST_FAILURE_DIAGNOSTIC',JSON.stringify({unresolvedBeforeClose,pending:[...s.pending].map(r=>r.url()),completed,expectedCompleted,failed:failed.map(r=>({url:r.url(),error:r.failure()?.errorText,status:s.responseStatus.get(r)}))}));
+  const frame = s.frResults[0]?.frame;
+  const frameReads = frame ? (s.counts.get(frame.url) ?? 0) : 0;
+  const completedFrameReads = frame ? [...s.completed].filter(request => request.url() === ORIGIN + frame.url) : [];
+  const frameWitnessed = frame !== undefined && s.verifiedFrameUrl === frame.url;
+  const validRepeatedFrameRead = frameReads <= 1 || (frameReads === 2 && frameWitnessed && completedFrameReads.length === 2
+    && completedFrameReads.every(request => request.method() === 'GET' && request.resourceType() === 'image'
+      && s.responseStatus.get(request) === 200));
+  if(unresolvedBeforeClose||s.pending.size||!validFailures||!validRepeatedFrameRead||JSON.stringify(completed.sort())!==JSON.stringify(expectedCompleted.sort())){
+    const safePath = (url: string): string => {
+      if (!url.startsWith(ORIGIN + '/')) return '[other-origin]';
+      const key = url.slice(ORIGIN.length);
+      if (key === frame?.url) return '/api/serve-upload/generated-videos/[frame].png';
+      return allowed.includes(key) ? key : '[other-route]';
+    };
+    const details = (request: Request) => {
+      const error = request.failure()?.errorText;
+      return {
+        method: request.method() === 'GET' || request.method() === 'POST' ? request.method() : 'OTHER',
+        path: safePath(request.url()), resourceType: request.resourceType(), status: s.responseStatus.get(request) ?? null,
+        error: error && /^net::ERR_[A-Z_]+(?:\.Inspector)?$/.test(error) ? error : error ? '[other-error]' : null,
+        refused: s.refused.has(request), lifecycle: s.nativeLifecycle.get(request),
+      };
+    };
+    console.log('CANVAS_UI_NATIVE_REQUEST_FAILURE_DIAGNOSTIC', JSON.stringify({
+      unresolvedBeforeClose, routesBeforeClose, pendingBeforeClose: pendingBeforeClose.length, pendingAfterClose: s.pending.size,
+      pending: [...new Set([...pendingBeforeClose, ...s.pending])].slice(0, 6).map(details),
+      completedCount: completed.length, expectedCompletedCount: expectedCompleted.length,
+      completed: completed.slice(0, 12).map(safePath), expectedCompleted: expectedCompleted.slice(0, 12).map(safePath),
+      failedCount: failed.length, failed: failed.slice(0, 6).map(details),
+      frame: { reads: frameReads, witnessed: frameWitnessed, completed: completedFrameReads.slice(0, 2).map(details) },
+    }));
     invalid('CANVAS_UI_FIXTURE_NATIVE_REQUEST_FAILURE');
   }
   if (failures.length) throw Error('CANVAS_UI_FIXTURE_CLEANUP_FAILURE: ' + failures.join('; '));
@@ -257,7 +307,7 @@ async function dispose(s: Session, expectedRefusal?: 'http' | 'websocket', clean
   if (s.errors.length) throw Error('CANVAS_UI_FIXTURE_INFRASTRUCTURE: ' + s.errors.join('; '));
 }
 
-async function withSession(theme:Theme,width:number,height:number,options:Options,run:(s:Session)=>Promise<void>):Promise<void>{const s=await session(theme,width,height,options);let primary:unknown;try{await run(s);}catch(e){primary=e;}try{await dispose(s);}catch(cleanup){if(primary)throw new AggregateError([primary,cleanup],'CANVAS_UI_FIXTURE_TEST_AND_CLEANUP');throw cleanup;}if(primary)throw primary;}
+async function withSession(theme:Theme,width:number,height:number,options:Options,run:(s:Session)=>Promise<void>):Promise<void>{const s=await session(theme,width,height,options);s.nativePhase='case';let primary:unknown;try{await run(s);}catch(e){primary=e;}try{await dispose(s);}catch(cleanup){if(primary)throw new AggregateError([primary,cleanup],'CANVAS_UI_FIXTURE_TEST_AND_CLEANUP');throw cleanup;}if(primary)throw primary;}
 
 
 
@@ -338,6 +388,7 @@ for(const theme of ['gold','mono'] as const)for(const vp of fuViewports)for(cons
     expect(await output.evaluate(el=>(el as HTMLImageElement).naturalHeight)).toBe(90);
     expect(await output.getAttribute('src')).toBe(ORIGIN+frame.url);
     expect(await output.isVisible()).toBe(true);
+    s.verifiedFrameUrl = frame.url;
   }
   const dir=path.resolve('output/playwright/frame-label-fu-20261020',String(process.pid));await mkdir(dir,{recursive:true});const file=path.join(dir,`${theme}-${vp.width}x${vp.height}-${value.label}.png`);await s.page.screenshot({path:file});console.log('FU_CAPTURE',JSON.stringify({path:file,bodyNotGate:true}));console.log('FU_COMPLETE',JSON.stringify({theme,width:vp.width,height:vp.height,label:value.label,onlyTimePositionNotExactDecodedFrameIndex:true,bodyNotGate:true}));
  });

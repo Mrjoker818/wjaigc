@@ -134,9 +134,13 @@ describe('actual product hook with actual HTTP connection and controlled server'
   it('rebuilds recovery after a lost response and retries the identical operation only on explicit user action', async () => {
     const f = mount(); await waitFor(() => expect(f.result.current.status).toBe('saved'));
     loseResponse = true; act(() => f.result.current.applyLocalChange({ placementId: 'p1', x: 62 }));
-    await waitFor(() => expect(f.result.current.status).toBe('recovery'), { timeout: 2_500 });
+    // Recovery is visible before the renewed session and media are ready to resend.
+    await waitFor(() => {
+      expect(f.result.current.status).toBe('recovery');
+      expect(f.result.current.recoveryRetryReady).toBe(true);
+    }, { timeout: 2_500 });
     expect(writes).toBe(1); expect(operations).toHaveLength(1);
-    expect(f.result.current.recoveryRetryReady).toBe(true); expect(tickets()).toBe(1); expect(starts()).toBe(1);
+    expect(tickets()).toBe(1); expect(starts()).toBe(1);
     act(() => f.result.current.retryRecovered());
     await waitFor(() => expect(f.result.current.status).toBe('saved'));
     expect(operations).toEqual([operations[0], operations[0]]); expect(writes).toBe(1);

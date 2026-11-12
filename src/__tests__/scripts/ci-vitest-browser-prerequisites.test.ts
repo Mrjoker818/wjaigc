@@ -34,7 +34,7 @@ function runBrowserPreparation(
   for (const step of selected) {
     const expected = step.name === 'Install Chromium for Vitest'
       ? 'pnpm exec playwright install --with-deps chromium'
-      : 'pnpm test:ci --shard=${{ matrix.shard }}/8';
+      : 'pnpm test:ci --shard=${{ matrix.shard }}/12';
     if (step.run?.trim() !== expected) throw new Error('CI_BROWSER_RUN_BOUNDARY');
     expect(step.if).toBeUndefined();
     expect(step.shell).toBeUndefined();
@@ -50,7 +50,7 @@ function runBrowserPreparation(
         && [ "$3" = install ] && [ "$4" = --with-deps ] && [ "$5" = chromium ]; then
         printf 'browser:%s\\n' "$*"
         return "$BROWSER_EXIT"
-      elif [ "$#" -eq 2 ] && [ "$1" = test:ci ] && [ "$2" = --shard=1/8 ]; then
+      elif [ "$#" -eq 2 ] && [ "$1" = test:ci ] && [ "$2" = --shard=1/12 ]; then
         printf 'tests:%s\\n' "$*"
         return 0
       fi
@@ -85,7 +85,7 @@ describe.each([
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout.trim().split(/\r?\n/)).toEqual([
       'browser:exec playwright install --with-deps chromium',
-      'tests:test:ci --shard=1/8',
+      'tests:test:ci --shard=1/12',
     ]);
   });
 

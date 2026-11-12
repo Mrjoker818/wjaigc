@@ -22,7 +22,7 @@ beforeEach(async()=>{
    if(state.mode==='denied')return new Response('{}',{status:403});
    if(state.mode==='service')return new Response('{}',{status:503});
    if(state.mode==='mismatch')return new Response(JSON.stringify({code:'ACTOR_SCOPE_CHANGED'}),{status:409});
-   return Response.json({success:true,principalId:state.actor,value:state.mode==='empty'?[]:[{...project('remote'),name:'远端新项目'}],syncRevision:1});
+   return Response.json({success:true,userId:state.actor,value:state.mode==='empty'?[]:[{...project('remote'),name:'远端新项目'}],syncRevision:1});
   }
   return Response.json({success:false});
  }));
@@ -38,12 +38,12 @@ it('local storage failure is explicit and retry can recover',async()=>{state.mod
 it('bounds a stalled request, allows retry and ignores its late response',async()=>{
  vi.useFakeTimers({toFake:['setTimeout','clearTimeout']});state.mode='hold';mount();await act(async()=>{await Promise.resolve();await Promise.resolve()});expect(state.gate).not.toBeNull();const late=state.gate!;
  await act(async()=>{await vi.advanceTimersByTimeAsync(4000)});expect(screen.getByText('读取较慢，仍在进行；完成后会自动显示，也可以重试。')).toBeTruthy();state.mode='ok';fireEvent.click(screen.getByRole('button',{name:'重试读取'}));await act(async()=>{await Promise.resolve();await Promise.resolve();await Promise.resolve()});expect(screen.getByText('远端新项目')).toBeTruthy();
- await act(async()=>{late(Response.json({success:true,principalId:'A',value:[{...project('old'),name:'迟到旧项目'}],syncRevision:1}));await Promise.resolve()});expect(screen.queryByText('迟到旧项目')).toBeNull();
+ await act(async()=>{late(Response.json({success:true,userId:'A',value:[{...project('old'),name:'迟到旧项目'}],syncRevision:1}));await Promise.resolve()});expect(screen.queryByText('迟到旧项目')).toBeNull();
 });
 it('a late A response cannot replace B after account change',async()=>{
  state.mode='hold';const view=mount('A');await waitFor(()=>expect(state.gate).not.toBeNull());const late=state.gate!;
  state.actor='B';state.mode='ok';view.rerender(<DashboardView user={user('B')} onOpenProject={()=>{}} onNewProject={()=>{}}/>);
  expect(await screen.findByText('远端新项目')).toBeTruthy();
- await act(async()=>{late(Response.json({success:true,principalId:'A',value:[{...project('a'),name:'A迟到内容'}],syncRevision:1}));await Promise.resolve()});
+ await act(async()=>{late(Response.json({success:true,userId:'A',value:[{...project('a'),name:'A迟到内容'}],syncRevision:1}));await Promise.resolve()});
  expect(screen.queryByText('A迟到内容')).toBeNull();expect(screen.getByText('远端新项目')).toBeTruthy();
 });

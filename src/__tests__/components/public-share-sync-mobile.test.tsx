@@ -390,7 +390,8 @@ describe('public share sync t', () => {
     it(`share native code copy ${theme}`, async () => {
       await withPage(theme, 390, 844, { surface: 'share' }, async s => {
         const copy = s.page.getByRole('button', { name: '复制', exact: true }); await copy.scrollIntoViewIfNeeded(); await target(copy); await copy.click();
-        expect(await s.page.evaluate(() => navigator.clipboard.readText())).toBe(CODE.replace(/\n/g, '\r\n'));
+        const copied = await s.page.evaluate(() => navigator.clipboard.readText());
+        expect(copied).toBe(process.platform === 'win32' ? CODE.replaceAll('\n', '\r\n') : CODE);
         expect(await s.page.getByRole('button', { name: '已复制', exact: true }).count()).toBe(1);
       });
     });

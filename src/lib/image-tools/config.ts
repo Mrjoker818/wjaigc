@@ -80,7 +80,7 @@ export const PYTHON_BIN =
   (SPACE_VENV_EXISTS ? SPACE_VENV_PYTHON : VENV_EXISTS ? VENV_PYTHON : SYSTEM_PYTHON);
 
 export const LOCAL_AI_ENABLED = process.env.LOCAL_AI_ENABLED === 'true';
-export const ONNX_MODELS_DIR = path.resolve(process.env.ONNX_MODELS_DIR || 'onnx-models');
+export const ONNX_MODELS_DIR = path.resolve(/* turbopackIgnore: true */ process.env.ONNX_MODELS_DIR || 'onnx-models');
 export const ONNX_MODEL_SHA256 = process.env.ONNX_MODEL_SHA256?.trim() ?? '';
 export const ONNX_MODEL = 'realesrgan-x4plus';
 export const ONNX_WORKER = process.env.ONNX_WORKER?.trim()

@@ -29,7 +29,14 @@ const { encode } = encodingRequire('iconv-lite') as {
 };
 const hash = (bytes: Buffer | string): string => createHash('sha256').update(bytes).digest('hex');
 const aliases = ['DATABASE_URL', 'PGDATABASE_URL', 'POSTGRES_TEST_DATABASE_URL', 'TEST_POSTGRES_URL'] as const;
-const fixtureKeys = [...aliases, 'TASK6_OWNED_FIXTURE_RECEIPT', 'TASK6_OWNED_FIXTURE_SHA256', 'WUJIE_DATA_DIR'] as const;
+const githubFixtureSelectors = [
+  'GITHUB_JOB',
+  'WUJIE_CI_SKETCH_POSTGRES_CONTAINER',
+  'WUJIE_CI_SKETCH_POSTGRES_NETWORK',
+] as const;
+const fixtureKeys = [
+  ...aliases, ...githubFixtureSelectors, 'TASK6_OWNED_FIXTURE_RECEIPT', 'TASK6_OWNED_FIXTURE_SHA256', 'WUJIE_DATA_DIR',
+] as const;
 let container: string;
 let root: string;
 let own: string;
@@ -242,6 +249,9 @@ describe('identity must precede every owned CREATE SCHEMA', () => {
 
 describe('proof precedes real integration product-module initialization', () => {
   it.each(['execution', 'publication', 'token'] as const)('rejects invalid %s proof before DataRoot, SQL or original cases register', async name => {
+    // This case supplies the historical owned fixture. In a hosted shard, do not
+    // also select the separate GitHub service fixture when importing the suite.
+    for (const key of githubFixtureSelectors) delete process.env[key];
     process.env.TASK6_OWNED_FIXTURE_SHA256 = '0'.repeat(64);
     vi.resetModules();
     const loaders = {

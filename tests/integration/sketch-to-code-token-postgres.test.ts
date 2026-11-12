@@ -133,6 +133,15 @@ async function until(query: QueryFn, sql: string, values: unknown[] = []): Promi
     await new Promise<void>(resolveTurn => setImmediate(resolveTurn));
   }
 }
+async function waitForDatabaseTime(query: QueryFn, timestamp: number): Promise<number> {
+  await query('SELECT pg_sleep_until(to_timestamp($1::double precision / 1000))', [timestamp]);
+  const { rows: [row] } = await query<{ now: string }>(
+    'SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::bigint AS now',
+  );
+  const now = Number(row?.now);
+  expect(now).toBeGreaterThanOrEqual(timestamp);
+  return now;
+}
 function filePath(saved: PersistedAssetFile): string { return resolve(ownedFixture?.mediaRoot || fixture, ownedFixture ? 'exports' : 'media/exports', saved.url.split('/').at(-1)!); }
 async function assertSuccess(query: QueryFn, value: SketchPublicationInput, reserve: number, actual: number): Promise<void> {
   const task = (await getCloudTaskById(value.task.id))!;
@@ -867,6 +876,7 @@ describe('Token fix1 post-rollback refund authority', () => {
         const blocker = await getPool().connect(); await blocker.query('BEGIN');
         const stamp = Date.now(), clock = vi.spyOn(Date, 'now').mockReturnValue(stamp);
         const trace: string[] = []; let before: Record<string, unknown> | undefined; let pid = 0;
+        let leaseExpiresAt: number | undefined;
         let run: ReturnType<typeof executeSketchTask> | undefined;
         try {
           run = executeSketchTask(metered(admission, null), { actorUserId: 'editor', projectId: 'shared' }, {
@@ -877,7 +887,13 @@ describe('Token fix1 post-rollback refund authority', () => {
                 await blocker.query(example.kind === 'grant'
                   ? "SELECT member_user_id FROM wujie_project_document_editors WHERE member_user_id='editor' FOR UPDATE"
                   : "SELECT user_id FROM wujie_credits WHERE user_id='editor' FOR UPDATE");
-                before = await accounting(query); throw error;
+                before = await accounting(query);
+                if (example.expiry === 'lease') {
+                  leaseExpiresAt = value.lease.expiresAt;
+                  // Leave room under the settlement client's 1s lock timeout before it starts waiting.
+                  await waitForDatabaseTime(query, leaseExpiresAt - example.wait * 1000);
+                }
+                throw error;
               }
             },
             connect: async () => {
@@ -886,17 +902,29 @@ describe('Token fix1 post-rollback refund authority', () => {
             },
           });
           const waitStarted = performance.now();
-          while (!(await query<{ ok: boolean }>("SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid=$1 AND wait_event_type='Lock') ok", [pid])).rows[0]?.ok) {
+          let lockedAt: number;
+          for (;;) {
+            const { rows: [lock] } = await query<{ ok: boolean; now: string }>(`SELECT EXISTS (
+              SELECT 1 FROM pg_stat_activity WHERE pid=$1 AND wait_event_type='Lock'
+            ) ok, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::bigint AS now`, [pid]);
+            if (lock?.ok) { lockedAt = Number(lock.now); break; }
             if (performance.now() - waitStarted > 8000) throw new Error('Fix1 real lock not observed');
             await new Promise<void>(resolveTurn => setImmediate(resolveTurn));
           }
-          await query('SELECT pg_sleep($1)', [example.wait]); await blocker.query('ROLLBACK');
+          let releasedAt: number | undefined;
+          if (example.expiry === 'lease') {
+            if (leaseExpiresAt === undefined) throw new Error('Claimed refund lease expiry required');
+            expect(lockedAt).toBeLessThan(leaseExpiresAt);
+            releasedAt = await waitForDatabaseTime(query, leaseExpiresAt);
+          } else await query('SELECT pg_sleep($1)', [example.wait]);
+          await blocker.query('ROLLBACK');
           expect((await run).status).toBe('deferred'); expect(await accounting(query)).toEqual(before);
           const afterLedger = trace.findIndex(sql => sql.includes('FROM wujie_credit_transactions'));
           const dbClock = trace.findIndex(sql => sql.includes('clock_timestamp())*1000)::bigint AS now'));
           expect(afterLedger).toBeGreaterThan(-1); expect(dbClock).toBeGreaterThan(afterLedger);
           expect(trace.some(sql => sql.includes('WITH candidate AS'))).toBe(false); expect(trace.at(-1)).toBe('ROLLBACK');
-          console.info('Token fix1 locked DB-time:', JSON.stringify({ ...example, stamp, pid, clockAfterLedger: true, noRefund: true }));
+          console.info('Token fix1 locked DB-time:', JSON.stringify({ ...example, stamp, pid, lockedAt, leaseExpiresAt,
+            releasedAt, clockAfterLedger: true, noRefund: true }));
         } finally { clock.mockRestore(); await blocker.query('ROLLBACK'); blocker.release(); await run; }
       });
     }, 30_000);
@@ -907,6 +935,7 @@ describe('Token fix1 post-rollback refund authority', () => {
         const controller = new AbortController(), stamp = Date.now();
         const clock = variant === 'abort' ? undefined : vi.spyOn(Date, 'now').mockReturnValue(stamp);
         const trace: string[] = []; let before: Record<string, unknown> | undefined; let staged = false;
+        let leaseClock: { expiresAt: number; reachedAt: number } | undefined;
         try {
           const result = await executeSketchTask(metered(admission, null), { actorUserId: 'editor', projectId: 'shared', signal: controller.signal }, {
             claimCloudTaskLease: (id, owner) => claimCloudTaskLease(id, owner, variant === 'lease' ? 700 : 180_000),
@@ -918,7 +947,11 @@ describe('Token fix1 post-rollback refund authority', () => {
               expect((await args[4]!.client!.query('SELECT identity FROM wujie_refund_identity_claims')).rows).toEqual([{ identity: admission.task.id }]);
               staged = true;
               if (variant === 'abort') controller.abort({ code: 'USER_CANCELLED' });
-              else await query('SELECT pg_sleep($1)', [variant === 'lease' ? 0.8 : 1.1]);
+              else if (variant === 'lease') {
+                const expiresAt = args[4]?.expectedSketchExecution?.leaseExpiresAt;
+                if (expiresAt === undefined) throw new Error('Staged refund lease expiry required');
+                leaseClock = { expiresAt, reachedAt: await waitForDatabaseTime(query, expiresAt) };
+              } else await query('SELECT pg_sleep($1)', [1.1]);
               return value;
             },
           });
@@ -927,7 +960,7 @@ describe('Token fix1 post-rollback refund authority', () => {
           expect(trace.filter(sql => sql.includes('WITH candidate AS'))).toHaveLength(1);
           expect(trace.filter(sql => sql.includes('clock_timestamp())*1000)::bigint AS now'))).toHaveLength(variant === 'abort' ? 1 : 2);
           console.info('Token fix1 original refund precommit rollback:', JSON.stringify({ variant, stagedOriginalRefund: true, stagedClaim: true,
-            result, outsideUnchanged: true, commitSent: false }));
+            leaseClock, result, outsideUnchanged: true, commitSent: false }));
         } finally { clock?.mockRestore(); }
       });
     }, 30_000);

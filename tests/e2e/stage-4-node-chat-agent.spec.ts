@@ -26,6 +26,7 @@ import {
 import { dragPointerAcrossFrames } from '../helpers/canvas-performance';
 import { cancelFirefoxAgentRun, observeFirefoxAgentPollAborts } from '../helpers/stage-4-firefox-agent-cancel';
 import { finalizeStage4SelectionDiagnostic } from '../helpers/stage-4-selection-diagnostics';
+import { sendStage4WorkflowResultToChat } from '../helpers/stage-4-workflow-chat-handoff';
 
 test.describe.configure({ mode: 'serial', timeout: 120_000 });
 test.use({ trace: 'off', video: 'on' });
@@ -814,6 +815,15 @@ test('completes chat to canvas to workflow to chat with durable lineage and refr
   expect(typeof workflowSubmission.executionId).toBe('string');
   const workflowExecutionId = String(workflowSubmission.executionId);
   const sendToChat = outputNode.getByRole('button', { name: '发送到智能对话', exact: true });
+  const readHit = () => sendToChat.evaluateAll(([button]) => {
+    if (!button) return null;
+    const bounds = button.getBoundingClientRect();
+    const x = bounds.left + bounds.width / 2;
+    const y = bounds.top + bounds.height / 2;
+    const hit = document.elementFromPoint(x, y);
+    return { x, y, hitsButton: button.contains(hit), portLegend: Boolean(hit?.closest('[data-workflow-port-legend]')) };
+  });
+  let before: Awaited<ReturnType<typeof readHit>> = null;
   if (isMobileViewport) {
     const closeDirectory = page.getByRole('button', { name: '关闭目录面板', exact: true });
     if (await closeDirectory.isVisible()) {
@@ -821,18 +831,36 @@ test('completes chat to canvas to workflow to chat with durable lineage and refr
     }
     await expect(closeDirectory).toBeHidden();
     await page.getByRole('button', { name: '关闭节点属性', exact: true }).click();
+    before = await readHit();
+    if (!before?.hitsButton) {
+      // Closing properties also unpins the node. Fit it before waiting for an offscreen card to mount.
+      const zoomOut = page.getByRole('button', { name: '缩小', exact: true });
+      await zoomOut.click();
+      await zoomOut.click();
+    }
   }
   await expect(sendToChat).toBeVisible({ timeout: 60_000 });
+  if (isMobileViewport) {
+    await expect.poll(readHit).toMatchObject({ hitsButton: true, portLegend: false });
+    await writeStage4Metrics(stage4Evidence, testInfo, 'workflow-chat-hit-target', { before, after: await readHit() });
+  }
 
-  const returnedTransferResponse = page.waitForResponse(response => {
-    if (response.request().method() !== 'POST' || new URL(response.url()).pathname !== '/api/assets/transfer') return false;
-    const body = response.request().postDataJSON() as Record<string, unknown> | null;
-    return body?.entityType === 'chat-result'
-      && body?.targetWorkspace === `standalone-chat:${chatProjectId}`;
+  const outputNodeId = await outputNode.getAttribute('data-node-id');
+  if (!outputNodeId) throw new Error('Workflow output node has no ID');
+  const { transfer: returnedTransfer, acknowledgedSaveAbort } = await sendStage4WorkflowResultToChat(page, {
+    actorId: auth.userId,
+    assetProjectId: canvasProjectId,
+    chatProjectId,
+    workflowId: chainFixture.workflow.id,
+    executionId: workflowExecutionId,
+    outputNodeId,
+    assetVersionId: generatedTask.asset_version_id,
+  }, () => sendToChat.click());
+  if (acknowledgedSaveAbort) stage4Evidence.confirmAcknowledgedWorkflowSaveAbort(acknowledgedSaveAbort);
+  await writeStage4Metrics(stage4Evidence, testInfo, 'workflow-chat-save', {
+    snapshotVerified: true, responseBodyAborted: Boolean(acknowledgedSaveAbort),
   });
-  await sendToChat.click();
   await expect(page).toHaveURL(new RegExp(`/simple-chat\\?`), { timeout: 30_000 });
-  const returnedTransfer = await returnedTransferResponse;
   expect(returnedTransfer.ok()).toBe(true);
   const returnedChatReference = await returnedTransfer.json() as {
     assetVersionId?: unknown;

@@ -465,7 +465,7 @@ async function prepareManagedAssetMedia(
     ? (await resolveVerifiedS3Source(storageKey, mimeType, byteSize!, options, dependencies)).source
     : await resolveVerifiedManagedLocalSource(
         relativePath,
-        path.resolve(options.dataRoot ?? getServerDataRoot()),
+        path.resolve(/* turbopackIgnore: true */ options.dataRoot ?? getServerDataRoot()),
         byteSize!,
         dependencies,
       );
