@@ -50,6 +50,7 @@
     "src/components/infinite-canvas.tsx",
     "src/components/help-guide.tsx",
     "src/components/layer-panel.tsx",
+    "src/components/simple-chat/chat-area.tsx",
     "src/lib/302-upscale-models.ts",
     "src/lib/agent-task-persistence.ts",
     "src/lib/api-compatibility.ts",
