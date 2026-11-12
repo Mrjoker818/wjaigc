@@ -2774,14 +2774,15 @@
     {
       "path": "src/components/infinite-canvas.tsx",
       "reviewArea": "ui",
-      "reviewedBlob": "2980eae0c1c4307041cd2820e19bb00136d37cdb",
+      "reviewedBlob": "f26126b7342d8e8fe5c177360b99c2e57f9504d3",
       "disposition": "reviewed",
       "summary": "Content fitting uses the visible desktop toolbar's measured position. Active touch pan is retained until its state commits. Video edit, extend, and derived media retain their established projection rules.",
       "evidence": [
         "release-blank-touch-final.log passes the eight previous empty-canvas failures. Native video edit and extend regression passes six cases.",
         "Earlier exact 1.0 second and verified placement evidence in resume.md.",
         "At 1280 by 720 the old build had zero reachable points on the last card of the 300-node fixture. The patched production build exposed all five points with 48 pixels above the toolbar. Edge drag produced a scoped save in synthetic fixtures at 1280 by 720, 1920 by 1080 and 375 by 812. Twenty view and dock tests and ten native toolbar tests passed.",
-        "2026-11-12: verified in-page exact 1.0-second selection against real FFmpeg (blue frame, 160×90 PNG), duration rejection, and cancellation without a request. The authorized parent insertion path is preserved. Report the timestamp returned by the server and reject invalid pasted input before submit."
+        "2026-11-12: verified in-page exact 1.0-second selection against real FFmpeg (blue frame, 160×90 PNG), duration rejection, and cancellation without a request. The authorized parent insertion path is preserved. Report the timestamp returned by the server and reject invalid pasted input before submit.",
+        "2026-11-12: the six-face close action recognizes a verified primary touch release inside the button when Chromium omits click after a cancelled preview gesture. A cancelled or moved press leaves the panel open. Four native Chromium cases, including keyboard and mouse behavior, passed on the pinned Next.js dependency set."
       ]
     },
     {

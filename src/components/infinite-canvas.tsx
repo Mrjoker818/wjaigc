@@ -3108,6 +3108,10 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   const [hexCube3dDragging, setHexCube3dDragging] = useState(false);
   const hexCube3dDragRef = useRef<{ groupId: string; startX: number; startY: number; startRotY: number; startTiltX: number } | null>(null);
   const hexCubeTouchDragRef = useRef<{ pointerId: number; groupId: string; element: HTMLDivElement; startX: number; startY: number; startRotY: number; startTiltX: number } | null>(null);
+  const hexCubeClosePress = useRef<{ groupId: string; pointerId: number; x: number; y: number } | null>(null);
+  const clearHexCubeClosePress = (event: React.PointerEvent<HTMLButtonElement>): void => {
+    if (hexCubeClosePress.current?.pointerId === event.pointerId) hexCubeClosePress.current = null;
+  };
   const finishHexCubeTouchDrag = useCallback((notify: boolean = true): void => {
     const owner = hexCubeTouchDragRef.current;
     if (!owner) return;
@@ -18141,7 +18145,40 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                     </button>
                     <button
                       className="p-2 min-h-[44px] min-w-[44px] rounded-md transition-colors"
-                      onClick={(e) => { e.stopPropagation(); deleteHexCubeGroup(hcg.id); }}
+                      onPointerDown={event => {
+                        if (event.pointerType === 'touch' && event.isPrimary) {
+                          hexCubeClosePress.current = {
+                            groupId: hcg.id, pointerId: event.pointerId, x: event.clientX, y: event.clientY,
+                          };
+                        }
+                      }}
+                      onPointerMove={event => {
+                        const press = hexCubeClosePress.current;
+                        if (press?.pointerId === event.pointerId
+                          && Math.hypot(event.clientX - press.x, event.clientY - press.y) >= 10) {
+                          clearHexCubeClosePress(event);
+                        }
+                      }}
+                      onPointerCancel={clearHexCubeClosePress}
+                      onLostPointerCapture={clearHexCubeClosePress}
+                      onPointerUp={event => {
+                        const press = hexCubeClosePress.current;
+                        if (event.pointerType !== 'touch' || !event.isPrimary
+                          || press?.pointerId !== event.pointerId || press.groupId !== hcg.id) return;
+                        clearHexCubeClosePress(event);
+                        const bounds = event.currentTarget.getBoundingClientRect();
+                        if (Math.hypot(event.clientX - press.x, event.clientY - press.y) >= 10
+                          || event.clientX < bounds.left || event.clientX > bounds.right
+                          || event.clientY < bounds.top || event.clientY > bounds.bottom) return;
+                        // Some touch browsers suppress the synthesized click immediately after a drag.
+                        event.stopPropagation();
+                        deleteHexCubeGroup(hcg.id);
+                      }}
+                      onClick={event => {
+                        event.stopPropagation();
+                        if (event.detail > 0 && (event.nativeEvent as PointerEvent).pointerType === 'touch') return;
+                        deleteHexCubeGroup(hcg.id);
+                      }}
                       title="关闭"
                       aria-label="关闭"
                       style={{ color: isMonochrome ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.4)' }}
