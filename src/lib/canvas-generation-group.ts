@@ -278,6 +278,9 @@ export const MODEL_ASPECT_RATIOS: Record<string, string[]> = {
     'doubao-seedream-5-0': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'],
     'seedream-5-0-lite': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'],
     'seedream-5': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'],
+    // Seedream 5.5 — 官方支持 10 种比例（含 2:1 / 1:2）
+    // Ref: https://docs.apib.ai/cn/api-reference/images/seedream-5-5/generation
+    'seedream-5-5': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9', '2:1', '1:2'],
     // Seedance 4.5: size=2K/4K，最小2560x1440起步，同Seedream 4.5比例
     'doubao-seedance-4-5': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'],
     'seedance': ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'],
@@ -409,6 +412,9 @@ export const MODEL_QUALITIES: Record<string, string[]> = {
     // 官方: 2K直出 + 4K AI增强，不支持 1K 和 3K
     'doubao-seedream-5-0': ['2K', '4K'],
     'seedream-5': ['2K', '4K'],
+    // Seedream 5.5 — 官方仅支持 1K / 1.5K / 2K，明确不支持 3K / 4K
+    // Ref: https://docs.apib.ai/cn/api-reference/images/seedream-5-5/generation
+    'seedream-5-5': ['2K', '1K'],
     // Seedance 4.5: 直连API size="2K"|"4K" (最小2560x1440起步)
     'doubao-seedance-4-5': ['2K', '4K'],
     'seedance': ['2K', '4K'],
@@ -668,6 +674,14 @@ export const APIMART_IMAGE_MODEL_SPECS: Record<string, ApimartImageModelSpec> = 
         quality: ['low', 'medium'],
         aspectRatios: APIMART_GROK_RATIOS,
         resolutionCase: 'lower',
+        maxImages: 1,
+    },
+    // Seedream 5.5：size/resolution 仅 1K/1.5K/2K，明确不支持 3K/4K；n 固定为 1。
+    // Ref: https://docs.apib.ai/cn/api-reference/images/seedream-5-5/generation
+    'seedream-5-5': {
+        tiers: ['2K', '1K'],
+        aspectRatios: ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9', '2:1', '1:2'],
+        resolutionCase: 'upper',
         maxImages: 1,
     },
 };

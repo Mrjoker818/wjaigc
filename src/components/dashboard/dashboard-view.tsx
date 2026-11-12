@@ -3450,7 +3450,22 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                           <div className="p-6 rounded-lg text-center border border-border text-muted-foreground">
                             <Search className="w-8 h-8 mx-auto mb-2 opacity-40" />
                             <p className="text-sm font-medium">未找到匹配的模型</p>
-                            <p className="text-xs mt-1">尝试其他关键词或清空搜索</p>
+                            <p className="text-xs mt-1">已发现列表里没有 “{modelSearchQuery.trim()}”，可换个关键词，或直接按模型 ID 添加</p>
+                            <button
+                              onClick={() => {
+                                const manualId = modelSearchQuery.trim();
+                                if (!manualId) return;
+                                setEditingModel(null);
+                                setModelFormName(manualId);
+                                setModelFormId(manualId.toLowerCase());
+                                setModelFormContext('');
+                                setShowModelDialog(true);
+                              }}
+                              className="mt-3 text-xs px-3 py-1.5 rounded-md bg-primary/10 text-primary hover:bg-primary/20 transition-colors font-medium cursor-pointer inline-flex items-center gap-1"
+                            >
+                              <Plus className="w-3 h-3" />
+                              直接添加 “{modelSearchQuery.trim()}”
+                            </button>
                           </div>
                         ) : (
                           <div className="rounded-lg overflow-hidden border border-border">
