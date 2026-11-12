@@ -49,6 +49,48 @@ describe('Stage 3 history boundary diagnostics', () => {
     expect(info.mock.calls).toHaveLength(count);
   });
 
+  it('reports whether the recovery record exists after the mounted pagehide listener runs', () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    dispose = install?.({ projectId: 'fixture-project' });
+    const persist = () => localStorage.setItem(key, JSON.stringify({
+      version: 4, baseProjectRevision: 73, maxRecoverableProjectRevision: 75,
+      snapshot: { projectId: 'fixture-project', revision: 8, images: [] },
+    }));
+    window.addEventListener('pagehide', persist, { once: true });
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyZ', ctrlKey: true }));
+    window.dispatchEvent(new Event('pagehide'));
+
+    expect(info.mock.calls.map(([message]) => JSON.parse(String(message).slice('STAGE3_HISTORY_STORAGE '.length))))
+      .toEqual([
+        { phase: 'boot', snapshot: null },
+        { phase: 'pagehide', snapshot: null },
+        { phase: 'write', snapshot: { version: 4, base: 73, max: 75, revision: 8, geometry: null } },
+        { phase: 'pagehide-tail', snapshotPresent: true },
+      ]);
+  });
+
+  it('reports a denied recovery write and preserves the native exception', () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const nativeError = new DOMException('private storage detail', 'QuotaExceededError');
+    const nativeSet = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw nativeError; });
+    dispose = install?.({ projectId: 'fixture-project' });
+    let thrown: unknown;
+    try { localStorage.setItem(key, 'private snapshot'); } catch (error) { thrown = error; }
+    expect(thrown).toBe(nativeError);
+    expect(nativeSet).toHaveBeenCalledExactlyOnceWith(key, 'private snapshot');
+    expect(info.mock.calls.at(-1)?.[0]).toBe('STAGE3_HISTORY_STORAGE {"phase":"write-failed","failure":"QuotaExceededError"}');
+  });
+
+  it('distinguishes an unavailable storage read from an absent recovery record', () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    dispose = install?.({ projectId: 'fixture-project' });
+    vi.spyOn(globalThis, 'localStorage', 'get').mockImplementation(() => {
+      throw new DOMException('private storage detail', 'SecurityError');
+    });
+    window.dispatchEvent(new Event('pagehide'));
+    expect(info.mock.calls.at(-1)?.[0]).toBe('STAGE3_HISTORY_STORAGE {"phase":"pagehide","storageReadable":false}');
+  });
+
   it('keeps unrelated projects and malformed storage opaque and leaves them untouched', () => {
     const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
     dispose = install?.({ projectId: 'fixture-project' });

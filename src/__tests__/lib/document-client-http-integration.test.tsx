@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createHash, webcrypto } from 'node:crypto';
+import { createHash } from 'node:crypto';
 // @ts-expect-error The existing jsdom dependency has no installed declarations.
 import { JSDOM } from 'jsdom';
 import * as Y from 'yjs';
 import { applyCanvasImagePatch, assertCanvasDocumentTransition, createCanvasDocument, readCanvasDocument } from '@/lib/collaboration/canvas-document';
 import { createBrowserPendingUpdateStore, useCollaborativeCanvas } from '@/lib/collaboration/document-client';
 import { createDocumentHttpBrowserStorage } from '@/lib/collaboration/document-http-browser-storage';
+import { jsdomCrypto } from '../helpers/jsdom-native-web-boundary';
 
 const hash = (value: string | Uint8Array): string => createHash('sha256').update(value).digest('hex');
 const digest = (value: Uint8Array): string => createHash('sha256').update('wujie-document-update-v1\0').update(value).digest('hex');
@@ -92,7 +93,7 @@ async function transport(input: string | URL | Request, init: RequestInit = {}):
 beforeEach(() => {
   const dom = new JSDOM('', { url: 'https://fixture.invalid/' });
   vi.stubGlobal('localStorage', dom.window.localStorage); vi.stubGlobal('sessionStorage', dom.window.sessionStorage);
-  vi.stubGlobal('crypto', webcrypto); vi.stubGlobal('isSecureContext', true); held = new Map();
+  vi.stubGlobal('crypto', jsdomCrypto); vi.stubGlobal('isSecureContext', true); held = new Map();
   vi.stubGlobal('navigator', { locks: lockPlatform() }); vi.stubGlobal('WebSocket', UnexpectedWebSocket);
   vi.stubGlobal('fetch', vi.fn(transport));
   canonical = createCanvasDocument(); applyCanvasImagePatch(canonical, {

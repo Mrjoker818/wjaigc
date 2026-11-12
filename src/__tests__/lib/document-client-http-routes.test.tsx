@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { createHash, webcrypto } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // @ts-expect-error The existing jsdom dependency has no installed declarations.
@@ -8,6 +8,7 @@ import { JSDOM } from 'jsdom';
 import * as Y from 'yjs';
 import { applyCanvasImagePatch, assertCanvasDocumentTransition, createCanvasDocument, readCanvasDocument } from '@/lib/collaboration/canvas-document';
 import { createBrowserPendingUpdateStore, useCollaborativeCanvas } from '@/lib/collaboration/document-client';
+import { jsdomCrypto } from '../helpers/jsdom-native-web-boundary';
 
 const service = vi.hoisted(() => ({ auth: vi.fn(), project: vi.fn(), ticket: vi.fn(),
   start: vi.fn(), renew: vi.fn(), snapshot: vi.fn(), write: vi.fn(), readReceipt: vi.fn() }));
@@ -76,7 +77,7 @@ beforeEach(() => {
   vi.stubEnv('COZE_PROJECT_DOMAIN_DEFAULT', 'http://localhost:5000');
   const dom = new JSDOM('', { url: 'http://localhost:5000/' });
   vi.stubGlobal('localStorage', dom.window.localStorage); vi.stubGlobal('sessionStorage', dom.window.sessionStorage);
-  vi.stubGlobal('crypto', webcrypto); vi.stubGlobal('isSecureContext', true); held = new Map();
+  vi.stubGlobal('crypto', jsdomCrypto); vi.stubGlobal('isSecureContext', true); held = new Map();
   vi.stubGlobal('navigator', { locks: locks() }); vi.stubGlobal('fetch', vi.fn(bridge));
   canonical = createCanvasDocument(); applyCanvasImagePatch(canonical, {
     placementId: 'p1', assetVersionId: 'version-p1', x: 10, y: 20, width: 80, height: 60, rotation: 0, zIndex: 0,

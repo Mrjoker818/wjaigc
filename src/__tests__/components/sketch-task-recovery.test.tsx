@@ -297,7 +297,7 @@ describe('review regressions: pending image admission and original placement int
     const { f, inserted, drawer } = placementRecoveryFixture(mode); const view = render(drawer());
     try {
       await discovered(f);
-      fireEvent.click(screen.getByRole('button', { name: new RegExp(`^${mode === 'image' ? '草图生图' : '草图转代码'} · A5 ·`) }));
+      fireEvent.click(await screen.findByRole('button', { name: new RegExp(`^${mode === 'image' ? '草图生图' : '草图转代码'} · A5 ·`) }));
       await screen.findByText('已完成 · 100%');
       await waitForRecoveryChoice(f, mode, 'A5');
       const originalPlacement = mode === 'image' ? f.imageSession.placement : f.session.placement;

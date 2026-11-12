@@ -219,7 +219,10 @@ describe('HM real NodeEditor Skill quote mobile UI, no execution', () => {
       expect(JSON.stringify(await workflow(s)),'cancel leaves original graph unchanged').toBe(before);
       expect(s.counts.has('POST /api/workflow/execute'),'never submit workflow').toBe(false);
       expect(s.counts.has('POST /api/skill-runs'),'never submit paid run').toBe(false);
-      expect(await run.evaluate(e=>document.activeElement===e),'cancel restores trigger focus').toBe(true);
+      // Radix restores focus after the dialog unmounts.
+      await expect.poll(() => run.evaluate(e => document.activeElement === e), {
+        timeout: 1500, message: 'cancel restores trigger focus',
+      }).toBe(true);
     });
   },25000);
 });

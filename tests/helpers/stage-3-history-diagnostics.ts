@@ -1,5 +1,8 @@
 /** Self-contained so Playwright can install it before application hydration. */
 export function installStage3HistoryDiagnostics(input: { projectId: string }): () => void {
+  if (window.top !== window || (location.protocol !== 'http:' && location.protocol !== 'https:')) {
+    return () => undefined;
+  }
   const key = 'wujie:canvas:prepared-snapshot:v1';
   const originalSet = Storage.prototype.setItem;
   const originalRemove = Storage.prototype.removeItem;
@@ -14,16 +17,34 @@ export function installStage3HistoryDiagnostics(input: { projectId: string }): (
   const coordinate = (value: unknown): number | null => (
     typeof value === 'number' && Number.isFinite(value) ? value : null
   );
-  const emit = (phase: 'boot' | 'write' | 'remove' | 'beforeunload' | 'pagehide'): void => {
+  const report = (payload: Record<string, unknown>): void => {
+    console.info(`STAGE3_HISTORY_STORAGE ${JSON.stringify(payload)}`);
+  };
+  const emit = (
+    phase: 'boot' | 'write' | 'write-failed' | 'remove' | 'beforeunload' | 'pagehide' | 'pagehide-tail',
+    failure?: string,
+  ): void => {
     if (count > 16) return;
     const truncated = count++ === 16;
     try {
       if (truncated) {
-        console.info('STAGE3_HISTORY_STORAGE {"phase":"truncated","limit":16}');
+        report({ phase: 'truncated', limit: 16 });
+        return;
+      }
+      if (phase === 'write-failed') {
+        report({ phase, failure });
+        return;
+      }
+      let raw: string | null;
+      try { raw = localStorage.getItem(key); } catch {
+        report({ phase, storageReadable: false });
+        return;
+      }
+      if (phase === 'pagehide-tail') {
+        report({ phase, snapshotPresent: raw !== null });
         return;
       }
       let snapshot: Record<string, unknown> | null = null;
-      const raw = localStorage.getItem(key);
       if (raw) {
         try {
           const stored = record(JSON.parse(raw));
@@ -54,11 +75,22 @@ export function installStage3HistoryDiagnostics(input: { projectId: string }): (
           }
         } catch { /* Invalid storage is opaque; the application still owns recovery. */ }
       }
-      console.info(`STAGE3_HISTORY_STORAGE ${JSON.stringify({ phase, snapshot })}`);
+      report({ phase, snapshot });
     } catch { /* Diagnostics must never alter lifecycle or storage behavior. */ }
   };
   const observedSet: Storage['setItem'] = function (this: Storage, keyToSet: string, value: string): void {
-    originalSet.call(this, keyToSet, value);
+    try {
+      originalSet.call(this, keyToSet, value);
+    } catch (error) {
+      try {
+        if (keyToSet === key && this === localStorage) {
+          const name = error instanceof DOMException ? error.name : '';
+          const known = name === 'QuotaExceededError' || name === 'SecurityError' || name === 'InvalidStateError';
+          emit('write-failed', known ? name : 'other');
+        }
+      } catch { /* Preserve the native error if the observation also fails. */ }
+      throw error;
+    }
     try {
       if (this === localStorage && keyToSet === key) emit('write');
     } catch { /* A diagnostic lookup must not turn a successful native write into a failure. */ }
@@ -73,12 +105,20 @@ export function installStage3HistoryDiagnostics(input: { projectId: string }): (
   Storage.prototype.removeItem = observedRemove;
   const beforeUnload = (): void => emit('beforeunload');
   const pageHide = (): void => emit('pagehide');
+  const pageHideTail = (): void => emit('pagehide-tail');
+  const armPageHideTail = (): void => {
+    window.addEventListener('pagehide', pageHideTail, { once: true });
+  };
   window.addEventListener('beforeunload', beforeUnload);
   window.addEventListener('pagehide', pageHide);
+  // The history test starts sending keys after the workspace has mounted.
+  window.addEventListener('keydown', armPageHideTail, { capture: true, once: true });
   emit('boot');
   return (): void => {
     window.removeEventListener('beforeunload', beforeUnload);
     window.removeEventListener('pagehide', pageHide);
+    window.removeEventListener('pagehide', pageHideTail);
+    window.removeEventListener('keydown', armPageHideTail, true);
     if (Storage.prototype.setItem === observedSet) Storage.prototype.setItem = originalSet;
     if (Storage.prototype.removeItem === observedRemove) Storage.prototype.removeItem = originalRemove;
   };

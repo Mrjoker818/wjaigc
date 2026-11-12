@@ -20,7 +20,7 @@ let post: typeof import('@/app/api/video/tools/route').POST;
 type Theme='gold'|'mono';
 interface Options {admin?:boolean; requireMissing?:boolean; touch?:boolean;holdRecovery?:boolean;catalogLoading?:boolean}
 interface FixtureWindow extends Window {canvasUi:{png:string;mount(theme:Theme,options:Options):void;unmount():void;state:{mounts:number;disposed:boolean;scopeChecks:number;images:unknown[];groups:unknown[];actions:string[];view:{offsetX:number;offsetY:number;zoom:number}|null;events:Array<{type:string;target:string}>}}}
-interface Session {frAudits:FRActivity[];frResults:Array<Awaited<ReturnType<FrameServer['extract']>>>;context:BrowserContext;page:Page;options:Options;errors:string[];counts:Map<string,number>;handlers:Set<Promise<void>>;mounted:boolean;pending:Set<Request>;completed:Set<Request>;failed:Set<Request>;refused:Set<Request>;responseStatus:Map<Request,number>;nativeWaiters:Set<()=>void>;png:Buffer;releaseRecovery:()=>void;recoveryCalls:number}
+interface Session {frAudits:FRActivity[];frResults:Array<Awaited<ReturnType<FrameServer['extract']>>>;context:BrowserContext;page:Page;options:Options;errors:string[];counts:Map<string,number>;handlers:Set<Promise<void>>;mounted:boolean;pending:Set<Request>;completed:Set<Request>;failed:Set<Request>;refused:Set<Request>;responseStatus:Map<Request,number>;nativeWaiters:Set<()=>void>;png:Buffer;releaseRecovery:()=>void;recoveryCalls:number;verifiedFrameUrl?:string}
 const ORIGIN='https://canvas-shell-mobile.invalid';
 const HELP_FILES=['canvas-overview.jpeg','erase-tool.jpeg','mask-tool.jpeg','remove-bg.jpeg','upscale.jpeg','lang-edit.jpeg','svg-trace.jpeg','extend.jpeg','oh-my-prompt.jpeg'];
 const ENTRY=String.raw`
@@ -176,7 +176,12 @@ async function session(theme: Theme = 'gold', width: number = 390, height: numbe
         if (url.origin !== ORIGIN || url.username || url.password || request.method() !== 'GET' || request.postData() !== null
           || headers.authorization || headers.cookie || headers['x-api-key'] || headers['api-key'] || headers['idempotency-key']) throw Error('CANVAS_UI_FIXTURE_HTTP_BOUNDARY');
         const key = url.pathname + url.search, count = (s.counts.get(key) ?? 0) + 1; s.counts.set(key, count);
-        if (count > (['/api/session','/api/auth/me','/api/task-events'].includes(key)?6:(key===CANVAS_FRAME_SOURCE||HELP_FILES.some(file=>key==='/api/help-image?file='+file))?3:1)) throw Error('CANVAS_UI_FIXTURE_HTTP_COUNT ' + key);
+        const frame = s.frResults.length === 1 ? s.frResults[0].frame : undefined;
+        const ownedFrameImage = frame?.url === key && request.resourceType() === 'image' && !request.isNavigationRequest();
+        const limit = ['/api/session','/api/auth/me','/api/task-events'].includes(key) ? 6
+          : (key === CANVAS_FRAME_SOURCE || HELP_FILES.some(file => key === '/api/help-image?file=' + file)) ? 3
+          : ownedFrameImage ? 2 : 1;
+        if (count > limit) throw Error('CANVAS_UI_FIXTURE_HTTP_COUNT ' + key);
         if (key === '/' && request.isNavigationRequest()) {
           await route.fulfill({ contentType: 'text/html', body: `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style></head><body style="margin:0;width:100vw;height:100dvh;overflow:hidden"><div id="fixture-root" style="position:relative;width:100%;height:100%"></div></body></html>` }); return;
         }
@@ -190,8 +195,7 @@ async function session(theme: Theme = 'gold', width: number = 390, height: numbe
         if (key === CANVAS_FRAME_SOURCE && frameServer) {
           await route.fulfill({ contentType: 'video/mp4', body: frameServer.clip }); return;
         }
-        const frame = s.frResults[0]?.frame;
-        if (frame && key === frame.url) {
+        if (frame && ownedFrameImage) {
           await route.fulfill({ contentType: 'image/png', body: frame.buffer }); return;
         }
         throw Error('CANVAS_UI_FIXTURE_UNKNOWN_HTTP ' + key);
@@ -245,7 +249,13 @@ async function dispose(s: Session, expectedRefusal?: 'http' | 'websocket', clean
   const expectedCompleted=[...s.counts].filter(([k])=>k!=='/unexpected').flatMap(([k,n])=>Array.from({length:n},()=>ORIGIN+k));
   const failed=[...s.failed];
   const validFailures=expectedRefusal==='http'?failed.length===1&&failed[0].url()===ORIGIN+'/unexpected'&&s.refused.has(failed[0]):failed.length===0;
-  if(unresolvedBeforeClose||s.pending.size||!validFailures||JSON.stringify(completed.sort())!==JSON.stringify(expectedCompleted.sort())){
+  const frame = s.frResults.length === 1 ? s.frResults[0].frame : undefined;
+  const frameReads = frame ? (s.counts.get(frame.url) ?? 0) : 0;
+  const completedFrameReads = frame ? [...s.completed].filter(request => request.url() === ORIGIN + frame.url) : [];
+  const validRepeatedFrameRead = frameReads <= 1 || (frameReads === 2 && s.verifiedFrameUrl === frame?.url
+    && completedFrameReads.length === 2 && completedFrameReads.every(request => request.method() === 'GET'
+      && request.resourceType() === 'image' && !request.isNavigationRequest() && s.responseStatus.get(request) === 200));
+  if(unresolvedBeforeClose||s.pending.size||!validFailures||!validRepeatedFrameRead||JSON.stringify(completed.sort())!==JSON.stringify(expectedCompleted.sort())){
     console.log('CANVAS_UI_NATIVE_REQUEST_FAILURE_DIAGNOSTIC',JSON.stringify({unresolvedBeforeClose,pending:[...s.pending].map(r=>r.url()),completed,expectedCompleted,failed:failed.map(r=>({url:r.url(),error:r.failure()?.errorText,status:s.responseStatus.get(r)}))}));
     invalid('CANVAS_UI_FIXTURE_NATIVE_REQUEST_FAILURE');
   }
@@ -345,6 +355,7 @@ for (const theme of ['gold','mono'] as const) for (const value of frValues) {
         expect(await output.getAttribute('src')).toBe(ORIGIN+frame.url);
         expect(await output.isVisible()).toBe(true);
         expect(await s.page.locator('[data-sonner-toast][data-type="error"]').count()).toBe(0);
+        s.verifiedFrameUrl = frame.url;
       }
       await frCapture(s,theme,value);
     });
