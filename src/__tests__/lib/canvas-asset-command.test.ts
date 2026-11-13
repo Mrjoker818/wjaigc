@@ -64,6 +64,20 @@ describe('typed canvas asset operations', () => {
       expect(() => parseDocumentAssetCommandRequest(bad)).toThrow();
     }
   });
+  it('publishes the restored name in the same update that attaches the new placement', () => {
+    const doc = createCanvasDocument();
+    try {
+      const command = parseDocumentAssetCommandRequest({ projectId: 'project-a', idempotencyKey: 'restore-key',
+        command: { action: 'attach', assetVersionId: 'v1', transform, name: '恢复图层' } }).command;
+      const updates: Array<ReturnType<typeof readCanvasDocument>> = [];
+      doc.on('update', () => updates.push(readCanvasDocument(doc)));
+      applyCanvasAssetCommand(doc, command, 'replacement');
+      expect(updates).toHaveLength(1);
+      expect(updates[0].placements.replacement.name).toBe('恢复图层');
+      expect(() => parseDocumentAssetCommandRequest({ projectId: 'project-a', idempotencyKey: 'restore-key',
+        command: { ...command, name: 'invalid\nname' } })).toThrow(DocumentAssetCommandInvalidError);
+    } finally { doc.destroy(); }
+  });
   it('enforces the existing 2000 placement limit before writing', () => {
     const doc = createCanvasDocument();
     doc.transact(() => { for (let i = 0; i < 2000; i++) {

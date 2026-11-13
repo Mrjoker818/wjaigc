@@ -46,6 +46,8 @@ export interface CanvasPlacementHistoryMetadataRestore {
   /** Fresh-page recovery only: refuse any previously written target metadata
    * atomically against the live session before constructing a durable frame. */
   requirePristine?: true;
+  /** The authoritative attach receipt already included the placement name. */
+  nameRestoredOnAttach?: true;
   /** Frozen from an authorized remove receipt by the durable history consumer.
    * This is restoration data, not authorization or server confirmation. */
   removal?: {
@@ -1726,7 +1728,7 @@ export function createCanvasDocumentSession(
     get status() { return status; },
     applyLocalGroups(groups, baseline): void { applyMetadata('groupDefinitions', groups, baseline); },
     applyLocalAnnotations(annotations, baseline): void { applyMetadata('annotationRecords', annotations, baseline); },
-    restorePlacementHistoryMetadata({ previousPlacementId, nextPlacementId, assetVersionId, removal, requirePristine }): void {
+    restorePlacementHistoryMetadata({ previousPlacementId, nextPlacementId, assetVersionId, removal, requirePristine, nameRestoredOnAttach }): void {
       if (disconnected || !initialized || ((historyBusy || mediaRecovery !== null) && !mediaHistoryBusy) ||
           (status !== 'saved' && status !== 'pending') || socket.readyState !== WebSocket.OPEN) {
         throw new Error('协作文档不可恢复摆放字段');
@@ -1819,7 +1821,7 @@ export function createCanvasDocumentSession(
         fields.push('annotations');
         patch.annotation = source.annotation ?? '';
       }
-      if (Object.hasOwn(source, 'name') && !doc.getMap('layerNames')._map.has(nextPlacementId)) {
+      if (!nameRestoredOnAttach && Object.hasOwn(source, 'name') && !doc.getMap('layerNames')._map.has(nextPlacementId)) {
         fields.push('layerNames');
         patch.name = source.name ?? null;
       }
@@ -1849,7 +1851,9 @@ export function createCanvasDocumentSession(
       // ownership; attach itself does not write those fields. Empty/default
       // values also retain their concrete head rather than claiming absence.
       restoredPlacementHeads.set(nextPlacementId, { previousPlacementId, assetVersionId,
-        heads: Object.fromEntries(fields.map(field => [field, placementHead(nextPlacementId, field)])),
+        heads: { ...Object.fromEntries(fields.map(field => [field, placementHead(nextPlacementId, field)])),
+          ...(nameRestoredOnAttach && snapshot?.placement.name !== undefined && snapshot.placement.name === previous.name
+            ? { layerNames: initialPlacementHead(nextPlacementId, 'layerNames') } : {}) },
         ...(removalFingerprint !== undefined ? { removalFingerprint } : {}),
         ...(snapshot ? { annotationIds: { ...removal!.annotationIds },
           annotationHeads: Object.fromEntries(Object.keys(annotations).map(id => [id, annotationHead(id)])) } : {}),

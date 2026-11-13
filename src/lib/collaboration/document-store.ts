@@ -10,11 +10,13 @@ const Y: typeof YTypes = require('yjs');
 
 import { getPool } from '@/lib/db-client';
 import {
+  applyCanvasImagePatch,
   assertCanvasDocumentTransition,
   createCanvasDocument,
   FORBIDDEN_CANVAS_HISTORY,
   isCanvasLayerName,
   readCanvasDocument,
+  resolveCanvasLayerName,
   type CanvasDocumentProjection,
 } from '@/lib/collaboration/canvas-document';
 import { assertDocumentEditor, assertDocumentProjectEnabled } from '@/lib/collaboration/document-access';
@@ -362,6 +364,28 @@ function assertRawDocumentMutation(previous: YTypes.Doc, candidate: YTypes.Doc, 
   }
 }
 
+async function readInheritedLayerName(client: PoolClient, ownerId: string, projectId: string, placementId: string): Promise<string | undefined> {
+  const result = await client.query<{ name: unknown }>(`
+    SELECT COALESCE(placement.metadata #> '{legacyImage,name}', legacy.image -> 'name') AS name
+      FROM wujie_workspace_placements placement
+      LEFT JOIN LATERAL (
+        SELECT images.image
+          FROM wujie_user_data data
+          CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(data.data_value) = 'array'
+            THEN data.data_value ELSE '[]'::jsonb END) AS projects(project)
+          CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(projects.project -> 'canvasImages') = 'array'
+            THEN projects.project -> 'canvasImages' ELSE '[]'::jsonb END) AS images(image)
+         WHERE placement.metadata #> '{legacyImage,name}' IS NULL
+           AND data.user_id = $2 AND data.data_key = 'projects'
+           AND projects.project ->> 'id' = $3 AND projects.project ->> 'userId' = $2
+           AND images.image ->> 'id' = placement.entity_id
+         LIMIT 1
+      ) legacy ON TRUE
+     WHERE placement.id = $1 AND placement.owner_id = $2 AND placement.project_id = $3`,
+  [placementId, ownerId, projectId]);
+  return resolveCanvasLayerName(undefined, result.rows[0]?.name);
+}
+
 /** Caller-owned transaction; only an exact typed command and a genuine server
  * preparation can reach this path. The caller must also update the graph and
  * commit its idempotency result before ACK. Never accepts raw bytes or callbacks. */
@@ -370,10 +394,16 @@ export async function commitDocumentAssetCommandInTransaction(
   input: { actorId: string; projectId: string; command: CanvasAssetCommand; placementId: string; prepared: PreparedDocumentAssets },
 ): Promise<DocumentUpdate & { removeSnapshot?: DocumentPlacementRemovalSnapshot }> {
   const { row, previous, ownerId } = await lockDocumentForWrite(client, input);
-  const removeSnapshot = input.command.action === 'remove'
-    ? captureDocumentPlacementRemovalSnapshot(readCanvasDocument(previous), input.projectId, input.command) : undefined;
   const candidate = createCanvasDocument();
   Y.applyUpdate(candidate, Y.encodeStateAsUpdate(previous));
+  // Capture the display name under the same project lock that removes it. A
+  // legacy fallback must also be present on the old tombstone for sealed undo.
+  if (input.command.action === 'remove' && candidate.getMap('layerNames').get(input.placementId) == null) {
+    const name = await readInheritedLayerName(client, ownerId, input.projectId, input.placementId);
+    if (name !== undefined) applyCanvasImagePatch(candidate, { placementId: input.placementId, name }, 'asset-command');
+  }
+  const removeSnapshot = input.command.action === 'remove'
+    ? captureDocumentPlacementRemovalSnapshot(readCanvasDocument(candidate), input.projectId, input.command) : undefined;
   applyCanvasAssetCommand(candidate, input.command, input.placementId);
   const update = await persistDocumentCandidate(client, input.projectId, ownerId, row, previous, candidate, input.prepared);
   return removeSnapshot ? { ...update, removeSnapshot } : update;

@@ -2212,6 +2212,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
             document.restorePlacementHistoryMetadata({ previousPlacementId: restored.removalSnapshot.placementId,
               nextPlacementId: restored.item.receipt!.placementId, assetVersionId: restored.removalSnapshot.placement.assetVersionId,
               requirePristine: true,
+              ...(restored.item.command.action === 'attach' && restored.item.command.name !== undefined ? { nameRestoredOnAttach: true } : {}),
               removal: { projectId, snapshot: restored.removalSnapshot, annotationIds: restored.annotationIds } });
             const sequence = await document.waitForPendingUpdates(); assertCurrent();
             return sequence;
@@ -2361,6 +2362,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
                 const nextPlacementId = restored.item.receipt!.placementId;
                 const binding = { previousPlacementId: member.placementId, nextPlacementId,
                   assetVersionId: restored.removalSnapshot.placement.assetVersionId,
+                  ...(restored.item.command.action === 'attach' && restored.item.command.name !== undefined ? { nameRestoredOnAttach: true as const } : {}),
                   removal: { projectId: activeProjectId, snapshot: restored.removalSnapshot, annotationIds: restored.annotationIds } };
                 document.restorePlacementHistoryMetadata(binding);
                 const documentSequence = await document.waitForPendingUpdates(); assertCurrent();
@@ -5780,6 +5782,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
           annotationIds = restored.annotationIds;
           const nextPlacementId = restored.item.receipt!.placementId;
           const binding = { previousPlacementId: placementId, nextPlacementId, assetVersionId: receipt.assetVersionId,
+            ...(restored.item.command.action === 'attach' && restored.item.command.name !== undefined ? { nameRestoredOnAttach: true as const } : {}),
             removal: { projectId, snapshot: restored.removalSnapshot, annotationIds: restored.annotationIds } };
           authority.restorePlacementHistoryMetadata(binding);
           const documentSequence = await authority.waitForPendingUpdates(); assertVideoScope();

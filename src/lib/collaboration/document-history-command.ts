@@ -92,9 +92,10 @@ function receiptMatches(command: DocumentHistoryCommand, receipt: DocumentAssetC
 function canonicalMapping(ids: Record<string, string>): Record<string, string> {
   return Object.fromEntries(Object.keys(ids).sort().map(id => [id, ids[id]]));
 }
-function restorationCommand(snapshot: DocumentPlacementRemovalSnapshot): DocumentHistoryCommand {
-  const { assetVersionId, x, y, width, height, rotation, zIndex } = snapshot.placement;
-  return checkedCommand({ action: 'attach', assetVersionId, transform: { x, y, width, height, rotation, zIndex } });
+function restorationCommand(snapshot: DocumentPlacementRemovalSnapshot, includeName = true): DocumentHistoryCommand {
+  const { assetVersionId, x, y, width, height, rotation, zIndex, name } = snapshot.placement;
+  return checkedCommand({ action: 'attach', assetVersionId, transform: { x, y, width, height, rotation, zIndex },
+    ...(includeName && name !== undefined ? { name } : {}) });
 }
 function checkedMapping(snapshot: DocumentPlacementRemovalSnapshot, ids: Record<string, string>): Record<string, string> {
   const parsed = annotationMappingSchema.safeParse(ids);
@@ -136,7 +137,8 @@ function checkedJournal(value: unknown, scope: DocumentHistoryCommandScope): Doc
     const removalIndex = items.findIndex(candidate => candidate.operationId === item.restoration!.removalOperationId);
     const removal = items[removalIndex], snapshot = removal?.receipt?.removeSnapshot;
     if (removalIndex < 0 || removalIndex >= index || removal.command.action !== 'remove' || !snapshot
-        || item.command.action !== 'attach' || JSON.stringify(item.command) !== JSON.stringify(restorationCommand(snapshot))) {
+        || item.command.action !== 'attach' || JSON.stringify(item.command) !== JSON.stringify(
+          restorationCommand(snapshot, item.command.name !== undefined))) {
       throw new Error('DOCUMENT_HISTORY_JOURNAL_INVALID');
     }
     try { checkedMapping(snapshot, item.restoration.annotationIds); }

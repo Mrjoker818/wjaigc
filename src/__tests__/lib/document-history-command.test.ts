@@ -187,6 +187,8 @@ describe('fresh page durable metadata recovery', () => {
     applyCanvasImagePatch(f.doc, { placementId: 'p1', name: '删除前的名称' }, 'fixture');
     await run(f);
     await restore(f);
+    expect(f.posts.find(post => post.command.action === 'attach')?.command).toMatchObject({ name: '删除前的名称' });
+    expect(readCanvasDocument(f.doc).placements['restored-1'].name).toBe('删除前的名称');
     applyCanvasImagePatch(f.doc, { placementId: 'restored-1', name: '协作者的新名称' }, 'remote');
     const result = await recoverDocumentHistoryCommands(recoveryInput(f, entry => applyRecoveredMetadata(f, entry)));
     expect(result[0]).toMatchObject({ metadataConfirmedSequence: 4 });

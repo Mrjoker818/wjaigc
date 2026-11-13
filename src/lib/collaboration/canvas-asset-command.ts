@@ -3,10 +3,10 @@ import { z } from 'zod';
 import type { RegisteredWorkspaceAssetReference } from '@/lib/asset-core/types';
 import type { CanvasAnnotationV2 } from '@/features/annotations/annotation-types';
 
-import { applyCanvasImagePatch, readCanvasDocument, validateCanvasDocumentProjection, type CanvasPlacement, type CanvasDocumentProjection } from './canvas-document';
+import { applyCanvasImagePatch, isCanvasLayerName, readCanvasDocument, validateCanvasDocumentProjection, type CanvasPlacement, type CanvasDocumentProjection } from './canvas-document';
 
 export type CanvasAssetCommand =
-  | { action: 'attach'; assetVersionId: string; transform: { x: number; y: number; width: number; height: number; rotation: number; zIndex: number } }
+  | { action: 'attach'; assetVersionId: string; name?: string | null; transform: { x: number; y: number; width: number; height: number; rotation: number; zIndex: number } }
   | { action: 'remove'; placementId: string; expectedAssetVersionId: string }
   | { action: 'replace'; placementId: string; expectedAssetVersionId: string; assetVersionId: string };
 export interface DocumentAssetCommandInput {
@@ -48,7 +48,7 @@ const commandSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('attach'), assetVersionId: safeId, transform: z.object({
     x: coordinate, y: coordinate, width: z.number().min(Number.EPSILON).max(1_000_000),
     height: z.number().min(Number.EPSILON).max(1_000_000), rotation: z.number().min(-360).max(360), zIndex: coordinate.int(),
-  }).strict() }).strict(),
+  }).strict(), name: z.string().refine(isCanvasLayerName).nullable().optional() }).strict(),
   z.object({ action: z.literal('remove'), placementId: safeId, expectedAssetVersionId: safeId }).strict(),
   z.object({ action: z.literal('replace'), placementId: safeId, expectedAssetVersionId: safeId, assetVersionId: safeId }).strict(),
 ]);
@@ -58,7 +58,7 @@ const removalSnapshotSchema = z.object({ version: z.literal(1), projectId: scope
 const commandResultSchema = z.object({ placementId: safeId, assetVersionId: safeId,
   documentSequence: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER), removeSnapshot: z.unknown().optional() }).strict();
 export const mediaImportCommandSchema = z.discriminatedUnion('action', [
-  commandSchema.options[0].omit({ assetVersionId: true }),
+  commandSchema.options[0].omit({ assetVersionId: true, name: true }),
   commandSchema.options[2].omit({ assetVersionId: true }),
 ]);
 
@@ -145,12 +145,14 @@ export function applyCanvasAssetCommand(doc: YTypes.Doc, command: CanvasAssetCom
   const before = readCanvasDocument(doc);
   if (command.action === 'attach') {
     if (Object.hasOwn(before.placements, placementId)) throw new DocumentAssetCommandConflictError();
+    const placement = { assetVersionId: command.assetVersionId, ...command.transform,
+      ...(command.name !== undefined ? { name: command.name } : {}) };
     try {
       validateCanvasDocumentProjection({ ...before, placements: {
-        ...before.placements, [placementId]: { assetVersionId: command.assetVersionId, ...command.transform },
+        ...before.placements, [placementId]: placement,
       } });
     } catch { throw new DocumentAssetCommandInvalidError(); }
-    applyCanvasImagePatch(doc, { placementId, assetVersionId: command.assetVersionId, ...command.transform }, 'asset-command');
+    applyCanvasImagePatch(doc, { placementId, ...placement }, 'asset-command');
     return;
   }
   const current = before.placements[placementId];

@@ -153,6 +153,22 @@ describe('annotation history across restored identities', () => {
     expect(f.session.projection.annotationRecords?.['restored-a']).toMatchObject({ sourceImageId: 'p3' });
   });
 
+  it('rebinds rename history to the initial name from an atomic restoration', () => {
+    const f = fixture();
+    f.session.applyLocalChange({ placementId: 'p1', name: '已改名' }); f.commit();
+    const snapshot = removeForAnnotationHistory(f);
+    applyCanvasAssetCommand(f.server, { action: 'attach', assetVersionId: 'version-p1', transform,
+      name: snapshot.placement.name }, 'p3'); f.publish();
+    const binding = { previousPlacementId: 'p1', nextPlacementId: 'p3', assetVersionId: 'version-p1',
+      removal: { projectId: 'project-a', snapshot, annotationIds: {} }, nameRestoredOnAttach: true as const };
+    f.session.restorePlacementHistoryMetadata(binding);
+    f.session.rebindPlacementHistory(binding);
+    f.session.undoLocal(); f.commit();
+    expect(f.session.images.p3.name).toBeNull();
+    f.session.redoLocal(); f.commit();
+    expect(f.session.images.p3.name).toBe('已改名');
+  });
+
   it('keeps a renamed layer on removal undo and preserves an independent geometry edit when undoing the rename', () => {
     const f = fixture();
     f.session.applyLocalChange({ placementId: 'p1', name: '产品图' });

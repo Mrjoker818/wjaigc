@@ -5,7 +5,8 @@ import type { PoolClient } from 'pg';
 
 import { applyCanvasImagePatch, createCanvasDocument, readCanvasDocument, validateCanvasDocumentProjection } from '@/lib/collaboration/canvas-document';
 import { applyCanvasAssetCommand } from '@/lib/collaboration/canvas-asset-command';
-import { assertCanonicalDocumentPayload, commitDocumentUpdateInTransaction, encodeCanonicalDocumentSnapshot } from '@/lib/collaboration/document-store';
+import { assertCanonicalDocumentPayload, commitDocumentAssetCommandInTransaction, commitDocumentUpdateInTransaction, encodeCanonicalDocumentSnapshot } from '@/lib/collaboration/document-store';
+import type { PreparedDocumentAssets } from '@/lib/collaboration/document-asset-validation';
 
 vi.mock('server-only', () => ({}));
 vi.mock('@/lib/collaboration/document-access', () => ({
@@ -14,8 +15,43 @@ vi.mock('@/lib/collaboration/document-access', () => ({
 vi.mock('@/lib/collaboration/document-assets', () => ({
   assertProjectAssetVersion: async () => {}, assertProjectCanvasPlacement: async () => {},
 }));
+vi.mock('@/lib/collaboration/document-asset-validation', () => ({ assertPreparedDocumentAssets: async () => {} }));
 
 describe('canonical Yjs document payload', () => {
+  it.each([undefined, null, '当前图层'])('seals the visible name on remove when the document name is %s', async currentName => {
+    const doc = createCanvasDocument();
+    try {
+      const transform = { x: 10, y: 20, width: 80, height: 60, rotation: 0, zIndex: 1 };
+      applyCanvasImagePatch(doc, { placementId: 'p1', assetVersionId: 'version-a', ...transform,
+        ...(currentName !== undefined ? { name: currentName } : {}),
+      }, 'seed');
+      const persisted = encodeCanonicalDocumentSnapshot(doc);
+      const query = vi.fn(async (sql: string, values?: unknown[]) => {
+        if (sql.includes('SELECT owner_id, sequence')) return { rowCount: 1, rows: [{ owner_id: 'owner-a',
+          sequence: '2', snapshot_sequence: '2', snapshot_bytes: persisted.bytes,
+          projection: JSON.parse(JSON.stringify(persisted.projection)),
+        }] };
+        if (sql.includes('SELECT COALESCE(placement.metadata')) {
+          expect(values).toEqual(['p1', 'owner-a', 'project-a']);
+          expect(currentName).not.toBe('当前图层');
+          return { rowCount: 1, rows: [{ name: '旧图层' }] };
+        }
+        return { rowCount: 1, rows: [] };
+      });
+      const removed = await commitDocumentAssetCommandInTransaction({ query } as unknown as PoolClient, {
+        projectId: 'project-a', actorId: 'editor-a', placementId: 'p1', prepared: {} as PreparedDocumentAssets,
+        command: { action: 'remove', placementId: 'p1', expectedAssetVersionId: 'version-a' },
+      });
+      const expectedName = currentName ?? '旧图层';
+      expect(removed.removeSnapshot?.placement.name).toBe(expectedName);
+      Y.applyUpdate(doc, removed.update);
+      expect(readCanvasDocument(doc).placements.p1).toMatchObject({ name: expectedName, deleted: true });
+      applyCanvasAssetCommand(doc, { action: 'attach', assetVersionId: 'version-a', transform,
+        name: removed.removeSnapshot?.placement.name }, 'replacement');
+      expect(readCanvasDocument(doc).placements.replacement.name).toBe(expectedName);
+    } finally { doc.destroy(); }
+  });
+
   it.each([undefined, '删除前名称'])('discards a concurrent rename on a removed layer with name %s and commits the live rename', async name => {
     const server = createCanvasDocument(), writer = createCanvasDocument(), reader = createCanvasDocument();
     try {
