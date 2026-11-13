@@ -44,10 +44,19 @@ async function loginAndCreateProject(page: Page): Promise<void> {
     .catch(() => false);
   if (!opened) await page.getByText('未命名项目', { exact: true }).last().click();
   await expect(canvas).toBeVisible({ timeout: 30_000 });
+  const collapse = page.getByRole('button', { name: '收起面板', exact: true });
+  if (await collapse.isVisible()) await collapse.click();
+  const projectId = await canvas.getAttribute('data-project-id');
+  expect(projectId).toBeTruthy();
+  await expect.poll(async () => {
+    const status = await page.request.get(`/api/collaboration/document-enable?projectId=${encodeURIComponent(projectId!)}`);
+    return status.ok();
+  }, { timeout: 30_000 }).toBe(true);
+  await expect(page.getByRole('group', { name: '协作文档状态与恢复' })).toHaveCount(0);
 }
 
 async function uploadSource(page: Page): Promise<Locator> {
-  const canvasImages = page.locator('[data-canvas-viewport] img');
+  const canvasImages = page.locator('[data-canvas-viewport] [data-canvas-image-id] img[alt="canvas image"]');
   const before = await canvasImages.count();
   await page.getByTestId('canvas-image-upload-input').setInputFiles({
     name: 'layer-editing-source.png',
@@ -57,13 +66,14 @@ async function uploadSource(page: Page): Promise<Locator> {
   await expect.poll(() => canvasImages.count(), { timeout: 30_000 }).toBeGreaterThan(before);
   const source = canvasImages.last();
   await expect(source).toBeVisible();
-  await source.click();
+  const placement = source.locator('xpath=ancestor::*[@data-canvas-image-id][1]');
+  if (await placement.getAttribute('data-canvas-selected') !== 'true') await placement.click();
   return source;
 }
 
 async function openLayerEditor(page: Page): Promise<Locator> {
   let entry = page.getByTestId('canvas-edit-elements');
-  if (await entry.count() === 0) {
+  if (!await entry.isVisible()) {
     await page.getByRole('button', { name: /展开更多工具/ }).click();
     entry = page.getByTestId('canvas-edit-elements');
   }
@@ -94,6 +104,7 @@ test.describe('Pear hybrid layer editing', () => {
   test.skip(!username || !password, 'Real E2E credentials are required for layer editing tests.');
 
   test('opens from the image toolbar and exposes smart, cloud, and local modes', async ({ page }, testInfo) => {
+    test.setTimeout(90_000);
     await capture(page, testInfo, 'layer-editor-modes', async () => {
       await loginAndCreateProject(page);
       await uploadSource(page);
@@ -143,6 +154,7 @@ test.describe('Pear hybrid layer editing', () => {
   });
 
   test('configures the ai-segment node without executing a provider call', async ({ page }, testInfo) => {
+    test.setTimeout(90_000);
     await capture(page, testInfo, 'layer-node-configuration', async () => {
       await loginAndCreateProject(page);
       await uploadSource(page);
@@ -150,7 +162,13 @@ test.describe('Pear hybrid layer editing', () => {
       const confirm = page.getByRole('button', { name: /继续|确认/ });
       if (await confirm.isVisible().catch(() => false)) await confirm.click();
 
-      const segmentTemplate = page.locator('[data-node-type="ai-segment"]');
+      const libraryToggle = page.getByRole('button', { name: '切换节点库面板', exact: true });
+      await expect(libraryToggle).toBeVisible();
+      if (await libraryToggle.getAttribute('aria-pressed') !== 'true') {
+        await libraryToggle.click();
+      }
+      const segmentTemplate = page.getByRole('complementary', { name: '节点库' })
+        .locator('[data-node-type="ai-segment"]');
       await expect(segmentTemplate).toBeVisible();
       await segmentTemplate.click();
       const node = page.locator('[data-node-id]').filter({ hasText: '元素分层' }).last();

@@ -26,7 +26,7 @@ function requireCredentials(): void {
   }
 }
 
-async function loginAndCreateProject(page: Page): Promise<void> {
+async function loginAndCreateProject(page: Page): Promise<string> {
   requireCredentials();
   await page.context().clearCookies();
   await page.goto('/', { waitUntil: 'networkidle' });
@@ -60,54 +60,74 @@ async function loginAndCreateProject(page: Page): Promise<void> {
     await page.getByText('未命名项目', { exact: true }).last().click();
   }
   await expect(canvasViewport).toBeVisible({ timeout: 30_000 });
+  const projectId = await canvasViewport.getAttribute('data-project-id');
+  expect(projectId).toBeTruthy();
+  // A new canvas is visible before its ownership check can accept uploads.
+  await expect.poll(async () => {
+    const response = await page.request.get(`/api/collaboration/document-enable?projectId=${encodeURIComponent(projectId!)}`);
+    return response.ok();
+  }, { timeout: 30_000 }).toBe(true);
+  await expect(page.getByRole('group', { name: '协作文档状态与恢复' })).toHaveCount(0);
+  return projectId!;
 }
 
 async function uploadAnnotationSource(page: Page): Promise<Locator> {
-  const canvasImages = page.locator('[data-canvas-viewport] img');
+  const canvasImages = page.locator('[data-canvas-viewport] [data-canvas-image-id]');
   const beforeUpload = await canvasImages.count();
-  const fileChooser = page.waitForEvent('filechooser');
-  await page.getByRole('button', { name: '图片上传' }).click();
-  await (await fileChooser).setFiles(fixturePath);
+  const upload = page.getByTestId('canvas-image-upload-input');
+  await expect(upload).toBeEnabled();
+  await upload.setInputFiles({ name: 'annotation-source.png', mimeType: 'image/png', buffer: fixtureBuffer });
   await expect.poll(() => canvasImages.count(), { timeout: 30_000 })
     .toBeGreaterThan(beforeUpload);
-  const imageContainer = canvasImages.last().locator('..');
+  const imageContainer = canvasImages.last();
   await expect(imageContainer).toBeVisible();
   return imageContainer;
 }
 
-async function readLogicalCanvasImageCount(page: Page): Promise<number> {
-  return page.evaluate(() => {
+async function openCanvasAnnotation(page: Page): Promise<void> {
+  const mobile = page.locator('[data-mobile-canvas-toolbar]');
+  if (await mobile.isVisible()) {
+    await mobile.getByRole('button', { name: '全部工具', exact: true }).click();
+    await page.getByRole('dialog', { name: '全部工具', exact: true })
+      .getByRole('button', { name: 'ChatCanvas', exact: true }).click();
+  } else {
+    const toggle = page.locator('[data-toolbar="bottom-toolbar"]').getByRole('button', { name: '全部工具', exact: true });
+    if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
+    await page.locator('[data-bottom-toolbar-drawer] [data-toolbar="bottom-annotation-entry"]').click();
+  }
+  await expect(page.getByTestId('annotation-composer')).toBeVisible();
+}
+
+async function readLogicalCanvasImageCount(page: Page, projectId: string): Promise<number> {
+  return page.evaluate((id) => {
     const raw = localStorage.getItem('unbounded_ai_user_data');
-    if (!raw) return 0;
-    const findLargestCanvas = (value: unknown): number => {
-      if (!value || typeof value !== 'object') return 0;
-      const record = value as Record<string, unknown>;
-      const ownCount = Array.isArray(record.canvasImages) ? record.canvasImages.length : 0;
-      return Object.values(record).reduce<number>(
-        (largest, child) => Math.max(largest, findLargestCanvas(child)),
-        ownCount,
-      );
-    };
-    return findLargestCanvas(JSON.parse(raw));
-  });
+    const userId = localStorage.getItem('unbounded_ai_current_user');
+    if (!raw || !userId) return 0;
+    const storage = JSON.parse(raw) as { userData?: Record<string, { projects?: Array<{
+      id: string; userId: string; canvasImages: unknown[];
+    }> }> };
+    return storage.userData?.[userId]?.projects
+      ?.find(project => project.id === id && project.userId === userId)?.canvasImages.length ?? 0;
+  }, projectId);
 }
 
 async function uploadAnnotationSources(
   page: Page,
+  projectId: string,
   count: number,
   expectedTotal: number,
 ): Promise<Locator> {
   const canvasImages = page.locator('[data-canvas-viewport] img');
   const beforeUpload = await canvasImages.count();
-  await page.locator('input[type="file"][accept="image/*"][multiple]').first().setInputFiles(
+  await page.getByTestId('canvas-image-upload-input').setInputFiles(
     Array.from({ length: count }, (_, index) => ({
     name: `annotation-perf-${beforeUpload + index + 1}.png`,
     mimeType: 'image/png',
     buffer: fixtureBuffer,
     })),
   );
-  await expect.poll(() => readLogicalCanvasImageCount(page), { timeout: 60_000 })
-    .toBeGreaterThanOrEqual(expectedTotal);
+  await expect.poll(() => readLogicalCanvasImageCount(page, projectId), { timeout: 60_000 })
+    .toBe(expectedTotal);
   return page.locator('[data-canvas-viewport] img:visible').first().locator('..');
 }
 
@@ -169,10 +189,11 @@ test.describe('ChatCanvas fused annotation', () => {
     test.setTimeout(180_000);
     const evidence = collectBrowserEvidence(page);
     try {
-      await loginAndCreateProject(page);
+      const projectId = await loginAndCreateProject(page);
       const imageContainer = await uploadAnnotationSource(page);
+      const sourceImageId = await imageContainer.getAttribute('data-canvas-image-id');
 
-      await page.locator('[data-toolbar="bottom-annotation-entry"]').click();
+      await openCanvasAnnotation(page);
       await expect(page.getByTestId('annotation-composer')).toBeVisible();
       await expect(page.locator('[data-annotation-id]')).toHaveCount(0);
 
@@ -209,33 +230,28 @@ test.describe('ChatCanvas fused annotation', () => {
       }
 
       await expect.poll(async () => (
-        page.evaluate(() => {
+        page.evaluate(({ projectId, sourceImageId }) => {
           const raw = localStorage.getItem('unbounded_ai_user_data');
-          if (!raw) return false;
-          const containsFourAnnotations = (value: unknown): boolean => {
-            if (!value || typeof value !== 'object') return false;
-            const record = value as Record<string, unknown>;
-            if (Array.isArray(record.annotationsV2)) {
-              return record.annotationsV2.length === 4;
-            }
-            return Object.values(record).some(containsFourAnnotations);
-          };
-          return containsFourAnnotations(JSON.parse(raw));
-        })
+          const userId = localStorage.getItem('unbounded_ai_current_user');
+          if (!raw || !userId) return false;
+          const storage = JSON.parse(raw) as { userData?: Record<string, { projects?: Array<{
+            id: string; userId: string;
+            metadata?: { annotationsV2?: Array<{ sourceImageId: string; projectId: string }> };
+          }> }> };
+          return storage.userData?.[userId]?.projects
+            ?.find(project => project.id === projectId && project.userId === userId)
+            ?.metadata?.annotationsV2?.filter(mark => (
+              mark.projectId === projectId && mark.sourceImageId === sourceImageId
+            )).length === 4;
+        }, { projectId, sourceImageId })
       ), { timeout: 20_000 }).toBeTruthy();
 
       await page.reload({ waitUntil: 'domcontentloaded' });
-      const reloadedCanvas = page.locator('[data-canvas-viewport]');
-      const remainedOnCanvas = await reloadedCanvas.waitFor({
-        state: 'visible',
-        timeout: 5_000,
-      }).then(() => true).catch(() => false);
-      if (!remainedOnCanvas) {
-        await expect(page.getByText('我的项目', { exact: true }).first()).toBeVisible();
-        await page.getByText('未命名项目', { exact: true }).last().click();
-      }
+      const reloadedCanvas = page.locator(`[data-canvas-viewport][data-project-id="${projectId}"]`);
       await expect(reloadedCanvas).toBeVisible({ timeout: 30_000 });
-      await page.locator('[data-toolbar="bottom-annotation-entry"]').click();
+      await expect(reloadedCanvas.locator(`[data-canvas-image-id="${sourceImageId}"]`)).toBeVisible();
+      await page.keyboard.press('KeyC');
+      await expect(page.getByTestId('annotation-composer')).toBeVisible();
       await expect(page.locator('[data-annotation-id]')).toHaveCount(4);
 
       await saveBrowserEvidence(page, testInfo, evidence, 'annotation-canvas-regression');
@@ -251,7 +267,7 @@ test.describe('ChatCanvas fused annotation', () => {
     try {
       await loginAndCreateProject(page);
       const imageContainer = await uploadAnnotationSource(page);
-      await page.locator('[data-toolbar="bottom-annotation-entry"]').click();
+      await openCanvasAnnotation(page);
       await page.locator('[data-annotation-tool="semantic-object"]').click();
       const box = await imageContainer.boundingBox();
       expect(box).not.toBeNull();
@@ -351,11 +367,11 @@ test.describe('ChatCanvas fused annotation', () => {
     });
 
     try {
-      await loginAndCreateProject(page);
-      const imageContainer = await uploadAnnotationSources(page, 25, 25);
-      metrics.imageCounts.push(await readLogicalCanvasImageCount(page));
+      const projectId = await loginAndCreateProject(page);
+      const imageContainer = await uploadAnnotationSources(page, projectId, 25, 25);
+      metrics.imageCounts.push(await readLogicalCanvasImageCount(page, projectId));
 
-      await page.locator('[data-toolbar="bottom-annotation-entry"]').click();
+      await openCanvasAnnotation(page);
       await expect(page.getByTestId('annotation-composer')).toBeVisible();
       const regionTool = page.locator('[data-annotation-tool="region"]');
       await regionTool.click();
@@ -383,20 +399,22 @@ test.describe('ChatCanvas fused annotation', () => {
       metrics.panVisibleImageCounts['25'] = await samplePanVisibility(page);
       expect(metrics.panVisibleImageCounts['25'].every((count) => count > 0)).toBeTruthy();
 
-      await uploadAnnotationSources(page, 25, 50);
-      metrics.imageCounts.push(await readLogicalCanvasImageCount(page));
+      await uploadAnnotationSources(page, projectId, 25, 50);
+      metrics.imageCounts.push(await readLogicalCanvasImageCount(page, projectId));
       metrics.panVisibleImageCounts['50'] = await samplePanVisibility(page);
       expect(metrics.panVisibleImageCounts['50'].every((count) => count > 0)).toBeTruthy();
 
-      await uploadAnnotationSources(page, 50, 100);
-      metrics.imageCounts.push(await readLogicalCanvasImageCount(page));
+      await uploadAnnotationSources(page, projectId, 50, 100);
+      metrics.imageCounts.push(await readLogicalCanvasImageCount(page, projectId));
       metrics.panVisibleImageCounts['100'] = await samplePanVisibility(page);
       expect(metrics.panVisibleImageCounts['100'].every((count) => count > 0)).toBeTruthy();
       expect(metrics.imageCounts).toEqual([25, 50, 100]);
 
-      await page.locator('[data-toolbar="bottom-annotation-entry"]').click();
+      if (await page.getByTestId('annotation-composer').isVisible()) {
+        await page.getByTestId('annotation-composer').getByRole('button', { name: '退出批注修改', exact: true }).click();
+      }
       await expect(page.getByTestId('annotation-composer')).toBeHidden();
-      await page.locator('button:has(svg.lucide-workflow)').first().click();
+      await page.getByTitle('节点模式', { exact: true }).click();
       const confirmSwitch = page.getByRole('button', { name: /缁х画|纭/ });
       if (await confirmSwitch.isVisible().catch(() => false)) await confirmSwitch.click();
       const contentImage = page.locator('[data-node-canvas-image]').first();
@@ -407,7 +425,11 @@ test.describe('ChatCanvas fused annotation', () => {
         targetPosition: { x: 520, y: 260 },
       });
       await expect(page.locator('[data-node-id]')).toHaveCount(1);
-      const addNodeButton = page.locator('aside button').first();
+      const addNodeButton = page.getByRole('complementary', { name: '节点库' })
+        .locator('[data-node-type="input-text"]');
+      if (!await addNodeButton.isVisible()) {
+        await page.getByRole('button', { name: '切换节点库面板', exact: true }).click();
+      }
       await expect(addNodeButton).toBeVisible();
       for (let index = 1; index < 50; index += 1) {
         await addNodeButton.click();

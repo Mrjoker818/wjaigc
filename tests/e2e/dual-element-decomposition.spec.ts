@@ -111,6 +111,15 @@ async function loginAndCreateProject(page: Page): Promise<void> {
     .catch(() => false);
   if (!opened) await page.getByText('未命名项目', { exact: true }).last().click();
   await expect(canvas).toBeVisible({ timeout: 30_000 });
+  const collapse = page.getByRole('button', { name: '收起面板', exact: true });
+  if (await collapse.isVisible()) await collapse.click();
+  const projectId = await canvas.getAttribute('data-project-id');
+  expect(projectId).toBeTruthy();
+  await expect.poll(async () => {
+    const status = await page.request.get(`/api/collaboration/document-enable?projectId=${encodeURIComponent(projectId!)}`);
+    return status.ok();
+  }, { timeout: 30_000 }).toBe(true);
+  await expect(page.getByRole('group', { name: '协作文档状态与恢复' })).toHaveCount(0);
 }
 
 async function uploadSource(page: Page, name: string): Promise<Locator> {
@@ -128,7 +137,8 @@ async function uploadSource(page: Page, name: string): Promise<Locator> {
 }
 
 async function openElementPanel(page: Page, image: Locator): Promise<Locator> {
-  await image.click();
+  const placement = image.locator('xpath=ancestor::*[@data-canvas-image-id][1]');
+  if (await placement.getAttribute('data-canvas-selected') !== 'true') await placement.click();
   const toolbar = page.locator('[data-toolbar="image-action-toolbar"]');
   await expect(toolbar).toBeVisible();
   let entry = toolbar.getByRole('button', { name: '元素拆解', exact: true });
@@ -270,6 +280,7 @@ test.describe('Dual-output element decomposition', () => {
   test.skip(!username || !password, 'Real E2E credentials are required; no authentication mock is used.');
 
   test('exposes board, layers, and both output modes from a selected real canvas image', async ({ page }, testInfo) => {
+    test.setTimeout(90_000);
     await capture(page, testInfo, 'element-output-modes', async () => {
       await loginAndCreateProject(page);
       const source = await uploadSource(page, 'element-modes-source.png');

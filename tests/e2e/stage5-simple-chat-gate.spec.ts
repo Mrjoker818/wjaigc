@@ -313,8 +313,8 @@ function projectRow(page: Page, projectName: string): Locator {
 async function renameProject(page: Page, before: string, after: string): Promise<void> {
   const row = projectRow(page, before);
   await row.hover();
-  await row.getByTitle('重命名').click();
-  const renameInput = row.locator('input');
+  await page.getByRole('button', { name: `重命名项目 ${before}`, exact: true }).click();
+  const renameInput = page.getByRole('textbox', { name: '项目名称', exact: true });
   await renameInput.fill(after);
   await renameInput.press('Enter');
 }
@@ -417,6 +417,11 @@ async function exerciseLongConversationMenus(page: Page, testInfo: TestInfo, lab
   await lastChatOption.click();
   await expect(page.getByRole('button', { name: 'Chat Model 18', exact: true })).toBeVisible();
 
+  const settingsToggle = page.getByRole('button', { name: '更多设置', exact: true });
+  if (await settingsToggle.isVisible() && await settingsToggle.getAttribute('aria-expanded') !== 'true') {
+    await settingsToggle.click();
+    await expect(page.getByRole('region', { name: '聊天设置', exact: true })).toBeVisible();
+  }
   const imageButton = page.getByRole('button', { name: 'Image Model 1', exact: true });
   await expect(imageButton).toBeVisible();
   await imageButton.click();
@@ -520,10 +525,7 @@ test.describe('阶段5外部门禁：智能对话独立页', () => {
     await composer.fill('触发断流验证');
     await composer.press('Enter');
     await expect(page.getByText('E2E 模拟供应商断流', { exact: true })).toBeVisible({ timeout: 30_000 });
-    const failedAssistantMessage = page.locator('[data-chat-message-id]').filter({
-      hasText: 'E2E 模拟供应商断流',
-    });
-    await expect(failedAssistantMessage.getByTitle('重新生成')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('button', { name: '重试', exact: true })).toBeVisible({ timeout: 10_000 });
   });
 
   test('model click updates aria-selected and submits the matching model/provider pair', async ({ page }, testInfo) => {
@@ -600,7 +602,7 @@ test.describe('阶段5外部门禁：智能对话独立页', () => {
     const composer = page.getByPlaceholder('输入消息，Enter 发送，支持 Ctrl+V 粘贴图片');
     await composer.fill('新的纯文字消息');
     await composer.press('Enter');
-    await expect(page.getByText('已忽略 1 张失效历史图片，本次请求继续发送。', { exact: true })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText(/已忽略 1 张失效历史图片，本次请求继续发送。/)).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText('历史图片过滤完成', { exact: true })).toBeVisible({ timeout: 20_000 });
 
     const requestBody = submittedBody as Record<string, unknown> | null;

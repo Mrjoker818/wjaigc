@@ -105,7 +105,7 @@ async function uploadAndSelectImage(page: Page): Promise<void> {
     });
     await expect.poll(() => images.count(), { timeout: 8_000 }).toBeGreaterThan(before);
   }).toPass({ timeout: 90_000, intervals: [250, 500, 1_000] });
-  await images.last().click();
+  await selectLastCanvasImage(page);
   await expect(page.locator('[data-toolbar="image-action-toolbar"]')).toBeVisible();
 }
 
@@ -118,11 +118,25 @@ async function setRightPanelCollapsed(page: Page, collapsed: boolean): Promise<v
 }
 
 async function fitCanvasContent(page: Page): Promise<void> {
-  await page.getByRole('button', { name: '重置视图', exact: true }).click();
+  const mobile = page.locator('[data-mobile-canvas-toolbar]');
+  if (await mobile.isVisible()) {
+    await mobile.getByRole('button', { name: '全部工具', exact: true }).click();
+    await page.getByRole('dialog', { name: '全部工具', exact: true })
+      .getByRole('button', { name: '重置视图', exact: true }).click();
+  } else {
+    await page.locator('[data-toolbar="bottom-toolbar"]').getByTitle('重置视图', { exact: true }).click();
+  }
   await expect(canvasImages(page).last()).toBeInViewport();
 }
 
 async function openToolbarAction(page: Page, label: string): Promise<void> {
+  const mobile = page.locator('[data-mobile-image-actions]');
+  if (await mobile.isVisible()) {
+    await mobile.getByRole('button', { name: '更多', exact: true }).click();
+    await page.getByRole('dialog', { name: '图片工具', exact: true })
+      .getByRole('button', { name: label, exact: true }).click();
+    return;
+  }
   const toolbar = page.locator('[data-toolbar="image-action-toolbar"]');
   await expect(toolbar).toBeVisible();
   let action = toolbar.getByRole('button', { name: label, exact: true });
@@ -133,6 +147,26 @@ async function openToolbarAction(page: Page, label: string): Promise<void> {
   }
   await expect(action).toBeVisible();
   await action.click();
+}
+
+async function visibleImageToolbar(page: Page): Promise<Locator> {
+  const mobile = await page.locator('[data-mobile-canvas-toolbar]').isVisible();
+  return page.locator(mobile ? '[data-mobile-image-actions]' : '[data-toolbar="image-action-toolbar"]');
+}
+
+const lastSelectionSide = new WeakMap<Page, boolean>();
+
+async function selectLastCanvasImage(page: Page): Promise<void> {
+  const image = canvasImages(page).last();
+  await expect(image).toBeInViewport();
+  const box = await image.boundingBox();
+  expect(box).not.toBeNull();
+  // Distinct points prevent rapid reselection between tools from opening the
+  // image preview instead of exercising the next toolbar action.
+  const left = !(lastSelectionSide.get(page) ?? false);
+  lastSelectionSide.set(page, left);
+  await image.click({ position: { x: box!.width * (left ? 0.25 : 0.75), y: box!.height * 0.5 } });
+  await expect(image).toHaveAttribute('data-canvas-selected', 'true');
 }
 
 async function expectWithinViewport(locator: Locator, page: Page, label: string): Promise<void> {
@@ -153,8 +187,14 @@ async function closeEditSurface(page: Page, locator: Locator): Promise<void> {
     if (await close.isVisible().catch(() => false)) await close.click();
   }
   await expect(locator).toBeHidden({ timeout: 10_000 });
-  const toolbar = page.locator('[data-toolbar="image-action-toolbar"]');
-  if (!await toolbar.isVisible().catch(() => false)) await canvasImages(page).last().click();
+  const toolbar = await visibleImageToolbar(page);
+  if (await canvasImages(page).last().getAttribute('data-canvas-selected') !== 'true') {
+    if (!await canvasImages(page).last().isVisible() || !await canvasImages(page).last().evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      return rect.left < innerWidth && rect.right > 0 && rect.top < innerHeight && rect.bottom > 0;
+    })) await fitCanvasContent(page);
+    await selectLastCanvasImage(page);
+  }
   await expect(toolbar).toBeVisible();
 }
 
@@ -180,22 +220,32 @@ test.describe('V588-UI-004 画布展示层多视口门禁', () => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await setRightPanelCollapsed(page, viewport.width < 900);
       await fitCanvasContent(page);
-      const imageToolbar = page.locator('[data-toolbar="image-action-toolbar"]');
+      const mobile = await page.locator('[data-mobile-canvas-toolbar]').isVisible();
+      const imageToolbar = await visibleImageToolbar(page);
+      if (!await imageToolbar.isVisible()) await selectLastCanvasImage(page);
       await expectWithinViewport(imageToolbar, page, `${viewport.name} 图片工具栏`);
 
-      const more = imageToolbar.getByRole('button', { name: /更多工具/ });
+      const more = imageToolbar.getByRole('button', { name: mobile ? '更多' : /更多工具/ });
       if (await more.isVisible().catch(() => false)) {
         if (await more.getAttribute('aria-expanded') !== 'true') await more.click();
-        const overflow = imageToolbar.locator('[data-image-toolbar-overflow]');
+        const overflow = mobile ? page.locator('[data-mobile-image-actions-drawer]')
+          : imageToolbar.locator('[data-image-toolbar-overflow]');
         await expectWithinViewport(overflow, page, `${viewport.name} 图片 +N 弹层`);
         await more.click();
       }
 
-      const allTools = page.getByRole('button', { name: '全部工具', exact: true });
+      const allTools = page.locator(mobile ? '[data-mobile-canvas-toolbar]' : '[data-toolbar="bottom-toolbar"]')
+        .getByRole('button', { name: '全部工具', exact: true });
       await allTools.click();
-      const drawer = page.locator('[data-bottom-toolbar-drawer]');
+      const drawer = page.locator(mobile ? '[data-mobile-canvas-toolbar-drawer]' : '[data-bottom-toolbar-drawer]');
       await expectWithinViewport(drawer, page, `${viewport.name} 底部工具抽屉`);
-      await expect(drawer.locator('[data-toolbar-drawer-section]')).toHaveCount(4);
+      if (mobile) {
+        for (const group of ['基础', '视图', '专业工具']) {
+          await expect(drawer.getByRole('region', { name: group, exact: true })).toBeVisible();
+        }
+      } else {
+        await expect(drawer.locator('[data-toolbar-drawer-section]')).toHaveCount(4);
+      }
       await allTools.click();
       await attachViewportScreenshot(page, testInfo, `toolbar-${viewport.name}`);
     }
@@ -221,6 +271,7 @@ test.describe('V588-UI-004 画布展示层多视口门禁', () => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await setRightPanelCollapsed(page, viewport.width < 900);
       await fitCanvasContent(page);
+      if (!await (await visibleImageToolbar(page)).isVisible()) await selectLastCanvasImage(page);
       for (const item of cases) {
         await openToolbarAction(page, item.action);
         const panel = item.text
@@ -250,6 +301,7 @@ test.describe('V588-UI-004 画布展示层多视口门禁', () => {
     await expectWithinViewport(openSvgPanel, page, '桌面 SVG 面板');
     await page.setViewportSize({ width: viewports[0].width, height: viewports[0].height });
     await expectWithinViewport(openSvgPanel, page, '保持打开并缩至 375px 的 SVG 面板');
-    await closeEditSurface(page, openSvgPanel);
+    await page.keyboard.press('Escape');
+    await expect(openSvgPanel).toBeHidden({ timeout: 10_000 });
   });
 });

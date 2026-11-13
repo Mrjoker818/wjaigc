@@ -69,10 +69,20 @@ async function loginAndCreateProject(page: Page): Promise<void> {
     .catch(() => false);
   if (!opened) await page.getByText('未命名项目', { exact: true }).last().click();
   await expect(canvas).toBeVisible({ timeout: 30_000 });
+  const collapse = page.getByRole('button', { name: '收起面板', exact: true });
+  if (await collapse.isVisible()) await collapse.click();
+  await expect(page.getByRole('button', { name: '展开面板', exact: true })).toBeVisible();
+  const projectId = await canvas.getAttribute('data-project-id');
+  expect(projectId).toBeTruthy();
+  await expect.poll(async () => {
+    const status = await page.request.get(`/api/collaboration/document-enable?projectId=${encodeURIComponent(projectId!)}`);
+    return status.ok();
+  }, { timeout: 30_000 }).toBe(true);
+  await expect(page.getByRole('group', { name: '协作文档状态与恢复' })).toHaveCount(0);
 }
 
 function canvasImages(page: Page): Locator {
-  return page.locator('[data-canvas-viewport] > div.group > img');
+  return page.locator('[data-canvas-viewport] [data-canvas-image-id] img[alt="canvas image"]');
 }
 
 async function uploadAndSelectSource(page: Page): Promise<{ source: Locator; sourceUrl: string }> {
@@ -88,7 +98,8 @@ async function uploadAndSelectSource(page: Page): Promise<{ source: Locator; sou
   await expect(source).toBeVisible();
   const sourceUrl = await source.getAttribute('src');
   expect(sourceUrl, 'Uploaded source image must expose a URL').toBeTruthy();
-  await source.click();
+  const placement = source.locator('xpath=ancestor::*[@data-canvas-image-id][1]');
+  if (await placement.getAttribute('data-canvas-selected') !== 'true') await placement.click();
   await expect(page.locator('[data-toolbar="image-action-toolbar"]')).toBeVisible();
   return { source, sourceUrl: sourceUrl! };
 }
@@ -116,6 +127,11 @@ async function captureJsonPost(page: Page, path: string, action: () => Promise<v
   };
 }
 
+function expectSameImageUrl(page: Page, requestedUrl: unknown, displayedUrl: string): void {
+  expect(requestedUrl).toEqual(expect.any(String));
+  expect(new URL(String(requestedUrl), page.url()).href).toBe(new URL(displayedUrl, page.url()).href);
+}
+
 async function waitForNewCompletedImage(
   page: Page,
   beforeCount: number,
@@ -129,7 +145,8 @@ async function waitForNewCompletedImage(
   }).toBeGreaterThan(beforeCount);
   await expect(page.locator('[data-canvas-viewport] [role="status"]')).toHaveCount(0, { timeout });
   const urls = await images.evaluateAll((elements) => elements.map((element) => element.getAttribute('src') || ''));
-  const resultUrl = urls.find((url) => url && url !== sourceUrl);
+  const sourceAbsolute = new URL(sourceUrl, page.url()).href;
+  const resultUrl = urls.find((url) => url && new URL(url, page.url()).href !== sourceAbsolute);
   expect(resultUrl, 'Completed edit must add a distinct result image to the canvas').toBeTruthy();
   return resultUrl!;
 }
@@ -228,7 +245,8 @@ test.describe('Image toolbar real editing flows', () => {
       const submitted = await captureJsonPost(page, '/api/image-edit', () => (
         page.getByRole('button', { name: '开始去背景', exact: true }).click()
       ));
-      expect(submitted.body).toMatchObject({ action: 'remove_background', imageUrl: sourceUrl });
+      expect(submitted.body).toMatchObject({ action: 'remove_background' });
+      expectSameImageUrl(page, submitted.body.imageUrl, sourceUrl);
       const resultUrl = await waitForNewCompletedImage(page, beforeCount, sourceUrl);
       const resultBuffer = await fetchImageBuffer(page, resultUrl);
       const metadata = await sharp(resultBuffer).metadata();
@@ -265,8 +283,8 @@ test.describe('Image toolbar real editing flows', () => {
       expect(submitted.body).toMatchObject({
         action: 'inpaint',
         editMode: 'erase',
-        imageUrl: sourceUrl,
       });
+      expectSameImageUrl(page, submitted.body.imageUrl, sourceUrl);
       expect(String(submitted.body.maskImage)).toMatch(/^data:image\/png;base64,/);
       const resultUrl = await waitForNewCompletedImage(page, beforeCount, sourceUrl);
       await expectMaskedResultContract(sourceBuffer, await fetchImageBuffer(page, resultUrl), submitted.body.maskImage);
@@ -297,9 +315,9 @@ test.describe('Image toolbar real editing flows', () => {
       expect(submitted.body).toMatchObject({
         action: 'inpaint',
         editMode: 'mask',
-        imageUrl: sourceUrl,
         prompt,
       });
+      expectSameImageUrl(page, submitted.body.imageUrl, sourceUrl);
       expect(String(submitted.body.maskImage)).toMatch(/^data:image\/png;base64,/);
       const resultUrl = await waitForNewCompletedImage(page, beforeCount, sourceUrl);
       await expectMaskedResultContract(sourceBuffer, await fetchImageBuffer(page, resultUrl), submitted.body.maskImage);
@@ -314,8 +332,8 @@ test.describe('Image toolbar real editing flows', () => {
       const { sourceUrl } = await uploadAndSelectSource(page);
       const sourceBuffer = await fetchImageBuffer(page, sourceUrl);
       const beforeCount = await canvasImages(page).count();
-      await page.getByTestId('canvas-color-adjust').click();
-      const panel = page.getByText('参数调色', { exact: true }).locator('..').locator('..').locator('..');
+      await openToolbarAction(page, '调色');
+      const panel = page.locator('[data-floating-panel="color-adjust"]');
       await expect(panel).toBeVisible();
       const preview = panel.getByRole('img', { name: '预览' });
       const initialFilter = await preview.getAttribute('style');
@@ -333,9 +351,9 @@ test.describe('Image toolbar real editing flows', () => {
       const [response, submitted] = await Promise.all([responsePromise, submittedPromise]);
       expect(response.ok(), `Color-adjust request failed with ${response.status()}`).toBeTruthy();
       expect(submitted.body).toMatchObject({
-        imageUrl: sourceUrl,
         params: { brightness: 35 },
       });
+      expectSameImageUrl(page, submitted.body.imageUrl, sourceUrl);
       const resultUrl = await waitForNewCompletedImage(page, beforeCount, sourceUrl, 120_000);
       expect(resultUrl).not.toBe(sourceUrl);
       const [sourcePixels, resultPixels] = await Promise.all([
