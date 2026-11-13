@@ -4,7 +4,7 @@ import React, { useState, useCallback, useEffect, useMemo, useLayoutEffect, useR
 import {
   Eye, EyeOff, Lock, Unlock, Trash2, ChevronUp, ChevronDown,
   GripVertical, MoreHorizontal, Pencil, X, Check, Image as ImageIcon,
-  Layers, Square, Circle, Triangle, Type, FileImage
+  Layers, Square, Circle, Triangle, Type, FileImage, Film
 } from 'lucide-react';
 import type { CanvasImage } from '@/components/infinite-canvas';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -48,23 +48,25 @@ export interface LayerPanelProps {
 }
 
 interface LayerThumbnailProps {
-  url: string;
+  url: string | undefined;
   name: string;
+  isVideo: boolean;
   isVisible: boolean;
   isMonochrome: boolean;
 }
 
-function LayerThumbnail({ url, name, isVisible, isMonochrome }: LayerThumbnailProps): React.ReactElement {
+function LayerThumbnail({ url, name, isVideo, isVisible, isMonochrome }: LayerThumbnailProps): React.ReactElement {
   const [failed, setFailed] = useState(false);
-  if (failed) {
+  if (!url || failed) {
+    const Icon = isVideo ? Film : FileImage;
     return (
       <div
         role="img"
-        aria-label="缩略图加载失败"
+        aria-label={isVideo ? `视频图层：${name}` : '缩略图加载失败'}
         className={'flex h-full w-full flex-col items-center justify-center gap-1 px-1 text-sm md:text-[11px] ' + (isMonochrome ? 'bg-gray-200 text-gray-700' : 'bg-white/5 text-foreground')}
       >
-        <FileImage className="h-4 w-4" aria-hidden="true" />
-        <span className="whitespace-nowrap">预览不可用</span>
+        <Icon className="h-4 w-4" aria-hidden="true" />
+        <span className="whitespace-nowrap">{isVideo ? '视频' : '预览不可用'}</span>
       </div>
     );
   }
@@ -188,6 +190,10 @@ function LayerItem({
   const bgClass = isSelected
     ? isMonochrome ? 'bg-gray-200' : 'bg-gold/10'
     : isMonochrome ? 'bg-transparent hover:bg-gray-50' : 'bg-transparent hover:bg-white/[0.02]';
+  const isVideo = image.mediaType === 'video' || Boolean(image.videoUrl);
+  const thumbnailUrl = isVideo
+    ? [image.videoThumbnailUrl, image.thumbnailUrl, image.url].find(url => url && url !== image.videoUrl)
+    : image.url;
 
   return (
     <div
@@ -198,7 +204,7 @@ function LayerItem({
     >
       {/* 缩略图区 */}
       <div className="relative w-full h-16 rounded-t-lg overflow-hidden">
-        <LayerThumbnail key={image.url} url={image.url} name={displayName} isVisible={isVisible} isMonochrome={isMonochrome} />
+        <LayerThumbnail key={thumbnailUrl} url={thumbnailUrl} name={displayName} isVideo={isVideo} isVisible={isVisible} isMonochrome={isMonochrome} />
         {multiSelectMode && (
           <button
             type="button"

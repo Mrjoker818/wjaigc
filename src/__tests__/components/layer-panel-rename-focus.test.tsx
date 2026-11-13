@@ -81,3 +81,21 @@ it('keeps an incoming rename when the local editor has no draft', () => {
   fireEvent.keyDown(field, { key: 'Enter' });
   expect(rename).not.toHaveBeenCalled();
 });
+
+it('shows a playable video without a poster as a video layer instead of an empty image', () => {
+  const video: CanvasImage = { ...image, url: '', mediaType: 'video', videoUrl: '/synthetic/video.mp4' };
+  const { container } = render(<LayerPanel images={[video]} position="bottom" />);
+  expect(screen.getByRole('img', { name: '视频图层：合成图层' })).toBeInstanceOf(HTMLElement);
+  expect(container.querySelector('img')).toBeNull();
+  expect(container.querySelector('video')).toBeNull();
+});
+
+it('uses the video poster and falls back to a video tile when the poster cannot load', () => {
+  const video: CanvasImage = { ...image, url: '/synthetic/video.mp4', mediaType: 'video',
+    videoUrl: '/synthetic/video.mp4', videoThumbnailUrl: '/synthetic/poster.jpg' };
+  render(<LayerPanel images={[video]} position="bottom" />);
+  const poster = screen.getByRole('img', { name: '合成图层' });
+  expect(poster.getAttribute('src')).toBe(video.videoThumbnailUrl);
+  fireEvent.error(poster);
+  expect(screen.getByRole('img', { name: '视频图层：合成图层' })).toBeInstanceOf(HTMLElement);
+});
