@@ -3,6 +3,7 @@ import { User, Project, ApiKey, UsageStats, UserData, WujieProjectFile, ImageGro
 import { APP_VERSION_LABEL } from '@/config/app-meta';
 import {
   canvasPlacementIdentityKey, excludeDeletedCanvasPlacements, parseDeletedCanvasPlacements, parseRestoredCanvasPlacements,
+  type RestoredCanvasPlacement,
 } from '@/lib/asset-core/deleted-canvas-placements';
 import {
   selectCanvasPlacementSnapshot,
@@ -557,6 +558,7 @@ export class UserManager {
   private _projectSyncQueue: Promise<void> = Promise.resolve();
   private _projectHydration: { userId: string; promise: Promise<boolean> } | null = null;
   private _lastAuthoritativeProjects = new Map<string, Project[]>();
+  private _confirmedCanvasRestores: RestoredCanvasPlacement[] = [];
   private _projectAdoptionPendingUsers = new Set<string>();
   private _onProjectsChanged: (() => void) | null = null;
   // ★ 跟踪最近删除的图片ID，防止服务器同步时将已删除的图片合并回来
@@ -1016,6 +1018,7 @@ export class UserManager {
     this._canvasKernelMode = 'legacy';
     this._workflowRendererMode = 'legacy';
     this._recentlyDeletedImageIds.clear();
+    this._confirmedCanvasRestores = [];
     this._projectHydration = null;
     this.lastDataLossSnapshotSignature = null;
   }
@@ -1055,6 +1058,14 @@ export class UserManager {
 
   getProjectSyncRevision(): number {
     return this._projectSyncRevision;
+  }
+
+  getRestoredImagesAfterRevision(project: Project, revision: number): CanvasImage[] {
+    if (this._assetGraphMode !== 'asset-v3' || project.userId !== this.currentUserId) return [];
+    const restoredKeys = new Set(this._confirmedCanvasRestores
+      .filter(item => item.projectId === project.id && item.revision > revision && item.revision <= this._projectSyncRevision)
+      .map(item => canvasPlacementIdentityKey(item.projectId, { ...item, id: item.entityId })));
+    return project.canvasImages.filter(image => restoredKeys.has(canvasPlacementIdentityKey(project.id, image)));
   }
 
   advanceProjectSyncRevision(revision: number): void {
@@ -2220,6 +2231,7 @@ export class UserManager {
         adoptedDraft: userData.projects,
         requiredBackups,
       });
+      this._confirmedCanvasRestores = restoredCanvasPlacements;
       this.notifyProjectsChanged(); // 通知 UI 刷新
       // ★ 调试日志：帮助追踪数据恢复
       const totalImages = userData.projects.reduce((sum, p) => sum + (p.canvasImages?.length || 0), 0);

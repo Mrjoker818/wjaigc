@@ -300,6 +300,15 @@ describe('canvas autosave hydration guard', () => {
     });
   });
 
+  it('retains only server-confirmed restored placements alongside a recovered draft', () => {
+    const restored = image({ id: 'restored', url: '/media/restored.png' });
+    const unrelated = image({ id: 'unrelated', url: '/media/unrelated.png' });
+    const pending = image({ id: 'pending', url: 'data:image/png;base64,AAAA' });
+    expect(reconcileRecoveredCanvasImages([pending], [restored, unrelated], [restored])).toEqual({
+      images: [pending, restored], discardedBlobIds: [],
+    });
+  });
+
   it('rejects an unowned legacy snapshot at a user boundary', () => {
     const storage = {
       getItem: vi.fn(() => JSON.stringify({

@@ -1173,7 +1173,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
         ) : null;
         const hadPendingMedia = Boolean(recoveredCanvasSnapshot && pendingMediaMarker);
         const recoveredMedia = recoveredCanvasSnapshot
-          ? reconcileRecoveredCanvasImages(recoveredCanvasSnapshot.images, storedProject.canvasImages)
+          ? reconcileRecoveredCanvasImages(recoveredCanvasSnapshot.images, storedProject.canvasImages,
+              userMgr.getRestoredImagesAfterRevision(storedProject, recoveredCanvasSnapshot.baseProjectRevision))
           : null;
         const targetProject = recoveredCanvasSnapshot
           ? {
@@ -1541,7 +1542,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
                 ) : null;
                 const hadPendingMedia = Boolean(recoveredCanvasSnapshot && pendingMediaMarker);
                 const recoveredMedia = recoveredCanvasSnapshot
-                  ? reconcileRecoveredCanvasImages(recoveredCanvasSnapshot.images, storedProject.canvasImages)
+                  ? reconcileRecoveredCanvasImages(recoveredCanvasSnapshot.images, storedProject.canvasImages,
+                      userMgr.getRestoredImagesAfterRevision(storedProject, recoveredCanvasSnapshot.baseProjectRevision))
                   : null;
                 const targetProject = recoveredCanvasSnapshot
                   ? {
