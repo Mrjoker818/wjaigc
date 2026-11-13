@@ -2326,20 +2326,28 @@ export class UserManager {
     }
     this._serverSyncReady = false;
     const syncUserId = nextUser.id;
+    const syncSessionEpoch = this._projectSyncSessionEpoch;
     const fallbackMutationGeneration = this._projectMutationGeneration;
     const hydrationPromise = this.loadProjectsFromServer(1, syncUserId).then(loadSuccess => {
       // Do not let a delayed sync for a previous account change the next account's data.
+      if (this.currentUserId !== syncUserId || this._projectSyncSessionEpoch !== syncSessionEpoch) return false;
+      const activeUserData = this.multiUserData?.userData[syncUserId];
       if (
         !loadSuccess
-        && this.currentUserId === syncUserId
         && this._projectMutationGeneration === fallbackMutationGeneration
         && existingLocalProjects.length > 0
       ) {
-        const activeUserData = this.multiUserData?.userData[syncUserId];
         if (activeUserData) {
           activeUserData.projects = existingLocalProjects;
           this.notifyProjectsChanged();
         }
+      }
+      // Opening a project must not trigger copy-on-write migration. Only replay
+      // a draft that still differs from the accepted server snapshot.
+      const authoritative = this._lastAuthoritativeProjects.get(syncUserId);
+      if (loadSuccess && activeUserData && authoritative
+        && !snapshotsEqual(activeUserData.projects, authoritative)) {
+        this.scheduleServerSync();
       }
       return loadSuccess;
     }).catch(error => {
@@ -2349,7 +2357,7 @@ export class UserManager {
     this._projectHydration = { userId: syncUserId, promise: hydrationPromise };
     void hydrationPromise;
 
-    this.saveData();
+    this.commitLocalDataOnly();
     return nextUser;
   }
 

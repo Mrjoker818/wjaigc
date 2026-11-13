@@ -172,6 +172,63 @@ afterEach(() => {
 });
 
 describe('UserManager project sync response isolation', () => {
+  it('loads an existing v1 project after login without writing it back', async () => {
+    storage.clear();
+    const legacyProject = { ...project('user-a', '/media/legacy.png'), schemaVersion: 1 };
+    const requests = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/user-data/sync?key=projects') {
+        return Response.json({ success: true, value: [legacyProject], projectRevision: 7, assetGraphMode: 'asset-v3' });
+      }
+      if (url === '/api/user-data/sync' && init?.method === 'POST') {
+        return Response.json({ success: true, projectRevision: 8 });
+      }
+      throw new Error('Unexpected project sync request');
+    });
+    vi.stubGlobal('fetch', requests);
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+
+    await manager.upsertUserFromServer(users[0]);
+    await expect(manager.waitForProjectHydration('user-a')).resolves.toBe(true);
+    await vi.advanceTimersByTimeAsync(2_001);
+
+    expect(manager.getProject('project-a')).toMatchObject(legacyProject);
+    expect(requests.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
+    expect(manager.getProjectSyncRevision()).toBe(7);
+  });
+
+  it('syncs an offline draft after a slow login read establishes its server revision', async () => {
+    const initial = project('user-a', '/media/a.png');
+    const local = JSON.parse(storage.get('unbounded_ai_user_data')!);
+    local.userData['user-a'].projects[0] = { ...initial, name: 'Offline edit', updatedAt: 2 };
+    storage.set('unbounded_ai_user_data', JSON.stringify(local));
+    const read = deferredResponse();
+    const requests = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/user-data/sync?key=projects') return read.promise;
+      if (url === '/api/user-data/sync' && init?.method === 'POST') {
+        return Response.json({ success: true, projectRevision: 8 });
+      }
+      throw new Error('Unexpected project sync request');
+    });
+    vi.stubGlobal('fetch', requests);
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+
+    await manager.upsertUserFromServer(users[0]);
+    await vi.advanceTimersByTimeAsync(2_001);
+    expect(requests.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
+    read.resolve(Response.json({ success: true, value: [initial], projectRevision: 7, assetGraphMode: 'asset-v3' }));
+    await expect(manager.waitForProjectHydration('user-a')).resolves.toBe(true);
+    await vi.advanceTimersByTimeAsync(2_001);
+
+    const writes = requests.mock.calls.filter(([, init]) => init?.method === 'POST');
+    expect(writes).toHaveLength(1);
+    expect(JSON.parse(String(writes[0][1]?.body))).toMatchObject({
+      projectRevision: 7, value: [expect.objectContaining({ id: 'project-a', name: 'Offline edit' })],
+    });
+    expect(manager.getProjectSyncRevision()).toBe(8);
+  });
+
   it('preserves server creation identity when a newer cold-start local project shares its ID', async () => {
     const seeded = JSON.parse(storage.get('unbounded_ai_user_data')!) as {
       userData: Record<string, { projects: Project[] }>;
