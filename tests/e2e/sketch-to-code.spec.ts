@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { compileSketchHtml } from '../../src/lib/sketch-to-code/html';
+import { CAPABILITY_CATALOG_VERSION } from '../../src/lib/task-core/model-capability-contract';
 
 // Task6 runs this against its authorized local app. All business endpoints are
 // intercepted: this is product wiring with controlled HTTP, NOT paid/shared acceptance.
@@ -14,8 +15,14 @@ async function fixture(page: Page): Promise<{ admissions: string[]; reads: strin
   let inputPng = '', entityId = '', sourceTrace: unknown;
   await page.route('**/api/**', route => route.fulfill({ status: 503, json: { success: false, error: 'SKETCH_FIXTURE_UNHANDLED_ENDPOINT' } }));
   await page.route('**/api/session', route => route.fulfill({ json: { success: true, user } }));
-  await page.route('**/api/models**', route => route.fulfill({ json: { success: true, providers: [], models: [], taskModelCatalog: [model] } }));
+  await page.route('**/api/models**', route => route.fulfill({ json: {
+    success: true, capabilityCatalogVersion: CAPABILITY_CATALOG_VERSION,
+    providers: [], models: [], taskModelCatalog: [model],
+  } }));
   await page.route('**/api/tasks/recover**', route => route.fulfill({ json: { success: true, tasks: [] } }));
+  await page.route('**/api/collaboration/document-enable?*', route => route.fulfill({
+    json: { success: true, projectId: task.projectId, enabled: false, featureEnabled: true, currentRevision: 2 },
+  }));
   await page.route('**/api/user-data/sync**', route => {
     if (route.request().method() === 'POST') {
       const body = route.request().postDataJSON(); if (body.key === 'projects') projects = body.value;
@@ -38,13 +45,20 @@ async function fixture(page: Page): Promise<{ admissions: string[]; reads: strin
 }
 
 test('original drawer exports fresh code and personal PNG placement survives refresh without readmitting a task', async ({ page }) => {
+  test.setTimeout(120_000);
   const evidence = await fixture(page);
+  const verifiedAuthority = page.waitForResponse(response => response.ok()
+    && new URL(response.url()).pathname === '/api/collaboration/document-enable');
   await page.goto(`/?projectId=${task.projectId}`);
+  await verifiedAuthority;
   await expect(page.locator('[data-canvas-interaction-surface]')).toBeVisible();
+  await expect(page.getByRole('group', { name: '协作文档状态与恢复' })).toHaveCount(0);
   const toolbar = page.viewportSize()!.width < 768 ? page.locator('[data-mobile-canvas-toolbar]') : page.locator('[data-toolbar="bottom-toolbar"]');
   await toolbar.getByRole('button', { name: '全部工具' }).click();
-  await page.getByRole('button', { name: '草图转代码', exact: true }).filter({ visible: true }).click();
-  const panel = page.getByRole('region', { name: '草图转代码' });
+  await page.getByRole('button', { name: '草图创作', exact: true }).filter({ visible: true }).click();
+  const panel = page.getByRole('region', { name: '草图创作', exact: true });
+  await panel.getByRole('button', { name: '草图转代码', exact: true }).click();
+  await expect(panel.getByText('当前项目授权未知或已失效，请恢复项目后操作。')).toHaveCount(0);
   await expect(panel.getByRole('button', { name: '生成代码' })).toBeDisabled();
   const surface = panel.getByLabel('绘图区'); const box = await surface.boundingBox();
   await page.mouse.move(box!.x + 30, box!.y + 30); await page.mouse.down(); await page.mouse.move(box!.x + 120, box!.y + 60); await page.mouse.up();
@@ -59,9 +73,20 @@ test('original drawer exports fresh code and personal PNG placement survives ref
   for await (const chunk of stream!) chunks.push(Buffer.from(chunk)); expect(Buffer.concat(chunks).toString('utf8')).toBe(html);
   await panel.getByRole('button', { name: '添加到画布' }).click();
   await expect(page.locator('[data-canvas-image-id^="sketch-"]')).toHaveCount(1);
-  await page.reload(); await expect(page.locator('[data-canvas-image-id^="sketch-"]')).toHaveCount(1);
-  await page.locator('[data-canvas-image-id^="sketch-"]').click(); await page.getByRole('button', { name: '打开草图代码' }).click();
-  await page.getByRole('button', { name: '打开代码预览' }).click();
-  expect(evidence.admissions).toHaveLength(1); expect(evidence.reads).toHaveLength(3);
+  const reopenedAuthority = page.waitForResponse(response => response.ok()
+    && new URL(response.url()).pathname === '/api/collaboration/document-enable');
+  await page.reload();
+  await reopenedAuthority;
+  await expect(page.getByRole('group', { name: '协作文档状态与恢复' })).toHaveCount(0);
+  await expect(page.locator('[data-canvas-image-id^="sketch-"]')).toHaveCount(1);
+  await page.locator('[data-canvas-image-id^="sketch-"]').click();
+  if (await page.locator('[data-mobile-image-actions]').isVisible()) {
+    await page.locator('[data-mobile-image-actions]').getByRole('button', { name: '更多', exact: true }).click();
+  }
+  await page.getByRole('button', { name: '打开草图代码', exact: true }).click();
+  await panel.getByRole('button', { name: '打开代码预览' }).click();
+  await expect(panel.frameLocator('iframe').getByText('草图页面中文')).toBeVisible();
+  expect(evidence.admissions).toHaveLength(1);
+  expect(evidence.reads).toHaveLength(3);
   expect(JSON.parse(evidence.admissions[0])).toMatchObject({ providerId: model.providerId, modelId: model.modelId });
 });

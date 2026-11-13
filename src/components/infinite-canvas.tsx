@@ -12653,10 +12653,21 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     ? 'video' : selectedImageData?.threeDModelUrl ? '3d' : 'image';
   const availableTools = getAvailableToolsByMediaType(selectedMediaType);
 
-  const visibleImageActions = fullOrder
+  const orderedImageActions = fullOrder
     .filter(label => !toolbarHiddenItems.has(label) && availableTools.includes(label))
     .map(label => imageActions.find(a => a.label === label))
     .filter((a): a is typeof imageActions[number] => a !== undefined);
+  const selectedSketchTrace = selectedIds.size === 1
+    ? parseWorkspaceSourceTrace(selectedImageData?.sourceTrace) : undefined;
+  const visibleImageActions = selectedSketchTrace?.source === 'sketch-to-code'
+    ? [{
+      icon: <FileImage size={14} />,
+      label: '打开草图代码',
+      desc: '查看此草图的代码',
+      action: () => openSketchToCode(selectedSketchTrace),
+      testId: 'canvas-open-sketch-code',
+    }, ...orderedImageActions]
+    : orderedImageActions;
 
   // 折叠时仅显示前5个
   const displayedActions = visibleImageActions.slice(0, 5);
@@ -14425,9 +14436,6 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       </span>
                     )}
                     <CanvasSourceTraceBadge sourceTrace={image.sourceTrace} isSelected={isSelected} />
-                    {isSelected && (() => { const trace = parseWorkspaceSourceTrace(image.sourceTrace); return trace?.source === 'sketch-to-code'
-                      ? <button type="button" className="pointer-events-auto rounded bg-black/80 px-2 py-1 text-xs text-amber-100 focus-visible:outline" aria-label="打开草图代码"
-                        data-toolbar="sketch-code" onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); openSketchToCode(trace); }}>打开代码</button> : null; })()}
                   </div>
                 ) : null;
                 })()}

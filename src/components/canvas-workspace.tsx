@@ -677,6 +677,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
 
   // Cleanup on unmount
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
       quickCreateCompileControllerRef.current?.abort();
