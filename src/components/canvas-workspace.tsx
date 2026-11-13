@@ -201,6 +201,7 @@ import {
   enqueueCanvasHydrationGuard,
   persistRecoveredCanvasSnapshot,
   persistPreparedCanvasUnloadSnapshot,
+  preserveConfirmedCanvasRestores,
   reconcileRecoveredCanvasImages,
   shouldConsumeCanvasHydrationGuard,
   type CanvasHydrationGuard,
@@ -2027,18 +2028,23 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
       const project = UserManagerCore.getInstance().getProject(snapshot.projectId);
       return project ? retainSavedProjectWorkflow(snapshot.metadata, project.metadata) : snapshot.metadata;
     };
-    const prepareCanvasWorkspaceSnapshot = (snapshot: CanvasPersistenceSnapshot) => {
+    const prepareCanvasWorkspaceSnapshot = (snapshot: CanvasPersistenceSnapshot, baseRevision = snapshot.baseProjectRevision) => {
+      const manager = UserManagerCore.getInstance();
+      const project = manager.getProject(snapshot.projectId);
+      const images = project
+        ? preserveConfirmedCanvasRestores(snapshot.images, manager.getRestoredImagesAfterRevision(project, baseRevision))
+        : [...snapshot.images];
       const normalizedSnapshot: CanvasPersistenceSnapshot = {
         ...snapshot,
         metadata: retainWorkspaceWorkflow(snapshot),
         images: serializeCanvasWorkspacePlacements(
-          snapshot.images as unknown as CanvasImage[],
+          images as unknown as CanvasImage[],
         ),
       };
       return prepareCanvasPersistenceSnapshot(normalizedSnapshot);
     };
-    const prepareCanvasWorkspaceUnloadSnapshot = (snapshot: CanvasPersistenceSnapshot) => {
-      const prepared = prepareCanvasWorkspaceSnapshot(snapshot);
+    const prepareCanvasWorkspaceUnloadSnapshot = (snapshot: CanvasPersistenceSnapshot, originalBaseRevision?: number) => {
+      const prepared = prepareCanvasWorkspaceSnapshot(snapshot, originalBaseRevision);
       const manager = UserManagerCore.getInstance();
       const userId = currentUserRef.current?.id;
       if (!userId) return prepared;
@@ -2107,8 +2113,12 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
         if (!canUseLegacyCanvasPersistence(snapshot.projectId, collaborativeCanvasRef.current)) {
           throw new Error('协作项目已由文档接管，旧画布快照不可保存');
         }
+        const project = manager.getProject(snapshot.projectId);
+        const images = project
+          ? preserveConfirmedCanvasRestores(snapshot.images, manager.getRestoredImagesAfterRevision(project, snapshot.baseProjectRevision))
+          : [...snapshot.images];
         const projectUpdates = {
-          canvasImages: [...snapshot.images],
+          canvasImages: images,
           metadata: retainWorkspaceWorkflow(snapshot),
         };
         if (reason === 'immediate') {

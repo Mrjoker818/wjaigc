@@ -387,7 +387,8 @@ describe('CanvasPersistenceScheduler', () => {
   });
 
   it('rebases a pending unload snapshot onto the latest acknowledged server revision', () => {
-    const scheduler = new CanvasPersistenceScheduler({ writer: async () => undefined });
+    const prepareForUnload = vi.fn(prepareCanvasPersistenceSnapshot);
+    const scheduler = new CanvasPersistenceScheduler({ writer: async () => undefined, prepareForUnload });
     const values = new Map<string, string>();
     const storage = {
       getItem: (key: string) => values.get(key) ?? null,
@@ -399,6 +400,7 @@ describe('CanvasPersistenceScheduler', () => {
     const prepared = scheduler.preparePendingSnapshotForUnload('project-a', 10);
 
     expect(prepared).not.toBeNull();
+    expect(prepareForUnload).toHaveBeenCalledWith(expect.objectContaining({ baseProjectRevision: 10 }), 7);
     persistPreparedCanvasUnloadSnapshot(prepared!, {
       storage,
       sendBeacon: () => false,

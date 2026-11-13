@@ -88,11 +88,11 @@ afterEach(() => {
 });
 
 describe('asset-v3 client project authority', () => {
-  it.each([['asset-v3', 8, 'placement-retained', true], ['asset-v3', 7, 'placement-retained', false],
-    ['asset-v3', 9, 'placement-retained', false], ['asset-v3', 8, 'other-placement', false],
-    ['legacy', 8, 'placement-retained', false]] as const)(
-    'adopts a newer confirmed restore without replaying the local omission (%s, revision %s, placement %s)',
-    async (mode, restoreRevision, restoredPlacement, keepsRestoredImage) => {
+  it.each([['asset-v3', 8, 'placement-retained', false, true], ['asset-v3', 8, 'placement-retained', true, true],
+    ['asset-v3', 7, 'placement-retained', false, false], ['asset-v3', 9, 'placement-retained', false, false],
+    ['asset-v3', 8, 'other-placement', false, false], ['legacy', 8, 'placement-retained', false, false]] as const)(
+    'adopts a newer confirmed restore without replaying the local omission (%s, revision %s, placement %s, ACK %s)',
+    async (mode, restoreRevision, restoredPlacement, advancedByOtherAck, keepsRestoredImage) => {
       const managed = {
         ...canvasImage('retained', 44), assetId: 'asset-retained',
         assetVersionId: 'version-retained', placementId: 'placement-retained',
@@ -120,6 +120,7 @@ describe('asset-v3 client project authority', () => {
       const manager = UserManager.getInstance();
       await expect(manager.loadProjectsFromServer(0, user.id)).resolves.toBe(true);
       manager.updateProject('project-1', { canvasImages: [] });
+      if (advancedByOtherAck) manager.advanceProjectSyncRevision(8);
       await expect(manager.loadProjectsFromServer(0, user.id)).resolves.toBe(true);
       await manager.flushProjectsToServer();
       const post = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');

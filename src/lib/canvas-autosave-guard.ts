@@ -146,16 +146,9 @@ export function reconcileRecoveredCanvasImages<T extends { id: string; url: stri
   restoredSinceDraft: ReadonlyArray<T> = [],
 ): { images: T[]; discardedBlobIds: string[] } {
   const savedById = new Map(savedImages.map(image => [image.id, image]));
-  const restoredById = new Map(restoredSinceDraft.map(image => [image.id, image]));
   const images: T[] = [];
   const discardedBlobIds: string[] = [];
-  for (const image of recoveredImages) {
-    const restored = restoredById.get(image.id);
-    if (restored) {
-      images.push(restored);
-      restoredById.delete(image.id);
-      continue;
-    }
+  for (const image of preserveConfirmedCanvasRestores(recoveredImages, restoredSinceDraft)) {
     if (!image.url.startsWith('blob:')) {
       images.push(image);
       continue;
@@ -167,8 +160,19 @@ export function reconcileRecoveredCanvasImages<T extends { id: string; url: stri
       discardedBlobIds.push(image.id);
     }
   }
-  images.push(...restoredById.values());
   return { images, discardedBlobIds };
+}
+
+export function preserveConfirmedCanvasRestores<T extends { id: string }>(
+  images: ReadonlyArray<T>, restoredSinceDraft: ReadonlyArray<T>,
+): T[] {
+  const restoredById = new Map(restoredSinceDraft.map(image => [image.id, image]));
+  const merged = images.map(image => {
+    const restored = restoredById.get(image.id);
+    restoredById.delete(image.id);
+    return restored ?? image;
+  });
+  return [...merged, ...restoredById.values()];
 }
 
 export async function persistRecoveredCanvasSnapshot(

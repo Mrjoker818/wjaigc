@@ -558,6 +558,7 @@ export class UserManager {
   private _projectSyncQueue: Promise<void> = Promise.resolve();
   private _projectHydration: { userId: string; promise: Promise<boolean> } | null = null;
   private _lastAuthoritativeProjects = new Map<string, Project[]>();
+  private _projectRebaseBaseRevision = 0;
   private _confirmedCanvasRestores: RestoredCanvasPlacement[] = [];
   private _projectAdoptionPendingUsers = new Set<string>();
   private _onProjectsChanged: (() => void) | null = null;
@@ -1013,6 +1014,7 @@ export class UserManager {
     this._projectSyncSessionEpoch += 1;
     this._projectSyncRequestEpoch += 1;
     this._projectSyncRevision = 0;
+    this._projectRebaseBaseRevision = 0;
     this._projectMutationGeneration = 0;
     this._acceptedProjectMutationGeneration = 0;
     this._canvasKernelMode = 'legacy';
@@ -1267,6 +1269,7 @@ export class UserManager {
         }
       }
       this._projectSyncRevision = envelope.revision;
+      this._projectRebaseBaseRevision = envelope.revision;
       this._assetGraphMode = envelope.assetGraphMode;
       this._lastAuthoritativeProjects.set(userId, cloneProjects(envelope.authoritativeBase));
     } catch (error) {
@@ -1312,6 +1315,7 @@ export class UserManager {
     }
 
     this._projectSyncRevision = envelope.revision;
+    this._projectRebaseBaseRevision = envelope.revision;
     this._assetGraphMode = envelope.assetGraphMode;
     this._lastAuthoritativeProjects.set(userId, cloneProjects(envelope.authoritativeBase));
   }
@@ -1410,6 +1414,7 @@ export class UserManager {
 
       userData.projects = persistedDraft;
       this._projectSyncRevision = input.revision;
+      this._projectRebaseBaseRevision = input.revision;
       this._acceptedProjectMutationGeneration = this._projectMutationGeneration;
       this._assetGraphMode = input.assetGraphMode;
       this._canvasKernelMode = input.canvasKernelMode;
@@ -1932,8 +1937,10 @@ export class UserManager {
         persistedLegacyBase?.revision ?? 0,
       );
       if (nextProjectSyncRevision < acceptedRevision) return false;
+      const rebaseBaseRevision = Math.max(this._projectRebaseBaseRevision,
+        persistedCommit?.revision ?? 0, persistedLegacyBase?.revision ?? 0);
       const restoredPlacementKeys = new Set(restoredCanvasPlacements
-        .filter(placement => placement.revision > acceptedRevision && placement.revision <= nextProjectSyncRevision)
+        .filter(placement => placement.revision > rebaseBaseRevision && placement.revision <= nextProjectSyncRevision)
         .map(placement => canvasPlacementIdentityKey(placement.projectId, { ...placement, id: placement.entityId })));
 
       if (data.value === undefined || data.value === null) {

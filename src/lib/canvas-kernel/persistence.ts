@@ -46,6 +46,7 @@ interface CanvasPersistenceSchedulerOptions {
   ) => Promise<CanvasPreparedPersistenceSnapshot> | CanvasPreparedPersistenceSnapshot;
   prepareForUnload?: (
     snapshot: CanvasPersistenceSnapshot,
+    originalBaseProjectRevision?: number,
   ) => CanvasPreparedPersistenceSnapshot;
   scheduleIdle?: (callback: () => void, timeoutMs: number) => IdleHandle;
   cancelIdle?: (handle: IdleHandle) => void;
@@ -258,7 +259,7 @@ export class CanvasPersistenceScheduler {
     ) {
       return prepared;
     }
-    const emergencyPrepared = this.prepareUnloadSnapshot(unloadSnapshot);
+    const emergencyPrepared = this.prepareUnloadSnapshot(unloadSnapshot, latest.baseProjectRevision);
     this.preparedSnapshots.set(projectId, emergencyPrepared);
     return emergencyPrepared;
   }
