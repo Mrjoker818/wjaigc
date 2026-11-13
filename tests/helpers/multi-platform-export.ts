@@ -91,7 +91,7 @@ export interface MultiPlatformExportFixture {
   repairCorruptSource(): Promise<void>;
   prepareCancellationLoad(): Promise<string[]>;
   cancelRun(page: Page, runId: string): Promise<void>;
-  failNextZipDownload(page: Page, versionId: string | undefined): Promise<void>;
+  failNextZipDownload(page: Page, runId: string, versionId: string | undefined): Promise<() => boolean>;
   activeCanvasPlacementCount(): Promise<number>;
   dispose(): Promise<void>;
 }
@@ -460,18 +460,21 @@ async function setupFixture(page: Page, testInfo: TestInfo, directory: string): 
         });
         expect(response.ok(), `cancel returned HTTP ${response.status()}`).toBe(true);
       },
-      async failNextZipDownload(targetPage, versionId) {
+      async failNextZipDownload(targetPage, runId, versionId) {
         if (!versionId) throw new Error('ZIP AssetVersion is missing');
-        let remaining = 1;
-        await targetPage.route('**/api/assets?**', async route => {
+        let intercepted = false;
+        await targetPage.route(`**/api/skill-runs/${encodeURIComponent(runId)}/assets?**`, async route => {
           const url = new URL(route.request().url());
-          if (remaining > 0 && url.searchParams.get('assetVersionId') === versionId) {
-            remaining -= 1;
+          if (!intercepted && url.searchParams.get('projectId') === projectId
+              && url.searchParams.getAll('assetVersionId').length === 1
+              && url.searchParams.get('assetVersionId') === versionId) {
+            intercepted = true;
             await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ code: 'CONTROLLED_DOWNLOAD_FAILURE' }) });
             return;
           }
           await route.continue();
         });
+        return () => intercepted;
       },
       async activeCanvasPlacementCount() {
         const result = await pool.query<{ count: string }>(

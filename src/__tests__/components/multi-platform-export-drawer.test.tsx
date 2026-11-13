@@ -91,7 +91,7 @@ describe('MultiPlatformExportDrawer', () => {
     expect(props.onLocateSource).toHaveBeenCalledWith('source-v');
     if (authority === 'document') expect(fetcher.mock.calls.some(([url]) => String(url).startsWith('/api/assets?'))).toBe(false);
   });
-  it.each(['normal','actor','project','unmount'] as const)('run-bound manual delivery %s never uses private assets or consumes a stale scope',async mode=>{
+  it.each(['normal','refresh','actor','project','unmount'] as const)('run-bound manual delivery %s never uses private assets or consumes a stale scope',async mode=>{
     const pending=deferred<Response>();let reads=0;
     const ref={assetId:'asset',assetVersionId:'image',kind:'image',url:'/image.png'};
     const fetcher=vi.fn<typeof fetch>(async input=>{
@@ -107,12 +107,19 @@ describe('MultiPlatformExportDrawer', () => {
     const view=render(<MultiPlatformExportDrawer {...props}/>);
     fireEvent.click(await screen.findByRole('button',{name:'批量放入画布'}));
     await waitFor(()=>expect(reads).toBe(2));
+    const refreshedOnAdd = vi.fn();
+    if (mode === 'refresh') {
+      view.rerender(<MultiPlatformExportDrawer {...props}
+        projection={structuredClone({ ...props.projection, lastSequence: 5 })}
+        onAddToCanvas={refreshedOnAdd} />);
+    }
     if(mode==='actor')view.rerender(<MultiPlatformExportDrawer {...props} accountKey="other"/>);
     if(mode==='project')view.rerender(<MultiPlatformExportDrawer {...props} projectId="other"/>);
     if(mode==='unmount')view.unmount();
     await act(async()=>{pending.resolve(Response.json({actorUserId:'editor',runId:'run-export-1',projectId:'project-1',references:[ref]}));await pending.promise;});
     if(mode==='normal')await waitFor(()=>expect(props.onAddToCanvas).toHaveBeenCalledWith([ref]));
     else expect(props.onAddToCanvas).not.toHaveBeenCalled();
+    if (mode === 'refresh') await waitFor(() => expect(refreshedOnAdd).toHaveBeenCalledWith([ref]));
     expect(fetcher.mock.calls.some(([url])=>String(url).startsWith('/api/assets?'))).toBe(false);
   });
   it('renders a bottom-toolbar drawer with the six approved sections and responsive controls', async () => {

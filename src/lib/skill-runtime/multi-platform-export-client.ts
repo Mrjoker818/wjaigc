@@ -55,22 +55,31 @@ export function createMultiPlatformExportRequestFingerprint(input: {
   });
 }
 
-export function parseMultiPlatformExportResult(output: unknown): MultiPlatformExportResultV1 {
-  if (!Array.isArray(output)) throw new Error('EXPORT_RESULT_NOT_FOUND');
+export function findMultiPlatformExportResultContent(output: unknown): string | undefined {
+  if (!Array.isArray(output)) return undefined;
   const candidate = [...output].reverse().find(item => (
     isRecord(item)
     && item.kind === 'json'
     && item.schemaId === RESULT_SCHEMA_ID
     && typeof item.content === 'string'
   ));
-  if (!candidate || typeof candidate.content !== 'string') throw new Error('EXPORT_RESULT_NOT_FOUND');
+  return candidate?.content;
+}
+
+export function parseMultiPlatformExportResultContent(content: string): MultiPlatformExportResultV1 {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(candidate.content) as unknown;
+    parsed = JSON.parse(content) as unknown;
   } catch {
     throw new Error('EXPORT_RESULT_INVALID');
   }
   return parseResultSchema(parsed);
+}
+
+export function parseMultiPlatformExportResult(output: unknown): MultiPlatformExportResultV1 {
+  const content = findMultiPlatformExportResultContent(output);
+  if (content === undefined) throw new Error('EXPORT_RESULT_NOT_FOUND');
+  return parseMultiPlatformExportResultContent(content);
 }
 
 export async function loadEnabledPlatformExportPresets(
@@ -274,7 +283,7 @@ export async function downloadExportGroup(input: {
     });
     input.signal?.throwIfAborted();
     if (stableReference.kind !== 'image') throw new Error('EXPORT_GROUP_REFERENCE_INVALID');
-    const response = await fetcher(stableReference.url, { method: 'GET', credentials: 'same-origin' });
+    const response = await fetcher(stableReference.url, { method: 'GET', credentials: 'same-origin', signal: input.signal });
     if (!response.ok) throw new Error(`导出图片下载失败 (${response.status})`);
     const contentLength = Number(response.headers.get('Content-Length') || 0);
     if (Number.isFinite(contentLength) && contentLength > MAX_GROUP_BYTES - totalBytes) {

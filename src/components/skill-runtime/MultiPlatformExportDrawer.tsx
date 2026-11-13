@@ -17,9 +17,10 @@ import {
   createMultiPlatformExportRequestFingerprint,
   downloadExportArtifact,
   downloadExportGroup,
+  findMultiPlatformExportResultContent,
   loadEnabledPlatformExportPresets,
   loadExportManifestFiles,
-  parseMultiPlatformExportResult,
+  parseMultiPlatformExportResultContent,
   previewMultiPlatformExportPlan,
   resolveExportSourceReference,
   resolveExportImageReferences,
@@ -155,27 +156,31 @@ export function MultiPlatformExportDrawer({
     return () => controller.abort();
   }, [fetcher, open]);
 
-  const parsedResult = useMemo<{ result?: MultiPlatformExportResultV1; error?: string }>(() => {
-    const outputs = projection?.result?.outputs;
-    if (!outputs) {
-      return projection?.status === 'completed'
-        ? { error: '结果数据损坏或版本不兼容' }
-        : {};
-    }
+  const outputs = projection?.result?.outputs;
+  const resultContent = findMultiPlatformExportResultContent(outputs);
+  const result = useMemo<MultiPlatformExportResultV1 | undefined>(() => {
+    if (resultContent === undefined) return undefined;
     try {
-      return { result: parseMultiPlatformExportResult(outputs) };
+      return parseMultiPlatformExportResultContent(resultContent);
     } catch {
-      return projection?.status === 'completed' || projection?.status === 'failed'
-        ? { error: '结果数据损坏或版本不兼容' }
-        : {};
+      return undefined;
     }
-  }, [projection?.result?.outputs, projection?.status]);
-  const result = parsedResult.result;
-  const deliveryControllerRef=useRef<AbortController|null>(null);
-  useLayoutEffect(()=>{
-    const controller=new AbortController();deliveryControllerRef.current=controller;
-    return ()=>{controller.abort();if(deliveryControllerRef.current===controller)deliveryControllerRef.current=null;};
-  },[open,projectId,accountKey,authority,result,onAddToCanvas,onLocateSource]);
+  }, [resultContent]);
+  const resultInvalid = !result && (projection?.status === 'completed' || (Boolean(outputs) && projection?.status === 'failed'));
+  const deliveryCallbacks = useRef({ onAddToCanvas, onLocateSource });
+  useLayoutEffect(() => {
+    deliveryCallbacks.current = { onAddToCanvas, onLocateSource };
+  }, [onAddToCanvas, onLocateSource]);
+  const deliveryControllerRef = useRef<AbortController | null>(null);
+  useLayoutEffect(() => {
+    if (!open || !result || authority === 'pending') return;
+    const controller = new AbortController();
+    deliveryControllerRef.current = controller;
+    return () => {
+      controller.abort();
+      if (deliveryControllerRef.current === controller) deliveryControllerRef.current = null;
+    };
+  }, [open, projectId, accountKey, authority, result]);
 
   useEffect(() => {
     if (!open || !result) {
@@ -399,9 +404,9 @@ export function MultiPlatformExportDrawer({
           <section className={sectionClass}>
             <SectionHeading icon={<PackageCheck aria-hidden="true" size={15} />}>结果</SectionHeading>
             {!result && <p className="text-xs text-muted-foreground">完成后可逐张下载、下载 ZIP 或放入画布。</p>}
-            {parsedResult.error && (
+            {resultInvalid && (
               <div className="space-y-2">
-                <div role="alert" className="break-words text-xs text-destructive">{parsedResult.error}</div>
+                <div role="alert" className="break-words text-xs text-destructive">结果数据损坏或版本不兼容</div>
                 <div className="flex flex-wrap gap-2">
                   {onRetry && <button type="button" className={touchClass} onClick={() => {
                     void Promise.resolve(onRetry('export')).catch(caught => {
@@ -434,14 +439,16 @@ export function MultiPlatformExportDrawer({
                   controller.signal.throwIfAborted();
                   const current=await resolveExportImageReferences({projectId,runId:result.runId,
                     versionIds:items.map(item=>item.assetVersionId!),fetcher,signal:controller.signal});
-                  controller.signal.throwIfAborted();await onAddToCanvas?.(current);controller.signal.throwIfAborted();
+                  controller.signal.throwIfAborted();
+                  await deliveryCallbacks.current.onAddToCanvas?.(current);
+                  controller.signal.throwIfAborted();
                 }}
                 onRetry={onRetry ? () => onRetry('export') : undefined}
                 onLocateSource={async sourceVersionId => {
                   const controller=deliveryControllerRef.current;
                   if(!controller)throw new Error('导出交付作用域已失效');
                   controller.signal.throwIfAborted();
-                  const located = await onLocateSource?.(sourceVersionId);
+                  const located = await deliveryCallbacks.current.onLocateSource?.(sourceVersionId);
                   controller.signal.throwIfAborted();
                   if (located === true) return undefined;
                   if (authority === 'pending') throw new Error('画布权威尚未就绪');

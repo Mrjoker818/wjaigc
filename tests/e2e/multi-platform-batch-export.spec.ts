@@ -116,10 +116,11 @@ test('Workflow 与 Simple Chat 共享运行/制品契约，ZIP 首次失败后�
   const completed = await readExportRun(page, run.runId, 'completed');
 
   await verifyCrossWorkspaceProjection(page, multiPlatformExport, completed);
-  await multiPlatformExport.failNextZipDownload(page, completed.result.zipAssetVersionId);
   await restoreCanvasExportRun(page, multiPlatformExport, run.runId);
+  const wasDownloadInterrupted = await multiPlatformExport.failNextZipDownload(page, run.runId, completed.result.zipAssetVersionId);
   await page.getByRole('button', { name: '下载 ZIP' }).click();
-  await expect(page.getByRole('alert').filter({ hasText: '导出制品加载失败' })).toBeVisible();
+  await expect(page.getByRole('alert').filter({ hasText: 'Skill 运行资产读取失败' })).toBeVisible();
+  expect(wasDownloadInterrupted()).toBe(true);
   await expect(page.getByRole('button', { name: '下载 ZIP' })).toBeEnabled();
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: '下载 ZIP' }).click();
