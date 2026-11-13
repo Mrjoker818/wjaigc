@@ -8,6 +8,7 @@ import {
   test,
   verifyCrossWorkspaceProjection,
   verifyDownloadedExportBundle,
+  verifyDownloadedPlatformGroup,
   verifyFailureEvidence,
 } from '../helpers/multi-platform-export';
 
@@ -18,6 +19,15 @@ test('Canvas 完成多平台导出、校验 ZIP/manifest、批量入画布并刷
   multiPlatformExport,
 }, testInfo) => {
   const drawer = await openCanvasExportDrawer(page, multiPlatformExport);
+  if (testInfo.project.name === 'mobile-chromium') {
+    const dock = page.locator('[data-mobile-canvas-toolbar]');
+    await expect(dock).toBeVisible();
+    const [drawerBounds, dockBounds] = await Promise.all([drawer.boundingBox(), dock.boundingBox()]);
+    expect(drawerBounds).not.toBeNull();
+    expect(dockBounds).not.toBeNull();
+    expect(drawerBounds!.y).toBeGreaterThanOrEqual(0);
+    expect(drawerBounds!.y + drawerBounds!.height).toBeLessThanOrEqual(dockBounds!.y);
+  }
   await expect(drawer.getByText('已选择 6 张受管图片')).toBeVisible();
   await expect(drawer.getByText('积分 0')).toBeVisible();
 
@@ -39,7 +49,9 @@ test('Canvas 完成多平台导出、校验 ZIP/manifest、批量入画布并刷
   await verifyDownloadedExportBundle(page, multiPlatformExport, run);
   const groupDownload = page.waitForEvent('download');
   await drawer.getByRole('button', { name: /下载 instagram 整组/i }).click();
-  expect((await groupDownload).suggestedFilename()).toMatch(/instagram-export\.zip$/u);
+  const group = await groupDownload;
+  expect(group.suggestedFilename()).toMatch(/instagram-export\.zip$/u);
+  await verifyDownloadedPlatformGroup(page, multiPlatformExport, run, 'instagram', group);
 
   await drawer.getByRole('button', { name: '批量放入画布' }).click();
   const visibleCanvasImages = expect.poll(

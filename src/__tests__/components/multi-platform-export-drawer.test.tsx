@@ -117,9 +117,9 @@ describe('MultiPlatformExportDrawer', () => {
     if(mode==='project')view.rerender(<MultiPlatformExportDrawer {...props} projectId="other"/>);
     if(mode==='unmount')view.unmount();
     await act(async()=>{pending.resolve(Response.json({actorUserId:'editor',runId:'run-export-1',projectId:'project-1',references:[ref]}));await pending.promise;});
-    if(mode==='normal')await waitFor(()=>expect(props.onAddToCanvas).toHaveBeenCalledWith([ref]));
+    if(mode==='normal')await waitFor(()=>expect(props.onAddToCanvas).toHaveBeenCalledWith([ref], expect.any(AbortSignal)));
     else expect(props.onAddToCanvas).not.toHaveBeenCalled();
-    if (mode === 'refresh') await waitFor(() => expect(refreshedOnAdd).toHaveBeenCalledWith([ref]));
+    if (mode === 'refresh') await waitFor(() => expect(refreshedOnAdd).toHaveBeenCalledWith([ref], expect.any(AbortSignal)));
     expect(fetcher.mock.calls.some(([url])=>String(url).startsWith('/api/assets?'))).toBe(false);
   });
   it('renders a bottom-toolbar drawer with the six approved sections and responsive controls', async () => {
@@ -148,7 +148,7 @@ describe('MultiPlatformExportDrawer', () => {
     }
     const drawer = screen.getByTestId('multi-platform-export-drawer');
     expect(drawer.hasAttribute('data-bottom-toolbar-drawer')).toBe(true);
-    expect(drawer.style.bottom).toBe('var(--canvas-bottom-toolbar-offset)');
+    expect(drawer.style.bottom).toBe('var(--canvas-bottom-toolbar-offset, calc(72px + env(safe-area-inset-bottom)))');
     expect(drawer.querySelector('.grid-cols-1')).not.toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
 

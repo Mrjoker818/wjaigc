@@ -45,7 +45,7 @@ interface MultiPlatformExportDrawerProps {
   onStart: () => void | Promise<void>;
   onCancel?: () => void | Promise<void>;
   onRetry?: (stepId: string) => void | Promise<void>;
-  onAddToCanvas?: (references: WorkspaceAssetReference[]) => void | Promise<void>;
+  onAddToCanvas?: (references: WorkspaceAssetReference[], signal: AbortSignal) => void | Promise<void>;
   onRestoreRun?: (run: SkillRunHistoryItem) => void | Promise<void>;
   onLocateSource?: (sourceVersionId: string) => boolean | void | Promise<boolean | void>;
   onClose: () => void;
@@ -181,6 +181,12 @@ export function MultiPlatformExportDrawer({
       if (deliveryControllerRef.current === controller) deliveryControllerRef.current = null;
     };
   }, [open, projectId, accountKey, authority, result]);
+  const requireDeliverySignal = (): AbortSignal => {
+    const signal = deliveryControllerRef.current?.signal;
+    if (!signal) throw new Error('导出交付作用域已失效');
+    signal.throwIfAborted();
+    return signal;
+  };
 
   useEffect(() => {
     if (!open || !result) {
@@ -256,8 +262,11 @@ export function MultiPlatformExportDrawer({
       data-testid="multi-platform-export-drawer"
       data-bottom-toolbar-drawer
       aria-label="多平台批量导出工具"
-      style={{ bottom: 'var(--canvas-bottom-toolbar-offset)' }}
-      className="fixed left-1/2 z-[90] flex max-h-[min(72vh,720px)] w-[min(960px,calc(100vw-16px))] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-border bg-background/95 text-foreground shadow-2xl backdrop-blur-md"
+      style={{
+        bottom: 'var(--canvas-bottom-toolbar-offset, calc(72px + env(safe-area-inset-bottom)))',
+        maxHeight: 'min(72dvh, 720px, calc(100dvh - var(--canvas-bottom-toolbar-offset, 72px) - 8px))',
+      }}
+      className="fixed left-1/2 z-[90] flex w-[min(960px,calc(100vw-16px))] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-border bg-background/95 text-foreground shadow-2xl backdrop-blur-md"
     >
       <header className="flex min-h-12 shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
@@ -272,7 +281,7 @@ export function MultiPlatformExportDrawer({
         </button>
       </header>
 
-      <div className="overflow-y-auto overscroll-contain p-3 sm:p-4">
+      <div className="min-h-0 touch-pan-y overflow-y-auto overscroll-contain p-3 sm:p-4">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
           <section className={sectionClass}>
             <SectionHeading icon={<FolderInput aria-hidden="true" size={15} />}>素材</SectionHeading>
@@ -426,30 +435,26 @@ export function MultiPlatformExportDrawer({
                 result={result}
                 references={references}
                 files={manifestFiles}
-                busy={busy}
-                onDownload={versionId => downloadExportArtifact(versionId, projectId, fetcher,result.runId,deliveryControllerRef.current?.signal)}
+                busy={busy || authority === 'pending'}
+                onDownload={versionId => downloadExportArtifact(versionId, projectId, fetcher, result.runId, requireDeliverySignal())}
                 onDownloadGroup={(items, platform, onProgress) => downloadExportGroup({
                   runId:result.runId,
                   projectId, platform, references: items, files: manifestFiles, fetcher, onProgress,
-                  signal:deliveryControllerRef.current?.signal,
+                  signal: requireDeliverySignal(),
                 })}
                 onAddToCanvas={async items => {
-                  const controller=deliveryControllerRef.current;
-                  if(!controller)throw new Error('导出交付作用域已失效');
-                  controller.signal.throwIfAborted();
+                  const signal = requireDeliverySignal();
                   const current=await resolveExportImageReferences({projectId,runId:result.runId,
-                    versionIds:items.map(item=>item.assetVersionId!),fetcher,signal:controller.signal});
-                  controller.signal.throwIfAborted();
-                  await deliveryCallbacks.current.onAddToCanvas?.(current);
-                  controller.signal.throwIfAborted();
+                    versionIds:items.map(item=>item.assetVersionId!),fetcher,signal});
+                  signal.throwIfAborted();
+                  await deliveryCallbacks.current.onAddToCanvas?.(current, signal);
+                  signal.throwIfAborted();
                 }}
                 onRetry={onRetry ? () => onRetry('export') : undefined}
                 onLocateSource={async sourceVersionId => {
-                  const controller=deliveryControllerRef.current;
-                  if(!controller)throw new Error('导出交付作用域已失效');
-                  controller.signal.throwIfAborted();
+                  const signal = requireDeliverySignal();
                   const located = await deliveryCallbacks.current.onLocateSource?.(sourceVersionId);
-                  controller.signal.throwIfAborted();
+                  signal.throwIfAborted();
                   if (located === true) return undefined;
                   if (authority === 'pending') throw new Error('画布权威尚未就绪');
                   const reference = await resolveExportSourceReference({
@@ -459,9 +464,9 @@ export function MultiPlatformExportDrawer({
                     projectId,
                     versionId: sourceVersionId,
                     fetcher,
-                    signal:controller.signal,
+                    signal,
                   });
-                  controller.signal.throwIfAborted();
+                  signal.throwIfAborted();
                   if (reference.kind !== 'image') throw new Error('来源版本不是可预览图片');
                   return reference;
                 }}

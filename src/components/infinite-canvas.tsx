@@ -1755,6 +1755,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     if (!toolbarCandidate || !scopeCandidate || typeof window === 'undefined') return undefined;
     const toolbar = toolbarCandidate;
     const scope = scopeCandidate;
+    const mobileToolbar = scope.querySelector<HTMLElement>('[data-mobile-canvas-toolbar]');
     const previous = previousBottomPanelsRef.current;
     const dockJustOpened = (showLayerPanel && !previous.showLayerPanel)
       || (showVersionHistory && !previous.showVersionHistory);
@@ -1799,8 +1800,14 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       });
       scope.style.setProperty('--canvas-dock-toolbar-bottom', `${layout.toolbarBottom}px`);
       scope.style.setProperty('--canvas-minimap-bottom', `${layout.minimapBottom}px`);
-      const rect = toolbar.getBoundingClientRect();
-      root.style.setProperty('--canvas-bottom-toolbar-offset', `${Math.max(0, window.innerHeight - rect.top + 8)}px`);
+      // At the mobile breakpoint the desktop toolbar has no layout box.
+      const desktopRect = toolbar.getBoundingClientRect();
+      const visibleToolbar = desktopRect.height > 0 ? desktopRect : mobileToolbar?.getBoundingClientRect();
+      if (visibleToolbar && visibleToolbar.height > 0) {
+        root.style.setProperty('--canvas-bottom-toolbar-offset', `${Math.max(0, window.innerHeight - visibleToolbar.top + 8)}px`);
+      } else {
+        root.style.removeProperty('--canvas-bottom-toolbar-offset');
+      }
       // Keep the most recently opened view usable when the full panels cannot coexist.
       if (layout.dismissPanel === 'dock') {
         setShowLayerPanel(false);
@@ -1809,6 +1816,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     }
     syncOffset();
     observer.observe(toolbar);
+    if (mobileToolbar) observer.observe(mobileToolbar);
     observer.observe(scope);
     const mutations = new MutationObserver((records) => {
       if (records.some(record => record.type === 'attributes' || record.target === scope || [...record.addedNodes, ...record.removedNodes]

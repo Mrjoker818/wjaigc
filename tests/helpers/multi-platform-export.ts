@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
-import { expect, test as base, type APIResponse, type Locator, type Page, type TestInfo } from '@playwright/test';
+import { expect, test as base, type APIResponse, type Download, type Locator, type Page, type TestInfo } from '@playwright/test';
 import JSZip from 'jszip';
 import { Pool } from 'pg';
 import sharp from 'sharp';
@@ -754,6 +754,28 @@ export async function verifyDownloadedExportBundle(
     evidenceKind: 'real-local-postgres-sharp',
     cloudVerified: false,
   }, null, 2));
+}
+
+export async function verifyDownloadedPlatformGroup(
+  page: Page,
+  fixture: MultiPlatformExportFixture,
+  run: ExportRunEvidence,
+  platform: string,
+  download: Download,
+): Promise<void> {
+  const manifestReference = await assetReference(page, fixture.projectId, run.result.manifestAssetVersionId!);
+  const response = await page.request.get(String(manifestReference.url));
+  expect(response.ok()).toBe(true);
+  const manifest = await response.json() as { files: Array<{ filename: string; platform: string; sha256: string }> };
+  const files = manifest.files.filter(file => file.platform === platform);
+  expect(files).toHaveLength(6);
+  expect(await download.failure()).toBeNull();
+  const archive = await JSZip.loadAsync(await readFile(await download.path()));
+  expect(Object.keys(archive.files).sort()).toEqual(files.map(file => file.filename).sort());
+  for (const file of files) {
+    const bytes = await archive.file(file.filename)!.async('nodebuffer');
+    expect(`sha256:${createHash('sha256').update(bytes).digest('hex')}`).toBe(file.sha256);
+  }
 }
 
 export async function restoreCanvasExportRun(

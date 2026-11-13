@@ -4363,12 +4363,12 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
     return true;
   }, [onNavigateToImage]);
 
-  const onAddExportImagesToCanvas = useCallback(async (references: WorkspaceAssetReference[]): Promise<void> => {
+  const onAddExportImagesToCanvas = useCallback(async (references: WorkspaceAssetReference[], signal: AbortSignal): Promise<void> => {
     const context=activeCanvasSkillRunRef.current;
     if(!projectId||!context||context.projectId!==projectId||context.runId!==skillRun.runId
       ||context.skillId!==MULTI_PLATFORM_EXPORT_SKILL_ID)throw new Error('导出运行上下文已变化，请重新选择运行记录');
     await receiveSkillOutputs(references,{runId:context.runId,sourceVersionIds:context.sourceVersionIds,
-      restoreDeletedPlacement:context.restoreDeletedPlacement});
+      restoreDeletedPlacement:context.restoreDeletedPlacement, signal});
   }, [projectId,receiveSkillOutputs,skillRun.runId]);
 
   const handleRetryExport = useCallback(async (): Promise<void> => {
