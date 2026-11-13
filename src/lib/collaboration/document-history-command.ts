@@ -563,10 +563,10 @@ async function readRestorationMetadata(
     complete = false;
   }
   if (Object.hasOwn(next, 'annotation')) pristine = false;
-  if (Object.hasOwn(snapshot.placement, 'name') && (next.name ?? null) !== (snapshot.placement.name ?? null)) {
-    complete = false;
-  }
-  if (Object.hasOwn(next, 'name')) pristine = false;
+  // Restore the old name only while the replacement has no name of its own.
+  // A collaborator's rename (including undo to null) doesn't block recovery
+  // of groups and annotations or require overwriting that collaborator.
+  if (Object.hasOwn(snapshot.placement, 'name') && !Object.hasOwn(next, 'name')) complete = false;
   if (Object.hasOwn(snapshot.placement, 'groupId')) {
     const originalGroupId = snapshot.placement.groupId;
     // A real concurrent group deletion clears its placement assignments. Its

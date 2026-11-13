@@ -138,11 +138,13 @@ describe('canvas document image bridge', () => {
     ])).toEqual({ kind: 'document', patches: [{ placementId: 'p1', name: '产品图' }] });
   });
 
-  it('uses the current document name when cached media still holds an older name', () => {
+  it('uses the document name and falls back to a valid legacy name before a rename or after undo', () => {
     const media = { ...image('a', 'p1', 10), name: '旧名称' };
     const renamed = { ...placement('a', 10), name: '新名称' };
     expect(projectDocumentPlacementsOntoImages([media], { p1: renamed }).images[0].name).toBe('新名称');
-    expect(projectDocumentPlacementsOntoImages([media], { p1: placement('a', 10) }).images[0].name).toBeUndefined();
+    expect(projectDocumentPlacementsOntoImages([media], { p1: placement('a', 10) }).images[0].name).toBe('旧名称');
+    expect(projectDocumentPlacementsOntoImages([media], { p1: { ...renamed, name: null } }).images[0].name).toBe('旧名称');
+    expect(projectDocumentPlacementsOntoImages([{ ...media, name: '\n' }], { p1: placement('a', 10) }).images[0].name).toBeUndefined();
   });
 
   it('refuses a media addition or version replacement that needs the project-scoped command', () => {

@@ -1,6 +1,6 @@
 import type { CanvasAnnotationV2 } from '@/features/annotations/annotation-types';
 import type { ImageGroupData } from '@/lib/user-types';
-import type { CanvasDocumentProjection, CanvasImagePatch, CanvasPlacement } from './canvas-document';
+import { resolveCanvasLayerName, type CanvasDocumentProjection, type CanvasImagePatch, type CanvasPlacement } from './canvas-document';
 
 interface CanvasBridgeImage {
   id: string;
@@ -164,14 +164,15 @@ export function projectDocumentPlacementsOntoImages<T extends CanvasBridgeImage>
     }
     resolved.add(image.placementId);
     if (placement.deleted) continue;
-    const { groupId: _oldGroupId, name: _oldName, ...base } = image;
+    const { groupId: _oldGroupId, name: legacyName, ...base } = image;
+    const name = resolveCanvasLayerName(placement.name, legacyName);
     projected.push({
       ...base,
       x: placement.x, y: placement.y,
       width: placement.width, height: placement.height,
       rotation: placement.rotation, zIndex: placement.zIndex,
       ...(placement.groupId ? { groupId: placement.groupId } : {}),
-      ...(placement.name ? { name: placement.name } : {}),
+      ...(name !== undefined ? { name } : {}),
     } as T);
   }
   return {

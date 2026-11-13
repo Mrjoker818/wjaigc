@@ -971,7 +971,7 @@ export function createCanvasDocumentSession(
   const restoredPlacementHeads = new Map<string, {
     previousPlacementId: string;
     assetVersionId: string;
-    heads: Partial<Record<'groups' | 'annotations', string | null>>;
+    heads: Partial<Record<'groups' | 'annotations' | 'layerNames', string | null>>;
     removalFingerprint?: string;
     annotationIds?: Record<string, string>;
     annotationHeads?: Record<string, string | null>;
@@ -1227,24 +1227,24 @@ export function createCanvasDocumentSession(
       }
     }
   };
-  const convertPlacementHistory = (): void => {
+  const convertPlacementHistory = (onlyLayerNames = false): void => {
     const removed = new Set<YjsHistoryItem>();
     for (const history of [undoHistory, redoHistory]) {
       for (let index = 0; index < history.length; index++) {
         const entry = history[index];
         if (entry.kind !== 'yjs') continue;
-        if (entry.annotationChanges !== undefined && annotationSuccessors.size) {
+        if (!onlyLayerNames && entry.annotationChanges !== undefined && annotationSuccessors.size) {
           removed.add(entry.item);
           history[index] = { kind: 'annotation', annotationChanges: entry.annotationChanges };
           continue;
         }
-        if (entry.changes === undefined) continue;
+        if (entry.changes === undefined || (onlyLayerNames && !entry.changes.some(change => change.fields.includes('layerNames')))) continue;
         removed.add(entry.item);
         history[index] = { kind: 'placement', changes: entry.changes };
       }
     }
     if (!removed.size) return;
-    // All reversible placement items now carry explicit intents; release their
+    // Converted placement items now carry explicit intents; release their
     // native retained structs without clearing metadata history or media redo.
     const keepUndo = undo.undoStack.filter(item => !removed.has(item));
     const keepRedo = undo.redoStack.filter(item => !removed.has(item));
@@ -1784,7 +1784,6 @@ export function createCanvasDocumentSession(
         // last synchronous guard uses the actual Y.Doc, including retired heads,
         // and refuses the entire recovery rather than supplementing a conflict.
         if (!snapshot || doc.getMap('groups')._map.has(nextPlacementId) || doc.getMap('annotations')._map.has(nextPlacementId)
-            || doc.getMap('layerNames')._map.has(nextPlacementId)
             || Object.keys(annotations).some(id => doc.getMap('annotationRecords')._map.has(id)
               || doc.getMap('annotationTombstones')._map.has(id))
             || Object.entries(snapshot.annotationRecords).some(([id, record]) => projection.annotationTombstones?.[id] !== true
@@ -1930,6 +1929,10 @@ export function createCanvasDocumentSession(
       }, localOrigin, () => { stagedPlacementHistory = changes; }, () => { stagedPlacementHistory = undefined; });
       if (applied) rememberPlacementHeads(changes ?? []);
       if (placementSuccessors.size) convertPlacementHistory();
+      else if (changes?.some(change => change.fields.includes('layerNames'))) {
+        // Explicit placement history skips a layer already deleted by a peer.
+        convertPlacementHistory(true);
+      }
     },
     undoLocal: (): void | Promise<void> => runHistory('undo'),
     redoLocal: (): void | Promise<void> => runHistory('redo'),

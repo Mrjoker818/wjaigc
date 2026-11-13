@@ -12,7 +12,8 @@ import { PROJECT_REVISION_DATA_KEY } from '@/lib/asset-core/canvas-project-sync'
 import { assertDocumentEnableMediaUnchanged, inspectDocumentEnableMedia } from '@/lib/collaboration/document-enable-media';
 import { migrateLegacyProjectOnWriteInTransaction, prepareVerifiedLegacyProjectMedia, selectCanvasImagesForAssetGraph } from '@/lib/asset-core/legacy-migration';
 import { readProjectSnapshot } from '@/lib/asset-core/project-readers';
-import { applyCanvasImagePatch, createCanvasDocument, isCanvasLayerName, readCanvasDocument, type CanvasDocumentProjection } from '@/lib/collaboration/canvas-document';
+import { applyCanvasImagePatch, createCanvasDocument, isCanvasLayerName, readCanvasDocument, resolveCanvasLayerName, type CanvasDocumentProjection } from '@/lib/collaboration/canvas-document';
+import { projectDocumentPlacementsOntoImages } from '@/lib/collaboration/canvas-document-image-bridge';
 import { assertDocumentEditor, DocumentProjectNotEnabledError } from '@/lib/collaboration/document-access';
 import { assertProjectAnnotationAsset, assertProjectAssetVersion } from '@/lib/collaboration/document-assets';
 import { encodeCanonicalDocumentSnapshot, loadDocumentInTransaction } from '@/lib/collaboration/document-store';
@@ -112,7 +113,7 @@ async function readCollaborativeProjectOnce(actorId: string, projectId: string):
     const matching = parseProjects(snapshot.rows[0].data_value)
       .filter(project => project.id === projectId && project.userId === ownerId);
     if (matching.length !== 1) throw new DocumentAuthorityConflictError();
-    const [resolved] = await readOwnerProjectsWithDocuments(ownerId, matching, client);
+    const [resolved] = await readProjectsWithDocuments(ownerId, matching, client, 'media-directory');
     if (!resolved) throw new DocumentAuthorityConflictError();
     await client.query('COMMIT');
     const canvasImages = resolved.canvasImages.map(toDocumentCanvasImage);
@@ -126,7 +127,7 @@ async function readCollaborativeProjectOnce(actorId: string, projectId: string):
       workspace: {
         id: projectId, userId: ownerId, name: resolved.name,
         createdAt: resolved.createdAt, updatedAt: resolved.updatedAt,
-        canvasImages, settings: {},
+        canvasImages: projectDocumentPlacementsOntoImages(canvasImages, projection.placements).images, settings: {},
         ...(Object.keys(safeMetadata).length > 0 ? { metadata: safeMetadata } : {}),
       },
       readOnly: process.env.WUJIE_YJS_ENABLED !== 'true',
@@ -156,6 +157,15 @@ export async function readOwnerProjectsWithDocuments(
   ownerId: string,
   projects: Project[],
   transaction?: PoolClient,
+): Promise<Project[]> {
+  return readProjectsWithDocuments(ownerId, projects, transaction, 'workspace');
+}
+
+async function readProjectsWithDocuments(
+  ownerId: string,
+  projects: Project[],
+  transaction: PoolClient | undefined,
+  view: 'media-directory' | 'workspace',
 ): Promise<Project[]> {
   if (projects.length === 0) return projects;
   const client = transaction ?? await getPool().connect();
@@ -208,14 +218,17 @@ export async function readOwnerProjectsWithDocuments(
         if (!image || image.assetVersionId !== placement.assetVersionId) {
           throw new DocumentAuthorityConflictError();
         }
-        const { groupId: _oldGroupId, name: _oldName, ...base } = image;
+        const { groupId: _oldGroupId, name: legacyName, ...base } = image;
+        // The live document overlays the directory; never cache a CRDT name as
+        // the inherited name, or undo could bring back the latest HTTP value.
+        const name = resolveCanvasLayerName(view === 'workspace' ? placement.name : undefined, legacyName);
         canvasImages.push({
           ...base,
           x: placement.x, y: placement.y,
           width: placement.width, height: placement.height,
           rotation: placement.rotation, zIndex: placement.zIndex,
           ...(placement.groupId ? { groupId: placement.groupId } : {}),
-          ...(placement.name ? { name: placement.name } : {}),
+          ...(name !== undefined ? { name } : {}),
         });
       }
       const metadata = { ...graphProject.metadata };

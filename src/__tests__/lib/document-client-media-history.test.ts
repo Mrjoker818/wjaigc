@@ -129,6 +129,30 @@ function restoreForAnnotationHistory(f: ReturnType<typeof fixture>, snapshot: Re
 }
 
 describe('annotation history across restored identities', () => {
+  it('skips undoing a rename on a remotely removed layer and keeps the session writable', () => {
+    const f = fixture();
+    f.session.applyLocalChange({ placementId: 'p1', name: '原图层名称' });
+    f.commit();
+    removeForAnnotationHistory(f);
+    const sent = f.socket.frames.length;
+    f.session.undoLocal();
+    expect(f.socket.frames).toHaveLength(sent);
+    expect(f.session.projection.placements.p1).toMatchObject({ deleted: true, name: '原图层名称' });
+    f.session.applyLocalChange({ placementId: 'p2', name: '仍可改名' });
+    f.commit();
+    expect(readCanvasDocument(f.server).placements.p2.name).toBe('仍可改名');
+  });
+
+  it('restores required metadata without replacing a name already chosen by a collaborator', () => {
+    const { f, binding } = metadataRemovalFixture();
+    applyCanvasImagePatch(f.server, { placementId: 'p3', name: '协作者的新名称' }, 'remote');
+    f.publish();
+    f.session.restorePlacementHistoryMetadata({ ...binding, requirePristine: true });
+    f.commit();
+    expect(f.session.projection.placements.p3).toMatchObject({ name: '协作者的新名称', annotation: 'placement note', groupId: 'group-a' });
+    expect(f.session.projection.annotationRecords?.['restored-a']).toMatchObject({ sourceImageId: 'p3' });
+  });
+
   it('keeps a renamed layer on removal undo and preserves an independent geometry edit when undoing the rename', () => {
     const f = fixture();
     f.session.applyLocalChange({ placementId: 'p1', name: '产品图' });

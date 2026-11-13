@@ -182,6 +182,17 @@ function applyRecoveredMetadata(f: ReturnType<typeof fixture>, result: DocumentH
   f.setSequence(4); return Promise.resolve(4);
 }
 describe('fresh page durable metadata recovery', () => {
+  it('finishes a pending restoration when a collaborator renames the replacement before metadata arrives', async () => {
+    const f = restorationFixture();
+    applyCanvasImagePatch(f.doc, { placementId: 'p1', name: '删除前的名称' }, 'fixture');
+    await run(f);
+    await restore(f);
+    applyCanvasImagePatch(f.doc, { placementId: 'restored-1', name: '协作者的新名称' }, 'remote');
+    const result = await recoverDocumentHistoryCommands(recoveryInput(f, entry => applyRecoveredMetadata(f, entry)));
+    expect(result[0]).toMatchObject({ metadataConfirmedSequence: 4 });
+    expect(readCanvasDocument(f.doc).placements['restored-1']).toMatchObject({ name: '协作者的新名称', annotation: 'latest note' });
+  });
+
   it.each(['pending', 'accepted', 'confirmed'] as const)('finishes an %s attach using the original map and key', async state => {
     const f = state === 'pending' ? await pendingRestorationFixture() : restorationFixture();
     if (state !== 'pending') { await run(f); await restore(f); }

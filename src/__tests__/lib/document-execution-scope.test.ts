@@ -3,6 +3,11 @@ import { EventEmitter } from 'node:events';
 import { createHash } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { runDocumentExecution, getDocumentExecutionScope, reserveDocumentExecutionActor, getDocumentExecutionStats, documentExecutionHttpFailure } from '@/lib/collaboration/document-execution-scope';
+import * as canvasDocument from '@/lib/collaboration/canvas-document';
+import { projectDocumentPlacementsOntoImages } from '@/lib/collaboration/canvas-document-image-bridge';
+import { readProjectSnapshot } from '@/lib/asset-core/project-readers';
+import { buildCanonicalAnnotationSourceVersionId } from '@/features/annotations/annotation-source-version';
+import type { Project } from '@/lib/user-types';
 import { loadDocumentCommonJs } from '../fixtures/document-commonjs';
 
 function deferred<T>(){let resolve!:(value:T)=>void,reject!:(cause:unknown)=>void;const promise=new Promise<T>((ok,fail)=>{resolve=ok;reject=fail});return {promise,resolve,reject};}
@@ -49,7 +54,7 @@ function loadSyntheticTicketService(raw: FakePool): typeof import('@/lib/collabo
     },
   });
 }
-function loadSyntheticProjectBridge(raw: FakePool): typeof import('@/lib/collaboration/document-project-bridge') {
+function loadSyntheticProjectBridge(raw: FakePool, doc = canvasDocument.createCanvasDocument()): typeof import('@/lib/collaboration/document-project-bridge') {
   return loadDocumentCommonJs(new URL('../../lib/collaboration/document-project-bridge.ts', import.meta.url), {
     'server-only': {},
     '@/lib/db-client': { getPool: () => resolvePool(raw) },
@@ -57,14 +62,15 @@ function loadSyntheticProjectBridge(raw: FakePool): typeof import('@/lib/collabo
       assertDocumentEditor: async () => ({ ownerId: 'owner-a' }),
       DocumentProjectNotEnabledError: class extends Error {},
     },
-    '@/lib/collaboration/document-store': { loadDocumentInTransaction: async () => ({ doc: {}, sequence: 1 }) },
-    '@/lib/collaboration/canvas-document': { readCanvasDocument: () => ({ placements: {} }) },
+    '@/lib/collaboration/document-store': { loadDocumentInTransaction: async () => ({ doc, sequence: 1 }) },
+    '@/lib/collaboration/canvas-document': canvasDocument,
+    '@/lib/collaboration/canvas-document-image-bridge': { projectDocumentPlacementsOntoImages },
     '@/features/annotations/annotation-bundle': {},
-    '@/features/annotations/annotation-source-version': {},
+    '@/features/annotations/annotation-source-version': { buildCanonicalAnnotationSourceVersionId },
     '@/lib/asset-core/storage': {},
-    '@/lib/asset-core/canvas-project-sync': {},
+    '@/lib/asset-core/canvas-project-sync': { readAssetV3Projects: async (_ownerId: string, projects: Project[]) => projects },
     '@/lib/asset-core/legacy-migration': {},
-    '@/lib/asset-core/project-readers': {},
+    '@/lib/asset-core/project-readers': { readProjectSnapshot },
     '@/lib/collaboration/document-enable-media': {},
     '@/lib/collaboration/document-assets': {},
   });
@@ -114,6 +120,31 @@ describe('document request execution scope',()=>{
     };
     const reader=loadSyntheticProjectBridge(raw);const result=await runDocumentExecution({},()=>reader.readCollaborativeProject('owner-a','project-a'));
     expect(result.projectId).toBe('project-a');expect(conflicts).toBe(2);expect(raw.client.calls.filter(sql=>sql==='BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ')).toHaveLength(2);
+  });
+  it('keeps the inherited name in the media directory while both workspace reads use the current document name', async () => {
+    const raw = new FakePool(), doc = canvasDocument.createCanvasDocument();
+    const transform = { x: 10, y: 20, width: 80, height: 60, rotation: 0, zIndex: 1 };
+    const media = { ...transform, id: 'image-a', name: '旧图层', placementId: 'p1', assetVersionId: 'version-a',
+      url: '/api/serve-upload/a.png', originalWidth: 80, originalHeight: 60, createdAt: 1 };
+    const project = { id: 'project-a', userId: 'owner-a', name: 'fixture', createdAt: 1, updatedAt: 1, canvasImages: [media] };
+    raw.client.handler = async sql => {
+      if (sql.includes('SELECT enabled FROM')) return { rowCount: 1, rows: [{ enabled: true }] };
+      if (sql.includes('SELECT data_value')) return { rowCount: 1, rows: [{ data_value: [project] }] };
+      if (sql.includes('SELECT project_id FROM')) return { rowCount: 1, rows: [{ project_id: 'project-a' }] };
+      return { rowCount: 1, rows: [] };
+    };
+    const reader = loadSyntheticProjectBridge(raw, doc);
+    try {
+      canvasDocument.applyCanvasImagePatch(doc, { placementId: 'p1', assetVersionId: 'version-a', ...transform }, 'fixture');
+      for (const [name, visible] of [[undefined, '旧图层'], ['当前图层', '当前图层'], [null, '旧图层']] as const) {
+        if (name !== undefined) canvasDocument.applyCanvasImagePatch(doc, { placementId: 'p1', name }, 'fixture');
+        const detail = await runDocumentExecution({}, () => reader.readCollaborativeProject('owner-a', 'project-a'));
+        const [listed] = await runDocumentExecution({}, () => reader.readOwnerProjectsWithDocuments('owner-a', [project as Project]));
+        expect(detail.canvasImages[0].name).toBe('旧图层');
+        expect(detail.workspace.canvasImages[0].name).toBe(visible);
+        expect(listed.canvasImages[0].name).toBe(visible);
+      }
+    } finally { doc.destroy(); }
   });
   it('observes an end emitted synchronously after the checkout callback and before its promise continuation',async()=>{
     const raw=new FakePool(),client=raw.client as FakeClient&{_ended:boolean};client._ended=false;

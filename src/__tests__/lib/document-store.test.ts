@@ -1,13 +1,56 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import { performance } from 'node:perf_hooks';
+import type { PoolClient } from 'pg';
 
 import { applyCanvasImagePatch, createCanvasDocument, readCanvasDocument, validateCanvasDocumentProjection } from '@/lib/collaboration/canvas-document';
-import { assertCanonicalDocumentPayload, encodeCanonicalDocumentSnapshot } from '@/lib/collaboration/document-store';
+import { applyCanvasAssetCommand } from '@/lib/collaboration/canvas-asset-command';
+import { assertCanonicalDocumentPayload, commitDocumentUpdateInTransaction, encodeCanonicalDocumentSnapshot } from '@/lib/collaboration/document-store';
 
 vi.mock('server-only', () => ({}));
+vi.mock('@/lib/collaboration/document-access', () => ({
+  assertDocumentEditor: async () => ({ ownerId: 'owner-a' }), assertDocumentProjectEnabled: async () => {},
+}));
+vi.mock('@/lib/collaboration/document-assets', () => ({
+  assertProjectAssetVersion: async () => {}, assertProjectCanvasPlacement: async () => {},
+}));
 
 describe('canonical Yjs document payload', () => {
+  it.each([undefined, '删除前名称'])('discards a concurrent rename on a removed layer with name %s and commits the live rename', async name => {
+    const server = createCanvasDocument(), writer = createCanvasDocument(), reader = createCanvasDocument();
+    try {
+      for (const id of ['p1', 'p2']) applyCanvasImagePatch(server, { placementId: id, assetVersionId: `version-${id}`,
+        x: 10, y: 20, width: 80, height: 60, rotation: 0, zIndex: 1,
+        ...(id === 'p1' && name !== undefined ? { name } : {}),
+      }, 'seed');
+      const beforeDelete = Y.encodeStateAsUpdate(server), vector = Y.encodeStateVector(server);
+      Y.applyUpdate(writer, beforeDelete);
+      applyCanvasImagePatch(writer, { placementId: 'p1', name: '迟到的改名' }, 'local');
+      applyCanvasImagePatch(writer, { placementId: 'p2', name: '有效的改名' }, 'local');
+      applyCanvasAssetCommand(server, { action: 'remove', placementId: 'p1', expectedAssetVersionId: 'version-p1' }, 'p1');
+      const persisted = encodeCanonicalDocumentSnapshot(server);
+      const query = vi.fn(async (sql: string) => {
+        if (sql.includes('SELECT owner_id, sequence')) return { rowCount: 1, rows: [{ owner_id: 'owner-a',
+          sequence: '2', snapshot_sequence: '2', snapshot_bytes: persisted.bytes,
+          projection: JSON.parse(JSON.stringify(persisted.projection)),
+        }] };
+        return { rowCount: 1, rows: [] };
+      });
+      const commit = await commitDocumentUpdateInTransaction({ query } as unknown as PoolClient, {
+        projectId: 'project-a', actorId: 'editor-a', bytes: Y.encodeStateAsUpdate(writer, vector),
+      });
+      expect(commit.sequence).toBe(3);
+      for (const replica of [reader, writer]) {
+        Y.applyUpdate(replica, persisted.bytes);
+        Y.applyUpdate(replica, commit.update);
+        const { placements } = readCanvasDocument(replica);
+        expect(placements.p1.deleted).toBe(true);
+        expect(placements.p1.name).toBe(name);
+        expect(placements.p2.name).toBe('有效的改名');
+      }
+    } finally { for (const doc of [server, writer, reader]) doc.destroy(); }
+  });
+
   it('merges separate layer renames from an old snapshot and reads both from the persisted snapshot', () => {
     const server = createCanvasDocument();
     const first = createCanvasDocument();

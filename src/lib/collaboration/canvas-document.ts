@@ -59,6 +59,13 @@ export function isCanvasLayerName(value: unknown): value is string {
     && !FORBIDDEN_CANVAS_HISTORY.test(value);
 }
 
+/** Null is the undo value for a name inherited from the media directory. */
+export function resolveCanvasLayerName(documentName: CanvasPlacement['name'], legacyName: unknown): string | undefined {
+  if (typeof documentName === 'string') return documentName;
+  const legacy = typeof legacyName === 'string' ? legacyName.trim() : undefined;
+  return isCanvasLayerName(legacy) ? legacy : undefined;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);

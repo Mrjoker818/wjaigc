@@ -13,6 +13,7 @@ import {
   assertCanvasDocumentTransition,
   createCanvasDocument,
   FORBIDDEN_CANVAS_HISTORY,
+  isCanvasLayerName,
   readCanvasDocument,
   type CanvasDocumentProjection,
 } from '@/lib/collaboration/canvas-document';
@@ -306,6 +307,9 @@ async function lockDocumentForWrite(
 function assertRawDocumentMutation(previous: YTypes.Doc, candidate: YTypes.Doc, bytes: Uint8Array): void {
   const existingVersions = new Set(previous.getMap('assetVersions').keys());
   const existingTombstones = new Set(previous.getMap('tombstones').keys());
+  const previousNames = previous.getMap<unknown>('layerNames');
+  const candidateNames = candidate.getMap<unknown>('layerNames');
+  const staleNames = new Set<string>();
   const touchedGroups = new Set<string>();
   const touchedAnnotations = new Set<string>();
   let touchedImmutableKey = false;
@@ -325,6 +329,9 @@ function assertRawDocumentMutation(previous: YTypes.Doc, candidate: YTypes.Doc, 
   candidate.getMap('annotationRecords').observe(event => {
     for (const key of event.changes.keys.keys()) touchedAnnotations.add(key);
   });
+  candidateNames.observe(event => {
+    for (const id of event.keysChanged) if (existingTombstones.has(id)) staleNames.add(id);
+  });
   try {
     Y.applyUpdate(candidate, bytes);
     if (touchedImmutableKey) {
@@ -333,6 +340,22 @@ function assertRawDocumentMutation(previous: YTypes.Doc, candidate: YTypes.Doc, 
     if ([...touchedGroups].some(id => candidate.getMap('groupTombstones').get(id) === true) ||
         [...touchedAnnotations].some(id => candidate.getMap('annotationTombstones').get(id) === true)) {
       throw new Error('Canvas deleted metadata record cannot be rewritten');
+    }
+    if (staleNames.size) {
+      // Keep the tombstone's name frozen without rejecting the rest of the
+      // frame. Retain the losing write's Yjs clock so its author also converges.
+      candidate.transact(() => {
+        for (const id of staleNames) {
+          const received = candidateNames.get(id);
+          if (candidateNames.has(id) && received !== null && !isCanvasLayerName(received)) {
+            throw new Error('Invalid canvas layer name');
+          }
+          const original = previousNames.get(id);
+          if (received === original) continue;
+          if (previousNames.has(id)) candidateNames.set(id, original);
+          else candidateNames.delete(id);
+        }
+      });
     }
   } catch (error) {
     throw new DocumentUpdateRejectedError(error);
