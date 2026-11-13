@@ -693,6 +693,9 @@ export async function cleanupNewProjectPlacements(
     }
     if (discoveryError) throw discoveryError;
   } finally {
+    // Leave the live canvas before restoring the isolated fixture so its
+    // autosave cannot overwrite the cleanup snapshot or race its revision.
+    await page.goto('about:blank', { waitUntil: 'domcontentloaded' });
     await restoreProjectSnapshot(page, evidence, originalProject);
   }
 }

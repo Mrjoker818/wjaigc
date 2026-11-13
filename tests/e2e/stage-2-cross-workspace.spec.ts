@@ -99,7 +99,8 @@ test.describe('Stage 2 cross-workspace flows', () => {
     const placementIds = new Set<string>();
     const saves = observeProjectGraphSaves(page, projectId);
     try {
-      const transfer = page.waitForResponse(response => response.url().includes('/api/assets/transfer') && response.request().method() === 'POST');
+      const transfer = page.waitForResponse(response => response.request().method() === 'POST'
+        && ['/api/assets/transfer', '/api/assets/actor-v2/transfer'].includes(new URL(response.url()).pathname));
       await addButton.click();
       const payload = await recordJsonResponse(await transfer, value => stage2Evidence.recordPayload(value));
       if (typeof payload.placementId === 'string') placementIds.add(payload.placementId);
