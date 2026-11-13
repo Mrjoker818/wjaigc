@@ -81,6 +81,7 @@ function toDocumentCanvasImage(image: CanvasImage): CanvasImage {
     mediaType: image.mediaType, videoUrl: image.videoUrl,
     videoDuration: image.videoDuration,
     videoThumbnailUrl: image.videoThumbnailUrl,
+    ...(image.videoPosterFallbacks?.length ? { videoPosterFallbacks: image.videoPosterFallbacks } : {}),
     relationType: image.relationType,
   };
 }

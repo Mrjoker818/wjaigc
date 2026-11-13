@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { Client } from 'pg';
+import { WORKSPACE_PANEL_RAIL_WIDTH } from '../../src/lib/workspace-panel-layout';
 
 interface ProjectImage {
   id: string;
@@ -137,7 +138,7 @@ async function prepareCanvasViewport(page: Page): Promise<void> {
   const collapsePanel = page.getByRole('button', { name: '收起面板', exact: true });
   if (await collapsePanel.isVisible()) await collapsePanel.click();
   const viewport = page.locator('[data-canvas-viewport]');
-  await expect(viewport).toHaveAttribute('data-canvas-occupied-right', '20');
+  await expect(viewport).toHaveAttribute('data-canvas-occupied-right', String(WORKSPACE_PANEL_RAIL_WIDTH));
   await page.locator('[data-toolbar="bottom-toolbar"]').getByTitle('重置视图', { exact: true }).click();
   await expect(page.locator('[data-canvas-history-pending]')).toHaveAttribute('data-canvas-history-pending', 'false');
 }
@@ -175,7 +176,7 @@ async function dragImage(page: Page, imageId: string, dx: number, dy: number): P
   const viewport = page.viewportSize()!;
   for (const point of [{ x, y }, { x: x + dx, y: y + dy }]) {
     expect(point.x).toBeGreaterThan(0);
-    expect(point.x).toBeLessThan(viewport.width - 20);
+    expect(point.x).toBeLessThan(viewport.width - WORKSPACE_PANEL_RAIL_WIDTH);
     expect(point.y).toBeGreaterThan(0);
     expect(point.y).toBeLessThan(viewport.height);
   }
@@ -925,11 +926,13 @@ test('owner and invited editor converge without copying the project into the edi
     await expect(inputCard).toBeVisible();
     await inputCard.click();
     const imageField = firstPage.locator('[data-node-field="imageUrl"]');
-    await imageField.getByText('画布', { exact: true }).click();
+    await imageField.getByRole('button', { name: '从画布选择图片', exact: true }).click();
+    const sourceOption = imageField.getByRole('button', { name: new RegExp(`^${sourceIndex + 1}\\. `) });
+    await expect(sourceOption).toBeVisible();
     const [inputRead] = await Promise.all([
       firstPage.waitForResponse(response => response.request().method() === 'POST'
         && new URL(response.url()).pathname === '/api/assets'),
-      imageField.getByRole('button').nth(sourceIndex).click(),
+      sourceOption.click(),
     ]);
     expect(inputRead.request().postDataJSON()).toEqual({ projectId,
       assetVersionId: source.assetVersionId, placementId: source.placementId });
@@ -961,10 +964,12 @@ test('owner and invited editor converge without copying the project into the edi
     expect(submittedBody.projectId).toBe(projectId);
     expect(submittedBody.workflowId).toBe(seededWorkflow.id);
     expect(submittedBody.nodes.map(node => node.type)).toEqual(['input-image', 'output-image']);
-    expect(submittedBody.nodes.find(node => node.id === inputNodeId)?.config).toMatchObject({
+    const submittedInput = submittedBody.nodes.find(node => node.id === inputNodeId)?.config;
+    expect(submittedInput).toMatchObject({
       source: 'canvas', projectId, assetVersionId: source.assetVersionId,
-      placementId: source.placementId, imageUrl: sourceBefore.file_url, assetTransferPending: false,
+      placementId: source.placementId, imageUrl: sourceBefore.file_url,
     });
+    expect(submittedInput).not.toHaveProperty('assetTransferPending');
     const { executionId } = await submitted.json() as { executionId: string };
     expect(executionId).toBeTruthy();
     expect(completed.request().postDataJSON().executionId).toBe(executionId);

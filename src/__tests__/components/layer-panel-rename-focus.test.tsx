@@ -99,3 +99,32 @@ it('uses the video poster and falls back to a video tile when the poster cannot 
   fireEvent.error(poster);
   expect(screen.getByRole('img', { name: '视频图层：合成图层' })).toBeInstanceOf(HTMLElement);
 });
+
+it('shows an older working poster after the preferred video poster fails', () => {
+  const video: CanvasImage = {
+    ...image, mediaType: 'video', videoUrl: '/synthetic/video.mp4',
+    videoThumbnailUrl: '/synthetic/expired.jpg', thumbnailUrl: '/synthetic/expired.jpg',
+  };
+  render(<LayerPanel images={[video]} position="bottom" />);
+  const preferred = screen.getByRole('img', { name: '合成图层' });
+  expect(preferred.getAttribute('src')).toBe(video.videoThumbnailUrl);
+  fireEvent.error(preferred);
+  expect(screen.getByRole('img', { name: '合成图层' }).getAttribute('src')).toBe(image.url);
+  expect(screen.queryByRole('img', { name: '视频图层：合成图层' })).toBeNull();
+});
+
+it('tries hydrated poster fallbacks in order before showing the video tile', () => {
+  const video: CanvasImage = {
+    ...image, url: '/synthetic/graph-poster.jpg', mediaType: 'video',
+    videoUrl: '/synthetic/video.mp4', videoThumbnailUrl: '/synthetic/graph-poster.jpg',
+    thumbnailUrl: '/synthetic/graph-poster.jpg',
+    videoPosterFallbacks: ['/synthetic/older-poster.jpg', '/synthetic/oldest-poster.jpg'],
+  };
+  render(<LayerPanel images={[video]} position="bottom" />);
+  for (const url of [video.url, ...video.videoPosterFallbacks!]) {
+    const poster = screen.getByRole('img', { name: '合成图层' });
+    expect(poster.getAttribute('src')).toBe(url);
+    fireEvent.error(poster);
+  }
+  expect(screen.getByRole('img', { name: '视频图层：合成图层' })).toBeInstanceOf(HTMLElement);
+});

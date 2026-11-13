@@ -731,12 +731,16 @@ export function hydrateAssetV3Projects(
       const width = numberOr(transform.width, base.width ?? 256);
       const height = numberOr(transform.height, base.height ?? 256);
       const isVideo = placement.kind === 'video';
-      const videoPosterUrl = isVideo
-        ? placement.thumbnailUrl
-          ?? base.videoThumbnailUrl
-          ?? base.thumbnailUrl
-          ?? (base.url && base.url !== base.videoUrl ? base.url : undefined)
-        : undefined;
+      const savedVideoPosters = Array.isArray(base.videoPosterFallbacks) ? base.videoPosterFallbacks.slice(0, 3) : [];
+      const videoPosters = isVideo
+        ? [...new Set([placement.thumbnailUrl, base.videoThumbnailUrl, base.thumbnailUrl, base.url, ...savedVideoPosters]
+          .filter((url): url is string => typeof url === 'string' && url.length > 0
+            && url !== placement.fileUrl && url !== base.videoUrl))]
+        : [];
+      const [videoPosterUrl, ...fallbackCandidates] = videoPosters;
+      // The workspace may be hydrated again before a project save. Preserve a
+      // stable order even when the snapshot and graph supply the same posters.
+      const videoPosterFallbacks = fallbackCandidates.sort().slice(0, 3);
       return {
         ...base,
         id: placement.entityId,
@@ -745,6 +749,7 @@ export function hydrateAssetV3Projects(
         mediaType: isVideo ? 'video' : 'image',
         videoUrl: isVideo ? placement.fileUrl : undefined,
         videoThumbnailUrl: isVideo ? videoPosterUrl : undefined,
+        videoPosterFallbacks: videoPosterFallbacks.length > 0 ? videoPosterFallbacks : undefined,
         sourceUrl: placement.recoverySourceUrl ?? base.sourceUrl,
         x: numberOr(transform.x, base.x ?? 0),
         y: numberOr(transform.y, base.y ?? 0),

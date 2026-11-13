@@ -434,6 +434,7 @@ export interface CanvasImage {
   videoUrl?: string;
   videoDuration?: number;
   videoThumbnailUrl?: string;
+  videoPosterFallbacks?: string[];
   isPlaying?: boolean;
   relationType?: string;
   // 图层面板扩展字段

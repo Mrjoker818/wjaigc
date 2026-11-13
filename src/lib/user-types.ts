@@ -162,6 +162,7 @@ export interface CanvasImage {
   videoUrl?: string;
   videoDuration?: number;
   videoThumbnailUrl?: string;
+  videoPosterFallbacks?: string[];
   // 关系与状态
   isPlaying?: boolean;
   relationType?: string;

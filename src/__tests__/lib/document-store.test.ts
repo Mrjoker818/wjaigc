@@ -34,7 +34,7 @@ describe('canonical Yjs document payload', () => {
         if (sql.includes('AS has_legacy_snapshot')) {
           expect(values).toEqual(['p1', 'owner-a', 'project-a']);
           expect(currentName).not.toBe('当前图层');
-          return { rowCount: 1, rows: [{ entity_id: 'image-a', name: null, has_legacy_snapshot: true }] };
+          return { rowCount: 1, rows: [{ entity_id: 'image-a', name: null, has_graph_name: false, has_legacy_snapshot: true }] };
         }
         if (sql.includes('FROM wujie_user_data')) {
           expect(values).toEqual(['owner-a', 'project-a', 'image-a']);

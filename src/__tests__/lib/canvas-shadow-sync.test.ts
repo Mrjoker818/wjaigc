@@ -2028,6 +2028,61 @@ describe('continuous canvas shadow synchronization', () => {
     }));
   });
 
+  it('keeps a distinct saved video poster when the asset graph supplies a preferred preview', () => {
+    const [hydrated] = hydrateAssetV3Projects([project([image('graph-video', {
+      mediaType: 'video',
+      url: '/media/video/saved-poster.jpg',
+      videoUrl: '/media/video/result.mp4',
+      videoThumbnailUrl: '/media/video/first-poster.jpg',
+      thumbnailUrl: '/media/video/second-poster.jpg',
+      videoPosterFallbacks: ['/media/video/result.mp4', '/media/video/graph-poster.jpg'],
+    })])], {
+      'project-1': [{
+        entityId: 'graph-video',
+        assetId: 'asset-video',
+        assetVersionId: 'version-video',
+        placementId: 'placement-video',
+        kind: 'video',
+        fileUrl: '/media/video/result.mp4',
+        thumbnailUrl: '/media/video/graph-poster.jpg',
+        availability: 'ready',
+        transform: {},
+        metadata: {},
+      }],
+    });
+
+    expect(hydrated.canvasImages[0]).toMatchObject({
+      mediaType: 'video',
+      videoUrl: '/media/video/result.mp4',
+      videoThumbnailUrl: '/media/video/graph-poster.jpg',
+      thumbnailUrl: '/media/video/graph-poster.jpg',
+      url: '/media/video/graph-poster.jpg',
+      videoPosterFallbacks: [
+        '/media/video/first-poster.jpg', '/media/video/saved-poster.jpg', '/media/video/second-poster.jpg',
+      ],
+    });
+  });
+
+  it('keeps the same video poster fallbacks when an asset-v3 workspace is hydrated again', () => {
+    const fileUrl = '/media/video/result.mp4';
+    const graphPoster = '/media/video/graph.jpg';
+    const initial = project([image('graph-video', {
+      mediaType: 'video', videoUrl: fileUrl, videoThumbnailUrl: graphPoster,
+      url: graphPoster, thumbnailUrl: '/media/video/snapshot.jpg',
+    })]);
+    const placements = {
+      'project-1': [{
+        entityId: 'graph-video', assetId: 'asset-video', assetVersionId: 'version-video', placementId: 'placement-video',
+        kind: 'video' as const, fileUrl, thumbnailUrl: graphPoster, availability: 'ready' as const,
+        transform: {}, metadata: { legacyImage: { url: '/media/video/placement.jpg' } },
+      }],
+    };
+    const [hydrated] = hydrateAssetV3Projects([initial], placements);
+    expect(hydrated.canvasImages[0].videoPosterFallbacks).toHaveLength(2);
+    const [rehydrated] = hydrateAssetV3Projects([hydrated], placements);
+    expect(rehydrated.canvasImages[0]).toEqual(hydrated.canvasImages[0]);
+  });
+
   it('reads the asset kind when hydrating graph placements', () => {
     const syncSource = readFileSync(
       resolve(process.cwd(), 'src/lib/asset-core/canvas-project-sync.ts'),

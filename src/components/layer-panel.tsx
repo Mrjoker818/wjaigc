@@ -48,16 +48,17 @@ export interface LayerPanelProps {
 }
 
 interface LayerThumbnailProps {
-  url: string | undefined;
+  urls: string[];
   name: string;
   isVideo: boolean;
   isVisible: boolean;
   isMonochrome: boolean;
 }
 
-function LayerThumbnail({ url, name, isVideo, isVisible, isMonochrome }: LayerThumbnailProps): React.ReactElement {
-  const [failed, setFailed] = useState(false);
-  if (!url || failed) {
+function LayerThumbnail({ urls, name, isVideo, isVisible, isMonochrome }: LayerThumbnailProps): React.ReactElement {
+  const [candidate, setCandidate] = useState(0);
+  const url = urls[candidate];
+  if (!url) {
     const Icon = isVideo ? Film : FileImage;
     return (
       <div
@@ -70,7 +71,7 @@ function LayerThumbnail({ url, name, isVideo, isVisible, isMonochrome }: LayerTh
       </div>
     );
   }
-  return <img src={url} alt={name} className="w-full h-full object-cover" style={{ opacity: isVisible ? 1 : 0.3 }} onError={() => setFailed(true)} />;
+  return <img key={url} src={url} alt={name} className="w-full h-full object-cover" style={{ opacity: isVisible ? 1 : 0.3 }} onError={() => setCandidate(candidate + 1)} />;
 }
 
 /** 图层项组件 */
@@ -191,9 +192,11 @@ function LayerItem({
     ? isMonochrome ? 'bg-gray-200' : 'bg-gold/10'
     : isMonochrome ? 'bg-transparent hover:bg-gray-50' : 'bg-transparent hover:bg-white/[0.02]';
   const isVideo = image.mediaType === 'video' || Boolean(image.videoUrl);
-  const thumbnailUrl = isVideo
-    ? [image.videoThumbnailUrl, image.thumbnailUrl, image.url].find(url => url && url !== image.videoUrl)
-    : image.url;
+  const posterFallbacks = Array.isArray(image.videoPosterFallbacks) ? image.videoPosterFallbacks.slice(0, 3) : [];
+  const thumbnailUrls = isVideo
+    ? [...new Set([image.videoThumbnailUrl, image.thumbnailUrl, image.url, ...posterFallbacks]
+      .filter((url): url is string => typeof url === 'string' && url.length > 0 && url !== image.videoUrl))]
+    : image.url ? [image.url] : [];
 
   return (
     <div
@@ -204,7 +207,7 @@ function LayerItem({
     >
       {/* 缩略图区 */}
       <div className="relative w-full h-16 rounded-t-lg overflow-hidden">
-        <LayerThumbnail key={thumbnailUrl} url={thumbnailUrl} name={displayName} isVideo={isVideo} isVisible={isVisible} isMonochrome={isMonochrome} />
+        <LayerThumbnail key={JSON.stringify(thumbnailUrls)} urls={thumbnailUrls} name={displayName} isVideo={isVideo} isVisible={isVisible} isMonochrome={isMonochrome} />
         {multiSelectMode && (
           <button
             type="button"

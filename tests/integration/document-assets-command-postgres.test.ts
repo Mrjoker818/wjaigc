@@ -392,6 +392,37 @@ describe('project controlled asset commands on real PostgreSQL', () => {
     });
   });
 
+  it('restores an unnamed layer without reviving a stale snapshot name', async () => {
+    await withIsolatedPostgres('layer-name-removal-unnamed', async ({ query }) => {
+      await seed(query);
+      const blank = await execute(attach);
+      const cleared = await execute(attach);
+      const unnamed = [[blank, ''], [cleared, null]] as const;
+      const legacyImages: Array<{ id: string; name: string }> = [];
+      for (const [placement, graphName] of unnamed) {
+        const row = await query<{ entity_id: string }>(`UPDATE wujie_workspace_placements
+          SET metadata = $2::jsonb WHERE id = $1 RETURNING entity_id`,
+        [placement.placementId, JSON.stringify({ legacyImage: { name: graphName } })]);
+        legacyImages.push({ id: row.rows[0].entity_id, name: '已清除的旧名称' });
+      }
+      await query('CREATE TABLE wujie_user_data (user_id text, data_key text, data_value jsonb)');
+      await query('INSERT INTO wujie_user_data VALUES ($1, $2, $3::jsonb)', ['owner-a', 'projects',
+        JSON.stringify([{ id: 'project-a', userId: 'owner-a', canvasImages: legacyImages }]),
+      ]);
+
+      for (const [placement] of unnamed) {
+        const removal = await execute({ action: 'remove', placementId: placement.placementId, expectedAssetVersionId: 'version-one' });
+        expect(removal.removeSnapshot).toBeDefined();
+        expect(removal.removeSnapshot?.placement.name).toBeUndefined();
+        const restored = await execute({ ...attach, name: removal.removeSnapshot?.placement.name });
+        const loaded = await loadDocument('project-a');
+        try {
+          expect(readCanvasDocument(loaded.doc).placements[restored.placementId].name).toBeUndefined();
+        } finally { loaded.doc.destroy(); }
+      }
+    });
+  });
+
   it.each(['version-one', 'version-video'])('captures %s metadata changed after media preparation and excludes already deleted groups', async version => {
     await withIsolatedPostgres('h2-preflight-preimage', async ({ query }) => {
       await seed(query);
