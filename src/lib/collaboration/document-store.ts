@@ -365,24 +365,27 @@ function assertRawDocumentMutation(previous: YTypes.Doc, candidate: YTypes.Doc, 
 }
 
 async function readInheritedLayerName(client: PoolClient, ownerId: string, projectId: string, placementId: string): Promise<string | undefined> {
-  const result = await client.query<{ name: unknown }>(`
-    SELECT COALESCE(placement.metadata #> '{legacyImage,name}', legacy.image -> 'name') AS name
-      FROM wujie_workspace_placements placement
-      LEFT JOIN LATERAL (
-        SELECT images.image
-          FROM wujie_user_data data
-          CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(data.data_value) = 'array'
-            THEN data.data_value ELSE '[]'::jsonb END) AS projects(project)
-          CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(projects.project -> 'canvasImages') = 'array'
-            THEN projects.project -> 'canvasImages' ELSE '[]'::jsonb END) AS images(image)
-         WHERE placement.metadata #> '{legacyImage,name}' IS NULL
-           AND data.user_id = $2 AND data.data_key = 'projects'
-           AND projects.project ->> 'id' = $3 AND projects.project ->> 'userId' = $2
-           AND images.image ->> 'id' = placement.entity_id
-         LIMIT 1
-      ) legacy ON TRUE
-     WHERE placement.id = $1 AND placement.owner_id = $2 AND placement.project_id = $3`,
+  const placement = await client.query<{ entity_id: string; name: unknown; has_legacy_snapshot: boolean }>(`
+    SELECT entity_id, metadata #> '{legacyImage,name}' AS name,
+           to_regclass('wujie_user_data') IS NOT NULL AS has_legacy_snapshot
+      FROM wujie_workspace_placements
+     WHERE id = $1 AND owner_id = $2 AND project_id = $3`,
   [placementId, ownerId, projectId]);
+  const source = placement.rows[0];
+  if (!source) return undefined;
+  const graphName = resolveCanvasLayerName(undefined, source.name);
+  if (graphName !== undefined || !source.has_legacy_snapshot) return graphName;
+  const result = await client.query<{ name: unknown }>(`
+    SELECT images.image -> 'name' AS name
+      FROM wujie_user_data data
+      CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(data.data_value) = 'array'
+        THEN data.data_value ELSE '[]'::jsonb END) AS projects(project)
+      CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(projects.project -> 'canvasImages') = 'array'
+        THEN projects.project -> 'canvasImages' ELSE '[]'::jsonb END) AS images(image)
+     WHERE data.user_id = $1 AND data.data_key = 'projects'
+       AND projects.project ->> 'id' = $2 AND projects.project ->> 'userId' = $1
+       AND images.image ->> 'id' = $3
+     LIMIT 1`, [ownerId, projectId, source.entity_id]);
   return resolveCanvasLayerName(undefined, result.rows[0]?.name);
 }
 

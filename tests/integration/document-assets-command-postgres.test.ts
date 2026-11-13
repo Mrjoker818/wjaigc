@@ -367,6 +367,31 @@ describe('fix1 concurrent preflight idempotency recovery', () => {
 });
 
 describe('project controlled asset commands on real PostgreSQL', () => {
+  it('preserves graph and older project names through deletion and attachment', async () => {
+    await withIsolatedPostgres('layer-name-removal', async ({ query }) => {
+      await seed(query);
+      const graph = await execute(attach);
+      const legacy = await execute(attach);
+      await query(`UPDATE wujie_workspace_placements
+        SET metadata = '{"legacyImage":{"name":"图层目录名"}}'::jsonb WHERE id = $1`, [graph.placementId]);
+      const row = await query<{ entity_id: string }>('SELECT entity_id FROM wujie_workspace_placements WHERE id = $1', [legacy.placementId]);
+      await query('CREATE TABLE wujie_user_data (user_id text, data_key text, data_value jsonb)');
+      await query('INSERT INTO wujie_user_data VALUES ($1, $2, $3::jsonb)', ['owner-a', 'projects',
+        JSON.stringify([{ id: 'project-a', userId: 'owner-a', canvasImages: [{ id: row.rows[0].entity_id, name: '旧项目名' }] }]),
+      ]);
+
+      for (const [placement, name] of [[graph, '图层目录名'], [legacy, '旧项目名']] as const) {
+        const removal = await execute({ action: 'remove', placementId: placement.placementId, expectedAssetVersionId: 'version-one' });
+        expect(removal.removeSnapshot?.placement.name).toBe(name);
+        const restored = await execute({ ...attach, name: removal.removeSnapshot?.placement.name });
+        const loaded = await loadDocument('project-a');
+        try {
+          expect(readCanvasDocument(loaded.doc).placements[restored.placementId].name).toBe(name);
+        } finally { loaded.doc.destroy(); }
+      }
+    });
+  });
+
   it.each(['version-one', 'version-video'])('captures %s metadata changed after media preparation and excludes already deleted groups', async version => {
     await withIsolatedPostgres('h2-preflight-preimage', async ({ query }) => {
       await seed(query);
