@@ -12,6 +12,7 @@ import { getPool } from '@/lib/db-client';
 import {
   assertCanvasDocumentTransition,
   createCanvasDocument,
+  FORBIDDEN_CANVAS_HISTORY,
   readCanvasDocument,
   type CanvasDocumentProjection,
 } from '@/lib/collaboration/canvas-document';
@@ -24,7 +25,6 @@ import { applyPreparedSkillRestoration, type PreparedSkillRestoration } from './
 const MAX_INCOMING_UPDATE_BYTES = 1_048_576;
 const MAX_PERSISTED_UPDATE_BYTES = 4_194_304;
 const RECOVERY_LOG_LIMIT = 32;
-const FORBIDDEN_HISTORY = /(?:data:|blob:|https?:\/\/|processing[:_-]|api[_-]?key)/i;
 
 interface DocumentRow {
   owner_id: string;
@@ -114,6 +114,7 @@ export function assertCanonicalDocumentPayload(
     ]) permitted.add(valueFingerprint(value));
     if (Object.hasOwn(placement, 'groupId')) permitted.add(valueFingerprint(placement.groupId));
     if (Object.hasOwn(placement, 'annotation')) permitted.add(valueFingerprint(placement.annotation));
+    if (Object.hasOwn(placement, 'name')) permitted.add(valueFingerprint(placement.name));
     if (placement.deleted === true) permitted.add(valueFingerprint(true));
   }
   for (const group of Object.values(projection.groupDefinitions ?? {})) {
@@ -185,7 +186,7 @@ function canonicalizeCandidate(candidate: YTypes.Doc, projection: CanvasDocument
   }
   // Never persist a raw client update. Yjs may retain overwritten content in its
   // update history, so a valid final projection alone is insufficient.
-  if (FORBIDDEN_HISTORY.test(Buffer.from(canonical).toString('utf8'))) {
+  if (FORBIDDEN_CANVAS_HISTORY.test(Buffer.from(canonical).toString('utf8'))) {
     throw new Error('Canvas document update retains forbidden history');
   }
   assertCanonicalDocumentPayload(canonical, projection);
@@ -215,7 +216,7 @@ function deriveVerifiedIncrementalUpdate(
 ): Uint8Array {
   const delta = Y.encodeStateAsUpdate(candidate, Y.encodeStateVector(previous));
   if (delta.length > MAX_PERSISTED_UPDATE_BYTES ||
-      FORBIDDEN_HISTORY.test(Buffer.from(delta).toString('utf8'))) {
+      FORBIDDEN_CANVAS_HISTORY.test(Buffer.from(delta).toString('utf8'))) {
     throw new Error('Canvas document incremental update retains forbidden history or exceeds size limit');
   }
   assertCanonicalDocumentPayload(delta, projection);

@@ -2,12 +2,60 @@ import { describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import { performance } from 'node:perf_hooks';
 
-import { readCanvasDocument } from '@/lib/collaboration/canvas-document';
-import { assertCanonicalDocumentPayload } from '@/lib/collaboration/document-store';
+import { applyCanvasImagePatch, createCanvasDocument, readCanvasDocument, validateCanvasDocumentProjection } from '@/lib/collaboration/canvas-document';
+import { assertCanonicalDocumentPayload, encodeCanonicalDocumentSnapshot } from '@/lib/collaboration/document-store';
 
 vi.mock('server-only', () => ({}));
 
 describe('canonical Yjs document payload', () => {
+  it('merges separate layer renames from an old snapshot and reads both from the persisted snapshot', () => {
+    const server = createCanvasDocument();
+    const first = createCanvasDocument();
+    const second = createCanvasDocument();
+    const reopened = createCanvasDocument();
+    try {
+      const geometry = { x: 10, y: 20, width: 80, height: 60, rotation: 0, zIndex: 1 };
+      applyCanvasImagePatch(server, { placementId: 'p1', assetVersionId: 'version-one', ...geometry }, 'seed');
+      applyCanvasImagePatch(server, { placementId: 'p2', assetVersionId: 'version-two', ...geometry }, 'seed');
+      const baseline = Y.encodeStateAsUpdate(server);
+      const vector = Y.encodeStateVector(server);
+      Y.applyUpdate(first, baseline);
+      Y.applyUpdate(second, baseline);
+      expect(readCanvasDocument(first).placements.p1).not.toHaveProperty('name');
+
+      applyCanvasImagePatch(first, { placementId: 'p1', name: '拥有者：产品图' }, 'owner');
+      applyCanvasImagePatch(second, { placementId: 'p2', name: '编辑者：演示视频' }, 'editor');
+      applyCanvasImagePatch(second, { placementId: 'p1', x: 41 }, 'editor');
+      Y.applyUpdate(server, Y.encodeStateAsUpdate(second, vector));
+      Y.applyUpdate(server, Y.encodeStateAsUpdate(first, vector));
+      const persisted = encodeCanonicalDocumentSnapshot(server);
+      for (const replica of [first, second, reopened]) {
+        Y.applyUpdate(replica, persisted.bytes);
+        const names = readCanvasDocument(replica).placements;
+        expect(names.p1).toMatchObject({ name: '拥有者：产品图', x: 41 });
+        expect(names.p2).toMatchObject({ name: '编辑者：演示视频', x: 10 });
+      }
+    } finally {
+      for (const doc of [server, first, second, reopened]) doc.destroy();
+    }
+  });
+
+  it('rejects malformed layer names without changing the placement', () => {
+    const doc = createCanvasDocument();
+    try {
+      applyCanvasImagePatch(doc, { placementId: 'p1', assetVersionId: 'version-one',
+        x: 10, y: 20, width: 80, height: 60, rotation: 0, zIndex: 1,
+      }, 'seed');
+      const initial = readCanvasDocument(doc).placements.p1;
+      for (const name of ['', '   ', '图层\n名称', '图'.repeat(201), 'https://example.test', 'API-key']) {
+        expect(() => applyCanvasImagePatch(doc, { placementId: 'p1', name }, 'local')).toThrow('Invalid canvas layer name');
+        expect(() => validateCanvasDocumentProjection({ placements: { p1: { ...initial, name } } }))
+          .toThrow('Invalid canvas layer name');
+      }
+      expect(readCanvasDocument(doc).placements.p1).toEqual(initial);
+    } finally { doc.destroy(); }
+  });
+
   it('keeps deleted metadata records and their monotonic tombstones in a canonical update', () => {
     const doc = new Y.Doc();
     doc.getMap('assetVersions').set('placement-one', 'version-one');

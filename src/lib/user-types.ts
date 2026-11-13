@@ -91,6 +91,7 @@ export interface ImageGroupData {
 
 export interface CanvasImage {
   id: string;
+  name?: string;
   url: string;
   x: number;
   y: number;

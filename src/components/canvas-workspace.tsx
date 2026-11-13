@@ -8408,6 +8408,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
           key={currentProject?.id || 'canvas-local'}
           images={images}
           onImagesChange={setImages}
+          onRenameLayer={(id, name) => {
+            setImages(current => current.map(image => image.id === id ? { ...image, name } : image));
+          }}
           onHistoryTransactionBegin={beginCanvasHistoryTransaction}
           onHistoryTransactionCommit={commitCanvasHistoryTransaction}
           onHistoryTransactionRollback={rollbackCanvasHistoryTransaction}

@@ -15,6 +15,7 @@ export interface CanvasPlacement {
   height: number;
   rotation: number;
   zIndex: number;
+  name?: string | null;
   groupId?: string | null;
   annotation?: string;
   deleted?: boolean;
@@ -32,7 +33,7 @@ export type CanvasImagePatch = { placementId: string } & Partial<CanvasPlacement
 
 const PATCH_FIELDS = new Set([
   'placementId', 'assetVersionId', 'x', 'y', 'width', 'height',
-  'rotation', 'zIndex', 'groupId', 'annotation', 'deleted',
+  'rotation', 'zIndex', 'name', 'groupId', 'annotation', 'deleted',
 ]);
 const PLACEMENT_FIELDS = new Set([...PATCH_FIELDS].filter((field) => field !== 'placementId'));
 const REQUIRED_FIELDS = [
@@ -40,16 +41,23 @@ const REQUIRED_FIELDS = [
 ] as const;
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
 const TRANSIENT_ID_PATTERN = /^(?:data|blob|https?|processing)(?:[:_-]|$)/i;
+export const FORBIDDEN_CANVAS_HISTORY = /(?:data:|blob:|https?:\/\/|processing[:_-]|api[_-]?key)/i;
 const MAX_PLACEMENTS = 2000;
 const MAX_COORDINATE = 1_000_000;
 const TRANSFORM_FIELDS = ['x', 'y', 'width', 'height', 'rotation', 'zIndex'] as const;
 const ROOT_FIELDS = new Set([
-  'assetVersions', 'transforms', 'groups', 'annotations', 'tombstones',
+  'assetVersions', 'transforms', 'layerNames', 'groups', 'annotations', 'tombstones',
   'groupDefinitions', 'annotationRecords', 'groupTombstones', 'annotationTombstones',
 ]);
 const MAX_METADATA_RECORDS = 2000;
 const ANNOTATION_TYPES = new Set(['semantic-object', 'region', 'brush', 'arrow', 'text']);
 const ANNOTATION_STATUSES = new Set(['draft', 'ready', 'stale', 'running', 'done', 'failed']);
+
+export function isCanvasLayerName(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 200
+    && value === value.trim() && !/[\u0000-\u001f\u007f]/u.test(value)
+    && !FORBIDDEN_CANVAS_HISTORY.test(value);
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -248,6 +256,7 @@ function materializePlacement(doc: YTypes.Doc, placementId: string): CanvasPlace
   }
   const groups = doc.getMap<unknown>('groups');
   const annotations = doc.getMap<unknown>('annotations');
+  const names = doc.getMap<unknown>('layerNames');
   return validateCanvasDocumentProjection({
     placements: {
       [placementId]: {
@@ -255,6 +264,7 @@ function materializePlacement(doc: YTypes.Doc, placementId: string): CanvasPlace
         ...transform,
         ...(groups.has(placementId) ? { groupId: groups.get(placementId) } : {}),
         ...(annotations.has(placementId) ? { annotation: annotations.get(placementId) } : {}),
+        ...(names.has(placementId) ? { name: names.get(placementId) } : {}),
       },
     },
   }).placements[placementId];
@@ -291,6 +301,9 @@ export function validateCanvasDocumentProjection(value: unknown): CanvasDocument
     assertFiniteNumber(raw.rotation, 'rotation', -360, 360);
     assertFiniteNumber(raw.zIndex, 'zIndex', -MAX_COORDINATE, MAX_COORDINATE);
     if (!Number.isInteger(raw.zIndex)) throw new Error('Invalid canvas zIndex');
+    if (Object.hasOwn(raw, 'name') && raw.name !== null && !isCanvasLayerName(raw.name)) {
+      throw new Error('Invalid canvas layer name');
+    }
     if (Object.hasOwn(raw, 'groupId') && raw.groupId !== null) {
       assertSafeId(raw.groupId, 'groupId');
     }
@@ -347,6 +360,7 @@ export function applyCanvasImagePatch(doc: YTypes.Doc, patch: CanvasImagePatch, 
   const transforms = doc.getMap<unknown>('transforms');
   const groups = doc.getMap<unknown>('groups');
   const annotations = doc.getMap<unknown>('annotations');
+  const names = doc.getMap<unknown>('layerNames');
   const tombstones = doc.getMap<unknown>('tombstones');
   if (typeof fields.groupId === 'string' && doc.getMap('groupTombstones').get(fields.groupId) === true) {
     throw new Error('Canvas placement references a deleted group');
@@ -377,6 +391,7 @@ export function applyCanvasImagePatch(doc: YTypes.Doc, patch: CanvasImagePatch, 
     }
     if (Object.hasOwn(fields, 'groupId')) groups.set(placementId, next.groupId);
     if (Object.hasOwn(fields, 'annotation')) annotations.set(placementId, next.annotation);
+    if (Object.hasOwn(fields, 'name')) names.set(placementId, next.name);
     if (fields.deleted === true) tombstones.set(placementId, true);
   }, origin);
 }
@@ -410,10 +425,11 @@ export function readCanvasDocument(doc: YTypes.Doc): CanvasDocumentProjection {
   const transforms = doc.getMap<unknown>('transforms');
   const groups = doc.getMap<unknown>('groups');
   const annotations = doc.getMap<unknown>('annotations');
+  const names = doc.getMap<unknown>('layerNames');
   for (const placementId of assetVersions.keys()) {
     placements[placementId] = materializePlacement(doc, placementId);
   }
-  for (const fieldMap of [transforms, groups, annotations]) {
+  for (const fieldMap of [transforms, groups, annotations, names]) {
     for (const placementId of fieldMap.keys()) {
       if (!assetVersions.has(placementId)) throw new Error('Orphan canvas placement field');
     }
@@ -444,9 +460,12 @@ export function assertCanvasDocumentTransition(previous: YTypes.Doc, candidate: 
     }
   }
   for (const [placementId, placement] of Object.entries(before.placements)) {
-    if (!Object.hasOwn(after.placements, placementId) ||
-        (placement.deleted === true && after.placements[placementId].deleted !== true)) {
+    const next = after.placements[placementId];
+    if (!next || (placement.deleted === true && next.deleted !== true)) {
       throw new Error('Canvas document placement cannot be revived or removed');
+    }
+    if (placement.deleted && next.name !== placement.name) {
+      throw new Error('Canvas deleted layer name cannot be changed');
     }
   }
   for (const field of ['groupDefinitions', 'annotationRecords'] as const) {

@@ -21,14 +21,14 @@ afterEach(() => {
 
 function renameLayer() {
   const rename = vi.fn();
-  render(<LayerPanel images={[image]} position="bottom" onRename={rename} />);
+  const { rerender } = render(<LayerPanel images={[image]} position="bottom" onRename={rename} />);
   const more = screen.getByRole('button', { name: '图层 合成图层 更多操作' });
   fireEvent.click(more);
   fireEvent.click(screen.getByRole('button', { name: '重命名' }));
   const field = screen.getByRole('textbox', { name: '重命名 合成图层' });
   expect(document.activeElement).toBe(field);
   fireEvent.change(field, { target: { value: ' 新名称 ' } });
-  return { rename, more, field };
+  return { rename, more, field, rerender };
 }
 
 it('keeps the editor open as focus moves to Save and Cancel, then discards the draft', () => {
@@ -59,4 +59,25 @@ it('preserves commit when focus leaves all rename controls', () => {
   act(() => more.focus());
   expect(rename).toHaveBeenCalledExactlyOnceWith('layer', '新名称');
   expect(screen.queryByRole('textbox')).toBeNull();
+});
+
+it('preserves the in-progress draft when a remote name arrives', () => {
+  const { rename, rerender } = renameLayer();
+  rerender(<LayerPanel images={[{ ...image, name: '远端名称' }]} position="bottom" onRename={rename} />);
+  const field = screen.getByRole('textbox', { name: '重命名 远端名称' });
+  expect(field).toHaveProperty('value', ' 新名称 ');
+  fireEvent.keyDown(field, { key: 'Enter' });
+  expect(rename).toHaveBeenCalledExactlyOnceWith('layer', '新名称');
+});
+
+it('keeps an incoming rename when the local editor has no draft', () => {
+  const rename = vi.fn();
+  const { rerender } = render(<LayerPanel images={[image]} position="bottom" onRename={rename} />);
+  fireEvent.click(screen.getByRole('button', { name: '图层 合成图层 更多操作' }));
+  fireEvent.click(screen.getByRole('button', { name: '重命名' }));
+  rerender(<LayerPanel images={[{ ...image, name: '远端名称' }]} position="bottom" onRename={rename} />);
+  const field = screen.getByRole('textbox', { name: '重命名 远端名称' });
+  expect(field).toHaveProperty('value', '远端名称');
+  fireEvent.keyDown(field, { key: 'Enter' });
+  expect(rename).not.toHaveBeenCalled();
 });

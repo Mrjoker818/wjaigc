@@ -186,7 +186,8 @@ interface YjsRedoneLink {
   redone: YTypes.ID;
 }
 
-type PlacementHistoryField = 'transforms' | 'groups' | 'annotations';
+const PLACEMENT_HISTORY_FIELDS = ['transforms', 'groups', 'annotations', 'layerNames'] as const;
+type PlacementHistoryField = (typeof PLACEMENT_HISTORY_FIELDS)[number];
 interface PlacementHistoryChange {
   placementId: string;
   assetVersionId: string;
@@ -222,6 +223,7 @@ const HISTORY_TRANSFORM_FIELDS = ['x', 'y', 'width', 'height', 'rotation', 'zInd
 function placementHistoryValue(placement: CanvasPlacement, field: PlacementHistoryField): string {
   if (field === 'transforms') return JSON.stringify(HISTORY_TRANSFORM_FIELDS.map(key => placement[key]));
   if (field === 'groups') return JSON.stringify(placement.groupId ?? null);
+  if (field === 'layerNames') return JSON.stringify(placement.name ?? null);
   return JSON.stringify(placement.annotation ?? '');
 }
 
@@ -234,7 +236,7 @@ function placementHistoryChanges(
     if (JSON.stringify(prior) === JSON.stringify(next)) continue;
     // Media identity/version changes are not reversible placement patches.
     if (!prior || prior.deleted || next.deleted || prior.assetVersionId !== next.assetVersionId) return undefined;
-    const fields = (['transforms', 'groups', 'annotations'] as const).filter(field => (
+    const fields = PLACEMENT_HISTORY_FIELDS.filter(field => (
       placementHistoryValue(prior, field) !== placementHistoryValue(next, field)
     ));
     if (fields.length) changes.push({ placementId, assetVersionId: next.assetVersionId, before: prior, after: next, fields });
@@ -949,6 +951,7 @@ export function createCanvasDocumentSession(
   const createUndoManager = (target: YTypes.Doc): YTypes.UndoManager => new Y.UndoManager([
     target.getMap('assetVersions'), target.getMap('transforms'),
     target.getMap('groups'), target.getMap('annotations'), target.getMap('tombstones'),
+    target.getMap('layerNames'),
     target.getMap('groupDefinitions'), target.getMap('annotationRecords'),
     target.getMap('groupTombstones'), target.getMap('annotationTombstones'),
   ], { trackedOrigins: new Set([localOrigin]), captureTimeout: 0 });
@@ -1299,6 +1302,7 @@ export function createCanvasDocumentSession(
           for (const field of fields) {
             if (field === 'transforms') for (const key of HISTORY_TRANSFORM_FIELDS) patch[key] = desired[key];
             else if (field === 'groups') patch.groupId = desired.groupId ?? null;
+            else if (field === 'layerNames') patch.name = desired.name ?? null;
             else patch.annotation = desired.annotation ?? '';
           }
           applyCanvasImagePatch(candidate, patch, placementHistoryOrigin);
@@ -1780,6 +1784,7 @@ export function createCanvasDocumentSession(
         // last synchronous guard uses the actual Y.Doc, including retired heads,
         // and refuses the entire recovery rather than supplementing a conflict.
         if (!snapshot || doc.getMap('groups')._map.has(nextPlacementId) || doc.getMap('annotations')._map.has(nextPlacementId)
+            || doc.getMap('layerNames')._map.has(nextPlacementId)
             || Object.keys(annotations).some(id => doc.getMap('annotationRecords')._map.has(id)
               || doc.getMap('annotationTombstones')._map.has(id))
             || Object.entries(snapshot.annotationRecords).some(([id, record]) => projection.annotationTombstones?.[id] !== true
@@ -1803,7 +1808,7 @@ export function createCanvasDocumentSession(
         }
       }
       const source = snapshot?.placement ?? previous;
-      const fields: Array<'groups' | 'annotations'> = [];
+      const fields: PlacementHistoryField[] = [];
       const patch: CanvasImagePatch = { placementId: nextPlacementId };
       if (Object.hasOwn(source, 'groupId') && !doc.getMap('groups')._map.has(nextPlacementId) &&
           (!source.groupId || (Object.hasOwn(projection.groupDefinitions ?? {}, source.groupId) &&
@@ -1814,6 +1819,10 @@ export function createCanvasDocumentSession(
       if (Object.hasOwn(source, 'annotation') && !doc.getMap('annotations')._map.has(nextPlacementId)) {
         fields.push('annotations');
         patch.annotation = source.annotation ?? '';
+      }
+      if (Object.hasOwn(source, 'name') && !doc.getMap('layerNames')._map.has(nextPlacementId)) {
+        fields.push('layerNames');
+        patch.name = source.name ?? null;
       }
       const groups: Record<string, ImageGroupData> = {};
       for (const id of snapshot?.groupIds ?? []) {

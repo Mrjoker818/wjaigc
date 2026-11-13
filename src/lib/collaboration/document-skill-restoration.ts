@@ -85,6 +85,7 @@ export async function applyPreparedSkillRestoration(client:PoolClient,doc:Doc,ca
       rotation:placement.rotation,zIndex:placement.zIndex});
     if(placement.groupId!==undefined)doc.getMap('groups').set(newPlacementId,placement.groupId);
     if(placement.annotation!==undefined)doc.getMap('annotations').set(newPlacementId,placement.annotation);
+    if(placement.name!==undefined)doc.getMap('layerNames').set(newPlacementId,placement.name);
     for(const id of liveGroups){const group=projection.groupDefinitions![id];
       doc.getMap('groupDefinitions').set(id,{...group,imageIds:[...group.imageIds,newPlacementId]});}
     for(const annotation of Object.values(current.annotationRecords)){

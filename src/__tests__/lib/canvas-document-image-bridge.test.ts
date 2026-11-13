@@ -127,6 +127,24 @@ describe('canvas document image bridge', () => {
     }]);
   });
 
+  it('routes a layer rename as a placement-only name change', () => {
+    const images = [image('a', 'p1', 10), image('b', 'p2', 20)];
+    const authority = {
+      projectId: 'project-a', authority: 'document' as const, status: 'saved',
+      images: { p1: placement('a', 10), p2: placement('b', 20) },
+    };
+    expect(routeCanvasWorkspaceChange('project-a', authority, images, [
+      { ...images[0], name: '产品图' }, images[1],
+    ])).toEqual({ kind: 'document', patches: [{ placementId: 'p1', name: '产品图' }] });
+  });
+
+  it('uses the current document name when cached media still holds an older name', () => {
+    const media = { ...image('a', 'p1', 10), name: '旧名称' };
+    const renamed = { ...placement('a', 10), name: '新名称' };
+    expect(projectDocumentPlacementsOntoImages([media], { p1: renamed }).images[0].name).toBe('新名称');
+    expect(projectDocumentPlacementsOntoImages([media], { p1: placement('a', 10) }).images[0].name).toBeUndefined();
+  });
+
   it('refuses a media addition or version replacement that needs the project-scoped command', () => {
     const before = [image('a', 'p1', 10)];
     const placements = { p1: placement('a', 10) };

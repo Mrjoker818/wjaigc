@@ -129,6 +129,25 @@ function restoreForAnnotationHistory(f: ReturnType<typeof fixture>, snapshot: Re
 }
 
 describe('annotation history across restored identities', () => {
+  it('keeps a renamed layer on removal undo and preserves an independent geometry edit when undoing the rename', () => {
+    const f = fixture();
+    f.session.applyLocalChange({ placementId: 'p1', name: '产品图' });
+    f.commit();
+    const snapshot = removeForAnnotationHistory(f);
+    restoreForAnnotationHistory(f, snapshot, 'p3', {});
+    expect(f.session.images.p3.name).toBe('产品图');
+
+    applyCanvasImagePatch(f.server, { placementId: 'p3', x: 177 }, 'remote');
+    f.publish();
+    f.session.undoLocal();
+    f.commit();
+    expect(f.session.images.p3).toMatchObject({ name: null, x: 177 });
+
+    f.session.redoLocal();
+    f.commit();
+    expect(f.session.images.p3).toMatchObject({ name: '产品图', x: 177 });
+  });
+
   it('preserves same-timestamp ordinals through remapping and a second remove restore cycle', () => {
     const f = annotationIdentityFixture();
     const original = f.session.projection.annotationRecords!['annotation-a'];

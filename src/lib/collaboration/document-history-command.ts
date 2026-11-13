@@ -563,6 +563,10 @@ async function readRestorationMetadata(
     complete = false;
   }
   if (Object.hasOwn(next, 'annotation')) pristine = false;
+  if (Object.hasOwn(snapshot.placement, 'name') && (next.name ?? null) !== (snapshot.placement.name ?? null)) {
+    complete = false;
+  }
+  if (Object.hasOwn(next, 'name')) pristine = false;
   if (Object.hasOwn(snapshot.placement, 'groupId')) {
     const originalGroupId = snapshot.placement.groupId;
     // A real concurrent group deletion clears its placement assignments. Its

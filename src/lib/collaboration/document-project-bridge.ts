@@ -12,7 +12,7 @@ import { PROJECT_REVISION_DATA_KEY } from '@/lib/asset-core/canvas-project-sync'
 import { assertDocumentEnableMediaUnchanged, inspectDocumentEnableMedia } from '@/lib/collaboration/document-enable-media';
 import { migrateLegacyProjectOnWriteInTransaction, prepareVerifiedLegacyProjectMedia, selectCanvasImagesForAssetGraph } from '@/lib/asset-core/legacy-migration';
 import { readProjectSnapshot } from '@/lib/asset-core/project-readers';
-import { applyCanvasImagePatch, createCanvasDocument, readCanvasDocument, type CanvasDocumentProjection } from '@/lib/collaboration/canvas-document';
+import { applyCanvasImagePatch, createCanvasDocument, isCanvasLayerName, readCanvasDocument, type CanvasDocumentProjection } from '@/lib/collaboration/canvas-document';
 import { assertDocumentEditor, DocumentProjectNotEnabledError } from '@/lib/collaboration/document-access';
 import { assertProjectAnnotationAsset, assertProjectAssetVersion } from '@/lib/collaboration/document-assets';
 import { encodeCanonicalDocumentSnapshot, loadDocumentInTransaction } from '@/lib/collaboration/document-store';
@@ -50,6 +50,7 @@ export interface CollaborativeProjectRead {
 function toDocumentCanvasImage(image: CanvasImage): CanvasImage {
   return {
     id: image.id, url: image.url,
+    ...(image.name !== undefined ? { name: image.name } : {}),
     x: image.x, y: image.y, width: image.width, height: image.height,
     originalWidth: image.originalWidth, originalHeight: image.originalHeight,
     rotation: image.rotation, zIndex: image.zIndex, createdAt: image.createdAt,
@@ -207,13 +208,14 @@ export async function readOwnerProjectsWithDocuments(
         if (!image || image.assetVersionId !== placement.assetVersionId) {
           throw new DocumentAuthorityConflictError();
         }
-        const { groupId: _oldGroupId, ...base } = image;
+        const { groupId: _oldGroupId, name: _oldName, ...base } = image;
         canvasImages.push({
           ...base,
           x: placement.x, y: placement.y,
           width: placement.width, height: placement.height,
           rotation: placement.rotation, zIndex: placement.zIndex,
           ...(placement.groupId ? { groupId: placement.groupId } : {}),
+          ...(placement.name ? { name: placement.name } : {}),
         });
       }
       const metadata = { ...graphProject.metadata };
@@ -347,11 +349,13 @@ export async function enableCollaborativeProject(
       if (!mapping) throw new DocumentAuthorityConflictError();
       placementByImageId.set(image.id, mapping.placementId);
       await assertProjectAssetVersion(ownerId, projectId, mapping.versionId, client);
+      const name = typeof image.name === 'string' ? image.name.trim() : undefined;
       applyCanvasImagePatch(doc, {
         placementId: mapping.placementId,
         assetVersionId: mapping.versionId,
         x: image.x, y: image.y, width: image.width, height: image.height,
         rotation: image.rotation, zIndex: image.zIndex,
+        ...(isCanvasLayerName(name) ? { name } : {}),
         ...(image.groupId ? { groupId: image.groupId } : {}),
       }, 'seed');
     }

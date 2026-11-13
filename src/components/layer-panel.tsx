@@ -113,7 +113,7 @@ function LayerItem({
   scrollOwnerRef,
 }: LayerItemProps) {
   const [isEditing, setIsEditing] = useState(false);
-  const [editName, setEditName] = useState(image.name || `图层 ${index + 1}`);
+  const [editName, setEditName] = useState<string | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
@@ -153,11 +153,8 @@ function LayerItem({
 
   // 外部触发重命名
   useEffect(() => {
-    if (forceRenameId === image.id) {
-      setIsEditing(true);
-      setEditName(image.name || `图层 ${index + 1}`);
-    }
-  }, [forceRenameId, image.id, image.name, index]);
+    if (forceRenameId === image.id) setIsEditing(true);
+  }, [forceRenameId, image.id]);
 
   const displayName = image.name || `图层 ${index + 1}`;
   const isVisible = image.visible !== false;
@@ -165,17 +162,19 @@ function LayerItem({
 
   const handleRenameCancel = (): void => {
     setIsEditing(false);
-    setEditName(displayName);
+    setEditName(null);
     onRenameCancel();
   };
 
   const handleRenameSubmit = (): void => {
-    if (!editName.trim()) {
+    const name = editName?.trim();
+    if (!name || name === displayName) {
       handleRenameCancel();
       return;
     }
-    onRename(editName.trim());
+    onRename(name);
     setIsEditing(false);
+    setEditName(null);
   };
 
   const actionButtonClass = 'flex h-11 w-11 items-center justify-center rounded transition-colors md:[@media(hover:hover)_and_(pointer:fine)]:h-auto md:[@media(hover:hover)_and_(pointer:fine)]:w-auto md:[@media(hover:hover)_and_(pointer:fine)]:p-0.5';
@@ -266,7 +265,7 @@ function LayerItem({
           >
           <input
             type="text"
-            value={editName}
+            value={editName ?? displayName}
             onChange={(e) => setEditName(e.target.value)}
             onKeyDown={(e) => {
               if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;

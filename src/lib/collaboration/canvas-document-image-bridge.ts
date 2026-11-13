@@ -11,6 +11,7 @@ interface CanvasBridgeImage {
   height: number;
   rotation?: number;
   zIndex?: number;
+  name?: string;
   groupId?: string;
   placementId?: string;
   assetVersionId?: string;
@@ -126,10 +127,11 @@ export function collectCanvasDocumentPatches<T extends CanvasBridgeImage>(
     }
     const transformChanged = TRANSFORM_FIELDS.some(field => prior[field] !== image[field]);
     const groupChanged = (prior.groupId || null) !== (image.groupId || null);
+    const nameChanged = prior.name !== image.name;
     if (prior.url !== image.url) {
       throw new Error('协作媒体命令尚未处理素材地址变更');
     }
-    if (!transformChanged && !groupChanged) continue;
+    if (!transformChanged && !groupChanged && !nameChanged) continue;
     patches.push({
       placementId,
       ...(transformChanged ? {
@@ -137,6 +139,7 @@ export function collectCanvasDocumentPatches<T extends CanvasBridgeImage>(
         rotation: image.rotation ?? placement.rotation, zIndex: image.zIndex ?? placement.zIndex,
       } : {}),
       ...(groupChanged ? { groupId: image.groupId || null } : {}),
+      ...(nameChanged ? { name: image.name ?? null } : {}),
     });
   }
   return patches;
@@ -161,13 +164,14 @@ export function projectDocumentPlacementsOntoImages<T extends CanvasBridgeImage>
     }
     resolved.add(image.placementId);
     if (placement.deleted) continue;
-    const { groupId: _oldGroupId, ...base } = image;
+    const { groupId: _oldGroupId, name: _oldName, ...base } = image;
     projected.push({
       ...base,
       x: placement.x, y: placement.y,
       width: placement.width, height: placement.height,
       rotation: placement.rotation, zIndex: placement.zIndex,
       ...(placement.groupId ? { groupId: placement.groupId } : {}),
+      ...(placement.name ? { name: placement.name } : {}),
     } as T);
   }
   return {
