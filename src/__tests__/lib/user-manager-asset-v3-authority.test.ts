@@ -88,6 +88,48 @@ afterEach(() => {
 });
 
 describe('asset-v3 client project authority', () => {
+  it.each([['asset-v3', 8, 'placement-retained', true], ['asset-v3', 7, 'placement-retained', false],
+    ['asset-v3', 9, 'placement-retained', false], ['asset-v3', 8, 'other-placement', false],
+    ['legacy', 8, 'placement-retained', false]] as const)(
+    'adopts a newer confirmed restore without replaying the local omission (%s, revision %s, placement %s)',
+    async (mode, restoreRevision, restoredPlacement, keepsRestoredImage) => {
+      const managed = {
+        ...canvasImage('retained', 44), assetId: 'asset-retained',
+        assetVersionId: 'version-retained', placementId: 'placement-retained',
+      };
+      const initial = project([managed]);
+      const seed = JSON.parse(storage.get('unbounded_ai_user_data')!);
+      seed.userData[user.id].projects = [initial];
+      storage.set('unbounded_ai_user_data', JSON.stringify(seed));
+      const snapshot = (revision: number, restoredCanvasPlacements?: unknown) => Response.json({
+        success: true, assetGraphMode: mode, projectRevision: revision,
+        value: [project([managed])], restoredCanvasPlacements,
+      });
+      fetchMock.mockImplementation((url: string | URL, init?: RequestInit) => {
+        if (String(url) === '/api/user-data/sync?key=projects') return Promise.resolve(snapshot(8, [{
+          projectId: 'project-1', entityId: managed.id, assetId: managed.assetId,
+          assetVersionId: managed.assetVersionId, placementId: restoredPlacement, revision: restoreRevision,
+        }]));
+        if (String(url) === '/api/user-data/sync' && init?.method === 'POST') {
+          return Promise.resolve(Response.json({ success: true, projectRevision: 9 }));
+        }
+        throw new Error('Unexpected project sync request');
+      });
+      fetchMock.mockResolvedValueOnce(snapshot(7));
+      const { UserManager } = await import('@/lib/user-manager');
+      const manager = UserManager.getInstance();
+      await expect(manager.loadProjectsFromServer(0, user.id)).resolves.toBe(true);
+      manager.updateProject('project-1', { canvasImages: [] });
+      await expect(manager.loadProjectsFromServer(0, user.id)).resolves.toBe(true);
+      await manager.flushProjectsToServer();
+      const post = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
+      const payload = JSON.parse(String(post?.[1]?.body));
+      expect(payload.projectRevision).toBe(8);
+      expect(payload.value[0].canvasImages.map((image: { id: string }) => image.id))
+        .toEqual(keepsRestoredImage ? ['retained'] : []);
+    },
+  );
+
   it('preserves a local upload added during GET before any debounced POST starts', async () => {
     let resolveResponse!: (response: Response) => void;
     fetchMock.mockReturnValue(new Promise<Response>(resolve => { resolveResponse = resolve; }));

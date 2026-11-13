@@ -180,6 +180,8 @@ test.describe('Stage 2 asset lifecycle', () => {
         url: String(before.url),
       });
     }
+    await openCanvasProject(page, projectId);
+    await expect(await canvasImageByUrl(page, String(before.url))).toBeVisible({ timeout: 20_000 });
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(await canvasImageByUrl(page, String(before.url))).toBeVisible({ timeout: 20_000 });
   });

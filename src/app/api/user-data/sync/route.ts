@@ -11,6 +11,7 @@ import {
   executeCanvasProjectSync,
   executeLegacyCanvasProjectSync,
   readCanvasProjectRevision,
+  readCanvasManagedSnapshot,
   readCanvasShadowSnapshot,
   readAssetV3Projects,
   type AssetGraphMappings,
@@ -541,14 +542,14 @@ export async function GET(request: NextRequest) {
     const workflowRendererMode = resolveDeliveredWorkflowRendererMode(process.env.WUJIE_WORKFLOW_RENDERER_MODE);
     // Read the revision first: a concurrent commit between these reads yields
     // an older revision with newer data, which CAS rejects safely on write.
-    const shadowSnapshot = key === 'projects'
-      && resolveAssetGraphMode(process.env.WUJIE_ASSET_GRAPH_MODE) === 'shadow'
-      ? await readCanvasShadowSnapshot(sessionUser.id)
-      : undefined;
-    const projectRevision = shadowSnapshot ? shadowSnapshot.revision : key === 'projects'
+    const projectAssetMode = key === 'projects' ? resolveAssetGraphMode(process.env.WUJIE_ASSET_GRAPH_MODE) : undefined;
+    const managedSnapshot = projectAssetMode === 'asset-v3'
+      ? await readCanvasManagedSnapshot(sessionUser.id)
+      : projectAssetMode === 'shadow' ? await readCanvasShadowSnapshot(sessionUser.id) : undefined;
+    const projectRevision = managedSnapshot ? managedSnapshot.revision : key === 'projects'
       ? await readCanvasProjectRevision(sessionUser.id)
       : undefined;
-    let value: unknown = shadowSnapshot ? shadowSnapshot.value : await dbGetUserData(sessionUser.id, key);
+    let value: unknown = managedSnapshot ? managedSnapshot.value : await dbGetUserData(sessionUser.id, key);
     if (key === 'projects' && typeof value === 'string') {
       value = JSON.parse(value) as unknown;
       if (!Array.isArray(value)) throw new Error('Invalid project snapshot');
@@ -588,7 +589,9 @@ export async function GET(request: NextRequest) {
       workflowRendererMode,
       ...(assetGraphMode ? { assetGraphMode } : {}),
       ...(projectRevision === undefined ? {} : { projectRevision }),
-      ...(shadowSnapshot ? { deletedCanvasPlacements: shadowSnapshot.deletedCanvasPlacements } : {}),
+      ...(projectAssetMode === 'shadow' && managedSnapshot ? { deletedCanvasPlacements: managedSnapshot.deletedCanvasPlacements } : {}),
+      ...(projectAssetMode === 'asset-v3' && managedSnapshot?.restoredCanvasPlacements
+        ? { restoredCanvasPlacements: managedSnapshot.restoredCanvasPlacements } : {}),
     });
   } catch (error) {
     return NextResponse.json({

@@ -169,6 +169,12 @@ describe('stage 2 asset lifecycle PostgreSQL contract', () => {
       const projects = values.projects as Array<{ canvasImages: Array<Record<string, unknown>> }>;
       expect(placement.rows[0]?.status).toBe('active');
       expect(values.__asset_graph_projects_revision).toBe(8);
+      const { readCanvasManagedSnapshot } = await import('../../src/lib/asset-core/canvas-project-sync');
+      expect(await readCanvasManagedSnapshot(ownerId)).toMatchObject({
+        revision: 8,
+        restoredCanvasPlacements: [{ projectId, entityId: imageId, assetId, assetVersionId: versionId, placementId, revision: 8 }],
+      });
+      expect((await readCanvasManagedSnapshot(randomUUID())).restoredCanvasPlacements).toEqual([]);
       expect(projects[0]?.canvasImages).toEqual([
         expect.objectContaining({
           id: imageId,

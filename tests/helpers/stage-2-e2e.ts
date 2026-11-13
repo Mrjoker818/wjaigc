@@ -705,6 +705,9 @@ export async function ensurePlacementRestored(
   evidence: Stage2Evidence,
   input: { projectId: string; assetId: string; versionId: string; placementId: string; url: string },
 ): Promise<Record<string, unknown>> {
+  // This direct fixture restore is out of band. Stop the previous canvas
+  // from saving its deleted copy while the server restores the placement.
+  await page.goto('about:blank', { waitUntil: 'domcontentloaded' });
   const resolveUrl = `/api/assets?projectId=${encodeURIComponent(input.projectId)}&assetVersionId=${encodeURIComponent(input.versionId)}&placementId=${encodeURIComponent(input.placementId)}`;
   const current = await page.request.get(resolveUrl);
   const currentPayload = await current.json().catch(() => ({})) as Record<string, unknown>;

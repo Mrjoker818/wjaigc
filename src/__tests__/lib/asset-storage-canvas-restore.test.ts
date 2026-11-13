@@ -38,6 +38,10 @@ async function restore(entityType: 'canvas-image' | 'canvas-video', kind: 'image
       return { rows: [], rowCount: 1 };
     }
     if (sql.includes("'__asset_graph_projects_revision'")) return { rows: [{ revision: '1' }], rowCount: 1 };
+    if (sql.includes("jsonb_build_object('canvasRestoreProjectRevision'")) {
+      expect(values).toEqual(['placement-1', 'owner-1', 'project-1', 1]);
+      return { rows: [], rowCount: 1 };
+    }
     throw new Error(`Unexpected SQL: ${sql}`);
   });
   const pool = { connect: vi.fn(async () => ({ query, release: vi.fn() })) };

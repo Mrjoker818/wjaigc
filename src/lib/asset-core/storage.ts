@@ -789,7 +789,16 @@ class PostgresAssetStorageTransaction implements AssetStorageTransaction {
        RETURNING data_value #>> '{}' AS revision`,
       [ownerId, Date.now()],
     );
-    return Number(revision.rows[0]?.revision ?? 0);
+    const nextRevision = Number(revision.rows[0]?.revision);
+    if (!Number.isSafeInteger(nextRevision) || nextRevision < 1) throw new Error('Canvas restore revision is unavailable');
+    const receipt = await this.client.query(
+      `UPDATE wujie_workspace_placements
+       SET metadata = metadata || jsonb_build_object('canvasRestoreProjectRevision', $4::bigint)
+       WHERE id = $1 AND owner_id = $2 AND project_id = $3 AND status = 'active'`,
+      [placement.id, ownerId, projectId, nextRevision],
+    );
+    if (receipt.rowCount !== 1) throw new Error('Canvas restore receipt is unavailable');
+    return nextRevision;
   }
 }
 

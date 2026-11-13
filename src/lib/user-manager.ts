@@ -1,7 +1,9 @@
 // 用户数据管理器 - localStorage + 服务器数据库双重存储
 import { User, Project, ApiKey, UsageStats, UserData, WujieProjectFile, ImageGroupData, CanvasImage } from './user-types';
 import { APP_VERSION_LABEL } from '@/config/app-meta';
-import { excludeDeletedCanvasPlacements, parseDeletedCanvasPlacements } from '@/lib/asset-core/deleted-canvas-placements';
+import {
+  canvasPlacementIdentityKey, excludeDeletedCanvasPlacements, parseDeletedCanvasPlacements, parseRestoredCanvasPlacements,
+} from '@/lib/asset-core/deleted-canvas-placements';
 import {
   selectCanvasPlacementSnapshot,
   serializeCanvasWorkspacePlacements,
@@ -392,6 +394,7 @@ function rebaseProjectSnapshots(
   localProjects: Project[],
   remoteProjects: Project[],
   userId: string,
+  restoredPlacementKeys: ReadonlySet<string>,
 ): ProjectRebaseResult {
   const baseById = new Map(baseProjects.map((project) => [project.id, project]));
   const localById = new Map(localProjects.map((project) => [project.id, project]));
@@ -451,6 +454,10 @@ function rebaseProjectSnapshots(
       const baseImage = baseImages.get(remoteImage.id);
       const localImage = localImages.get(remoteImage.id);
       if (baseImage && !localImage) {
+        if (restoredPlacementKeys.has(canvasPlacementIdentityKey(remoteProject.id, remoteImage))) {
+          canvasImages.push(remoteImage);
+          continue;
+        }
         if (snapshotsEqual(remoteImage, baseImage)) continue;
         backup('local-image-delete-remote-edit', remoteProject.id, null, remoteImage, remoteImage.id);
         canvasImages.push(remoteImage);
@@ -1878,6 +1885,7 @@ export class UserManager {
         workflowRendererMode?: WorkflowRendererMode;
         projectRevision?: number;
         deletedCanvasPlacements?: unknown;
+        restoredCanvasPlacements?: unknown;
       };
       if (!isCurrentLoad()) return false;
       if (!data.success) {
@@ -1893,6 +1901,10 @@ export class UserManager {
         : 'legacy';
       const deletedCanvasPlacements = parseDeletedCanvasPlacements(data.deletedCanvasPlacements);
       if (!deletedCanvasPlacements) return false;
+      const restoredCanvasPlacements = nextAssetGraphMode === 'asset-v3'
+        ? parseRestoredCanvasPlacements(data.restoredCanvasPlacements)
+        : [];
+      if (!restoredCanvasPlacements) return false;
       const nextCanvasKernelMode = resolveCanvasKernelMode(data.canvasKernelMode);
       this._workflowRendererMode = resolveWorkflowRendererMode(data.workflowRendererMode);
       const nextProjectSyncRevision = Number.isSafeInteger(data.projectRevision) && Number(data.projectRevision) >= 0
@@ -1909,6 +1921,9 @@ export class UserManager {
         persistedLegacyBase?.revision ?? 0,
       );
       if (nextProjectSyncRevision < acceptedRevision) return false;
+      const restoredPlacementKeys = new Set(restoredCanvasPlacements
+        .filter(placement => placement.revision > acceptedRevision && placement.revision <= nextProjectSyncRevision)
+        .map(placement => canvasPlacementIdentityKey(placement.projectId, { ...placement, id: placement.entityId })));
 
       if (data.value === undefined || data.value === null) {
         // A missing record is a valid first-login state, not a failed sync.
@@ -2028,6 +2043,7 @@ export class UserManager {
           localProjectsFiltered,
           serverProjects,
           currentUserId,
+          restoredPlacementKeys,
         );
         requiredBackups = rebase.conflicts;
         userData.projects = rebase.projects;

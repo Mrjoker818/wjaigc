@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   executeLegacyCanvasProjectSync: vi.fn(),
   readCanvasProjectRevision: vi.fn(),
   readCanvasShadowSnapshot: vi.fn(),
+  readCanvasManagedSnapshot: vi.fn(),
   readAssetV3Projects: vi.fn(),
   persistResultImage: vi.fn(),
   inspectCompletedImage: vi.fn(),
@@ -39,6 +40,7 @@ vi.mock('@/lib/asset-core/canvas-project-sync', () => ({
   executeLegacyCanvasProjectSync: mocks.executeLegacyCanvasProjectSync,
   readCanvasProjectRevision: mocks.readCanvasProjectRevision,
   readCanvasShadowSnapshot: mocks.readCanvasShadowSnapshot,
+  readCanvasManagedSnapshot: mocks.readCanvasManagedSnapshot,
   readAssetV3Projects: mocks.readAssetV3Projects,
 }));
 vi.mock('@/lib/persist-result-image', () => ({ persistResultImage: mocks.persistResultImage }));
@@ -323,7 +325,8 @@ describe('user-data asset graph sync route', () => {
 
   it('uses asset graph placements for production GET hydration only in asset-v3 mode', async () => {
     process.env.WUJIE_ASSET_GRAPH_MODE = 'asset-v3';
-    mocks.dbGetUserData.mockResolvedValue(projects);
+    const restored = [{ projectId: 'project-1', entityId: 'graph-image', assetId: 'a', assetVersionId: 'v', placementId: 'p', revision: 8 }];
+    mocks.readCanvasManagedSnapshot.mockResolvedValue({ value: projects, revision: 9, restoredCanvasPlacements: restored });
     const projected = [{ ...projects[0], canvasImages: [{ id: 'graph-image', url: '' }] }];
     mocks.readAssetV3Projects.mockResolvedValue(projected);
 
@@ -334,6 +337,8 @@ describe('user-data asset graph sync route', () => {
     expect(mocks.readAssetV3Projects).toHaveBeenCalledWith('user-1', projects);
     expect(body.value).toEqual(projected);
     expect(body.assetGraphMode).toBe('asset-v3');
+    expect(body).toMatchObject({ projectRevision: 9, restoredCanvasPlacements: restored });
+    expect(mocks.dbGetUserData).not.toHaveBeenCalled();
   });
 
   it('returns the server canvas mode and ignores a client-supplied mode on POST', async () => {

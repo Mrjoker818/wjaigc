@@ -21,7 +21,10 @@ import {
 import { lockAssetGraphWriteGate } from './storage';
 import type { AssetKind, MediaAvailability } from './types';
 import { parseWorkspaceSourceTrace } from './source-trace';
-import { parseDeletedCanvasPlacements, type DeletedCanvasPlacement } from './deleted-canvas-placements';
+import {
+  parseDeletedCanvasPlacements, parseRestoredCanvasPlacements,
+  type DeletedCanvasPlacement, type RestoredCanvasPlacement,
+} from './deleted-canvas-placements';
 
 export const PROJECT_REVISION_DATA_KEY = '__asset_graph_projects_revision';
 
@@ -70,16 +73,20 @@ export interface CanvasProjectSyncInput {
   inspectManagedMedia?: InspectManagedLegacyMedia;
 }
 
-export async function readCanvasShadowSnapshot(actorUserId: string, database: Pick<Pool, 'query'> = getPool()): Promise<{
+export async function readCanvasShadowSnapshot(
+  actorUserId: string, database: Pick<Pool, 'query'> = getPool(), includeRestores = false,
+): Promise<{
   value: unknown;
   revision: number;
   deletedCanvasPlacements: DeletedCanvasPlacement[];
+  restoredCanvasPlacements?: RestoredCanvasPlacement[];
 }> {
   // One statement gives projects, revision and deletion identities the same MVCC snapshot.
   const result = await database.query<{
     value: unknown;
     revision: unknown;
     deleted_placements: unknown;
+    restored_placements?: unknown;
   }>(`SELECT
     (SELECT data_value FROM wujie_user_data WHERE user_id = $1 AND data_key = 'projects') AS value,
     (SELECT data_value FROM wujie_user_data WHERE user_id = $1 AND data_key = $2) AS revision,
@@ -92,13 +99,35 @@ export async function readCanvasShadowSnapshot(actorUserId: string, database: Pi
       AND v.owner_id = p.owner_id AND v.project_id = p.project_id
     WHERE p.owner_id = $1 AND p.status = 'trashed' AND p.deleted_at IS NOT NULL
       AND p.workspace_kind = 'canvas' AND p.entity_type IN ('canvas-image', 'canvas-video')
-      AND p.workspace_id IN (p.project_id, 'canvas:' || p.project_id)), '[]'::jsonb) AS deleted_placements`,
+      AND p.workspace_id IN (p.project_id, 'canvas:' || p.project_id)), '[]'::jsonb) AS deleted_placements${includeRestores ? `,
+    COALESCE((SELECT jsonb_agg(jsonb_build_object(
+      'projectId', p.project_id, 'entityId', p.entity_id,
+      'assetId', p.asset_id, 'assetVersionId', p.asset_version_id, 'placementId', p.id,
+      'revision', p.metadata->'canvasRestoreProjectRevision'
+    )) FROM wujie_workspace_placements p
+    JOIN wujie_assets a ON a.id = p.asset_id AND a.owner_id = p.owner_id AND a.project_id = p.project_id
+    JOIN wujie_asset_versions v ON v.id = p.asset_version_id AND v.asset_id = p.asset_id
+      AND v.owner_id = p.owner_id AND v.project_id = p.project_id
+    WHERE p.owner_id = $1 AND p.status = 'active' AND a.status = 'active'
+      AND p.workspace_kind = 'canvas' AND p.entity_type IN ('canvas-image', 'canvas-video')
+      AND p.workspace_id IN (p.project_id, 'canvas:' || p.project_id)
+      AND jsonb_typeof(p.metadata->'canvasRestoreProjectRevision') = 'number'), '[]'::jsonb) AS restored_placements` : ''}`,
   [actorUserId, PROJECT_REVISION_DATA_KEY]);
   const row = result.rows[0];
   if (!row) throw new Error('Canvas project snapshot is unavailable');
   const deletedCanvasPlacements = parseDeletedCanvasPlacements(row.deleted_placements);
   if (!deletedCanvasPlacements) throw new Error('Canvas deletion snapshot is invalid');
-  return { value: row.value, revision: parseProjectRevision(row.revision), deletedCanvasPlacements };
+  const revision = parseProjectRevision(row.revision);
+  const restoredCanvasPlacements = includeRestores ? parseRestoredCanvasPlacements(row.restored_placements) : undefined;
+  if (restoredCanvasPlacements === null || restoredCanvasPlacements?.some(entry => entry.revision > revision)) {
+    throw new Error('Canvas restoration snapshot is invalid');
+  }
+  return { value: row.value, revision, deletedCanvasPlacements,
+    ...(restoredCanvasPlacements ? { restoredCanvasPlacements } : {}) };
+}
+
+export function readCanvasManagedSnapshot(actorUserId: string): ReturnType<typeof readCanvasShadowSnapshot> {
+  return readCanvasShadowSnapshot(actorUserId, getPool(), true);
 }
 
 interface ProjectRevisionRow extends QueryResultRow {

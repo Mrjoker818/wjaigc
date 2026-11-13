@@ -317,7 +317,9 @@ export async function adoptManagedCanvasMapping(
   });
   const updated = await client.query(
     `UPDATE wujie_workspace_placements
-     SET entity_id = $9, transform = $4::jsonb, metadata = $5::jsonb, updated_at = now()
+     SET entity_id = $9, transform = $4::jsonb, metadata = $5::jsonb || CASE WHEN entity_id = $9
+       THEN jsonb_strip_nulls(jsonb_build_object('canvasRestoreProjectRevision', metadata->'canvasRestoreProjectRevision'))
+       ELSE '{}'::jsonb END, updated_at = now()
      WHERE id = $1 AND owner_id = $2 AND project_id = $3
        AND asset_id = $6 AND asset_version_id = $7
        AND workspace_kind = 'canvas' AND workspace_id IN ($3, 'canvas:' || $3)
@@ -416,7 +418,8 @@ export async function adoptTaskProjectedCanvasMapping(
   });
   const updated = await client.query(
     `UPDATE wujie_workspace_placements
-     SET transform = $4::jsonb, metadata = $5::jsonb, updated_at = now()
+     SET transform = $4::jsonb, metadata = $5::jsonb ||
+       jsonb_strip_nulls(jsonb_build_object('canvasRestoreProjectRevision', metadata->'canvasRestoreProjectRevision')), updated_at = now()
      WHERE id = $1 AND owner_id = $2 AND project_id = $3
        AND asset_id = $6 AND asset_version_id = $7
        AND workspace_kind = 'canvas' AND workspace_id IN ($3, 'canvas:' || $3)
@@ -1083,7 +1086,9 @@ async function updateGraphForImage(
     ? await client.query(
     `UPDATE wujie_workspace_placements
      SET asset_version_id = $4, status = 'active', deleted_at = NULL,
-         transform = $5::jsonb, metadata = $6::jsonb, updated_at = now()
+         transform = $5::jsonb, metadata = $6::jsonb || CASE WHEN asset_version_id = $4
+           THEN jsonb_strip_nulls(jsonb_build_object('canvasRestoreProjectRevision', metadata->'canvasRestoreProjectRevision'))
+           ELSE '{}'::jsonb END, updated_at = now()
      WHERE id = $1 AND owner_id = $2 AND project_id = $3`,
     [
       mapping.placementId,
