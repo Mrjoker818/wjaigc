@@ -6,10 +6,6 @@ on:
         description: Run the separately authorized real P0 generation once
         type: boolean
         default: false
-  push:
-    branches: [acceptance/vps-p0-79a92dc3]
-    paths:
-      - .github/workflows/vps-candidate-p0.yml
 permissions:
   contents: read
 concurrency:
@@ -17,6 +13,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   real-p0:
+    if: github.ref == 'refs/heads/acceptance/vps-p0-79a92dc3'
     runs-on: ubuntu-24.04
     timeout-minutes: 18
     environment: real-e2e
@@ -25,14 +22,14 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-          fetch-depth: 2
+          fetch-depth: 4
       - name: Confirm candidate
         shell: bash
         run: |
           set -eu
 
-          test "$(git rev-parse HEAD^)" = 79a92dc39ce016af0daeadfc430847091e15b0e7
           base=79a92dc39ce016af0daeadfc430847091e15b0e7
+          git merge-base --is-ancestor "$base" HEAD
           test "$(git rev-parse "$base^{tree}")" = 316072ecfe2f9febb5485c93ce036436f38a3010
           test "$(git diff --name-only "$base"..HEAD)" = '.github/workflows/vps-candidate-p0.yml'
           git checkout --detach "$base"
@@ -63,7 +60,7 @@ jobs:
             -p 45466 -i "$RUNNER_TEMP/vps-test-key" -L 127.0.0.1:15179:127.0.0.1:15179 "wujieci79@$VPS_TEST_ADDRESS"
           rm -f -- "$RUNNER_TEMP/vps-test-key"
           curl --fail --silent --show-error --max-time 10 "$E2E_BASE_URL" -o "$RUNNER_TEMP/wujie-p0-index.html"
-      - name: Verify the P0 account and authorized image model
+      - name: Verify the P0 account, build and model prerequisites
         shell: bash
         env:
           P0_RUN_PAID: ${{ github.event_name == 'workflow_dispatch' && inputs.run_paid }}
@@ -123,16 +120,49 @@ jobs:
             echo '::error title=Real P0 pending::The exact real image model and paid-run authorization must be configured.'
             exit 2
           fi
-          pnpm exec playwright test tests/e2e/p0-core.spec.ts --project=chromium --retries=0
-      - name: Upload P0 browser evidence
+          umask 077
+          export PLAYWRIGHT_JSON_OUTPUT_FILE="$RUNNER_TEMP/p0-private-report.json"
+          export PLAYWRIGHT_WORKERS=1
+          r=0
+          pnpm exec playwright test tests/e2e/p0-core.spec.ts \
+            --project=chromium --retries=0 --reporter=json --trace=off \
+            --output="$RUNNER_TEMP/p0-private-capture" >"$RUNNER_TEMP/p0-private-run.log" 2>&1 || r=$?
+          mkdir -p "$RUNNER_TEMP/p0-public"
+          export P0_PLAYWRIGHT_EXIT="$r"
+          node --input-type=module <<'NODE'
+          import { readFile, writeFile } from 'node:fs/promises';
+          import { join } from 'node:path';
+          const n = value => Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+          let run;
+          try { run = JSON.parse(await readFile(process.env.PLAYWRIGHT_JSON_OUTPUT_FILE, 'utf8')); } catch {}
+          const stats = run?.stats;
+          const exit = Number(process.env.P0_PLAYWRIGHT_EXIT);
+          const counts = { passed: n(stats?.expected), failed: n(stats?.unexpected), skipped: n(stats?.skipped), flaky: n(stats?.flaky) };
+          const cleanLines = [];
+          function visit(suite) {
+            for (const item of suite?.specs ?? []) for (const test of item.tests ?? []) for (const result of test.results ?? []) {
+              const error = result.error;
+              if (result.status === 'passed' || !error?.location) continue;
+              const location = error.location;
+              const match = String(location.file || '').replaceAll('\\','/').match(/(?:^|\/)(p0-core\.spec\.ts|evidence\.ts)$/u);
+              if (match && n(location.line)) cleanLines.push({ file: match[1], line: location.line });
+            }
+            for (const child of suite?.suites ?? []) visit(child);
+          }
+          for (const suite of run?.suites ?? []) visit(suite);
+          const pass = exit === 0 && counts.passed === 1 && counts.failed === 0 && counts.skipped === 0 && counts.flaky === 0;
+          const summary = { candidate: '79a92dc39ce016af0daeadfc430847091e15b0e7', browser: 'chromium', exit, counts, failureLocations: cleanLines, result: pass ? 'pass' : 'fail' };
+          const data = JSON.stringify(summary, null, 2);
+          await writeFile(join(process.env.RUNNER_TEMP, 'p0-public', 'summary.json'), data + '\n');
+          console.log(data);
+          if (!pass) process.exitCode = 1;
+          NODE
+      - name: Upload redacted P0 result
         if: always() && github.event_name == 'workflow_dispatch' && inputs.run_paid
         uses: actions/upload-artifact@v4
         with:
           name: candidate-p0-browser
-          path: |
-            test-results/
-            .playwright-output/
-            playwright-report/
+          path: ${{ runner.temp }}/p0-public/summary.json
           if-no-files-found: warn
       - name: Close the VPS connection
         if: always()
