@@ -20,30 +20,55 @@ test.describe.configure({ mode: 'serial', timeout: 120_000 });
 // The Stage 4 fixture owns a sanitized trace so Playwright must not start a second trace.
 test.use({ trace: 'off', video: 'on' });
 
-const TINY_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+const fixtureSizes = [
+  { ratio: '1:1', width: 96, height: 96 },
+  { ratio: '16:9', width: 160, height: 90 },
+  { ratio: '2:3', width: 80, height: 120 },
+] as const;
 let providerServer: Server | undefined;
 let providerBaseUrl = '';
 const providerSockets = new Set<Socket>();
 const providerImageRequests: string[] = [];
 
 test.beforeAll(async () => {
-  providerServer = createServer((request, response) => {
-    let raw = '';
-    request.setEncoding('utf8');
-    request.on('data', chunk => { raw += chunk; });
-    request.on('end', () => {
+  const images = await Promise.all(fixtureSizes.map(async size => ({
+    ...size,
+    b64: (await sharp({ create: { width: size.width, height: size.height, channels: 3, background: '#215d95' } })
+      .png().toBuffer()).toString('base64'),
+  })));
+  providerServer = createServer(async (request, response) => {
+    try {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      const raw = Buffer.concat(chunks);
       const pathname = new URL(request.url || '/', 'http://127.0.0.1').pathname;
       if (pathname.endsWith('/images/generations') || pathname.endsWith('/images/edits')) {
-        providerImageRequests.push(pathname);
+        const size = request.headers['content-type']?.startsWith('multipart/form-data')
+          ? (await new Response(new Uint8Array(raw), {
+            headers: { 'content-type': request.headers['content-type'] },
+          }).formData()).get('size')
+          : (JSON.parse(raw.toString('utf8')) as { size?: string }).size;
+        const pixels = typeof size === 'string' ? /^(\d+)x(\d+)$/i.exec(size) : null;
+        const image = images.find(item => size === item.ratio || (pixels
+          && Number(pixels[1]) * item.height === Number(pixels[2]) * item.width));
+        if (!image) {
+          response.writeHead(400, { 'Content-Type': 'application/json' });
+          response.end(JSON.stringify({ error: 'Unexpected controlled image size' }));
+          return;
+        }
+        providerImageRequests.push(image.ratio);
         response.writeHead(200, { 'Content-Type': 'application/json' });
-        response.end(JSON.stringify({ data: [{ b64_json: TINY_PNG_BASE64 }] }));
+        response.end(JSON.stringify({ data: [{ b64_json: image.b64 }] }));
         return;
       }
       response.writeHead(200, { 'Content-Type': 'application/json' });
       response.end(JSON.stringify({
         choices: [{ message: { role: 'assistant', content: `Controlled Skill plan: ${raw.length}` } }],
       }));
-    });
+    } catch {
+      response.writeHead(400, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ error: 'Unexpected controlled provider request' }));
+    }
   });
   providerServer.on('connection', socket => {
     providerSockets.add(socket);
@@ -113,7 +138,7 @@ async function readCatalog(page: Page, surface: 'canvas' | 'workflow'): Promise<
   return payload.skills ?? [];
 }
 
-test('画布与节点模式使用同一套 27 项 Skill 并逐项恢复结果', async ({ page, stage4Evidence }, testInfo) => {
+test('画布与节点模式使用同一套 28 项基础 Skill 并逐项恢复结果', async ({ page, stage4Evidence }, testInfo) => {
   test.skip(
     !process.env.DATABASE_URL && !process.env.PGDATABASE_URL,
     'BLOCKED: DATABASE_URL or PGDATABASE_URL is required for the isolated Stage 4 Skill fixture',
@@ -127,15 +152,34 @@ test('画布与节点模式使用同一套 27 项 Skill 并逐项恢复结果', 
     fixture: skillFixture,
     page,
     providerBaseUrl: `${providerBaseUrl}/v1`,
+    imageAspectRatios: fixtureSizes.map(size => size.ratio),
   });
   const metadata = skillFixture.canvasProject.metadata as Record<string, unknown>;
   const sourceNode = createWorkflowNode('input-image', 80, 120, '营销来源图');
+  await seedStage4Baseline(page, skillFixture, auth);
+  const sourceTransfer = await page.request.post('/api/assets/transfer', {
+    data: {
+      sourceVersion: sourceAsset.sourceVersionId,
+      targetProject: String(fixture.canvasProject.id),
+      targetWorkspace: skillFixture.workflow.id,
+      entityType: 'workflow-input',
+      entityId: sourceNode.id,
+      idempotencyKey: `skill-runtime:${sourceNode.id}:source`,
+    },
+  });
+  expect(sourceTransfer.ok(), `Workflow source transfer returned HTTP ${sourceTransfer.status()}`).toBe(true);
+  const workflowSource = await sourceTransfer.json() as {
+    assetId: string; assetVersionId: string; placementId: string; url: string;
+  };
+  expect(workflowSource.assetVersionId).toBe(sourceAsset.sourceVersionId);
+  expect(workflowSource.placementId).not.toBe(`stage4-placement-${fixture.browserProfile}`);
   sourceNode.config = {
     ...sourceNode.config,
     projectId: String(fixture.canvasProject.id),
-    assetVersionId: `stage4-version-${fixture.browserProfile}`,
-    placementId: `stage4-placement-${fixture.browserProfile}`,
-    imageUrl: sourceAsset.canonicalUrl,
+    assetId: workflowSource.assetId,
+    assetVersionId: workflowSource.assetVersionId,
+    placementId: workflowSource.placementId,
+    imageUrl: workflowSource.url,
   };
   const marketingNode = createWorkflowNode('ai-skill', 420, 120);
   skillFixture.canvasProject.metadata = {
@@ -171,7 +215,7 @@ test('画布与节点模式使用同一套 27 项 Skill 并逐项恢复结果', 
   const identity = (skills: CatalogSkill[]) => skills
     .map(skill => `${skill.id}@${skill.version}`)
     .sort();
-  expect(canvasSkills).toHaveLength(27);
+  expect(canvasSkills).toHaveLength(28);
   expect(identity(workflowSkills)).toEqual(identity(canvasSkills));
   expect(canvasSkills.map(skill => skill.id)).toEqual(expect.arrayContaining([
     'preset-ad-ab-variants',
@@ -180,6 +224,7 @@ test('画布与节点模式使用同一套 27 项 Skill 并逐项恢复结果', 
     'preset-video-platform-thumbnails',
     'preset-pinterest-pins',
     'preset-batch-sku-assets',
+    'preset-platform-compliance-audit',
   ]));
   await writeStage4Metrics(stage4Evidence, testInfo, 'skill-catalog-identity', {
     canvas: identity(canvasSkills),
@@ -231,7 +276,7 @@ test('画布与节点模式使用同一套 27 项 Skill 并逐项恢复结果', 
     async () => (await readSkillRun(page, canvasSubmissionPayload.runId!)).status,
     { timeout: 90_000, intervals: [250, 500, 1_000, 2_000] },
   ).toBe('completed');
-  expect(providerImageRequests.length).toBeGreaterThanOrEqual(2);
+  expect(providerImageRequests).toEqual(['16:9', '16:9']);
   const canvasRun = await readSkillRun(page, canvasSubmissionPayload.runId!);
   expect(canvasRun.status).toBe('completed');
   expect(canvasRun.skillId).toBe(canvasRequest.skillId);
@@ -253,7 +298,7 @@ test('画布与节点模式使用同一套 27 项 Skill 并逐项恢复结果', 
   await expect.poll(async () => canvasPreview.evaluate(image => ({
     width: (image as HTMLImageElement).naturalWidth,
     height: (image as HTMLImageElement).naturalHeight,
-  }))).toEqual({ width: 1, height: 1 });
+  }))).toEqual({ width: 160, height: 90 });
   await canvasImages.last().click();
   await page.getByRole('button', { name: '展开更多工具', exact: true }).click();
   await page.locator('[data-image-toolbar-overflow]').getByRole('button', { name: '下载', exact: true }).click();
@@ -265,8 +310,8 @@ test('画布与节点模式使用同一套 27 项 Skill 并逐项恢复结果', 
   expect(downloadPath).toBeTruthy();
   const downloadedMetadata = await sharp(downloadPath!).metadata();
   expect(downloadedMetadata.format).toBe('png');
-  expect(downloadedMetadata.width).toBe(1);
-  expect(downloadedMetadata.height).toBe(1);
+  expect(downloadedMetadata.width).toBe(160);
+  expect(downloadedMetadata.height).toBe(90);
 
   await page.getByTitle('关闭 Skill').click();
   await page.getByPlaceholder('搜索 Skills...').fill('批量 SKU');
@@ -347,7 +392,10 @@ test('画布与节点模式使用同一套 27 项 Skill 并逐项恢复结果', 
     await page.getByLabel('Skill 执行').last().click();
   }
   await expect(skillSelect).toBeVisible({ timeout: 20_000 });
-  await expect(skillSelect.locator('option')).toHaveCount(28);
+  const skillOptions = skillSelect.locator('option');
+  await expect(skillOptions).toHaveCount(workflowSkills.length + 1);
+  expect((await skillOptions.evaluateAll(options => options.map(option => (option as HTMLOptionElement).value))).sort())
+    .toEqual(['', ...workflowSkills.map(skill => skill.id)].sort());
   await skillSelect.selectOption('preset-pinterest-pins');
   await expect(skillSelect).toHaveValue('preset-pinterest-pins');
   await expect(page.getByText('已选择 1 张来源图片', { exact: true }).last()).toBeVisible();
@@ -365,21 +413,24 @@ test('画布与节点模式使用同一套 27 项 Skill 并逐项恢复结果', 
     response.request().method() === 'POST'
     && new URL(response.url()).pathname === '/api/skill-runs/estimate'
   ), { timeout: 90_000 });
-  const workflowSubmission = page.waitForResponse(response => (
-    response.request().method() === 'POST'
-    && new URL(response.url()).pathname === '/api/workflow/execute'
-    && Boolean(response.request().postData()?.includes('"action":"start"'))
-  ), { timeout: 90_000 });
-  await page.getByRole('button', { name: '执行工作流', exact: true }).click();
+  const [workflowEstimateResponse] = await Promise.all([
+    workflowEstimate,
+    page.getByRole('button', { name: '执行工作流', exact: true }).click(),
+  ]);
+  expect(workflowEstimateResponse.ok(), `Workflow estimate returned HTTP ${workflowEstimateResponse.status()}`).toBe(true);
   await expect(page.getByRole('heading', { name: 'Skill 费用预估', exact: true })).toBeVisible({ timeout: 20_000 });
-  const workflowEstimateResponse = await workflowEstimate;
-  expect(workflowEstimateResponse.ok()).toBe(true);
   const workflowEstimatePayload = await workflowEstimateResponse.json() as { minimum?: number; maximum?: number };
   expect(workflowEstimatePayload.minimum).toBe(workflowEstimatePayload.maximum);
   expect(workflowEstimatePayload.maximum).toBeGreaterThan(0);
   await expect(page.getByText(`${workflowEstimatePayload.maximum} 积分`, { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: '确认执行', exact: true }).click();
-  const workflowSubmissionResponse = await workflowSubmission;
+  const [workflowSubmissionResponse] = await Promise.all([
+    page.waitForResponse(response => (
+      response.request().method() === 'POST'
+      && new URL(response.url()).pathname === '/api/workflow/execute'
+      && Boolean(response.request().postData()?.includes('"action":"start"'))
+    ), { timeout: 90_000 }),
+    page.getByRole('button', { name: '确认执行', exact: true }).click(),
+  ]);
   expect(workflowSubmissionResponse.ok()).toBe(true);
   const workflowSubmissionPayload = await workflowSubmissionResponse.json() as { executionId?: string };
   expect(typeof workflowSubmissionPayload.executionId).toBe('string');
@@ -416,6 +467,7 @@ test('画布与节点模式使用同一套 27 项 Skill 并逐项恢复结果', 
   ]);
   expect(workflowRun.creditCost).toBe(workflowEstimatePayload.maximum);
   expect(workflowOutput?.assetVersionIds).toEqual(workflowRun.assetVersionIds);
+  expect(providerImageRequests).toEqual(['16:9', '16:9', '1:1', '1:1', '1:1', '2:3', '2:3', '2:3']);
   await writeStage4Metrics(stage4Evidence, testInfo, 'skill-run-surface-identity', {
     canvas: {
       runId: canvasRun.runId,

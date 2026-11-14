@@ -4,6 +4,7 @@ import * as React from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, Expand, Scissors } from 'lucide-react';
 import type { CanvasImage, EditMode } from '@/components/infinite-canvas';
+import { getConstrainedFixedPanelPosition, getConstrainedImageToolbarPosition } from '@/lib/image-toolbar-position';
 
 function subscribeExpandViewport(notify: () => void): () => void {
   window.addEventListener('resize', notify);
@@ -35,6 +36,8 @@ interface CanvasEditExpandCropPanelProps {
   editImageId: string | null;
   zoom: number;
   viewOffset: { x: number; y: number };
+  viewport: { width: number; height: number };
+  occupiedRight: number;
   isMonochrome: boolean;
   exitEditMode: () => void;
   cropRatio: string;
@@ -66,6 +69,8 @@ export function CanvasEditExpandCropPanel({
   editImageId,
   zoom,
   viewOffset,
+  viewport,
+  occupiedRight,
   isMonochrome,
   exitEditMode,
   cropRatio,
@@ -92,8 +97,23 @@ export function CanvasEditExpandCropPanel({
     subscribeExpandViewport, getExpandViewportSnapshot, getServerExpandViewportSnapshot,
   );
   const isMobilePanel = viewportWidth > 0 && viewportWidth < 768;
+  const toolbarRef = React.useRef<HTMLDivElement>(null);
+  const [toolbarSize, setToolbarSize] = React.useState({ width: 0, height: 0 });
   const paddingTouchRef = React.useRef<PaddingTouch | null>(null);
   React.useEffect(() => () => { paddingTouchRef.current = null; }, [editMode, editImageId]);
+  React.useLayoutEffect(() => {
+    const toolbar = toolbarRef.current;
+    if (!toolbar || isMobilePanel) return;
+    const measure = () => {
+      const width = toolbar.offsetWidth;
+      const height = toolbar.offsetHeight;
+      setToolbarSize(size => size.width === width && size.height === height ? size : { width, height });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(toolbar);
+    return () => observer.disconnect();
+  }, [editMode, editImageId, isMobilePanel]);
   const renderToolbar = (element: React.ReactElement): React.ReactElement => (
     isMobilePanel ? createPortal(element, document.body) : element
   );
@@ -438,25 +458,31 @@ export function CanvasEditExpandCropPanel({
         {(editMode === 'expand' || editMode === 'crop') && (() => {
           const editImg = images.find(i => i.id === editImageId);
           if (!editImg) return null;
-          const imgScreenX = editImg.x * zoom + viewOffset.x;
-          const imgScreenY = editImg.y * zoom + viewOffset.y;
-          const imgScreenW = editImg.width * zoom;
-          const panelX = imgScreenX + imgScreenW / 2;
-          const panelY = imgScreenY - 8;
+          const canvasArea = {
+            width: Math.max(0, (viewport.width || viewportWidth) - occupiedRight),
+            height: viewport.height,
+          };
+          const maxWidth = Math.max(0, canvasArea.width - 32);
+          const toolbar = {
+            width: Math.min(maxWidth, toolbarSize.width || (editMode === 'crop' ? 480 : 360)),
+            height: toolbarSize.height || 48,
+          };
+          const anchor = getConstrainedImageToolbarPosition({ image: editImg, zoom, offset: viewOffset, toolbar, viewport: canvasArea });
+          const position = getConstrainedFixedPanelPosition({ anchor, panel: toolbar, viewport: canvasArea });
 
           return renderToolbar(
             <div
+              ref={toolbarRef}
               data-floating-panel="multi-angle"
               className={isMobilePanel ? 'fixed z-[180] pointer-events-auto overflow-y-auto overscroll-contain motion-reduce:transition-none' : 'absolute z-50 pointer-events-auto motion-reduce:transition-none'}
               data-toolbar="edit-mode"
-              style={isMobilePanel ? { right: 'max(12px, env(safe-area-inset-right))', bottom: 'max(112px, calc(env(safe-area-inset-bottom) + 96px))', width: 'min(360px, calc(100vw - max(12px, env(safe-area-inset-left)) - max(12px, env(safe-area-inset-right))))', maxHeight: 'min(40dvh, calc(100dvh - max(12px, env(safe-area-inset-top)) - max(112px, calc(env(safe-area-inset-bottom) + 96px))))', touchAction: 'pan-y' } : { left: panelX, top: panelY, transform: 'translate(-50%, -100%)' }}
+              style={isMobilePanel ? { right: 'max(12px, env(safe-area-inset-right))', bottom: 'max(112px, calc(env(safe-area-inset-bottom) + 96px))', width: 'min(360px, calc(100vw - max(12px, env(safe-area-inset-left)) - max(12px, env(safe-area-inset-right))))', maxHeight: 'min(40dvh, calc(100dvh - max(12px, env(safe-area-inset-top)) - max(112px, calc(env(safe-area-inset-bottom) + 96px))))', touchAction: 'pan-y' } : { ...position, width: 'max-content', maxWidth }}
               onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
             >
               {editMode === 'expand' && (
                 <div
-                  className={`${panelBaseClass} ${isMobilePanel ? 'w-full flex-wrap justify-start [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:whitespace-nowrap [&_input]:min-h-11 [&_input]:text-base' : ''}`} 
-                  style={{ minWidth: isMobilePanel ? 0 : 'min(360px, calc(100vw - 24px))' }}
+                  className={`${panelBaseClass} min-w-0 flex-wrap ${isMobilePanel ? 'w-full justify-start [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:whitespace-nowrap [&_input]:min-h-11 [&_input]:text-base' : ''}`}
                   onMouseDown={(e) => e.stopPropagation()}
                 >
                   <Expand size={14} className={isMonochrome ? 'text-blue-500' : 'text-gold'} />
@@ -538,8 +564,7 @@ export function CanvasEditExpandCropPanel({
               {/* CROP toolbar */}
               {editMode === 'crop' && (
                 <div
-                  className={`${panelBaseClass} ${isMobilePanel ? 'w-full flex-wrap justify-start [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:whitespace-nowrap [&_input]:min-h-11 [&_input]:text-base' : ''}`} 
-                  style={{ minWidth: isMobilePanel ? 0 : 'min(480px, calc(100vw - 24px))' }}
+                  className={`${panelBaseClass} min-w-0 flex-wrap ${isMobilePanel ? 'w-full justify-start [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:whitespace-nowrap [&_input]:min-h-11 [&_input]:text-base' : ''}`}
                   onMouseDown={(e) => e.stopPropagation()}
                 >
                   <Scissors size={14} className={isMonochrome ? 'text-blue-500' : 'text-gold'} />

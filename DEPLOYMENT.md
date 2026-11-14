@@ -18,14 +18,17 @@ pnpm start
 
 ## Cloud Host
 
-Recommended path: Docker.
+Build the Docker image, apply migrations against the configured PostgreSQL database, then start the app.
 
 ```bash
-docker compose up -d --build
+docker compose build wujieai
+docker compose run --rm wujieai node scripts/run-migrations.mjs
+docker compose up -d wujieai
 ```
 
-Set these env vars on the host:
+Set these env vars in the Compose runtime `.env` file. `DATABASE_URL` or `PGDATABASE_URL` must point to a reachable PostgreSQL instance. Compose starts the application only.
 
+- `DATABASE_URL` or `PGDATABASE_URL`
 - `PORT`
 - `WUJIE_DATA_DIR`
 - `WUJIE_AUTH_SECRET`
@@ -38,7 +41,7 @@ Set these env vars on the host:
 
 For production, `WUJIE_AUTH_SECRET` (or `NEXTAUTH_SECRET`) and `PAYMENT_TOKEN_SECRET` must each contain at least 32 random characters, and `WUJIE_ADMIN_PASSWORD` must be a unique non-placeholder value. Set a separate `INTERNAL_API_SECRET` as well, so server-to-server requests do not reuse the session signing key. The application refuses to sign sessions, bootstrap an administrator, or issue payment QR tokens when required secrets are missing. Generate secrets with `openssl rand -base64 48` or an equivalent secret manager.
 
-Mount persistent storage to `/data` so user files survive restarts.
+Mount persistent storage to `/data` so user files survive restarts. The Docker image uses this volume for uploads and bundles the font used by Chinese PDF export.
 
 ## Notes
 

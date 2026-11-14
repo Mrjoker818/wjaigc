@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { writeFile, mkdir, readFile, unlink } from 'fs/promises';
+import { writeFile, mkdir, mkdtemp, readFile, readdir, rm } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join, relative, isAbsolute } from 'path';
+import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
 import { isSafeVideoSource, validateApiInputs } from '@/lib/api-validator';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
@@ -15,6 +16,26 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
 type ExtractMode = 'fps' | 'keyframes' | 'uniform' | 'first-last';
+
+async function probeVideo(videoPath: string): Promise<{ duration: number; width: number; height: number }> {
+  try {
+    const { stdout } = await execFileAsync('ffprobe', [
+      '-v', 'error', '-select_streams', 'v:0',
+      '-show_entries', 'format=duration:stream=duration,width,height',
+      '-of', 'json', videoPath,
+    ], { timeout: 15_000, windowsHide: true });
+    const { format, streams } = JSON.parse(stdout);
+    const stream = streams?.[0];
+    const durations = [Number(stream?.duration), Number(format?.duration)];
+    return {
+      duration: durations.find(value => Number.isFinite(value) && value > 0) ?? 0,
+      width: stream?.width || 0,
+      height: stream?.height || 0,
+    };
+  } catch {
+    return { duration: 0, width: 0, height: 0 };
+  }
+}
 
 function resolveWithinDirectory(directory: string, requestedPath: string): string | null {
   const resolved = join(directory, requestedPath);
@@ -61,6 +82,7 @@ export async function POST(req: NextRequest) {
   const authResult = await requireApiAuthOrReject(req);
   if (authResult instanceof NextResponse) return authResult;
 
+  let workDir: string | undefined;
   try {
     const body = await req.json();
     // 输入校验
@@ -81,8 +103,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 1. 下载视频到临时文件
-    const workDir = join('/tmp', `vframe_${Date.now()}_${randomUUID().slice(0, 8)}`);
-    await mkdir(workDir, { recursive: true });
+    workDir = await mkdtemp(join(tmpdir(), 'wujie-video-frames-'));
     const videoPath = join(workDir, 'input.mp4');
 
     let videoBuffer: Buffer;
@@ -96,13 +117,14 @@ export async function POST(req: NextRequest) {
       videoBuffer = localBuffer;
     }
     await writeFile(videoPath, videoBuffer);
+    const videoInfo = await probeVideo(videoPath);
 
     // 2. 根据模式构造 ffmpeg 命令
     const frameDir = join(workDir, 'frames');
     await mkdir(frameDir, { recursive: true });
     const outPattern = join(frameDir, 'frame_%04d.jpg');
 
-    const args: string[] = ['-i', videoPath];
+    const args: string[] = ['-hide_banner', '-loglevel', 'error', '-i', videoPath];
     
     switch (mode as ExtractMode) {
       case 'fps':
@@ -113,17 +135,19 @@ export async function POST(req: NextRequest) {
         // 仅提取关键帧
         args.push('-vf', "select='eq(pict_type,I)'", '-vsync', 'vfr', '-q:v', '2', outPattern);
         break;
-      case 'uniform':
-        // 均匀提取N帧
-        const n = Math.max(2, Math.min(30, count));
-        args.push('-vf', `fps=1/${n}`, '-vframes', String(n), '-q:v', '2', outPattern);
+      case 'uniform': {
+        const requested = Math.trunc(Number(count));
+        const n = Number.isFinite(requested) ? Math.max(2, Math.min(30, requested)) : 6;
+        const samplesPerSecond = videoInfo.duration > 0 ? n / videoInfo.duration : 1;
+        args.push('-vf', `fps=${samplesPerSecond}:start_time=0`, '-vframes', String(n), '-q:v', '2', outPattern);
         break;
+      }
       case 'first-last':
         // 仅首帧和尾帧
         // 首帧
-        await execFileAsync('ffmpeg', ['-i', videoPath, '-vframes', '1', '-q:v', '2', join(frameDir, 'frame_0001.jpg')]);
+        await execFileAsync('ffmpeg', ['-i', videoPath, '-vframes', '1', '-q:v', '2', join(frameDir, 'frame_0001.jpg')], { timeout: 60_000 });
         // 尾帧
-        await execFileAsync('ffmpeg', ['-sseof', '-0.1', '-i', videoPath, '-vframes', '1', '-q:v', '2', join(frameDir, 'frame_0002.jpg')]);
+        await execFileAsync('ffmpeg', ['-sseof', '-0.1', '-i', videoPath, '-vframes', '1', '-q:v', '2', join(frameDir, 'frame_0002.jpg')], { timeout: 60_000 });
         break;
       default:
         args.push('-vf', `fps=1`, '-vframes', '6', '-q:v', '2', outPattern);
@@ -134,7 +158,6 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. 获取生成的帧列表
-    const { readdir } = await import('fs/promises');
     const frameFiles = (await readdir(frameDir)).filter(f => f.endsWith('.jpg')).sort();
 
     // 4. Copy frames into the persistent directory served by /api/serve-upload.
@@ -142,36 +165,16 @@ export async function POST(req: NextRequest) {
     if (!existsSync(uploadDir)) await mkdir(uploadDir, { recursive: true });
     
     const frames: string[] = [];
+    const batchId = randomUUID();
     for (let i = 0; i < frameFiles.length; i++) {
       const file = frameFiles[i];
-      const destName = `vf_${Date.now()}_${i.toString().padStart(3, '0')}.jpg`;
+      const destName = `vf_${batchId}_${i.toString().padStart(3, '0')}.jpg`;
       const src = join(frameDir, file);
       const dest = join(uploadDir, destName);
       const buf = await readFile(src);
       await writeFile(dest, buf);
       frames.push(`/api/serve-upload/video-frames/${destName}`);
     }
-
-    // 5. 获取视频信息
-    let videoInfo = { duration: 0, width: 0, height: 0 };
-    try {
-      const { stdout } = await execFileAsync('ffprobe', [
-        '-v', 'error', '-show_entries', 'format=duration:stream=width,height',
-        '-of', 'json', videoPath
-      ]);
-      const info = JSON.parse(stdout);
-      videoInfo = {
-        duration: parseFloat(info.format?.duration || '0'),
-        width: info.streams?.[0]?.width || 0,
-        height: info.streams?.[0]?.height || 0,
-      };
-    } catch {}
-
-    // 6. 清理临时文件（异步）
-    try {
-      const { rm } = await import('fs/promises');
-      rm(workDir, { recursive: true, force: true });
-    } catch {}
 
     return NextResponse.json({
       success: true,
@@ -191,5 +194,11 @@ export async function POST(req: NextRequest) {
       { error: '视频抽帧失败: ' + msg.slice(0, 500) },
       { status: 500 }
     );
+  } finally {
+    if (workDir) {
+      await rm(workDir, { recursive: true, force: true }).catch(error => {
+        console.warn('[video/extract-frames] 临时文件清理失败:', error);
+      });
+    }
   }
 }

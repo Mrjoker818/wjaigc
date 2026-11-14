@@ -348,7 +348,7 @@ scripts/
 #### 发布运行时挂载
 
 - **源码目录启动（含 Coze 的 `next start` 入口）**：应用工作目录保留 `scripts/upscale_onnx.py` 时可使用默认 worker。发布产物只含编译结果时，从部署方的只读目录挂载脚本，并把 `ONNX_WORKER` 设置为脚本在运行容器内的绝对路径。显式配置的脚本缺失时，ONNX readiness 为 `false`。
-- **Docker runner**：当前 Dockerfile 的最终阶段未复制 `scripts/`，基础镜像为 Alpine。可在已有可启动的应用镜像上使用下方 Compose 覆盖文件。部署方预置与容器 CPU 架构和 musl ABI 匹配的完整 Python 运行时、标准库、原生库及已装依赖，或提供自带兼容加载器和库的运行时。挂载后 Python 的解释器、符号链接目标和动态库均须在容器内可解析。当前仓库 Dockerfile 还要求 `/app/server.js`，检出的源码及构建入口没有提供该文件，镜像构建和容器启动需单独验收。
+- **Docker runner**：Alpine 镜像通过 `scripts/docker-start.sh` 启动已完成的构建，包含中文 PDF 字体及 SVG 转换依赖。下方 Compose 覆盖文件用于挂载可选推理工具。部署方预置与容器 CPU 架构和 musl ABI 匹配的 Python 运行时、标准库、原生库及模型依赖，或提供自带兼容加载器和库的运行时。挂载后 Python 的解释器、符号链接目标和动态库均须在容器内可解析。
 - **只读挂载**：挂载包仅包含可信 runtime、worker 和权重。权重与脚本不进入镜像构建上下文、`public`、`.next` 或业务数据目录。沿用既有凭据注入和部署包检查，运行时临时文件使用容器可写的临时目录，输出继续使用应用的持久化数据目录。
 
 将覆盖文件放在构建上下文之外，并将 `/srv/wujie-inference` 替换为部署主机预置目录。下面配置启用 ONNX。需要 IOPaint 或 rembg 时，再添加对应的绝对路径与模型配置。

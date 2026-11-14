@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { execSql, isDatabaseConfigured } from "@/lib/db-client";
+import { getSessionUser } from "@/lib/server-auth";
 
 async function ensureShareTable() {
   try {
@@ -80,7 +81,7 @@ export async function GET(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ shareId: string }> }
 ) {
   try {
@@ -88,13 +89,19 @@ export async function DELETE(
       return NextResponse.json({ error: "数据库未配置" }, { status: 503 });
     }
 
+    const user = await getSessionUser(request);
+    if (!user) {
+      return NextResponse.json({ error: "请先登录" }, { status: 401 });
+    }
     const { shareId } = await params;
     await ensureShareTable();
-    await execSql(
-      `UPDATE wujie_shared_conversations SET is_active = FALSE WHERE id = $1`,
-      [shareId]
+    const revoked = await execSql(
+      `UPDATE wujie_shared_conversations SET is_active = FALSE WHERE id = $1 AND user_id = $2`,
+      [shareId, user.id]
     );
-
+    if (revoked.rowCount !== 1) {
+      return NextResponse.json({ error: "分享不存在" }, { status: 404 });
+    }
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error("[share] 撤销分享失败:", err);

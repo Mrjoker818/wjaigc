@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { encodeHtmlScriptJson } from '@/lib/html-script-json';
 
 interface FlowchartRequest {
   title: string;
@@ -37,8 +38,15 @@ header button:hover { background: rgba(255,255,255,0.2); }
 <div id="container"><div id="diagram"></div></div>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <script>
-mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'strict' });
-const code = ${JSON.stringify(mermaidCode)};
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'default',
+  securityLevel: 'strict',
+  htmlLabels: false,
+  flowchart: { htmlLabels: false },
+});
+const code = ${encodeHtmlScriptJson(mermaidCode)};
+const title = ${encodeHtmlScriptJson(title)};
 const container = document.getElementById('diagram');
 // XSS 防护：错误消息文本化后再展示，避免 err.message 注入 innerHTML
 function showError(prefix, err) {
@@ -64,7 +72,9 @@ function exportSVG() {
   const clone = svg.cloneNode(true);
   clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
   const blob = new Blob([new XMLSerializer().serializeToString(clone)], {type: 'image/svg+xml'});
-  const a = document.createElement('a'); a.download = '${escapeAttr(title)}.svg'; a.href = URL.createObjectURL(blob); a.click();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.download = title + '.svg'; a.href = url; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 function exportPNG() {
   const svg = document.querySelector('#diagram svg');
@@ -74,15 +84,24 @@ function exportPNG() {
   const blob = new Blob([new XMLSerializer().serializeToString(clone)], {type: 'image/svg+xml'});
   const url = URL.createObjectURL(blob);
   const img = new Image();
-  img.onload = () => {
-    const canvas = document.createElement('canvas');
-    const rect = svg.getBoundingClientRect();
-    canvas.width = rect.width * 2; canvas.height = rect.height * 2;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  img.onerror = () => {
     URL.revokeObjectURL(url);
-    const a = document.createElement('a'); a.download = '${escapeAttr(title)}.png'; a.href = canvas.toDataURL('image/png'); a.click();
+    alert('无法导出 PNG，请重试或导出 SVG。');
+  };
+  img.onload = () => {
+    try {
+      const canvas = document.createElement('canvas');
+      const rect = svg.getBoundingClientRect();
+      canvas.width = Math.ceil(rect.width * 2); canvas.height = Math.ceil(rect.height * 2);
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const a = document.createElement('a'); a.download = title + '.png'; a.href = canvas.toDataURL('image/png'); a.click();
+    } catch {
+      alert('无法导出 PNG，请重试或导出 SVG。');
+    } finally {
+      URL.revokeObjectURL(url);
+    }
   };
   img.src = url;
 }
@@ -93,10 +112,6 @@ function exportPNG() {
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-function escapeAttr(s: string): string {
-  return s.replace(/["\\]/g, '');
 }
 
 export async function POST(request: Request) {

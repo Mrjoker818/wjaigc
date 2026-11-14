@@ -12,6 +12,11 @@ import {
 } from '@playwright/test';
 
 import {
+  classifyProductionShareRequest,
+  evaluateProductionShareRequests,
+  readShareBuildAssets,
+} from './read-only-canvas-share-build-assets';
+import {
   writeTask7EvidenceRecord,
   type Task7EvidenceStatus,
 } from './read-only-canvas-share-evidence';
@@ -360,6 +365,7 @@ export function observeReadOnlyShareRequests(
   evidence: ShareEvidence,
   baseURL: string,
   primaryPage: Page,
+  classify?: (record: ShareRequestRecord) => ForbiddenReason | null,
 ): { settleAndStop: () => Promise<void> } {
   const expectedOrigin = new URL(baseURL).origin;
   const pendingRequests = new Set<Request>();
@@ -385,7 +391,9 @@ export function observeReadOnlyShareRequests(
       range: request.headers().range ?? null,
       ...requestFrameRoles(request, primaryPage),
     };
-    const reason = requestReason(record, expectedOrigin, evidence.scenario);
+    const reason = classify
+      ? classify(canonicalRequest(record, expectedOrigin))
+      : requestReason(record, expectedOrigin, evidence.scenario);
     if (reason) record.reason = reason;
     evidence.requests.push(record);
     if (url.pathname.startsWith('/api/')) {
@@ -568,11 +576,15 @@ async function attachEvidence(
 export const test = base.extend<{ shareEvidence: ShareEvidence }>({
   shareEvidence: [async ({ context, page }, runTest, testInfo) => {
     const evidence = createShareEvidence();
+    const baseURL = String(testInfo.project.use.baseURL);
+    const productionBuildDirectory = process.env.WUJIE_SHARE_NETWORK_BUILD_DIR?.trim();
+    const productionAssets = productionBuildDirectory ? await readShareBuildAssets(productionBuildDirectory) : null;
     const observer = observeReadOnlyShareRequests(
       context,
       evidence,
-      String(testInfo.project.use.baseURL),
+      baseURL,
       page,
+      productionAssets ? record => classifyProductionShareRequest(productionAssets, evidence.scenario, record) : undefined,
     );
     const attachConsole = (targetPage: Page): void => {
       targetPage.on('console', message => {
@@ -600,12 +612,23 @@ export const test = base.extend<{ shareEvidence: ShareEvidence }>({
         || testInfo.expectedStatus === 'skipped'
         || testInfo.annotations.some(annotation => annotation.type === 'skip');
       if (!skipped) {
-        const validation = validateShareRequestContract(
-          evidence,
-          new URL(String(testInfo.project.use.baseURL)).origin,
-        );
-        const status = evidenceStatus(testInfo, validation.valid);
-        await attachEvidence(viewport, evidence, testInfo, status);
+        const origin = new URL(baseURL).origin;
+        const requests = evidence.requests.map(record => canonicalRequest(record, origin));
+        const validation = productionAssets && evidence.scenario
+          ? evaluateProductionShareRequests(productionAssets, evidence.scenario, requests, evidence.forbiddenFrameNavigations.length)
+          : validateShareRequestContract(evidence, origin);
+        if (productionAssets) {
+          // This attachment is separate from the immutable schema-4 development matrix.
+          await testInfo.attach('production-share-network-contract', {
+            contentType: 'application/json',
+            body: JSON.stringify({
+              identity: evidence.identity, viewport, validation, requests,
+              mediaLongPress: evidence.details.mediaLongPress ?? null,
+            }),
+          });
+        } else {
+          await attachEvidence(viewport, evidence, testInfo, evidenceStatus(testInfo, validation.valid));
+        }
         if (!validation.valid) {
           throw new Error(`只读分享请求契约失败：${validation.errors.join('; ')}`);
         }

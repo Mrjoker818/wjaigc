@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
 import { User } from '@/lib/user-types';
 import { fetchSessionPayload } from '@/lib/auth-session';
+import { readSimpleCreateLoginTarget } from '@/lib/simple-create-navigation';
 import { LoginPanel } from '@/components/dashboard/login-panel';
 import { Toaster } from '@/components/ui/sonner';
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
@@ -46,6 +47,7 @@ function AuthLoadingScreen({ message }: { message: string }) {
 function HomeContent() {
   const searchParams = useSearchParams();
   const returningToDashboard = searchParams.get('view') === 'dashboard';
+  const simpleCreateTarget = readSimpleCreateLoginTarget(searchParams.get('returnTo'));
   const [authChecked, setAuthChecked] = useState(!returningToDashboard);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   // Survives workspace logout/remount within this page only; never persisted.
@@ -77,12 +79,17 @@ function HomeContent() {
       return;
     }
 
+    if (simpleCreateTarget) {
+      window.location.replace(simpleCreateTarget);
+      return;
+    }
+
     // Canvas mode: load projects then enter workspace
     try {
       await UserManagerCore.getInstance().loadProjectsFromServer();
     } catch { /* non-blocking */ }
     setCurrentUser(user);
-  }, []);
+  }, [simpleCreateTarget]);
 
   const handleWorkspaceLogout = useCallback(() => {
     window.history.replaceState(null, '', '/');

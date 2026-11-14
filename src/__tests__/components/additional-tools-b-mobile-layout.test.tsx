@@ -162,7 +162,7 @@ function Entry({ theme }: { theme: 'gold' | 'mono' }): React.ReactElement | null
   return open ? <EffectReverseEngineeringPanel initialSource={{ projectId: input.project, imageId: input.sourceId,
     versionId: input.version, imageUrl: input.sourceUrl, label: input.prompt }} analyzerOptions={[]}
     isMonochrome={theme === 'mono'} onClose={() => { state.closes++; setOpen(false); }}
-    onCanvasResult={result => record('effect-result', result)} /> : null;
+    captureCanvasResult={() => result => { record('effect-result', result); }} /> : null;
 }
 // The actual parent renders its actual SourcePanel + Workspace grid, not a copied shell.
 renderEntry = theme => <Entry theme={theme} />;

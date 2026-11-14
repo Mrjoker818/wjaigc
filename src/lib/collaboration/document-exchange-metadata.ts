@@ -1,11 +1,15 @@
-import * as Y from 'yjs';
+import type * as YTypes from 'yjs';
+
+// Share the CommonJS Yjs instance with the document store and gateway.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const Y: typeof YTypes = require('yjs');
 
 export class DocumentExchangeDependencyPendingError extends Error {
   constructor() { super('DOCUMENT_EXCHANGE_DEPENDENCY_PENDING'); }
 }
 
 /** Isolated policy candidate; raw synchronization never replaces typed media commands. */
-export function assertDocumentExchangeMetadataUpdate(previous: Y.Doc, bytes: Uint8Array): void {
+export function assertDocumentExchangeMetadataUpdate(previous: YTypes.Doc, bytes: Uint8Array): void {
   const candidate = new Y.Doc({ gc: false });
   try {
     Y.applyUpdate(candidate, Y.encodeStateAsUpdate(previous));

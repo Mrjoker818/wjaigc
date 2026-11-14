@@ -226,7 +226,7 @@
       "source": "main",
       "sourceCommit": "c8dac11754b7b6dd9de8d4829e44777f1ca0ce88",
       "sourceBlob": "1ecf15108088280f739d877aa18596af57ad8cd9",
-      "reviewedBlob": "6761d028e2e3704ea202f18fe9835d2be937497e",
+      "reviewedBlob": "29ba1bd83c65d89e5beb4668ebb73c2b2a40cea3",
       "disposition": "reviewed",
       "summary": "The deployment runbook describes one-time database bootstrap, runtime-injected credentials, and optional local CPU inference. Historical temporary passwords and the account roster were removed from the current documentation.",
       "evidence": [
@@ -237,7 +237,8 @@
         "AGENTS.md:20 says a configured DB forces DB_ONLY and bans FILE_ONLY in all production cases. src/lib/auth/auth-persistence.ts:40–55 defaults to DB_ONLY when configured, allows explicit DB_PLUS_FILE with a DB, and rejects FILE_ONLY in production when a DB is configured. The ring fallback itself is present at src/lib/auth/auth-repository.ts:242–263, where a 48-byte random secret is the last bootstrap source and the ring is persisted.",
         "AGENTS.md:22–23 promises provider insert-only behavior and unaffected local development. src/lib/db-storage.ts:1246–1276 checks a snapshot of IDs, then calls an upsert with ON CONFLICT DO UPDATE at lines 477–501. A concurrent creation or key rotation after the snapshot can be overwritten. Users have an actual DO NOTHING insert at line 1164.",
         "src/lib/server-data-root.ts:69–105 seeds both writable project-local data and /tmp without a veFaas-only or empty-DB check. The existence check and copy are separate operations. AGENTS.md:141–144,355–386 also still directs users to the deleted local neural tool scripts and endpoints.",
-        "Formal seed bootstrap and migration concurrency remain unverified. The credential-bearing package paths are individually on hold."
+        "Formal seed bootstrap and migration concurrency remain unverified. The credential-bearing package paths are individually on hold.",
+        "2026-11-14 VPS candidate. Updated the optional inference deployment instructions to describe the actual Alpine runner and its compatible read-only mounts. The rebuilt image started and reported its bundled media tools in a fresh fixture."
       ]
     },
     {
@@ -1151,14 +1152,15 @@
       "source": "main",
       "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
       "sourceBlob": "370202d3a94ae2aa77286e8ca2ce0afe3549bed1",
-      "reviewedBlob": "23f88d7fa7445ebbf5e3cda34ccbc09c6d192952",
+      "reviewedBlob": "6f11c4099b5c7f90e59e09f8678a7e3fc3f90a20",
       "disposition": "reviewed",
       "summary": "The rename draft survives Tab to Save or Cancel. Explicit Save commits once and Cancel discards the draft.",
       "evidence": [
         "layer-panel-rename-focus.test.tsx and layer-panel-wide-touch-native.test.tsx targeted Chromium checks passed.",
         "Source identity. Baseline blob ca5e72e2345c777e9d2493ed59f0654d1cc5e3a0. Pinned HEAD blob 370202d3a94ae2aa77286e8ca2ce0afe3549bed1. Last reachable path change 3b4c9eeb111f3fc8a324324f2900f710f5f304aa. Candidate path has no Git diff against pinned HEAD.",
         "Lines 165–177 and 253–276. Input blur immediately calls handleRenameSubmit. The explicit cancel button prevents pointer-down blur, but Tab still blurs the input and removes the controls after committing. Escape does cancel when pressed inside the input. resume.md line 41 records the older formal pointer cancellation, which does not cover this focus path.",
-        "Lines 358–381 move one position and normalize z-index. Lines 426–449 hand bulk lock/visibility to dedicated callbacks, wired in infinite-canvas.tsx lines 19524–19543. vitest-full.log lines 86308–86310 record a fixture request failure in the native layer workflow."
+        "Lines 358–381 move one position and normalize z-index. Lines 426–449 hand bulk lock/visibility to dedicated callbacks, wired in infinite-canvas.tsx lines 19524–19543. vitest-full.log lines 86308–86310 record a fixture request failure in the native layer workflow.",
+        "2026-11-14 VPS candidate. Keeps explicit rename confirmation, stores only the user's current draft, and tries a bounded list of poster candidates before showing a named video fallback. See the existing VPS two-account rename evidence and the new isolated Edge exchange and reload."
       ]
     },
     {
@@ -2775,7 +2777,7 @@
     {
       "path": "src/components/infinite-canvas.tsx",
       "reviewArea": "ui",
-      "reviewedBlob": "5f0e541ee290226b7e842e36cfc013dd25cb9e82",
+      "reviewedBlob": "a7e5aa45c081776fafb6ed1dfb4f196e5cf7a2e8",
       "disposition": "reviewed",
       "summary": "Content fitting uses the visible desktop toolbar's measured position. Active touch pan is retained until its state commits. Video edit, extend, and derived media retain their established projection rules.",
       "evidence": [
@@ -2784,7 +2786,8 @@
         "At 1280 by 720 the old build had zero reachable points on the last card of the 300-node fixture. The patched production build exposed all five points with 48 pixels above the toolbar. Edge drag produced a scoped save in synthetic fixtures at 1280 by 720, 1920 by 1080 and 375 by 812. Twenty view and dock tests and ten native toolbar tests passed.",
         "2026-11-12: verified in-page exact 1.0-second selection against real FFmpeg (blue frame, 160×90 PNG), duration rejection, and cancellation without a request. The authorized parent insertion path is preserved. Report the timestamp returned by the server and reject invalid pasted input before submit.",
         "2026-11-12: the six-face close action recognizes a verified primary touch release inside the button when Chromium omits click after a cancelled preview gesture. A cancelled or moved press leaves the panel open. Four native Chromium cases, including keyboard and mouse behavior, passed on the pinned Next.js dependency set.",
-        "2026-11-12: independent review led to one compatibility-click case. A trusted touch had to hit Close before the test abandoned it; the old candidate closed on the compatibility MouseEvent, while the repair preserved the panel. Four relevant native Chromium cases passed again."
+        "2026-11-12: independent review led to one compatibility-click case. A trusted touch had to hit Close before the test abandoned it; the old candidate closed on the compatibility MouseEvent, while the repair preserved the panel. Four relevant native Chromium cases passed again.",
+        "2026-11-14 VPS candidate. Reviewed the collaboration-aware layer rename and deferred result insertion, local reverse-placement action, video poster fallback, and bounded mobile entry points. Isolated Edge read back both layer names and the single corrected source-relative placement in two sessions after reload."
       ]
     },
     {
@@ -2864,33 +2867,36 @@
     {
       "path": "package.json",
       "reviewArea": "infra",
-      "reviewedBlob": "82265de89aee38f3d047fc77a70a90a261062a68",
+      "reviewedBlob": "fa7d7613ba5f1fadedfe5367566ced5571073ffa",
       "disposition": "reviewed",
       "summary": "Pins the published fixes for the production Next.js, PSD, Zod and redirect dependencies. The development lint configuration retains the repository's existing rule version.",
       "evidence": [
         "pnpm 9 frozen installation verified the resolved runtime versions. The previous PSD reopened with both layers; a new PSD round trip preserved exact RGBA pixels. The 84 targeted tests and two isolated document WebSocket cases passed.",
-        "pnpm 9 frozen installation verified the resolved versions. The old PSD reopened with both layers; a new PSD round trip preserved the exact RGBA pixels. The 84 targeted tests and two isolated document WebSocket checks passed."
+        "pnpm 9 frozen installation verified the resolved versions. The old PSD reopened with both layers; a new PSD round trip preserved the exact RGBA pixels. The 84 targeted tests and two isolated document WebSocket checks passed.",
+        "2026-11-14 VPS candidate. Adds only the exact @pdf-lib/fontkit 1.1.1 dependency for searchable Unicode PDF output. The production dependency audit and frozen Docker install completed successfully."
       ]
     },
     {
       "path": "pnpm-lock.yaml",
       "reviewArea": "infra",
-      "reviewedBlob": "d79751298eac592b17cf0427fe56090d759dc9fd",
+      "reviewedBlob": "ec30451d9b9f1b7133d982ba22b64d769e15f120",
       "disposition": "reviewed",
       "summary": "Resolves the reviewed production fixes from the previous lock and retains the original React Hooks lint plugin.",
       "evidence": [
         "The final official npm audit reports zero advisories at every severity. pnpm 9 accepted a frozen install and resolved the previous lint plugin version.",
         "The official npm production audit returned zero for all severities. Frozen installation verified the exact lock without replacing the original runtime environment.",
-        "The official npm production audit moved from eight advisories to zero. Frozen installation and exact version checks passed without replacing the original environment."
+        "The official npm production audit moved from eight advisories to zero. Frozen installation and exact version checks passed without replacing the original environment.",
+        "2026-11-14 VPS candidate. The importer and resolved versions match the pinned fontkit addition. Docker installed with the frozen lock and the production dependency audit returned zero advisories."
       ]
     },
     {
       "path": "next.config.ts",
       "disposition": "reviewed",
-      "reviewedBlob": "a56564781d2efc1ea06a6605623b9a4ebd439ef6",
+      "reviewedBlob": "320dcfcf2e599811d43edc6cd98556226057a0a3",
       "summary": "Explicitly traces the staged, architecture-matched FFmpeg executables and license for the document media route.",
       "evidence": [
-        "Deploy-package tests assert that the Linux media bundle is included in the actual route trace contract."
+        "Deploy-package tests assert that the Linux media bundle is included in the actual route trace contract.",
+        "2026-11-14 VPS candidate. Adds only the PDF font and its license to the file-trace includes. The rebuilt PDF route manifest lists both files and the strict trace check found no leaked application config or root documents."
       ]
     },
     {
@@ -2933,10 +2939,11 @@
     {
       "path": "src/components/canvas-workspace.tsx",
       "disposition": "reviewed",
-      "reviewedBlob": "61f9b3c1c67b5995f6f17acb7ab5ed12a3f8c13c",
+      "reviewedBlob": "a1fb879319760b5d054376485655f285b1a43d17",
       "summary": "Waits for project persistence authority before restoring existing task results and holds a terminal event across a temporary projection gate in the same account and project.",
       "evidence": [
-        "The isolated Edge reopening regression exposed three premature polls in the old build and passed on the fixed source. The existing write guard, actor and project isolation, and poll budget remain in effect. Eighteen focused projector, placeholder and polling tests passed."
+        "The isolated Edge reopening regression exposed three premature polls in the old build and passed on the fixed source. The existing write guard, actor and project isolation, and poll budget remain in effect. Eighteen focused projector, placeholder and polling tests passed.",
+        "2026-11-14 VPS candidate. Carries the existing session and project checks through deferred restore and requires authoritative upload receipt confirmation for reverse placement. In isolated Edge the correction produced one upload, preserved its source, and appeared beside it in both sessions after reload."
       ]
     },
     {
@@ -3023,6 +3030,195 @@
       "summary": "Restricts tracing for the runtime durability path resolution without changing data-root selection or authorization.",
       "evidence": [
         "The pinned Next.js 16.4.6 comparison retained the same compiled durability result while dropping the accidental source-root references. Existing durable and temporary-root behavior passed targeted tests."
+      ]
+    },
+    {
+      "path": "DEPLOYMENT.md",
+      "reviewedBlob": "195416c4aac66ba7aaeefa6005d6b79de6713c46",
+      "disposition": "reviewed",
+      "summary": "Documents the current Compose build, explicit database migrations, application-only startup, and the durable /data mount.",
+      "evidence": [
+        "2026-11-14 VPS candidate. Compared the proposed commands to Dockerfile and docker-compose.yml. A cold build applied the 52 migrations to a dedicated PostgreSQL database before the application returned HTTP 200."
+      ]
+    },
+    {
+      "path": "Dockerfile",
+      "reviewedBlob": "b231e18d670831b7c058f59c1a7d0a2e253520b9",
+      "disposition": "reviewed",
+      "summary": "Builds from the source-only context with the frozen lock and a prechecked runtime image. Copies the compiled app, source required by the collaboration entry point, migrations and selected scripts, and installs the documented media packages.",
+      "evidence": [
+        "2026-11-14 VPS candidate. The Alpine candidate built and cold started with FFmpeg, Potrace, CairoSVG and ezdxf. The package verifier checked 260 manifests and the strict trace audit passed."
+      ]
+    },
+    {
+      "path": "Dockerfile.dockerignore",
+      "reviewedBlob": "2bd4e0f961b5801d7c331936691e8a0b61af742c",
+      "disposition": "reviewed",
+      "summary": "Limits the Docker-specific source context to required build inputs and excludes environment files, retired seed data, generated assets, logs and test output.",
+      "evidence": [
+        "2026-11-14 VPS candidate. Reviewed the rule order and compared it to the Docker COPY stages. Frozen build, package verification, and cold start passed without a committed environment file."
+      ]
+    },
+    {
+      "path": "migrations/20261114_wj_brand_kits.sql",
+      "reviewedBlob": "ede7edd24606884635ff58fa1114eed795022b99",
+      "disposition": "reviewed",
+      "summary": "Adds the missing brand kit table with the fields, defaults and timestamp units required by the existing route.",
+      "evidence": [
+        "2026-11-14 VPS candidate. Checked the route column use and the SQL. A fresh data volume applied the migration, and the existing isolated Edge coverage records create, edit, read and delete."
+      ]
+    },
+    {
+      "path": "migrations/20261114_wj_favorites.sql",
+      "reviewedBlob": "0ba8cd2315a55f02f1a7ef51f6c8c9a6eeb489da",
+      "disposition": "reviewed",
+      "summary": "Adds the missing favorites table and its per-user chronological index using the existing storage schema.",
+      "evidence": [
+        "2026-11-14 VPS candidate. Reviewed the insert and listing field names. The fresh PostgreSQL fixture applied the migration, and existing Edge evidence covers favorite, search, reload and removal."
+      ]
+    },
+    {
+      "path": "scripts/docker-start.sh",
+      "reviewedBlob": "24bfc0a3e48da50764ebbb9f290f9f25cc310a66",
+      "disposition": "reviewed",
+      "summary": "Checks that BUILD_ID and the completion marker agree before starting Next or the existing presence server, and replaces the shell with the selected process.",
+      "evidence": [
+        "2026-11-14 VPS candidate. Reviewed both entry points, the mismatch failure and the runtime COPY list. The rebuilt image accepted its marker pair and started its collaboration-enabled server against the test database."
+      ]
+    },
+    {
+      "path": "src/app/api/export-project/route.ts",
+      "reviewedBlob": "918ed1c05a74465dab9dbfe856ecbbb26ae7cc20",
+      "disposition": "reviewed",
+      "summary": "Streams administrator exports from the selected runtime workspace, terminates the archive on cancellation, and retains the top-level environment template while filtering runtime configuration.",
+      "evidence": [
+        "2026-11-14 VPS candidate. Export tests cover the administrator boundary, unavailable workspace, ordinary file retention, the root environment template, nested exclusions and cancellation both before the first byte and during an outstanding read. Strict package tracing retains the API route without sweeping in the working directory."
+      ]
+    },
+    {
+      "path": "src/app/api/flowchart/generate/route.ts",
+      "reviewedBlob": "b35d24a6efa9173c30f0a016f6b697f4448e67d0",
+      "disposition": "reviewed",
+      "summary": "Preserves authenticated Mermaid output with text labels that can be converted to PNG, safely encoded diagram data and download names, and object URL cleanup.",
+      "evidence": [
+        "2026-11-14 VPS candidate. Reviewed the generated HTML data and rendering code. Existing Edge evidence records drawing inspection plus a downloaded SVG and PNG."
+      ]
+    },
+    {
+      "path": "src/app/api/font-design/gallery-image/route.ts",
+      "reviewedBlob": "78efeb09b4fceac60970103631f68aba1eb09df1",
+      "disposition": "reviewed",
+      "summary": "Resolves the stored site-relative gallery entry under the bundled gallery and uses the path-relative containment check before serving it.",
+      "evidence": [
+        "2026-11-14 VPS candidate. Reviewed the original-file selection and path handling. The route regression and isolated Edge evidence cover loading the original JPEG."
+      ]
+    },
+    {
+      "path": "src/app/api/knowledge/extract-text/route.ts",
+      "reviewedBlob": "2033820f515a451777ae2d5045f54d6f4912a1c6",
+      "disposition": "reviewed",
+      "summary": "Uses exact Buffer lengths for inline, HTTP and file-backed documents, keeping existing format detection and parser selection.",
+      "evidence": [
+        "2026-11-14 VPS candidate. Reviewed each existing input path. The small UTF-8 fixture and isolated route evidence returned the original note text."
+      ]
+    },
+    {
+      "path": "src/app/api/mindmap/generate/route.ts",
+      "reviewedBlob": "63928ff55327bd37117883b217b94774c238f0f2",
+      "disposition": "reviewed",
+      "summary": "Serializes the tree and title as data and keeps the authenticated D3 view, zoom and PNG download.",
+      "evidence": [
+        "2026-11-14 VPS candidate. Reviewed text rendering and file naming. The route test preserves punctuation and the existing Edge evidence includes fit-to-view and a real PNG download."
+      ]
+    },
+    {
+      "path": "src/app/api/pdf/generate/route.ts",
+      "reviewedBlob": "b06ddfe15bf6cfacd4b55a7a6227441d0135cac1",
+      "disposition": "reviewed",
+      "summary": "Keeps the standard PDF font for supported text and uses the bundled font for Chinese Markdown, watermarks and form fields. It returns a clear error for text outside the installed fonts.",
+      "evidence": [
+        "2026-11-14 VPS candidate. Reviewed layout, font embedding and form field values. Six Unicode route regressions and the existing container Edge Chinese PDF download provide coverage."
+      ]
+    },
+    {
+      "path": "src/app/api/simple-chat/share/[shareId]/route.ts",
+      "reviewedBlob": "86754422838e185ae7422edae7a389e3d2ae731c",
+      "disposition": "reviewed",
+      "summary": "Checks session identity and restricts share revocation to the matching owner in a single statement. The existing anonymous read behavior remains available for active shares.",
+      "evidence": [
+        "2026-11-14 VPS candidate. Reviewed the owner condition and return codes. Existing Edge revocation evidence and PostgreSQL regression cover owner, second account and an invalidated link."
+      ]
+    },
+    {
+      "path": "src/app/api/video/extract-frames/route.ts",
+      "reviewedBlob": "51f5579b8cb439c4b804e27e062f471389882dc2",
+      "disposition": "reviewed",
+      "summary": "Probes the video duration for uniform sampling, gives each result batch unique file names, and removes the per-request work directory after success or failure.",
+      "evidence": [
+        "2026-11-14 VPS candidate. Reviewed FFmpeg arguments and cleanup. The regression and prior isolated Edge evidence verify six readable JPEGs from a one-second video."
+      ]
+    },
+    {
+      "path": "src/components/ui/command.tsx",
+      "reviewedBlob": "76e7900b19f9804b205fcc0032b909cd75b7521d",
+      "disposition": "reviewed",
+      "summary": "Places the screen-reader title and description inside the dialog content so they are associated with the command popup.",
+      "evidence": [
+        "2026-11-14 VPS candidate. Reviewed the Radix dialog layout and existing independent Edge widget evidence."
+      ]
+    },
+    {
+      "path": "src/components/ui/progress.tsx",
+      "reviewedBlob": "4e6d17c4ec28f81fd4888bc893889066ecff0574",
+      "disposition": "reviewed",
+      "summary": "Passes the same numerical value to the Radix progress root that drives the visual indicator.",
+      "evidence": [
+        "2026-11-14 VPS candidate. Reviewed the forwarded property and existing independent Edge evidence for a determinate progress value."
+      ]
+    },
+    {
+      "path": "src/components/ui/toast.tsx",
+      "reviewedBlob": "b2af3e9b8fb835567400f9e3e3eb7387ad5d3a57",
+      "disposition": "reviewed",
+      "summary": "Provides an accessible Chinese label for the toast dismiss button.",
+      "evidence": [
+        "2026-11-14 VPS candidate. Reviewed the existing dismiss handler and independent Edge check for the labeled close control."
+      ]
+    },
+    {
+      "path": "src/lib/effect-reverse-engineering/types.ts",
+      "reviewedBlob": "c85cfddcb56f41373abc0077d0dd8449d5459907",
+      "disposition": "reviewed",
+      "summary": "Gives the existing completed split callback its typed result and task identity and allows the caller to await the placement.",
+      "evidence": [
+        "2026-11-14 VPS candidate. Reviewed the workspace and panel callers. The isolated Edge candidate completed one correction and one placement followed by readback on two accounts."
+      ]
+    },
+    {
+      "path": "src/lib/html-script-json.ts",
+      "reviewedBlob": "4793a6b61e017528d2753f145ea521ecf884cedc",
+      "disposition": "reviewed",
+      "summary": "Encodes text and object values for the inline script data used by workflow diagram downloads.",
+      "evidence": [
+        "2026-11-14 VPS candidate. Reviewed both call sites and the existing flowchart and mind-map download tests for their document structure and text fidelity."
+      ]
+    },
+    {
+      "path": "src/lib/pdf/fonts/OFL.txt",
+      "reviewedBlob": "4e811673b24a001f87fecd3dc042f8edd796676d",
+      "disposition": "reviewed",
+      "summary": "Retains the SIL OFL 1.1 text, original copyright notice, upstream path and the derivative font name.",
+      "evidence": [
+        "2026-11-14 VPS candidate. Reviewed the notice and runtime distribution. The rebuilt PDF route trace includes this license beside the bundled font."
+      ]
+    },
+    {
+      "path": "src/lib/pdf/fonts/WujiePdfSansSC-Regular.ttf",
+      "reviewedBlob": "ddaa749716524dc2c1115c0f38a6752898869a76",
+      "disposition": "reviewed",
+      "summary": "Adds the renamed static Regular instance of Noto Sans SC for searchable Chinese PDF output.",
+      "evidence": [
+        "2026-11-14 VPS candidate. The source and container font SHA-256 agree at 5fd961a8072194fb42da8f07dcfdd3b2af5c459f38cc2e5e2205a22d199da519. The runtime file trace and existing Chinese PDF download both locate the bundled font."
       ]
     }
   ]

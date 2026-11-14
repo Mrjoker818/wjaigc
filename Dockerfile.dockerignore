@@ -1,0 +1,27 @@
+# Keep the source context separate from Coze's prebuilt release package.
+*
+!package.json
+!pnpm-lock.yaml
+!.npmrc
+!.pnpmfile.cjs
+!next.config.ts
+!tsconfig.json
+!postcss.config.mjs
+!scripts
+!migrations
+!public
+!src
+
+**/.env
+**/.env.*
+**/.git
+**/node_modules
+**/deploy-seed
+**/data/system/users.json
+**/data/system/api-providers.json
+**/data/system/auth-secret
+**/*.log
+scripts/export-deploy-seed.mjs
+public/uploads
+public/outputs
+src/**/__tests__

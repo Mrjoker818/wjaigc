@@ -1,5 +1,11 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { NextRequest, NextResponse } from 'next/server';
-import { PDFDocument, rgb, StandardFonts, degrees } from 'pdf-lib';
+import fontkit from '@pdf-lib/fontkit';
+import {
+  PDFDict, PDFDocument, PDFName, StandardFonts, adjustDimsForRotation, defaultTextFieldAppearanceProvider,
+  degrees, rgb, type AppearanceProviderFor, type PDFFont, type PDFForm, type PDFTextField,
+} from 'pdf-lib';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 interface PdfRequest {
@@ -29,14 +35,105 @@ const THEMES: Record<string, { primary: [number, number, number]; secondary: [nu
   'minimal-gray': { primary: [0.25, 0.25, 0.25], secondary: [0.45, 0.45, 0.45], bg: [1, 1, 1], text: [0.15, 0.15, 0.15] },
 };
 
-function hexToRgb(hex: string): [number, number, number] {
-  const clean = hex.replace('#', '');
-  return [
-    parseInt(clean.slice(0, 2), 16) / 255,
-    parseInt(clean.slice(2, 4), 16) / 255,
-    parseInt(clean.slice(4, 6), 16) / 255,
-  ];
+const FONT_PATH = path.join(process.cwd(), 'src/lib/pdf/fonts/WujiePdfSansSC-Regular.ttf');
+const graphemes = new Intl.Segmenter();
+const words = new Intl.Segmenter('zh', { granularity: 'word' });
+let fontBytes: Promise<Buffer> | undefined;
+
+class UnsupportedPdfTextError extends Error {
+  constructor() { super('PDF 字体不支持部分字符，请移除这些字符后重试'); }
 }
+
+async function embedChineseFont(document: PDFDocument, subset = true): Promise<PDFFont> {
+  fontBytes ??= readFile(FONT_PATH).catch(error => {
+    fontBytes = undefined;
+    throw error;
+  });
+  document.registerFontkit(fontkit);
+  return document.embedFont(await fontBytes, { subset });
+}
+
+function createFontSupportCheck(font: PDFFont): (text: string) => boolean {
+  const characters = new Set(font.getCharacterSet());
+  return text => {
+    for (const unicode of text.replace(/[\r\n\t\f\v]/g, '')) {
+      if (!characters.has(unicode.codePointAt(0)!)) return false;
+    }
+    return true;
+  };
+}
+
+function registerFormFont(form: PDFForm, font: PDFFont): void {
+  const { dict } = form.acroForm;
+  const resourcesKey = PDFName.of('DR');
+  const fontsKey = PDFName.of('Font');
+  const resources = dict.lookupMaybe(resourcesKey, PDFDict) ?? form.doc.context.obj({});
+  const fonts = resources.lookupMaybe(fontsKey, PDFDict) ?? form.doc.context.obj({});
+  fonts.set(PDFName.of(font.name), font.ref);
+  resources.set(fontsKey, fonts);
+  dict.set(resourcesKey, resources);
+}
+
+function wrapPdfText(text: string, measure: (line: string) => number, availableWidth: number): string[] {
+  const lines: string[] = [];
+  let line = '';
+  function flush() {
+    if (line) lines.push(line.trimEnd());
+    line = '';
+  }
+
+  for (const { segment: chunk } of words.segment(text)) {
+    if (!chunk.trim() && !line) continue;
+    if (measure(line + chunk) <= availableWidth) {
+      line += chunk;
+      continue;
+    }
+    if (measure(chunk) <= availableWidth) {
+      flush();
+      line = chunk.trimStart();
+      continue;
+    }
+    for (const { segment } of graphemes.segment(chunk)) {
+      if (line && measure(line + segment) > availableWidth) flush();
+      if (line || segment.trim()) line += segment;
+    }
+  }
+  flush();
+  return lines;
+}
+
+const wrapChineseField: AppearanceProviderFor<PDFTextField> = (field, widget, font) => {
+  if (!field.isMultiline()) return defaultTextFieldAppearanceProvider(field, widget, font);
+  const originalText = field.getText() ?? '';
+  const rotation = widget.getAppearanceCharacteristics()?.getRotation();
+  const bounds = adjustDimsForRotation(widget.getRectangle(), rotation);
+  const padding = (widget.getBorderStyle()?.getWidth() ?? 0) + 1;
+  const width = bounds.width - 2 * padding;
+  const height = bounds.height - 2 * padding;
+  if (width <= 0 || height <= 0) return defaultTextFieldAppearanceProvider(field, widget, font);
+
+  const appearance = widget.getDefaultAppearance() || field.acroField.getDefaultAppearance() || '';
+  const fontSize = Number(/\/(?:[^\s]+)\s+(\d*\.?\d+)\s+Tf\b/.exec(appearance)?.[1]);
+  const sourceLines = originalText.split(/\r\n|[\r\n]/);
+  let size = fontSize > 0 ? fontSize : Math.min(12, height / font.heightAtSize(1));
+  const wrapAtSize = () => sourceLines.flatMap(line => {
+    const wrapped = wrapPdfText(line, value => font.widthOfTextAtSize(value, size), width - 0.01);
+    return wrapped.length > 0 ? wrapped : [''];
+  });
+  let lines = wrapAtSize();
+  while (!(fontSize > 0) && size > 4 && lines.length * font.heightAtSize(size) * 1.2 > height) {
+    size = Math.max(4, size - 1);
+    lines = wrapAtSize();
+  }
+  // Use the standard widget styling with line breaks only in the appearance stream.
+  const getText = field.getText;
+  field.getText = () => lines.join('\n');
+  try {
+    return defaultTextFieldAppearanceProvider(field, widget, font);
+  } finally {
+    field.getText = getText;
+  }
+};
 
 // Simple markdown-to-PDF with basic formatting
 async function buildMarkdownPdf(content: string, themeName: string): Promise<Uint8Array> {
@@ -45,6 +142,9 @@ async function buildMarkdownPdf(content: string, themeName: string): Promise<Uin
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
   const fontItalic = await doc.embedFont(StandardFonts.HelveticaOblique);
+  const supportsStandardFont = createFontSupportCheck(font);
+  const chineseFont = supportsStandardFont(content) ? null : await embedChineseFont(doc);
+  const supportsChineseFont = chineseFont ? createFontSupportCheck(chineseFont) : null;
 
   const lines = content.split('\n');
   const margin = 60;
@@ -64,11 +164,17 @@ async function buildMarkdownPdf(content: string, themeName: string): Promise<Uin
 
   function drawText(text: string, opts: { size?: number; color?: [number, number, number]; bold?: boolean; italic?: boolean; indent?: number } = {}) {
     const { size = fontSize, color = theme.text, bold = false, italic = false, indent = 0 } = opts;
-    const f = bold ? fontBold : italic ? fontItalic : font;
+    const baseFont = bold ? fontBold : italic ? fontItalic : font;
+    const f = chineseFont && !supportsStandardFont(text) ? chineseFont : baseFont;
     const x = margin + indent;
-    page.drawText(text, { x, y, size, font: f, color: rgb(...color), maxWidth: maxWidth - indent });
-    y -= size + 6;
-    if (y < margin + 40) newPage();
+    const normalized = text.replace(/\r/g, '').replace(/\t/g, '    ');
+    if (f === chineseFont && supportsChineseFont && !supportsChineseFont(normalized)) throw new UnsupportedPdfTextError();
+    const wrapped = wrapPdfText(normalized, value => f.widthOfTextAtSize(value, size), maxWidth - indent);
+    for (const line of wrapped) {
+      if (y < margin + 40) newPage();
+      page.drawText(line, { x, y, size, font: f, color: rgb(...color) });
+      y -= size + 6;
+    }
   }
 
   for (const line of lines) {
@@ -99,6 +205,7 @@ async function buildMarkdownPdf(content: string, themeName: string): Promise<Uin
 
     // Lists
     if (line.match(/^[\s]*[-*+]\s/)) {
+      if (y < margin + 40) newPage();
       const text = line.replace(/^[\s]*[-*+]\s/, '');
       page.drawText('•', { x: margin + 8, y: y + 1, size: fontSize, font, color: rgb(...theme.primary) });
       drawText(text, { indent: 24 });
@@ -107,6 +214,7 @@ async function buildMarkdownPdf(content: string, themeName: string): Promise<Uin
     if (line.match(/^[\s]*\d+[.)]\s/)) {
       const match = line.match(/^([\s]*\d+[.)]\s)(.*)/);
       if (match) {
+        if (y < margin + 40) newPage();
         page.drawText(match[1].trim(), { x: margin + 4, y: y + 1, size: fontSize, font: fontBold, color: rgb(...theme.primary) });
         drawText(match[2], { indent: 24 });
       }
@@ -118,6 +226,7 @@ async function buildMarkdownPdf(content: string, themeName: string): Promise<Uin
 
     // Blockquote
     if (line.startsWith('> ')) {
+      if (y < margin + 40) newPage();
       page.drawRectangle({ x: margin, y: y - 2, width: 3, height: lineHeight, color: rgb(...theme.secondary) });
       drawText(line.slice(2), { italic: true, indent: 12, color: [0.4, 0.4, 0.4] });
       continue;
@@ -226,12 +335,28 @@ export async function POST(req: NextRequest) {
         const pdfBytes = await resp.arrayBuffer();
         const doc = await PDFDocument.load(pdfBytes);
         const form = doc.getForm();
+        const supportsDefaultFont = createFontSupportCheck(form.getDefaultFont());
+        let chineseFont: PDFFont | undefined;
+        let supportsChineseFont: ((text: string) => boolean) | undefined;
         for (const [key, value] of Object.entries(body.fields)) {
+          if (typeof value !== 'string') continue;
+          let field;
           try {
-            const field = form.getTextField(key);
+            field = form.getTextField(key);
             field.setText(value);
           } catch {
-            // Skip fields that don't exist
+            // A template may omit the field or restrict the size of its value.
+            continue;
+          }
+          if (!supportsDefaultFont(value)) {
+            // Editable fields need the full font for their appearance and later edits.
+            if (!chineseFont) {
+              chineseFont = await embedChineseFont(doc, false);
+              supportsChineseFont = createFontSupportCheck(chineseFont);
+              registerFormFont(form, chineseFont);
+            }
+            if (!supportsChineseFont?.(value)) throw new UnsupportedPdfTextError();
+            field.updateAppearances(chineseFont, wrapChineseField);
           }
         }
         const outBytes = await doc.save();
@@ -251,7 +376,9 @@ export async function POST(req: NextRequest) {
         if (!resp.ok) return NextResponse.json({ error: `获取 PDF 失败: ${resp.status}` }, { status: 400 });
         const pdfBytes = await resp.arrayBuffer();
         const doc = await PDFDocument.load(pdfBytes);
-        const font = await doc.embedFont(StandardFonts.Helvetica);
+        const standardFont = await doc.embedFont(StandardFonts.Helvetica);
+        const font = createFontSupportCheck(standardFont)(body.watermarkText) ? standardFont : await embedChineseFont(doc);
+        if (font !== standardFont && !createFontSupportCheck(font)(body.watermarkText)) throw new UnsupportedPdfTextError();
         const pages = doc.getPages();
         for (const page of pages) {
           const { width, height } = page.getSize();
@@ -304,6 +431,9 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: `不支持的 PDF 操作类型: ${type}` }, { status: 400 });
     }
   } catch (err: unknown) {
+    if (err instanceof UnsupportedPdfTextError) {
+      return NextResponse.json({ error: err.message }, { status: 422 });
+    }
     console.error('[PDF Generate] Error:', err);
     return NextResponse.json({ error: 'PDF 生成失败，请检查输入参数' }, { status: 500 });
   }

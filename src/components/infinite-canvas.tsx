@@ -240,7 +240,8 @@ import {
 import type { ElementDecomposeOutputMode } from '@/lib/element-decomposition/types';
 import type { LayerDecompositionResult } from '@/lib/layer-decomposition/types';
 import type { LayerDocumentSource } from '@/lib/layer-documents/types';
-import type { EffectReverseTaskResult } from '@/lib/effect-reverse-engineering/types';
+import type { EffectReverseResultHandler } from '@/lib/effect-reverse-engineering/types';
+import type { EffectReverseSource } from '@/components/effect-reverse-engineering-panel';
 import type { SketchCanvasContext } from '@/components/sketch-to-code-panel';
 import { createSketchPanelSession, type SketchPanelSession } from '@/lib/sketch-to-code/client';
 import { createSketchImagePanelSession, type SketchImagePanelSession } from '@/lib/sketch-to-code/image-client';
@@ -321,6 +322,10 @@ interface EffectReverseCanvasSource {
   originalWidth?: number;
   originalHeight?: number;
 }
+
+export type CaptureEffectReverseInsertion = (
+  source: EffectReverseCanvasSource, signal: AbortSignal,
+) => (url: string, taskId: string) => Promise<CanvasImage>;
 
 interface UpscaleModelsResponse {
   models?: Array<{
@@ -619,6 +624,7 @@ interface InfiniteCanvasProps {
   canRetryPendingDelete?: (imageIds: readonly string[]) => boolean;
   /** Persist a file as an owned project image before using it as reverse-engineering source. */
   onUploadEffectReverseSource?: (file: File) => Promise<CanvasImage>;
+  captureEffectReverseInsertion?: CaptureEffectReverseInsertion;
   /** 用户绘制的连线 */
   connections?: CanvasConnection[];
   /** 连线变更回调 */
@@ -836,7 +842,7 @@ function CanvasScaledMenuSelect({
   );
 }
 
-export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, taskModelCatalog = [], taskModelOptions = [], catalogStatus = { loading: false, error: null }, images, onImagesChange, onRenameLayer, selectedImage, onSelectImage, onPreviewImage, onGenerateVariation, onExtractKeywords, onAddImages, captureDisplay3dInsertion, captureVideoToolInsertion, onUploadFiles, uploadAuthority, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, renderOhMyPromptExternally = false, onCloseOhMyPrompt, onInsertPrompt, onInsertVisionPrompt, visionScopeKey, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onCanvasToolActivated, onCaptureCropHistory, onUndo, onRedo, mobileCanUndo, mobileCanRedo, onHistoryTransactionBegin, onHistoryTransactionCommit, onHistoryTransactionRollback, isHistoryTransitionPending = false, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onDeleteImages, canRetryPendingDelete, onUploadEffectReverseSource, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, canvasGeneratorActorId, initialAnnotations = [], onAnnotationsChange, documentMetadataMode = false, annotationExecutionContext, onRequestTaskPoll }: InfiniteCanvasProps) {
+export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, taskModelCatalog = [], taskModelOptions = [], catalogStatus = { loading: false, error: null }, images, onImagesChange, onRenameLayer, selectedImage, onSelectImage, onPreviewImage, onGenerateVariation, onExtractKeywords, onAddImages, captureDisplay3dInsertion, captureVideoToolInsertion, onUploadFiles, uploadAuthority, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, renderOhMyPromptExternally = false, onCloseOhMyPrompt, onInsertPrompt, onInsertVisionPrompt, visionScopeKey, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onCanvasToolActivated, onCaptureCropHistory, onUndo, onRedo, mobileCanUndo, mobileCanRedo, onHistoryTransactionBegin, onHistoryTransactionCommit, onHistoryTransactionRollback, isHistoryTransitionPending = false, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onDeleteImages, canRetryPendingDelete, onUploadEffectReverseSource, captureEffectReverseInsertion, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, canvasGeneratorActorId, initialAnnotations = [], onAnnotationsChange, documentMetadataMode = false, annotationExecutionContext, onRequestTaskPoll }: InfiniteCanvasProps) {
   const effectiveUploadAuthority = uploadAuthority ?? (projectId ? 'unknown' : 'legacy');
   const isMonochrome = themeStyle === 'monochrome';
   const taskModelCatalogIndex = useMemo(
@@ -7762,32 +7768,53 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     return nextSource;
   }, [onSelectImage, setSelectedIds]);
 
-  const handleEffectReverseResult = useCallback((result: EffectReverseTaskResult) => {
+  const captureEffectReverseResult = useCallback((submittedSource: EffectReverseSource, signal: AbortSignal): EffectReverseResultHandler => {
     const source = effectReverseSource;
-    if (!source || !result.correctedImageUrl) return;
-    const createdAt = Date.now();
-    const imageId = `effect-reverse-${createdAt}`;
-    const newImage: CanvasImage = {
-      id: imageId,
-      url: result.correctedImageUrl,
-      x: source.x + source.width + 48,
-      y: source.y,
-      width: source.width,
-      height: source.height,
-      originalWidth: source.originalWidth,
-      originalHeight: source.originalHeight,
-      createdAt,
-      name: `${source.label || '效果图'}-反向拆图`,
-      generatedFromImageId: source.imageId,
-      annotationSourceImageId: source.imageId,
-      annotationSourceVersionId: source.sourceVersionId,
-      annotationVersionId: buildAnnotationSourceVersionId(imageId, createdAt, result.correctedImageUrl),
+    const scope = reverseSourceUploadScopeRef.current;
+    if (!source || source.projectId !== submittedSource.projectId || source.imageId !== submittedSource.imageId
+      || source.sourceVersionId !== submittedSource.versionId || source.imageUrl !== submittedSource.imageUrl) {
+      throw new Error('拆图源已切换，请重新选择源图');
+    }
+    const assertCurrent = (): void => {
+      signal.throwIfAborted();
+      if (!scope.mounted || scope !== reverseSourceUploadScopeRef.current || scope.projectId !== source.projectId
+        || scope.authority === 'unknown') throw new Error('拆图项目或账号已切换');
     };
-    onImagesChange([...imagesRef.current, newImage]);
-    setSelectedIds(new Set([newImage.id]));
-    onSelectImage(newImage);
-    toast.success('透视校正结果已添加到源图右侧');
-  }, [effectReverseSource, onImagesChange, onSelectImage, setSelectedIds]);
+    assertCurrent();
+    const insert = scope.authority === 'document' ? captureEffectReverseInsertion?.(source, signal) : undefined;
+    if (scope.authority === 'document' && !insert) throw new Error('协作画布暂不可保存拆图结果');
+
+    const insertLegacy = (url: string, taskId: string): CanvasImage => {
+      const createdAt = Date.now();
+      const newImage: CanvasImage = {
+        id: taskId,
+        url,
+        x: source.x + source.width + 48,
+        y: source.y,
+        width: source.width,
+        height: source.height,
+        originalWidth: source.originalWidth,
+        originalHeight: source.originalHeight,
+        createdAt,
+        name: `${source.label || '效果图'}-反向拆图`,
+        generatedFromImageId: source.imageId,
+        annotationSourceImageId: source.imageId,
+        annotationSourceVersionId: source.sourceVersionId,
+        annotationVersionId: buildAnnotationSourceVersionId(taskId, createdAt, url),
+      };
+      if (onImagesChange([...imagesRef.current, newImage]) === false) throw new Error('拆图结果未保存');
+      return newImage;
+    };
+    return async (result, taskId) => {
+      if (!result.correctedImageUrl) return;
+      assertCurrent();
+      const newImage = insert ? await insert(result.correctedImageUrl, taskId) : insertLegacy(result.correctedImageUrl, taskId);
+      assertCurrent();
+      setSelectedIds(new Set([newImage.id]));
+      onSelectImage(newImage);
+      toast.success('透视校正结果已添加到源图右侧');
+    };
+  }, [captureEffectReverseInsertion, effectReverseSource, onImagesChange, onSelectImage, setSelectedIds]);
 
   // 3D model name to friendly Chinese label mapping
   const get3DModelLabel = useCallback((modelId: string): string => {
@@ -14260,6 +14287,8 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                   <div className="absolute top-1 left-1 z-30"
                     style={{ fontSize: `${Math.max(9, 11 / zoom)}px` }}>
                     <button
+                      type="button"
+                      onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => {
                         e.stopPropagation();
                         setViewer3DModelUrl(image.threeDModelUrl || '');
@@ -15758,6 +15787,8 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           editImageId={editImageId}
           zoom={zoom}
           viewOffset={viewOffset}
+          viewport={canvasSize}
+          occupiedRight={canvasOccupiedRight}
           isMonochrome={isMonochrome}
           exitEditMode={exitEditMode}
           cropRatio={cropRatio}
@@ -16473,19 +16504,39 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         {/* ====== IMAGE-TO-IMAGE FLOATING PANEL ====== */}
         {/* ====== MULTI-ANGLE FLOATING PANEL ====== */}
         {activeTool === 'multiAngle' && selectedImageData && editMode === 'none' && (() => {
-          const pos = getToolbarPosition();
-          const isMobileMultiAngle = typeof window !== 'undefined' && window.innerWidth < 768;
+          const isMobileMultiAngle = window.innerWidth < 768;
+          const usableWidth = (canvasSize.width || window.innerWidth) - canvasOccupiedRight;
+          const desktopWidth = Math.min(300, Math.max(0, usableWidth - 32));
+          const imageCenter = (selectedImageData.x + selectedImageData.width / 2) * zoom + viewOffset.x;
+          const desktopLeft = Math.max(16, Math.min(imageCenter - desktopWidth / 2, usableWidth - desktopWidth - 16));
+          const desktopTop = 'min(72px, 22dvh)';
           const multiAnglePanel = (
             <div
               data-popup="multi-angle"
               onPointerUp={(e) => { if (e.pointerType !== 'mouse') e.stopPropagation(); }}
               onPointerCancel={(e) => { if (e.pointerType !== 'mouse') e.stopPropagation(); }}
               onPointerLeave={(e) => { if (e.pointerType !== 'mouse') e.stopPropagation(); }}
-              className="z-50 pointer-events-auto"
-              style={isMobileMultiAngle ? { position: 'fixed', right: 'max(12px, env(safe-area-inset-right, 0px))', bottom: 'calc(96px + env(safe-area-inset-bottom, 0px))', width: 'min(360px, calc(100vw - max(12px, env(safe-area-inset-left, 0px)) - max(12px, env(safe-area-inset-right, 0px))))', maxHeight: 'calc(100dvh - 112px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))' } : { position: 'absolute', left: pos.left, top: pos.top, transform: pos.transform }}
+              className="fixed z-[77] pointer-events-auto"
+              style={isMobileMultiAngle ? {
+                right: 'max(12px, env(safe-area-inset-right, 0px))',
+                bottom: 'calc(96px + env(safe-area-inset-bottom, 0px))',
+                width: 'min(360px, calc(100vw - max(12px, env(safe-area-inset-left, 0px)) - max(12px, env(safe-area-inset-right, 0px))))',
+                maxHeight: 'calc(100dvh - 112px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))',
+              } : {
+                left: desktopLeft,
+                top: desktopTop,
+                width: desktopWidth,
+                maxHeight: `calc(100dvh - ${desktopTop} - min(80px, 25dvh))`,
+              }}
               onMouseDown={(e) => e.stopPropagation()}
             >
-              <div className={`${panelBaseClass} flex-col !items-stretch !gap-3 !p-3 w-[300px] max-[768px]:w-full max-[768px]:max-h-[inherit] max-[768px]:overflow-y-auto max-[768px]:overscroll-contain max-[768px]:touch-pan-y max-[768px]:[&>div]:shrink-0 max-[768px]:[&_button]:min-h-11 max-[768px]:[&_button]:min-w-11 max-[768px]:[&_button]:whitespace-nowrap`} onMouseDown={(e) => e.stopPropagation()}>
+              <div
+                role="region"
+                aria-label="多角度"
+                tabIndex={0}
+                className={`${panelBaseClass} w-full max-h-[inherit] flex-col !items-stretch !gap-3 !p-3 overflow-y-auto overscroll-contain touch-pan-y [&>div]:shrink-0 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-current max-[768px]:[&_button]:min-h-11 max-[768px]:[&_button]:min-w-11 max-[768px]:[&_button]:whitespace-nowrap`}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <RotateCcw size={14} className={isMonochrome ? 'text-blue-500' : 'text-gold'} />
@@ -16662,7 +16713,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
               </div>
             </div>
           );
-          return isMobileMultiAngle ? createPortal(multiAnglePanel, document.body) : multiAnglePanel;
+          return createPortal(multiAnglePanel, document.body);
         })()}
 
         {/* ====== DOWNLOAD FLOATING PANEL ====== */}
@@ -18026,7 +18077,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                   setShowEffectReverse(false);
                   setEffectReverseSource(null);
                 }}
-                onCanvasResult={handleEffectReverseResult}
+                captureCanvasResult={captureEffectReverseResult}
               />
             </Suspense>
           </div>

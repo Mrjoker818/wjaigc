@@ -9,7 +9,7 @@ import { Scanner } from '@tailwindcss/oxide';
 import { chromium, type Browser, type BrowserContext, type Page, type Locator, type Request } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 type Theme='gold'|'mono';
-interface Options {admin?:boolean; requireMissing?:boolean; touch?:boolean;holdRecovery?:boolean;catalogLoading?:boolean;sphereOnly?:boolean}
+interface Options {admin?:boolean; requireMissing?:boolean; touch?:boolean;holdRecovery?:boolean;catalogLoading?:boolean;sphereOnly?:boolean;desktopPanelSource?:boolean}
 interface FixtureWindow extends Window {canvasUi:{png:string;mount(theme:Theme,options:Options):void;unmount():void;state:{mounts:number;disposed:boolean;scopeChecks:number;images:unknown[];groups:unknown[];actions:string[];view:{offsetX:number;offsetY:number;zoom:number}|null;events:Array<{type:string;target:string}>}}}
 interface Session {context:BrowserContext;page:Page;options:Options;errors:string[];counts:Map<string,number>;handlers:Set<Promise<void>>;mounted:boolean;pending:Set<Request>;completed:Set<Request>;failed:Set<Request>;refused:Set<Request>;responseStatus:Map<Request,number>;nativeWaiters:Set<()=>void>;png:Buffer;releaseRecovery:()=>void;recoveryCalls:number}
 const ORIGIN='https://canvas-shell-mobile.invalid';
@@ -34,14 +34,16 @@ const sketchContext={key:scope.key,captureScope:()=>{scope.assertCurrent();retur
 const bxDescriptor={providerId:'bx-provider',modelId:'bx-image',kind:'image' as const,sourceType:'image' as const,protocol:'openai',executionMode:'sync' as const,allowedRatios:['1:1','3:2'],allowedSizes:['1024x1024'],qualityOptions:['standard'],maxOutputs:2,supportsVision:false,supportsReferenceImages:true,maxReferenceImages:14,supportsMask:false,allowedDurationsSeconds:[],maxDurationSeconds:0,supportedOperations:['image-to-image','multi-reference'] as Array<'image-to-image'|'multi-reference'>,outputKinds:['image'],capabilitySources:{allowedRatios:'admin' as const,allowedSizes:'admin' as const,qualityOptions:'admin' as const,supportsReferenceImages:'admin' as const,maxReferenceImages:'admin' as const}};
 const bxUnsupported={...bxDescriptor,modelId:'bx-no-reference',supportsReferenceImages:false,maxReferenceImages:0};
 const bySecond={...bxDescriptor,providerId:'by-provider-b',maxReferenceImages:2,allowedRatios:['1:1','16:9'],allowedSizes:['1536x1024'],qualityOptions:['hd'],maxOutputs:1};
-function Entry({theme,admin,catalogLoading,sphereOnly}:{theme:'gold'|'mono';admin:boolean;catalogLoading:boolean;sphereOnly:boolean}):React.ReactElement{
- const [images,setImages]=useState<CanvasImage[]>([{id:'br-A',url:png,x:100,y:160,width:56,height:56,name:'BW A',prompt:'BR成员A'},{id:'br-B',url:png,x:100,y:270,width:56,height:56,name:'BW B',prompt:'BR成员B'},{id:'br-keep',url:png,x:100,y:380,width:56,height:56,name:'BW 保留',prompt:'BR组外素材'}]);const [selected,setSelected]=useState<CanvasImage|null>(null);state.images=images;const [groups,setGroups]=useState<Array<{id:string;name:string;note:string;imageIds:string[];x:number;y:number;collapsed:boolean}>>([]);state.groups=groups;
+function Entry({theme,admin,catalogLoading,sphereOnly,desktopPanelSource}:{theme:'gold'|'mono';admin:boolean;catalogLoading:boolean;sphereOnly:boolean;desktopPanelSource?:boolean}):React.ReactElement{
+ const [images,setImages]=useState<CanvasImage[]>(desktopPanelSource
+   ? [{id:'desktop-angle-source',url:png,x:515,y:501,width:240,height:180,name:'多角度验收源图',prompt:'多角度验收源图'}]
+   : [{id:'br-A',url:png,x:100,y:160,width:56,height:56,name:'BW A',prompt:'BR成员A'},{id:'br-B',url:png,x:100,y:270,width:56,height:56,name:'BW B',prompt:'BR成员B'},{id:'br-keep',url:png,x:100,y:380,width:56,height:56,name:'BW 保留',prompt:'BR组外素材'}]);const [selected,setSelected]=useState<CanvasImage|null>(null);state.images=images;const [groups,setGroups]=useState<Array<{id:string;name:string;note:string;imageIds:string[];x:number;y:number;collapsed:boolean}>>([]);state.groups=groups;
  return <><OperationAuditClient/><InfiniteCanvas images={images} selectedImage={selected} projectId="canvas-ui-project" isPanelCollapsed={false} isAdmin={admin}
  taskModelCatalog={[bxDescriptor,bxUnsupported,bySecond]} taskModelOptions={[{id:'bx-image',providerId:'bx-provider',providerName:'BX 合成供应商',name:'BX 图像',type:'image'},{id:'bx-no-reference',providerId:'bx-provider',providerName:'BX 合成供应商',name:'BX 不支持参考图',type:'image'},{id:'bx-image',providerId:'by-provider-b',providerName:'BY 合成供应商乙',name:'BY 图像乙',type:'image'}]} themeStyle={theme==='mono'?'monochrome':'gold'} initialViewState={{offsetX:0,offsetY:0,zoom:1}} onViewStateChange={view=>{state.view=view;}}
  initialGroups={groups} onGroupsChange={next=>{setGroups(next);}} versionHistoryManager={manager} sketchImageEnabled={true} sketchContext={sketchContext} catalogStatus={{loading:catalogLoading,error:null}} onImagesChange={setImages} onSelectImage={setSelected} onPreviewImage={action('preview')} onGenerateVariation={action('variation')} onExtractKeywords={action('keywords')} onSendToChat={image=>{state.actions.push('chat:'+image.id);}} onFusion={action('fusion')} onAddImages={()=>{throw Error('CANVAS_UI_FIXTURE_UNEXPECTED_PUBLISH')}}
  onSwitchToDashboard={action('dashboard')} onToggleVisionPrompt={action('omp')} onToggleSettings={action('settings')} onToggleTheme={action('theme')} onToggleUserManager={action('users')} onToggleAdminSystem={action('admin')} onToggleProjectData={action('projects')} onToggleFavorites={action('favorites')} onTogglePromptTemplate={action('templates')} onToggleHelp={action('external-help')} onSwitchToNodeMode={action('node')} onSwitchToWorkflowHub={action('workflow')}/>{sphereOnly&&<div id="cy-sphere-fixture" style={{position:'fixed',left:16,top:16,width:260,height:196,zIndex:100}}><MultiAngleSpherePreview imageUrl={png} rotation={0} tilt={0} zoom={1} isMonochrome={theme==='mono'}/></div>}</>;
 }
-Object.assign(window,{canvasUi:{state,png,mount(theme:'gold'|'mono',options:{admin?:boolean;catalogLoading?:boolean;sphereOnly?:boolean}){if(state.mounts||state.disposed)throw Error('CANVAS_UI_FIXTURE_REMOUNT');state.mounts++;for(const type of ['pointerdown','pointerup','gotpointercapture','lostpointercapture','click'])document.addEventListener(type,observe,true);document.documentElement.classList.add(theme==='mono'?'theme-monochrome':'theme-gold');root.render(<Entry theme={theme} admin={options.admin===true} catalogLoading={options.catalogLoading===true} sphereOnly={options.sphereOnly===true}/>);},unmount(){if(!state.disposed){state.disposed=true;root.unmount();}taskEventsClient.disconnect();for(const type of ['pointerdown','pointerup','gotpointercapture','lostpointercapture','click'])document.removeEventListener(type,observe,true);}}});
+Object.assign(window,{canvasUi:{state,png,mount(theme:'gold'|'mono',options:{admin?:boolean;catalogLoading?:boolean;sphereOnly?:boolean;desktopPanelSource?:boolean}){if(state.mounts||state.disposed)throw Error('CANVAS_UI_FIXTURE_REMOUNT');state.mounts++;for(const type of ['pointerdown','pointerup','gotpointercapture','lostpointercapture','click'])document.addEventListener(type,observe,true);document.documentElement.classList.add(theme==='mono'?'theme-monochrome':'theme-gold');root.render(<Entry theme={theme} admin={options.admin===true} catalogLoading={options.catalogLoading===true} sphereOnly={options.sphereOnly===true} desktopPanelSource={options.desktopPanelSource===true}/>);},unmount(){if(!state.disposed){state.disposed=true;root.unmount();}taskEventsClient.disconnect();for(const type of ['pointerdown','pointerup','gotpointercapture','lostpointercapture','click'])document.removeEventListener(type,observe,true);}}});
 `;
 let browser: Browser | undefined;
 let bundle = '', css = '';
@@ -238,3 +240,92 @@ for(const e of cyMatrix){
  it('CY '+e.theme+' '+e.width+'x'+e.height+' isolated real sphere cold image paints',async()=>{await withSession(e.theme,e.width,e.height,{touch:true,sphereOnly:true},async s=>{try{await cyTexture(s.page.locator('#cy-sphere-fixture canvas'));console.log('CY_LEAF_COMPLETE',JSON.stringify({...e,realLeafAlongsideOriginalParent:true,noParameterChanges:true}));}finally{await cyCapture(s,e,'leaf-end-or-failure');}});},25000);
  it('CY '+e.theme+' '+e.width+'x'+e.height+' parent controls native preview touch cancel mouse and no submit',async()=>{await withSession(e.theme,e.width,e.height,{touch:true},async s=>{const before=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);try{await s.page.locator('[data-canvas-image-id="br-A"]').tap({position:{x:28,y:38}});await s.page.locator('[data-mobile-image-actions]').getByRole('button',{name:'更多',exact:true}).tap();await s.page.getByRole('dialog',{name:'图片工具',exact:true}).getByRole('button',{name:'多角度',exact:true}).tap();const preview=s.page.getByTitle(cyPreviewTitle,{exact:true}),panel=preview.locator('..');await preview.waitFor({state:'visible'});await cyCapture(s,e,'parent-opened');await cyAudit(s,panel);const ranges=panel.locator('input[type="range"]');expect(await ranges.count()).toBe(2);for(const label of ['主体','摄像头']){const b=panel.getByRole('button',{name:label,exact:true});await cyTap(s,b);expect.soft(await b.getAttribute('aria-pressed'),label+' selection visible to assistive technology').toBe('true');if(label==='摄像头')await cyTexture(preview.locator('canvas'));}for(const label of ['特写','广角','标准']){const b=panel.getByRole('button',{name:label,exact:true});await cyTap(s,b);expect.soft(await b.getAttribute('aria-pressed'),label+' selection exposed').toBe('true');}for(let i=0;i<2;i++){await cyReveal(s,ranges.nth(i));const r=await ranges.nth(i).boundingBox();if(!r)throw Error('CY_REAL_RANGE_BOUNDS');await ranges.nth(i).tap({position:{x:r.width*.75,y:r.height/2}});expect(Number(await ranges.nth(i).inputValue())).toBeGreaterThan(0);await cyDrag(s,r.x+r.width*.75,r.y+r.height/2,-r.width*.5,0);expect(Number(await ranges.nth(i).inputValue())).toBeLessThan(0);}await cyTap(s,panel.getByTitle('重置',{exact:true}));expect(await ranges.nth(0).inputValue()).toBe('0');expect(await ranges.nth(1).inputValue()).toBe('0');expect(await panel.getByRole('button',{name:'标准',exact:true}).getAttribute('aria-pressed')).toBe('true');await cyReveal(s,preview);const r=await preview.boundingBox();if(!r)throw Error('CY_REAL_PREVIEW_BOUNDS');const p={x:r.x+r.width/2,y:r.y+r.height/2};expect(await preview.evaluate((el,p)=>el.contains(document.elementFromPoint(p.x,p.y)),p)).toBe(true);await cyDrag(s,p.x,p.y,24,16);expect(await ranges.nth(0).inputValue(),'native touch changes rotation').toBe('13');expect(await ranges.nth(1).inputValue(),'native touch changes tilt').toBe('-9');await cyDrag(s,p.x,p.y,-16,16,true);expect(await ranges.nth(0).inputValue(),'cancel restores prior rotation').toBe('13');expect(await ranges.nth(1).inputValue(),'cancel restores prior tilt').toBe('-9');await cyTap(s,panel.getByTitle('重置',{exact:true}));await cyReveal(s,preview);const m=await preview.boundingBox();if(!m)throw Error('CY_MOUSE_PREVIEW');await s.page.mouse.move(m.x+m.width/2,m.y+m.height/2);await s.page.mouse.down();await s.page.mouse.move(m.x+m.width/2+24,m.y+m.height/2+16,{steps:4});await s.page.mouse.up();await settle(s.page);expect(await ranges.nth(0).inputValue(),'original mouse drag rotation retained').toBe('13');expect(await ranges.nth(1).inputValue(),'original mouse drag tilt retained').toBe('-9');await cyCapture(s,e,'parent-inputs');await cyTap(s,panel.getByRole('button',{name:'取消',exact:true}));await preview.waitFor({state:'detached'});const after=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);expect(after.images).toEqual(before.images);expect(after.view).toEqual(before.view);expect(after.actions).toEqual([]);console.log('CY_PARENT_COMPLETE',JSON.stringify({...e,sourceAndViewUnchanged:true,noSubmit:true,coldParentTexture:true,nativeRangesTouchCancelMouse:true}));}finally{await cyCapture(s,e,'parent-end-or-failure');}});},25000);
 }
+
+it('keeps the desktop multi-angle panel inside the viewport and scrolls on short desktop', async () => {
+  await withSession('gold', 1440, 900, { desktopPanelSource:true }, async ({page}) => {
+    const source=page.locator('[data-canvas-image-id="desktop-angle-source"]');
+    await source.click();
+    const action=page.getByRole('button',{name:'多角度',exact:true}).filter({visible:true}).first();
+    if (!await action.isVisible()) {
+      await page.getByRole('button',{name:'展开更多工具',exact:true}).filter({visible:true}).first().click();
+    }
+    await action.click();
+    const panel=page.locator('[data-popup="multi-angle"]');
+    const camera=panel.getByRole('button',{name:'摄像头',exact:true});
+    await panel.waitFor();
+    const panelY=(await panel.boundingBox())!.y;
+    const cameraY=(await camera.boundingBox())!.y;
+    expect(panelY, 'multi-angle panel top (previously -119.5 px)').toBeGreaterThanOrEqual(0);
+    expect(cameraY, 'camera control top (previously -70.5 px)').toBeGreaterThanOrEqual(0);
+
+    // The workspace project menu uses z-index 70 and can wrap over the tool.
+    await page.evaluate(() => {
+      const header=document.createElement('div');
+      header.setAttribute('data-fixture-project-menu','');
+      header.style.cssText='position:fixed;left:56px;right:0;top:12px;height:150px;z-index:70';
+      document.body.append(header);
+    });
+    const cameraReceivesPointer=()=>camera.evaluate(button=>{
+      const box=button.getBoundingClientRect();
+      return button.contains(document.elementFromPoint(box.x+box.width/2,box.y+box.height/2));
+    });
+    expect(await cameraReceivesPointer(), 'the accessible mode control is above the workspace project menu').toBe(true);
+    await camera.click();
+    expect(await camera.getAttribute('aria-pressed')).toBe('true');
+    expect(await source.getAttribute('data-canvas-selected')).toBe('true');
+
+    const preview=panel.getByTitle(cyPreviewTitle,{exact:true});
+    await cyTexture(preview.locator('canvas'));
+    const previewBounds=(await preview.boundingBox())!;
+    const centerX=previewBounds.x+previewBounds.width/2;
+    const centerY=previewBounds.y+previewBounds.height/2;
+    await page.mouse.move(centerX,centerY);
+    await page.mouse.down();
+    await page.mouse.move(centerX+40,centerY-20,{steps:8});
+    await page.mouse.up();
+    const rotation=panel.getByRole('slider',{name:'旋转',exact:true});
+    const tilt=panel.getByRole('slider',{name:'垂直视角',exact:true});
+    await expect.poll(async () => Number(await rotation.inputValue())).toBe(22);
+    await expect.poll(async () => Number(await tilt.inputValue())).toBe(11);
+
+    await page.setViewportSize({width:800,height:320});
+    await settle(page);
+    const bounds=(await panel.boundingBox())!;
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.y).toBeGreaterThanOrEqual(0);
+    expect(bounds.x+bounds.width).toBeLessThanOrEqual(800);
+    expect(bounds.y+bounds.height).toBeLessThanOrEqual(320);
+    expect(await camera.getAttribute('aria-pressed')).toBe('true');
+    expect(await rotation.inputValue()).toBe('22');
+
+    const viewState=page.locator('[data-canvas-surface]');
+    const initialTransform=await viewState.evaluate(node=>node.style.transform);
+    const scrollable=panel.getByRole('region',{name:'多角度',exact:true});
+    const cancel=panel.getByRole('button',{name:'取消',exact:true});
+    expect((await cancel.boundingBox())!.y).toBeGreaterThan(bounds.y+bounds.height);
+    await page.mouse.move(bounds.x+bounds.width-24,bounds.y+bounds.height/2);
+    await page.mouse.wheel(0,700);
+    await expect.poll(async () => {
+      const button=(await cancel.boundingBox())!;
+      return button.y>=bounds.y && button.y+button.height<=bounds.y+bounds.height;
+    }).toBe(true);
+    expect(await viewState.evaluate(node=>node.style.transform)).toBe(initialTransform);
+
+    await scrollable.focus();
+    await page.keyboard.press('Home');
+    await expect.poll(() => scrollable.evaluate(node=>node.scrollTop)).toBe(0);
+
+    await page.setViewportSize({width:767,height:320});
+    await settle(page);
+    const mobileBounds=(await panel.boundingBox())!;
+    expect(mobileBounds.x).toBeGreaterThanOrEqual(0);
+    expect(mobileBounds.y).toBeGreaterThanOrEqual(0);
+    expect(mobileBounds.x+mobileBounds.width).toBeLessThanOrEqual(767);
+    expect(mobileBounds.y+mobileBounds.height).toBeLessThanOrEqual(320);
+    expect(await cameraReceivesPointer(), 'the project menu does not cover the narrow-screen control').toBe(true);
+    expect(await rotation.inputValue()).toBe('22');
+    await cancel.click();
+    await panel.waitFor({state:'detached'});
+    expect(await source.getAttribute('data-canvas-selected')).toBe('true');
+  });
+}, 25000);

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { encodeHtmlScriptJson } from '@/lib/html-script-json';
 
 interface MindmapNode {
   text: string;
@@ -12,7 +13,6 @@ interface MindmapRequest {
 }
 
 function renderMindmapHTML(title: string, root: MindmapNode): string {
-  const jsonData = JSON.stringify(root);
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -41,7 +41,8 @@ header button:hover { background: rgba(255,255,255,0.25); }
 <svg id="mindmap"></svg>
 <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 <script>
-const data = ${jsonData};
+const data = ${encodeHtmlScriptJson(root)};
+const title = ${encodeHtmlScriptJson(title)};
 const width = document.getElementById('mindmap').clientWidth;
 const height = document.getElementById('mindmap').clientHeight;
 
@@ -88,7 +89,7 @@ function exportPNG() {
   const blob = new Blob([svgStr], {type: 'image/svg+xml;charset=utf-8'});
   const url = URL.createObjectURL(blob);
   img.onload = () => { ctx.fillStyle = '#f5f5f5'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.drawImage(img, 0, 0, canvas.width, canvas.height); URL.revokeObjectURL(url);
-    const a = document.createElement('a'); a.download = '${escapeAttr(title)}.png'; a.href = canvas.toDataURL('image/png'); a.click(); };
+    const a = document.createElement('a'); a.download = title + '.png'; a.href = canvas.toDataURL('image/png'); a.click(); };
   img.src = url;
 }
 window.addEventListener('resize', () => { const w = document.getElementById('mindmap').clientWidth; const h = document.getElementById('mindmap').clientHeight; svg.attr('viewBox', [-w/2, -h/2, w, h]); });
@@ -99,10 +100,6 @@ window.addEventListener('resize', () => { const w = document.getElementById('min
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-function escapeAttr(s: string): string {
-  return s.replace(/["\\]/g, '');
 }
 
 export async function POST(request: Request) {

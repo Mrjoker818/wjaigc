@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
+import { readPsd, type Psd } from 'ag-psd';
 
 import { collectBrowserEvidence, saveBrowserEvidence } from '../helpers/evidence';
 
@@ -99,6 +100,125 @@ async function capture(
     throw error;
   }
 }
+
+test('reopens the saved local layer document and downloads an editable PSD after reload', async ({ page }, testInfo) => {
+  const deliveryMode = process.env.E2E_LOCAL_PSD_DELIVERY;
+  test.skip(deliveryMode !== '1' && deliveryMode !== 'document', 'Run against the dedicated local PSD delivery fixture.');
+  const origin = new URL(testInfo.project.use.baseURL ?? '');
+  expect(origin.hostname).toBe('127.0.0.1');
+  expect(origin.protocol).toBe('http:');
+  expect(username?.startsWith('qa_nov13_')).toBe(true);
+  expect(Boolean(password?.length)).toBe(true);
+  test.setTimeout(180_000);
+  await capture(page, testInfo, 'local-layer-document-download', async () => {
+    const submissions: string[] = [];
+    await page.route('**/api/layered-decompose', async route => {
+      if (route.request().method() === 'POST') {
+        const engine: unknown = route.request().postDataJSON()?.engine;
+        if (engine !== 'local' || new URL(route.request().url()).origin !== origin.origin) {
+          submissions.push('blocked');
+          await route.abort();
+          return;
+        }
+        submissions.push(engine);
+      }
+      await route.continue();
+    });
+    await loginAndCreateProject(page);
+    if (deliveryMode === 'document') {
+      const canvas = page.locator('[data-canvas-viewport]');
+      const projectId = (await canvas.getAttribute('data-project-id'))!;
+      const query = new URLSearchParams({ projectId });
+      await page.goto('/?view=dashboard', { waitUntil: 'domcontentloaded' });
+      const before = await page.request.get('/api/user-data/sync?key=projects');
+      expect(before.status()).toBe(200);
+      const snapshot = await before.json() as { projectRevision: number; value: Array<{ id: string; name: string }> };
+      expect(snapshot.value.filter(project => project.id === projectId)).toHaveLength(1);
+      const name = `PSD source ${projectId}`;
+      const saved = await page.request.post('/api/user-data/sync', { data: {
+        key: 'projects', projectRevision: snapshot.projectRevision,
+        value: snapshot.value.map(project => project.id === projectId ? { ...project, name } : project),
+      } });
+      expect(saved.status()).toBe(200);
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.getByRole('button', { name: `${name} 项目操作菜单`, exact: true }).click();
+      await page.getByRole('menuitem', { name: '管理协作', exact: true }).click();
+      const [enabled] = await Promise.all([
+        page.waitForResponse(response => new URL(response.url()).pathname === '/api/collaboration/document-enable'
+          && response.request().method() === 'POST'),
+        page.getByRole('button', { name: '启用协作', exact: true }).click(),
+      ]);
+      expect(enabled.status()).toBe(200);
+      expect(await enabled.json()).toMatchObject({ success: true, projectId });
+      await page.goto(`/?${query}`, { waitUntil: 'domcontentloaded' });
+      await expect(canvas).toHaveAttribute('data-project-id', projectId);
+      await expect(page.getByTestId('canvas-image-upload-input')).toHaveAttribute('accept', /video\/mp4/);
+      await expect(page.getByRole('group', { name: '协作文档状态与恢复' }).getByRole('status')).toHaveText('已保存');
+    }
+    const source = (await uploadSource(page)).locator('xpath=ancestor::*[@data-canvas-image-id][1]');
+    const sourceId = await source.getAttribute('data-canvas-image-id');
+    expect(sourceId).toBeTruthy();
+    const editor = await openLayerEditor(page);
+    await editor.locator('[data-layer-engine="local"]').click();
+    await editor.getByTestId('layer-start').click();
+    const rows = editor.locator('[data-layer-row]');
+    await expect(rows.first()).toBeVisible({ timeout: 90_000 });
+    await expect(editor.getByTestId('layer-document-status')).toHaveText('已保存');
+    const layerCount = await rows.count();
+    expect(layerCount).toBeGreaterThanOrEqual(2);
+
+    if (deliveryMode === 'document') {
+      const query = new URLSearchParams({ projectId: (await page.locator('[data-canvas-viewport]').getAttribute('data-project-id'))! });
+      const projection = await page.request.get(`/api/collaboration/document-project?${query}`);
+      expect(projection.status()).toBe(200);
+      const project = await projection.json() as { canvasImages: Array<{ id: string; assetVersionId?: string; placementId?: string }> };
+      expect(project.canvasImages.find(image => image.id === sourceId)).toMatchObject({
+        assetVersionId: expect.any(String), placementId: expect.any(String),
+      });
+    }
+
+    const layerName = 'QA saved PSD layer';
+    await rows.first().dblclick();
+    await rows.first().locator('input').fill(layerName);
+    const [saveResponse] = await Promise.all([
+      page.waitForResponse(response => new URL(response.url()).pathname === '/api/layer-documents'
+        && response.request().method() === 'PATCH'),
+      rows.first().locator('input').press('Enter'),
+    ]);
+    expect(saveResponse.ok()).toBe(true);
+    await expect(editor.getByTestId('layer-document-status')).toHaveText('已保存');
+    await editor.getByRole('button', { name: '关闭', exact: true }).click();
+    await expect(editor).not.toBeVisible();
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(source).toHaveAttribute('data-canvas-image-id', sourceId!);
+    if (await source.getAttribute('data-canvas-selected') !== 'true') await source.click();
+    const [readResponse] = await Promise.all([
+      page.waitForResponse(response => new URL(response.url()).pathname === '/api/layer-documents'
+        && response.request().method() === 'GET'),
+      openLayerEditor(page),
+    ]);
+    expect(readResponse.ok()).toBe(true);
+    await expect(editor.getByTestId('layer-document-status')).toHaveText('已保存');
+    await expect(rows).toHaveCount(layerCount);
+    await expect(rows.first()).toContainText(layerName);
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      editor.getByTestId('layer-export-psd').click(),
+    ]);
+    expect(download.suggestedFilename()).toMatch(/\.psd$/iu);
+    const bytes = readFileSync(await download.path() ?? '');
+    expect(bytes.subarray(0, 4).toString('ascii')).toBe('8BPS');
+    const psd = readPsd(bytes, { skipLayerImageData: true, skipCompositeImageData: true, skipThumbnail: true });
+    function namesOf(layers: Psd['children']): string[] {
+      return (layers ?? []).flatMap(layer => [layer.name ?? '', ...namesOf(layer.children)]);
+    }
+    const layerNames = namesOf(psd.children);
+    expect(layerNames.length).toBeGreaterThanOrEqual(2);
+    expect(layerNames).toContain(layerName);
+    expect(submissions).toEqual(['local']);
+  });
+});
 
 test.describe('Pear hybrid layer editing', () => {
   test.skip(!username || !password, 'Real E2E credentials are required for layer editing tests.');

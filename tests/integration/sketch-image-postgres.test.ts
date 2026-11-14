@@ -1,9 +1,13 @@
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
+import { request as makeHttpRequest } from 'node:http';
+import { request as makeHttpsRequest } from 'node:https';
 import { isDeepStrictEqual } from 'node:util';
 import { resolve } from 'node:path';
+import { Readable } from 'node:stream';
 import { createCanvas } from '@napi-rs/canvas';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   assertSketchPostgresSchema, readSketchPostgresFixture, withSketchPostgres,
 } from '../helpers/owned-sketch-postgres-fixture';
@@ -34,15 +38,143 @@ import { readSketchImageResult } from '@/lib/sketch-to-code/image-result';
 import { cancelSketchImageTask, pollSketchImageTask } from '@/lib/sketch-to-code/image-public-http';
 import { markSketchImageKnownFailure } from '@/lib/sketch-to-code/image-known-failure';
 
-// No business/database mock. Only the server import sentinel and external S3
-// upload are replaced; migrations, SQL, billing, authority, leases, decoding,
-// local persistence, publisher, protected reader and public helpers stay real.
+const cloudBoundary = vi.hoisted(() => {
+  const forbidden = vi.fn((): never => { throw new Error('SKETCH_FIXTURE_NETWORK_FORBIDDEN'); });
+  const send = vi.fn<(command: unknown, options?: { abortSignal?: AbortSignal }) => Promise<unknown>>(forbidden);
+  return { forbidden, send };
+});
+
+// No business/database mock. The object-storage case exercises the real upload,
+// HEAD, signer and range code at a controlled transport boundary. Other cases
+// remain local only.
 vi.mock('server-only', () => ({}));
-vi.mock('@/lib/s3-storage', async importOriginal => ({
-  ...await importOriginal<typeof import('@/lib/s3-storage')>(),
-  uploadBinaryToS3: async (): Promise<null> => null,
+vi.mock('coze-coding-dev-sdk', async importOriginal => ({
+  ...await importOriginal<typeof import('coze-coding-dev-sdk')>(),
+  S3Storage: class { constructor() { cloudBoundary.forbidden(); } },
 }));
-afterEach((): void => { vi.unstubAllEnvs(); });
+vi.mock('@aws-sdk/client-s3', async importOriginal => {
+  const original = await importOriginal<typeof import('@aws-sdk/client-s3')>();
+  return {
+    ...original,
+    S3Client: class {
+      send = cloudBoundary.send as unknown as S3Client['send'];
+      middlewareStack = { add: vi.fn() };
+    },
+  };
+});
+vi.mock('node:http', async importOriginal => ({
+  ...await importOriginal<typeof import('node:http')>(),
+  request: vi.fn(cloudBoundary.forbidden),
+}));
+vi.mock('node:https', async importOriginal => ({
+  ...await importOriginal<typeof import('node:https')>(),
+  request: vi.fn(cloudBoundary.forbidden),
+}));
+beforeEach((): void => {
+  cloudBoundary.forbidden.mockClear();
+  for (const name of ['COZE_BUCKET_ENDPOINT_URL', 'COZE_BUCKET_NAME', 'COZE_WORKLOAD_IDENTITY_API_KEY',
+    'COZE_BUCKET_ACCESS_KEY', 'COZE_BUCKET_SECRET_KEY', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY']) {
+    vi.stubEnv(name, undefined);
+  }
+  vi.stubGlobal('fetch', cloudBoundary.forbidden);
+});
+afterEach((): void => {
+  try {
+    expect(cloudBoundary.forbidden).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    cloudBoundary.send.mockReset().mockImplementation(cloudBoundary.forbidden);
+    vi.mocked(makeHttpRequest).mockReset().mockImplementation(cloudBoundary.forbidden);
+    vi.mocked(makeHttpsRequest).mockReset().mockImplementation(cloudBoundary.forbidden);
+  }
+});
+
+function cozeObjectStorageFixture() {
+  const endpoint = 'http://127.0.0.1:1';
+  const bucket = 'sketch-isolated-fixture';
+  const workload = 'synthetic-sketch-workload-token';
+  vi.stubEnv('COZE_BUCKET_ENDPOINT_URL', endpoint);
+  vi.stubEnv('COZE_BUCKET_NAME', bucket);
+  vi.stubEnv('COZE_WORKLOAD_IDENTITY_API_KEY', workload);
+  type ObjectEntry = { bytes: Buffer; mimeType: string; eTag: string };
+  type ReadEvent = { key: string; status: 200 | 206; range: string };
+  const objects = new Map<string, ObjectEntry>();
+  const proof = { puts: 0, zeroLengthHeads: [] as string[], unboundedProxyGets: 0, reads: [] as ReadEvent[] };
+  let serveRanges = false;
+  cloudBoundary.send.mockImplementation(async (command: unknown, options?: { abortSignal?: AbortSignal }) => {
+    options?.abortSignal?.throwIfAborted();
+    if (!(command instanceof PutObjectCommand || command instanceof HeadObjectCommand
+      || command instanceof GetObjectCommand || command instanceof DeleteObjectCommand)) {
+      return cloudBoundary.forbidden();
+    }
+    const key = command.input.Key ?? '';
+    if (command.input.Bucket !== bucket || !/^exports\/[a-f0-9]{16}-[a-f0-9-]{36}-(?:input-sketch|generated-image)\.png$/u.test(key)) {
+      return cloudBoundary.forbidden();
+    }
+    if (command instanceof PutObjectCommand) {
+      expect(command.input.IfNoneMatch).toBe('*');
+      if (!Buffer.isBuffer(command.input.Body) || command.input.ContentType !== 'image/png' || objects.has(key)) {
+        throw new Error('Unexpected fixture upload');
+      }
+      const bytes = Buffer.from(command.input.Body);
+      objects.set(key, { bytes, mimeType: 'image/png', eTag: '"' + createHash('sha256').update(bytes).digest('hex') + '"' });
+      proof.puts++; return {};
+    }
+    if (command instanceof DeleteObjectCommand) { objects.delete(key); return {}; }
+    const entry = objects.get(key);
+    if (!entry) throw Object.assign(new Error('Missing test object'), { name: 'NoSuchKey' });
+    if (command instanceof HeadObjectCommand) {
+      proof.zeroLengthHeads.push(key);
+      return { ContentLength: 0, ContentType: entry.mimeType, ETag: entry.eTag };
+    }
+    // Recreate the observed Coze proxy behavior if a caller ever tries it.
+    proof.unboundedProxyGets++;
+    return { ContentLength: entry.bytes.length, ContentType: entry.mimeType, ETag: entry.eTag, Body: Readable.from([entry.bytes]) };
+  });
+  type RequestOptions = { method?: string; headers?: Record<string, string>; signal?: AbortSignal };
+  type Reply = (response: Readable & { statusCode: number; headers: Record<string, string> }) => void;
+  function reply(callback: Reply, statusCode: number, headers: Record<string, string>, bytes: Buffer): void {
+    queueMicrotask(() => callback(Object.assign(Readable.from([bytes]), { statusCode, headers })));
+  }
+  // No sockets are opened here; only the exact synthetic signer and URL are accepted.
+  vi.mocked(makeHttpRequest).mockImplementation(((url: URL, params: RequestOptions, callback: Reply) => ({
+    once: vi.fn(),
+    end(body: Buffer): void {
+      params.signal?.throwIfAborted();
+      const input = JSON.parse(body.toString('utf8')) as { bucket_name: string; path: string };
+      if (url.href !== endpoint + '/sign-url' || params.method !== 'POST' || params.headers?.['x-storage-token'] !== workload
+        || input.bucket_name !== bucket || !objects.has(input.path)) return cloudBoundary.forbidden();
+      reply(callback, 200, { 'content-type': 'application/json' }, Buffer.from(JSON.stringify({
+        data: { url: 'https://tos.coze.site/' + input.path + '?signature=synthetic' },
+      })));
+    },
+  })) as unknown as typeof makeHttpRequest);
+  vi.mocked(makeHttpsRequest).mockImplementation(((url: URL, params: RequestOptions, callback: Reply) => ({
+    once: vi.fn(),
+    end(): void {
+      params.signal?.throwIfAborted();
+      const key = url.pathname.slice(1);
+      const entry = objects.get(key);
+      const range = /^bytes=(\d+)-(\d+)$/u.exec(params.headers?.Range ?? '');
+      if (url.origin !== 'https://tos.coze.site' || url.search !== '?signature=synthetic' || params.method !== 'GET'
+        || !entry || !range || params.headers?.['If-Match'] !== entry.eTag) return cloudBoundary.forbidden();
+      const start = Number(range[1]), end = Number(range[2]);
+      if (start > end || end >= entry.bytes.length) throw new Error('Unexpected fixture byte range');
+      if (!serveRanges) {
+        // A 200 response cannot prove an exact conditional range.
+        proof.reads.push({ key, status: 200, range: range[0] });
+        reply(callback, 200, { 'content-type': entry.mimeType, etag: entry.eTag }, entry.bytes);
+        return;
+      }
+      const bytes = entry.bytes.subarray(start, end + 1);
+      proof.reads.push({ key, status: 206, range: range[0] });
+      reply(callback, 206, { 'content-range': 'bytes ' + start + '-' + end + '/' + entry.bytes.length,
+        'content-length': String(bytes.length), 'content-type': entry.mimeType, etag: entry.eTag }, bytes);
+    },
+  })) as unknown as typeof makeHttpsRequest);
+  return { proof, objects, allowRanges(): void { serveRanges = true; } };
+}
 
 const analysis: SketchImageAnalysis = Object.freeze({
   summary: '手绘山与太阳', composition: '左侧山峰，右上太阳',
@@ -142,17 +274,17 @@ function request(projectId = 'personal'): SketchImageInput {
     visionProviderId: 'vision-provider', visionModelId: 'vision-model',
     imageProviderId: 'image-provider', imageModelId: 'image-model', idempotencyKey: randomUUID(), aspectRatio: '4:3' };
 }
-function pricing(mode: 'flat' | 'token' | 'free' = 'flat'): CreditPricingConfig {
+function pricing(mode: 'flat' | 'token' | 'free' = 'flat', imageCredits = 11): CreditPricingConfig {
   return { modelCredits: {
     'vision-provider::vision-model': mode === 'token'
       ? { credits: 7, tokenPricing: { input: 1_000_000, output: 1_000_000 } } : mode === 'free' ? 0 : 7,
-    'image-provider::image-model': mode === 'free' ? 0 : 11,
+    'image-provider::image-model': mode === 'free' ? 0 : imageCredits,
   } };
 }
 async function admission(value: SketchImageInput, f: ImageFixture, mode: 'flat' | 'token' | 'free' = 'flat',
-  actorUserId = 'owner'): Promise<SketchImageTaskAdmission> {
+  actorUserId = 'owner', imageCredits = 11): Promise<SketchImageTaskAdmission> {
   return admitSketchImageTask(value, { actorUserId, signal: new AbortController().signal }, {
-    generation: f.generation, loadPricingConfig: async (): Promise<CreditPricingConfig> => pricing(mode),
+    generation: f.generation, loadPricingConfig: async (): Promise<CreditPricingConfig> => pricing(mode, imageCredits),
   });
 }
 async function originalTask(taskId: string): Promise<PersistedCloudTask> {
@@ -244,7 +376,7 @@ async function financial(query: QueryFn, taskId: string, actorUserId: string, ac
       model: row.type === 'refund' ? refundModel : 'image-model', task_id: taskId, reference_id: taskId })));
 }
 async function delivered(query: QueryFn, taskId: string, actorUserId: string, projectId: string,
-  reserve: number, actual: number, mode: 'flat' | 'token' | 'free' = 'flat'): Promise<void> {
+  reserve: number, actual: number, mode: 'flat' | 'token' | 'free' = 'flat', imageCredits = 11): Promise<void> {
   const task = await originalTask(taskId), identity = readSketchImageTaskIdentity(task);
   expect(task).toMatchObject({ type: 'sketch-to-image', status: 'completed', creditCost: reserve,
     creditStatus: reserve ? 'charged' : 'not-applicable', providerId: 'image-provider', model: 'image-model' });
@@ -263,7 +395,7 @@ async function delivered(query: QueryFn, taskId: string, actorUserId: string, pr
     vision: { providerId: 'vision-provider', modelId: 'vision-model', calls: 1,
       mode: mode === 'token' ? 'token' : 'flat', reserveCredits: mode === 'free' ? 0 : 7,
       ...(mode === 'token' ? { tokenPricing: { input: 1_000_000, output: 1_000_000 } } : {}) },
-    image: { providerId: 'image-provider', modelId: 'image-model', calls: 1, credits: mode === 'free' ? 0 : 11 },
+    image: { providerId: 'image-provider', modelId: 'image-model', calls: 1, credits: mode === 'free' ? 0 : imageCredits },
     totalReserveCredits: reserve });
   expect(result.imageAssetId).not.toBe(result.previewAssetId);
   expect(result.imageAssetVersionId).not.toBe(result.previewAssetVersionId);
@@ -472,6 +604,77 @@ describe.sequential('I1 real configured models and original publication transact
 });
 
 describe.sequential('Task8 sketch image increment on mandatory owned real PostgreSQL', () => {
+  it('recovers the original 70% Coze object readback and settles a fourteen-credit reserve exactly once', async () => {
+    await ownedCase('image_pg_coze_object_readback', async ({ query }, files) => {
+      const storage = cozeObjectStorageFixture();
+      const remoteId = 'synthetic-original-receipt';
+      const f = fixture(files, {
+        generate: async () => ({ taskIds: [remoteId], directImageUrls: [], usedModel: 'image-model', usedProviderId: 'image-provider' }),
+        query: async () => ({ status: 'completed', imageUrls: [outputPng] }),
+      });
+      const value = request();
+      const accepted = await admission(value, f, 'flat', 'owner', 7);
+      const taskId = accepted.task.id;
+      const pollBody = { taskId, projectId: value.projectId, providerId: 'image-provider', model: 'image-model' };
+      const context = { actorUserId: 'owner', projectId: value.projectId };
+
+      expect(await executeSketchImageTask(accepted, context, f.worker))
+        .toEqual({ status: 'deferred', reason: 'SKETCH_IMAGE_PUBLICATION_UNCONFIRMED' });
+      const pending = await originalTask(taskId), identity = readSketchImageTaskIdentity(pending, 'owner');
+      expect(pending).toMatchObject({ status: 'processing', progress: 70, creditStatus: 'pending', creditCost: 14 });
+      expect(readSketchImageCheckpoint(pending.result?.sketchImageExecution, identity))
+        .toMatchObject({ phase: 'accepted', receipt: { taskIds: [remoteId], directImageUrls: [] } });
+      const poll = await pollSketchImageTask(pollBody, pending, 'owner', 'owned-coze-pending');
+      expect(poll.status).toBe(202);
+      expect(await poll.json()).toMatchObject({ progress: 70, reserveCredits: 14 });
+      expect(await counts(query)).toEqual({ tasks: 1, assets: 0, versions: 0, refunds: 0 });
+      expect(storage.objects.size).toBe(0);
+      const held = [{ type: 'consume', amount: -14, balance_after: 86 }];
+      await financial(query, taskId, 'owner', 14, held);
+      expect(storage.proof.zeroLengthHeads).toHaveLength(1);
+      const rejectedKey = storage.proof.zeroLengthHeads[0];
+      expect(rejectedKey).toMatch(/-input-sketch\.png$/u);
+      expect(storage.proof.reads).toEqual([{ key: rejectedKey, status: 200, range: 'bytes=0-0' }]);
+      const beforeRecovery = { heads: storage.proof.zeroLengthHeads.length, reads: storage.proof.reads.length };
+
+      // End only this synthetic attempt's lease; recover using the durable receipt.
+      await query('UPDATE cloud_tasks SET lease_expires_at=$2 WHERE id=$1', [taskId, Date.now() - 1]);
+      storage.allowRanges();
+      const scheduleRecovery = vi.fn<(candidate: PersistedCloudTask, requestId: string) => boolean>(() => true);
+      const resume = await pollSketchImageTask(pollBody, await originalTask(taskId), 'owner', 'owned-coze-expired', { scheduleRecovery });
+      expect(resume.status).toBe(202);
+      expect(await resume.json()).toMatchObject({ progress: 70, needsReconcile: true, recoveryPending: true });
+      expect(scheduleRecovery).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: taskId, attemptCount: 1 }), 'owned-coze-expired');
+      const scheduled = scheduleRecovery.mock.calls[0][0];
+      expect(await recoverSketchImageTask(scheduled.id, readSketchImageTaskIdentity(scheduled, 'owner'), f.worker))
+        .toEqual({ status: 'completed' });
+      const reads = storage.proof.reads.slice(beforeRecovery.reads);
+      const heads = storage.proof.zeroLengthHeads.slice(beforeRecovery.heads);
+      expect([...storage.objects.keys()].map(key => key.match(/(?:input-sketch|generated-image)\.png$/u)?.[0]).sort())
+        .toEqual(['generated-image.png', 'input-sketch.png']);
+      for (const [key, entry] of storage.objects) {
+        expect(heads).toContain(key);
+        expect(reads.filter(item => item.key === key)).toEqual(expect.arrayContaining([
+          { key, status: 206, range: 'bytes=0-0' },
+          { key, status: 206, range: `bytes=0-${entry.bytes.length - 1}` },
+        ]));
+      }
+      await delivered(query, taskId, 'owner', value.projectId, 14, 14, 'flat', 7);
+      const result = await originalTask(taskId);
+      expect(result).toMatchObject({ status: 'completed', progress: 100, creditStatus: 'charged', attemptCount: 2 });
+      expect(result.result?.sketchImageSettlement).toMatchObject({ reserveCredits: 14, actualCredits: 14, deltaCredits: 0 });
+      const versions = await query<{ storage_key: string }>('SELECT storage_key FROM wujie_asset_versions WHERE task_id=$1', [taskId]);
+      expect(versions.rows.map(row => row.storage_key).sort()).toEqual([...storage.objects.keys()].sort());
+      expect(versions.rows).toHaveLength(2);
+      expect(await recoverSketchImageTask(taskId, identity, f.worker)).toMatchObject({ status: 'skipped' });
+      await financial(query, taskId, 'owner', 14, held);
+      expect(await counts(query)).toEqual({ tasks: 1, assets: 2, versions: 2, refunds: 0 });
+      expect((await query('SELECT identity FROM wujie_refund_identity_claims')).rows).toEqual([]);
+      expect(f.calls).toEqual({ analysis: 1, generation: 1, remoteIds: [remoteId, remoteId] });
+      expect(storage.proof).toMatchObject({ puts: 4, unboundedProxyGets: 0 });
+    });
+  }, 30_000);
+
   it('publishes flat18 original PNG/new image and replays the original nonce without new work or charge', async (): Promise<void> => {
     await ownedCase('image_pg_flat', async ({ query }, files): Promise<void> => {
       const f = fixture(files), value = request('shared'), accepted = await admission(value, f, 'flat', 'editor');

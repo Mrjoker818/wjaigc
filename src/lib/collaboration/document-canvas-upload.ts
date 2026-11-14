@@ -72,6 +72,9 @@ const VIDEO_TOOL_FILENAMES = {
   'image/gif': /^video_\d+_[a-f0-9]{8}\.gif$/u,
   'video/mp4': /^(?:compressed|merged)_\d+_[a-f0-9]{8}\.mp4$/u,
 };
+const EFFECT_REVERSE_RESULT_PREFIX = '/api/serve-upload/effect-reverse/';
+const EFFECT_REVERSE_TASK_ID = /^effect-reverse-[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/u;
+const TIMESTAMPED_PNG_SUFFIX = /^\d+\.png$/u;
 
 export type VideoToolMediaFormat = keyof typeof VIDEO_TOOL_FILENAMES;
 
@@ -87,40 +90,59 @@ export async function readGeneratedVideoToolFiles(
   });
   const files: File[] = [];
   for (const { url, filename } of paths) {
-    assertCurrent();
-    const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store', redirect: 'error',
-      signal: AbortSignal.timeout(video ? 60_000 : 15_000) });
-    if (!response.ok || response.headers.get('content-type')?.split(';')[0] !== format || !response.body) {
-      await response.body?.cancel().catch(() => undefined);
-      throw new Error('无法读取视频工具结果');
-    }
-    if (Number(response.headers.get('content-length')) > limit) {
-      await response.body.cancel().catch(() => undefined);
-      throw new Error('视频工具结果超过协作画布导入上限');
-    }
-    const reader = response.body.getReader();
-    const parts: ArrayBuffer[] = [];
-    let bytes = 0;
-    try {
-      assertCurrent();
-      for (;;) {
-        const { value, done } = await reader.read();
-        assertCurrent();
-        if (done) break;
-        bytes += value.byteLength;
-        if (bytes > limit) throw new Error('视频工具结果超过协作画布导入上限');
-        parts.push(new Uint8Array(value).buffer);
-      }
-    } catch (error) {
-      await reader.cancel().catch(() => undefined);
-      throw error;
-    } finally {
-      reader.releaseLock();
-    }
-    if (bytes === 0) throw new Error('视频工具结果为空');
-    files.push(new File(parts, filename, { type: format }));
+    files.push(await readGeneratedToolFile(url, filename, format, limit, '视频工具结果',
+      AbortSignal.timeout(video ? 60_000 : 15_000), assertCurrent));
   }
   return files;
+}
+
+export function readEffectReverseResultFile(
+  url: string, taskId: string, filename: string, signal: AbortSignal, assertCurrent: () => void,
+): Promise<File> {
+  const prefix = EFFECT_REVERSE_RESULT_PREFIX + taskId + '-';
+  if (!EFFECT_REVERSE_TASK_ID.test(taskId) || !url.startsWith(prefix)
+    || !TIMESTAMPED_PNG_SUFFIX.test(url.slice(prefix.length))) {
+    throw new Error('拆图结果地址与当前任务不匹配');
+  }
+  return readGeneratedToolFile(url, filename, 'image/png', IMAGE_LIMIT, '拆图结果',
+    AbortSignal.any([signal, AbortSignal.timeout(15_000)]), assertCurrent);
+}
+
+async function readGeneratedToolFile(
+  url: string, filename: string, format: VideoToolMediaFormat, limit: number, label: string,
+  signal: AbortSignal, assertCurrent: () => void,
+): Promise<File> {
+  assertCurrent();
+  const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store', redirect: 'error', signal });
+  if (!response.ok || response.headers.get('content-type')?.split(';')[0] !== format || !response.body) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error(`无法读取${label}`);
+  }
+  if (Number(response.headers.get('content-length')) > limit) {
+    await response.body.cancel().catch(() => undefined);
+    throw new Error(`${label}超过协作画布导入上限`);
+  }
+  const reader = response.body.getReader();
+  const parts: ArrayBuffer[] = [];
+  let bytes = 0;
+  try {
+    assertCurrent();
+    for (;;) {
+      const { value, done } = await reader.read();
+      assertCurrent();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > limit) throw new Error(`${label}超过协作画布导入上限`);
+      parts.push(new Uint8Array(value).buffer);
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+  if (bytes === 0) throw new Error(`${label}为空`);
+  return new File(parts, filename, { type: format });
 }
 
 export interface CommitDocumentCanvasFileInput extends Omit<DocumentCanvasUploadInput, 'idempotencyKey'> {

@@ -23,14 +23,14 @@ describe('effect reverse engineering canvas wiring', () => {
     expect(source).toContain('sourceVersionId:');
     expect(source).toContain('<EffectReverseEngineeringPanel');
     expect(source).toContain('initialSource={effectReverseSource}');
-    expect(source).toContain('onCanvasResult={handleEffectReverseResult}');
+    expect(source).toContain('captureCanvasResult={captureEffectReverseResult}');
   });
 
   it('inserts a corrected result beside the frozen source without replacing it', () => {
-    expect(source).toContain('const handleEffectReverseResult');
+    expect(source).toContain('const captureEffectReverseResult');
     expect(source).toContain('result.correctedImageUrl');
     expect(source).toContain('x: source.x + source.width + 48');
-    expect(source).toContain('onImagesChange([...imagesRef.current, newImage]);');
+    expect(source).toContain('onImagesChange([...imagesRef.current, newImage]) === false');
   });
 
   it('preserves the existing adjacent toolbar actions', () => {

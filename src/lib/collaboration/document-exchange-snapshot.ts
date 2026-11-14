@@ -1,10 +1,13 @@
 import 'server-only';
 import { createHash } from 'node:crypto';
 import type { PoolClient } from 'pg';
-import * as Y from 'yjs';
+import type * as YTypes from 'yjs';
 import { getPool } from '@/lib/db-client';
 import { authorizeDocumentExchangeSessionInTransaction, DocumentExchangeError } from './document-exchange-access';
 import { loadDocumentInTransaction } from './document-store';
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const Y: typeof YTypes = require('yjs');
 
 export interface DocumentExchangeSnapshotInput {
   actorId: string; authSessionHash: string; projectId: string; sessionToken: string;

@@ -2,6 +2,7 @@ import { expect, type Locator, type Page, test } from '@playwright/test';
 import sharp from 'sharp';
 
 import type { TaskModelDescriptor } from '../../src/lib/task-core/model-capability-contract';
+import { QUALITY_LEVEL_DISPLAY_NAMES } from '../../src/lib/canvas-generation-group';
 import { collectBrowserEvidence, saveBrowserEvidence } from '../helpers/evidence';
 
 const username = process.env.E2E_TEST_USERNAME?.trim();
@@ -21,6 +22,7 @@ interface PublicModel {
 
 interface ModelCatalogPayload {
   success?: boolean;
+  providers?: Array<{ id: string; name?: string; displayName?: string }>;
   models?: PublicModel[];
   taskModelCatalog?: TaskModelDescriptor[];
 }
@@ -74,7 +76,13 @@ async function loginAndCreateProject(page: Page): Promise<void> {
   expect((await loginResponse).ok()).toBe(true);
   await expect(page.getByRole('heading', { name: '我的项目', exact: true })).toBeVisible();
   await page.getByRole('button', { name: '新建项目', exact: true }).click();
+  const canvas = page.locator('[data-canvas-viewport]');
+  await expect(canvas).toHaveAttribute('data-project-id', /.+/);
   await expect(page.getByRole('button', { name: '图片上传' })).toBeVisible();
+  const projectId = (await canvas.getAttribute('data-project-id'))!;
+  await expect.poll(async () => (
+    await page.request.get(`/api/collaboration/document-enable?projectId=${encodeURIComponent(projectId)}`)
+  ).status(), { timeout: 30_000 }).toBe(200);
 }
 
 async function fetchCatalog(page: Page, type: 'image' | 'video'): Promise<ModelCatalogPayload> {
@@ -87,8 +95,12 @@ async function fetchCatalog(page: Page, type: 'image' | 'video'): Promise<ModelC
 }
 
 function findProviderSpecificImagePair(payload: ModelCatalogPayload): [ImageCapabilityCase, ImageCapabilityCase] | null {
+  const providers = new Map((payload.providers || []).map(provider => [provider.id, provider]));
   const models = new Map((payload.models || []).map(model => (
-    [`${model.providerId}::${model.id}`, model]
+    [`${model.providerId}::${model.id}`, {
+      ...model,
+      providerName: providers.get(model.providerId)?.name || providers.get(model.providerId)?.displayName || model.providerName,
+    }]
   )));
   const byModelId = new Map<string, TaskModelDescriptor[]>();
   for (const descriptor of payload.taskModelCatalog || []) {
@@ -155,25 +167,30 @@ async function createUploadFixture(): Promise<Buffer> {
 }
 
 async function uploadCanvasImage(page: Page): Promise<Locator> {
-  const images = page.locator('[data-canvas-viewport] img');
+  const images = page.locator('[data-canvas-viewport] [data-canvas-image-id]');
   const before = await images.count();
   await page.getByTestId('canvas-image-upload-input').setInputFiles({
     name: 'v588-provider-capability.png',
     mimeType: 'image/png',
     buffer: await createUploadFixture(),
   });
-  await expect.poll(() => images.count(), { timeout: 30_000 }).toBeGreaterThan(before);
+  await expect(images).toHaveCount(before + 1, { timeout: 30_000 });
+  await expect(images.last().getByRole('img', { name: 'canvas image', exact: true })).toBeVisible();
   return images.last();
 }
 
 async function selectGroupModel(group: Locator, capability: ImageCapabilityCase): Promise<void> {
-  await group.getByText('模型', { exact: true }).locator('..').locator(':scope > button').click();
+  const modelControl = group.getByText('模型', { exact: true }).locator('..');
+  const trigger = modelControl.locator(':scope > button');
+  await trigger.click();
   const label = capability.model.apiDisplayName
     || capability.model.displayName
     || capability.model.name
     || capability.model.id;
   const provider = capability.model.providerName || capability.model.providerId;
-  await group.getByRole('button').filter({ hasText: label }).filter({ hasText: provider }).click();
+  const name = `${label} · 来自 ${provider}`;
+  await modelControl.locator(':scope > div').getByRole('button', { name, exact: true }).click();
+  await expect(trigger).toHaveText(name);
 }
 
 async function assertScaledMenu(
@@ -196,7 +213,7 @@ async function assertScaledMenu(
 async function assertGroupControls(group: Locator, descriptor: TaskModelDescriptor): Promise<void> {
   await assertScaledMenu(group, '图像比例', descriptor.allowedRatios);
   await assertScaledMenu(group, '图片分辨率', descriptor.allowedSizes);
-  await assertScaledMenu(group, '图片质量', descriptor.qualityOptions.map(qualityLabel));
+  await assertScaledMenu(group, '图片质量', descriptor.qualityOptions.map(value => QUALITY_LEVEL_DISPLAY_NAMES[value] || value));
   await assertScaledMenu(
     group,
     '出图数量',
@@ -204,7 +221,7 @@ async function assertGroupControls(group: Locator, descriptor: TaskModelDescript
   );
 }
 
-test.describe.serial('V588-PROVIDER-005 unified provider capabilities', () => {
+test.describe('V588-PROVIDER-005 unified provider capabilities', () => {
   test('same model id keeps provider-specific controls across five user surfaces', async ({ page }, testInfo) => {
     test.setTimeout(180_000);
     requireAccount(testInfo);
@@ -222,7 +239,10 @@ test.describe.serial('V588-PROVIDER-005 unified provider capabilities', () => {
         return;
       }
 
-      await page.getByRole('button', { name: '图像生成器' }).click();
+      const expandPanel = page.getByRole('button', { name: '展开面板', exact: true });
+      if (await expandPanel.isVisible()) await expandPanel.click();
+      await page.getByRole('button', { name: '图像生成', exact: true }).click();
+      await page.getByRole('button', { name: '专业创作', exact: true }).click();
       const generationSelect = page.locator('#gen-model-select');
       await expect(generationSelect).toBeVisible();
       const generationPanel = generationSelect.locator('xpath=ancestor::div[contains(@class,"h-full")][1]');
@@ -231,29 +251,41 @@ test.describe.serial('V588-PROVIDER-005 unified provider capabilities', () => {
         await expect(generationSelect).toHaveValue(exactKey(capability.descriptor));
         await assertGenerationPanelControls(generationPanel, capability.descriptor);
       }
-      await page.getByRole('button', { name: '图像生成器' }).click();
+      await page.getByRole('button', { name: '收起面板', exact: true }).click();
+      await expect(generationSelect).not.toBeVisible();
 
       const image = await uploadCanvasImage(page);
       await image.click({ modifiers: ['Alt'] });
-      await image.click({ modifiers: ['Control'] });
       const referenceGroup = page.locator('[data-toolbar="generation-group"]').filter({ hasText: '参考图组' });
-      const fusionGroup = page.locator('[data-toolbar="generation-group"]').filter({ hasText: '融图组' });
       await expect(referenceGroup).toBeVisible();
-      await expect(fusionGroup).toBeVisible();
+      const zoomOut = page.locator('[data-toolbar="bottom-toolbar"]').getByRole('button', { name: '缩小', exact: true });
+      // The group lives in the canvas world, so use the viewer's zoom to bring
+      // its controls clear of the fixed toolbar on short desktop viewports.
+      for (let step = 0; step < 3; step += 1) await zoomOut.click();
       await selectGroupModel(referenceGroup, pair[0]);
       await assertGroupControls(referenceGroup, pair[0].descriptor);
       await selectGroupModel(referenceGroup, pair[1]);
       await assertGroupControls(referenceGroup, pair[1].descriptor);
+      await referenceGroup.getByTitle('关闭组').click();
+      await expect(referenceGroup).toHaveCount(0);
+
+      const fusionToggle = page.getByRole('button', { name: 'Ctrl+Click 画布图片选择参考融合', exact: true });
+      if (!await fusionToggle.isVisible()) await page.getByTitle('展开工具栏').click();
+      await fusionToggle.click();
+      await image.click({ modifiers: ['Control'] });
+      const fusionGroup = page.locator('[data-toolbar="generation-group"]').filter({ hasText: '融图组' });
+      await expect(fusionGroup).toBeVisible();
       await selectGroupModel(fusionGroup, pair[0]);
       await assertGroupControls(fusionGroup, pair[0].descriptor);
 
       await page.getByTitle('节点模式').click();
       await expect(page.getByRole('toolbar', { name: '工作流工具栏' })).toBeVisible();
-      await page.locator('[data-node-type="ai-generate"]').click();
-      const workflowNode = page.locator('[data-workflow-node-id]').last();
-      await workflowNode.click();
+      const nodeLibrary = page.getByRole('button', { name: '切换节点库面板', exact: true });
+      if (await nodeLibrary.getAttribute('aria-pressed') !== 'true') await nodeLibrary.click();
+      await page.getByRole('complementary', { name: '节点库' }).locator('[data-node-type="ai-generate"]').click();
       const nodeModelField = page.locator('[data-node-field="model"]');
       const nodeModelSelect = nodeModelField.locator('select');
+      await expect(nodeModelSelect).toBeVisible();
       for (const capability of pair) {
         const key = exactKey(capability.descriptor);
         await expect(nodeModelSelect.locator(`option[value="${key}"]`)).toHaveCount(1);
@@ -275,9 +307,10 @@ test.describe.serial('V588-PROVIDER-005 unified provider capabilities', () => {
         test.skip(true, '视频能力目录为空，视频面板保持未验证');
         return;
       }
-      await page.getByRole('button', { name: '视频生成' }).click();
-      const videoPanel = page.getByText('视频模型', { exact: true }).locator('..').locator('..');
-      const videoSelect = videoPanel.locator('select').first();
+      const directVideo = page.getByRole('button', { name: '视频生成', exact: true });
+      if (!await directVideo.isVisible()) await page.getByRole('button', { name: '全部工具', exact: true }).click();
+      await directVideo.click();
+      const videoSelect = page.getByText('视频模型', { exact: true }).locator('..').locator('select');
       await videoSelect.selectOption(exactKey(videoDescriptor));
       await expect(videoSelect).toHaveValue(exactKey(videoDescriptor));
       for (const ratio of videoDescriptor.allowedRatios) {

@@ -1,6 +1,11 @@
 import { expect, test } from '@playwright/test';
 
 import {
+  classifyProductionShareRequest,
+  matchesShareBuildAsset,
+  readShareBuildAssets,
+} from '../helpers/read-only-canvas-share-build-assets';
+import {
   configureShareEvidence,
   createShareEvidence,
   downloadPath,
@@ -40,7 +45,11 @@ test('context gate records the exact negative request and frame-navigation multi
   const sameOrigin = new URL(baseURL).origin;
   const evidence = createShareEvidence();
   configureShareEvidence(evidence, 'desktop-invalid', 'network-gate/negative-self-test');
-  const observer = observeReadOnlyShareRequests(context, evidence, baseURL, page);
+  const buildDirectory = process.env.WUJIE_SHARE_NETWORK_BUILD_DIR?.trim();
+  const assets = buildDirectory ? await readShareBuildAssets(buildDirectory) : null;
+  const observer = observeReadOnlyShareRequests(context, evidence, baseURL, page, assets
+    ? record => classifyProductionShareRequest(assets, 'desktop-invalid', record)
+    : undefined);
   let stopped = false;
   await context.route('https://task7.invalid/**', route => route.abort('blockedbyclient'));
   await context.route('**/__task7-probe/**', async route => {
@@ -103,6 +112,14 @@ test('context gate records the exact negative request and frame-navigation multi
     await observer.settleAndStop();
     stopped = true;
 
+    if (assets) {
+      // Require that the production rules were exercised, not merely present.
+      const recognized = evidence.requests.filter(record => matchesShareBuildAsset(assets, {
+        ...record, origin: record.origin === sameOrigin ? ':same-origin' : record.origin,
+      }));
+      expect(recognized.some(record => record.resourceType === 'script')).toBe(true);
+      expect(recognized.some(record => record.resourceType === 'stylesheet')).toBe(true);
+    }
     const expected = [
       { method: 'POST', origin: sameOrigin, pathname: '/__task7-probe/non-api-write', search: '', reason: 'unsafe-method', pageRole: 'primary', frameRole: 'main', resourceType: 'fetch', navigation: false, range: null },
       { method: 'GET', origin: 'https://task7.invalid', pathname: '/read', search: '', reason: 'cross-origin', pageRole: 'primary', frameRole: 'main', resourceType: 'fetch', navigation: false, range: null },
@@ -131,6 +148,15 @@ test('context gate records the exact negative request and frame-navigation multi
       frameRole: 'main',
       reason: 'unexpected-navigation',
     }]);
+    if (assets) {
+      await testInfo.attach('production-network-negative-check', {
+        contentType: 'application/json',
+        body: JSON.stringify({
+          expectedForbiddenRequests: expected.length, observedForbiddenRequests: evidence.forbiddenRequests.length,
+          forbiddenFrameNavigations: evidence.forbiddenFrameNavigations.length, exactMultiset: true,
+        }),
+      });
+    }
   } finally {
     if (!stopped) await observer.settleAndStop();
   }

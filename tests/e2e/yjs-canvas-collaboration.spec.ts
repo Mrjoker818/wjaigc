@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { Client } from 'pg';
 import { WORKSPACE_PANEL_RAIL_WIDTH } from '../../src/lib/workspace-panel-layout';
+import { closeCollaborationContext, test } from '../helpers/local-yjs-browser-test';
 
 interface ProjectImage {
   id: string;
@@ -197,16 +198,17 @@ async function openAnnotationComposer(page: Page): Promise<void> {
   await expect(page.getByTestId('annotation-composer')).toBeVisible();
 }
 
-test('owner and invited editor converge without copying the project into the editor account', async ({ browser, browserName, headless, launchOptions }) => {
-  test.skip(!localGate, 'Requires an explicit isolated localhost Yjs gate');
+test.skip(!localGate, 'Requires an explicit isolated localhost Yjs gate');
+
+test('owner and invited editor converge without copying the project into the editor account', async ({ collaborationBrowser: browser, browserName, headless, launchOptions }) => {
   test.setTimeout(240_000);
   const gate = requireLocalGate();
   let firstContext = await browser.newContext({ baseURL: gate.baseURL, viewport: { width: 1280, height: 800 } });
-  let firstPage = await firstContext.newPage();
   let editorBrowser: Browser | undefined;
   let secondContextForCleanup: BrowserContext | undefined;
 
   try {
+    let firstPage = await firstContext.newPage();
     // The isolated setContent probe reproduces Firefox's captured mouse input
     // crossing contexts even after bringToFront. A separate browser process
     // preserves owner's live gesture while editor receives its own native click.
@@ -391,7 +393,7 @@ test('owner and invited editor converge without copying the project into the edi
     expect(((await readProjects(secondContext)).value ?? []).some(project => project.id === projectId)).toBe(false);
 
     const ownerStorage = await firstContext.storageState();
-    await firstContext.close();
+    await closeCollaborationContext(firstContext);
     firstContext = await browser.newContext({
       baseURL: gate.baseURL,
       storageState: ownerStorage,
@@ -1112,10 +1114,10 @@ test('owner and invited editor converge without copying the project into the edi
     expect(errors).toEqual([]);
   } finally {
     try {
-      await secondContextForCleanup?.close();
+      if (secondContextForCleanup) await closeCollaborationContext(secondContextForCleanup);
     } finally {
       try {
-        await firstContext.close();
+        await closeCollaborationContext(firstContext);
       } finally {
         await editorBrowser?.close();
       }

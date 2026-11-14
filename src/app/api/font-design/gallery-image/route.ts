@@ -47,9 +47,9 @@ export async function GET(request: NextRequest) {
     // Priority 1: Check localPath (extracted from embedded markdown images)
     if (item.localPath) {
       // Path traversal prevention: normalize and verify the path is within public/gallery
-      const resolvedPath = path.resolve(process.cwd(), 'public', item.localPath);
-      const allowedDir = path.resolve(process.cwd(), 'public', 'gallery');
-      if (!resolvedPath.startsWith(allowedDir)) {
+      const resolvedPath = path.resolve(process.cwd(), 'public', item.localPath.replace(/^\/+/, ''));
+      const relativePath = path.relative(GALLERY_DIR, resolvedPath);
+      if (!relativePath || relativePath === '..' || relativePath.startsWith('..' + path.sep) || path.isAbsolute(relativePath)) {
         console.warn('[gallery-image] Path traversal blocked:', item.localPath);
         return NextResponse.json({ error: 'Invalid path' }, { status: 403 });
       }

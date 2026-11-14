@@ -55,6 +55,8 @@ export interface EffectReverseTaskResult {
   regions?: EffectReverseRegion[];
 }
 
+export type EffectReverseResultHandler = (result: EffectReverseTaskResult, taskId: string) => void | Promise<void>;
+
 export interface EffectReverseTaskRecord {
   taskId: string;
   userId: string;

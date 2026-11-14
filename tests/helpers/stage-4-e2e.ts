@@ -602,6 +602,7 @@ export async function seedStage4RuntimeDependencies(input: {
   fixture: Stage4SeedTarget;
   page: Page;
   providerBaseUrl: string;
+  imageAspectRatios?: readonly string[];
 }): Promise<{ sourceVersionId: string; selectedEntityId: string; canonicalUrl: string }> {
   await assertStage4IsolationDatabaseConfigured();
   const connectionString = process.env.DATABASE_URL || process.env.PGDATABASE_URL;
@@ -653,7 +654,7 @@ export async function seedStage4RuntimeDependencies(input: {
           id: 'stage4-image-model',
           name: 'Stage 4 Image Model',
           type: 'image',
-          supportedAspectRatios: ['1:1'],
+          supportedAspectRatios: input.imageAspectRatios ?? ['1:1'],
           supportedQualities: ['1K'],
           maxImages: 1,
           capabilities: ['image'],

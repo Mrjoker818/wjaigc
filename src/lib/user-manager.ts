@@ -3068,6 +3068,7 @@ export class UserManager {
     const imageUrlMap = new Map<string, string>();
     const uniqueUrls = [...new Set(project.canvasImages.map(img => img.url).filter(Boolean))];
     await Promise.all(uniqueUrls.map(async (url) => {
+      if (url.startsWith('data:')) return;
       try {
         // For relative URLs, prepend the origin
         const fetchUrl = url.startsWith('/') ? `${window.location.origin}${url}` : url;
@@ -3111,7 +3112,10 @@ export class UserManager {
       format: 'wujie-project',
       version: '2.0',
       exportedAt: Date.now(),
-      project,
+      project: {
+        ...project,
+        canvasImages: project.canvasImages.map(image => ({ ...image, url: resolveUrl(image.url) })),
+      },
     };
     const jsonBlock = JSON.stringify(payload);
 
@@ -3366,6 +3370,18 @@ export class UserManager {
       name: payload.project.name || 'Imported Project',
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      canvasImages: payload.project.canvasImages.map(image => {
+        // The imported project owns new placements. Keep the archived bytes and layer IDs.
+        const imported = { ...image };
+        delete imported.assetId;
+        delete imported.assetVersionId;
+        delete imported.placementId;
+        if (/^data:image\//i.test(imported.url) && imported.mediaType !== 'video') {
+          imported.sourceUrl = imported.url;
+          imported.thumbnailUrl = imported.url;
+        }
+        return imported;
+      }),
     };
     userData.projects.unshift(project);
     this.markProjectMutation();

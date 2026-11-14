@@ -2,7 +2,7 @@ import 'server-only';
 
 import { createHash } from 'node:crypto';
 import type { PoolClient } from 'pg';
-import * as Y from 'yjs';
+import type * as YTypes from 'yjs';
 import { getPool } from '@/lib/db-client';
 import { commitDocumentUpdateInTransaction, DocumentUpdateRejectedError, loadDocumentInTransaction } from './document-store';
 import { DocumentAssetError } from './document-assets';
@@ -10,6 +10,10 @@ import { assertDocumentExchangeMetadataUpdate, DocumentExchangeDependencyPending
 import { getDocumentExecutionScope } from './document-execution-scope';
 import { authorizeDocumentExchangeSessionInTransaction, DocumentExchangeError,
   type StoredDocumentExchangeSession as StoredSession } from './document-exchange-access';
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const Y: typeof YTypes = require('yjs');
+
 export { authorizeDocumentExchangeSessionInTransaction, DocumentExchangeError } from './document-exchange-access';
 
 export interface DocumentExchangeUpdateInput {

@@ -1,177 +1,161 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createReadStream, statSync, existsSync, readdirSync } from 'fs';
-import { join, relative } from 'path';
-import { Readable } from 'stream';
-import { pipeline } from 'stream/promises';
-import { createGzip } from 'zlib';
-import { spawn, execFileSync, execSync } from 'child_process';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import { requireAdminUser } from '@/lib/server-auth';
 
-const PROJECT_ROOT = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
-
 // Exclude patterns for each scope
-const EXCLUDE_COMMON = [
-  'node_modules',
-  '.next',
-  '.git',
-  'upscayl-models',
-  '__pycache__',
-  '*.pyc',
-  '.DS_Store',
-  'project-source.tar.gz',
+const EXCLUDE_NAMES = [
+  'node_modules', '.next', '.git', 'upscayl-models', '__pycache__',
+  '.DS_Store', 'project-source.tar.gz', 'deploy-seed',
 ];
+const EXCLUDE_PATHS = ['data/system', 'data/users'];
+const ENV_EXAMPLE = '.env.example';
+const ENV_PREFIX = '.env.';
+const execFileAsync = promisify(execFile);
 
-interface FileEntry {
-  path: string;        // Relative path from project root
-  fullPath: string;    // Absolute path
-  size: number;
+function envExcludes(includeExample: boolean): string[] {
+  if (!includeExample) return ['.env', '.env.*'];
+  // Tar exclusion globs have no negation. Match shorter names, the first
+  // differing letter, longer names, and examples below the workspace root.
+  const suffix = ENV_EXAMPLE.slice(ENV_PREFIX.length);
+  const patterns = ['.env', '*/' + ENV_EXAMPLE, ENV_EXAMPLE + '?*'];
+  for (let i = 0; i < suffix.length; i++) {
+    const prefix = ENV_PREFIX + suffix.slice(0, i);
+    patterns.push(prefix, prefix + '[!' + suffix[i] + ']*');
+  }
+  return patterns;
 }
 
-function toResponseStream(stream: Readable): ReadableStream<Uint8Array> {
-  return Readable.toWeb(stream) as ReadableStream<Uint8Array>;
-}
+// Keep runtime workspace inspection out of the Next build's file tracing.
+const INSPECT_WORKSPACE = `
+  const { lstatSync, readdirSync, statSync } = require('node:fs');
+  const { join } = require('node:path');
+  const [root, config] = process.argv.slice(1);
+  const { entries, excludeNames, excludePaths, envExample } = JSON.parse(config);
+  const directory = path => statSync(path, { throwIfNoEntry: false })?.isDirectory();
+  const excluded = new Set(excludePaths);
+  if (!directory(root) || !directory(join(root, 'src'))) process.exit(2);
+  const present = entries.length
+    ? entries.filter(name => statSync(join(root, name), { throwIfNoEntry: false }))
+    : readdirSync(root);
+  const includeEnvExample = entries.length === 0
+    && lstatSync(join(root, envExample), { throwIfNoEntry: false })?.isFile() === true;
+  const countDeadline = performance.now() + 1500;
+  function count(dir, prefix = '') {
+    let files = 0;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (performance.now() > countDeadline) throw new Error('File count deadline');
+      const path = prefix + entry.name;
+      if (excludeNames.includes(entry.name) || excluded.has(path) || entry.name.endsWith('.pyc')
+        || entry.name === '.env'
+        || (entry.name.startsWith('.env.') && !(includeEnvExample && path === envExample))) continue;
+      if (entry.isDirectory()) files += count(join(dir, entry.name), path + '/');
+      else if (entry.isFile()) files++;
+    }
+    return files;
+  }
+  let fileCount = -1;
+  try {
+    fileCount = entries.length
+      ? present.reduce((n, name) => n + (directory(join(root, name)) ? count(join(root, name), name + '/') : 1), 0)
+      : count(root);
+  } catch { /* The count is informational. */ }
+  process.stdout.write(JSON.stringify({ present, fileCount, includeEnvExample }));
+`;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
 /**
- * Walk directory and collect files matching include/exclude rules
- */
-function walkDir(dir: string, baseDir: string, excludes: string[], includes: string[] | null): FileEntry[] {
-  const results: FileEntry[] = [];
-  
-  if (!existsSync(dir)) return results;
-  
-  const entries = readdirSync(dir, { withFileTypes: true });
-  
-  for (const entry of entries) {
-    const fullPath = join(dir, entry.name);
-    const relPath = relative(baseDir, fullPath);
-    
-    // Check excludes
-    if (excludes.some(exc => {
-      if (exc.startsWith('*.')) {
-        return entry.name.endsWith(exc.slice(1));
-      }
-      return entry.name === exc || relPath.startsWith(exc + '/');
-    })) {
-      continue;
-    }
-    
-    // Check includes (if specified, only include matching paths)
-    if (includes && !includes.some(inc => relPath.startsWith(inc + '/') || relPath === inc)) {
-      if (entry.isDirectory()) {
-        // Still recurse into subdirs that might contain included paths
-        const subResults = walkDir(fullPath, baseDir, excludes, includes);
-        results.push(...subResults);
-      }
-      continue;
-    }
-    
-    if (entry.isDirectory()) {
-      results.push(...walkDir(fullPath, baseDir, excludes, null));
-    } else if (entry.isFile()) {
-      try {
-        const stat = statSync(fullPath);
-        results.push({ path: relPath, fullPath, size: stat.size });
-      } catch {
-        // Skip files we can't stat
-      }
-    }
-  }
-  
-  return results;
-}
-
-/**
  * Create a tar.gz stream of the project
  * Uses Node.js child_process to call tar for reliability with large directories
  */
-async function createTarGz(scope: string): Promise<{ stream: Readable; fileCount: number; totalSize: number }> {
-  const excludes = [...EXCLUDE_COMMON];
-  let includes: string[] | null = null;
-  
-  switch (scope) {
-    case 'source':
-      // Source code only: src, scripts, configs
-      includes = ['src', 'scripts'];
-      break;
-    case 'source-config':
-      // Source + config files
-      includes = ['src', 'scripts'];
-      // Also include root config files
-      break;
-    case 'with-assets':
-      // Source + config + public assets (no uploads/outputs)
-      excludes.push('public/uploads', 'public/outputs', 'public/ai-psd', 'public/gallery');
-      break;
-    case 'full':
-      // Everything
-      break;
-    default:
-      includes = ['src', 'scripts'];
+async function createTarGz(scope: string, signal: AbortSignal): Promise<{
+  stream: ReadableStream<Uint8Array>; fileCount: number;
+}> {
+  signal.throwIfAborted();
+  const projectRoot = process.env.COZE_WORKSPACE_PATH?.trim() || process.cwd();
+  const withAssets = scope === 'with-assets';
+  const entries = scope === 'source' || scope === 'source-config' ? ['src', 'scripts'] : [];
+  if (scope === 'source-config') {
+    entries.push(
+      'package.json', 'pnpm-lock.yaml', 'tsconfig.json', 'next.config.ts',
+      'next-env.d.ts', 'postcss.config.mjs', 'tailwind.config.ts', 'components.json',
+      'drizzle.config.ts', 'eslint.config.mjs', '.coze', '.gitignore', 'AGENTS.md', 'DESIGN.md',
+    );
   }
-  
-  // Build tar arguments
-  const tarArgs: string[] = ['cfz', '-', '-C', PROJECT_ROOT];
-  
-  for (const exc of excludes) {
-    if (!exc.startsWith('*.')) {
-      tarArgs.push(`--exclude=./${exc}`);
-    } else {
-      tarArgs.push(`--exclude=${exc}`);
-    }
-  }
-  
-  if (scope === 'source' || scope === 'source-config') {
-    // Add source directories
-    tarArgs.push('./src', './scripts');
-    
-    if (scope === 'source-config') {
-      // Add config files
-      const configFiles = [
-        'package.json', 'pnpm-lock.yaml', 'tsconfig.json', 'next.config.ts',
-        'next-env.d.ts', 'postcss.config.mjs', 'tailwind.config.ts',
-        'components.json', 'drizzle.config.ts', 'eslint.config.mjs',
-        '.coze', '.gitignore', 'AGENTS.md', 'DESIGN.md',
-      ];
-      const probe = 'const fs=require("node:fs");const path=require("node:path");const root=process.argv[1];const names=JSON.parse(process.argv[2]);process.stdout.write(JSON.stringify(names.filter(name=>fs.existsSync(path.join(root,name)))));';
-      const existing = JSON.parse(execFileSync(process.execPath, [
-        '-e', probe, PROJECT_ROOT, JSON.stringify(configFiles),
-      ], { encoding: 'utf8', timeout: 5000, maxBuffer: 65536, windowsHide: true })) as string[];
-      for (const f of existing) {
-        tarArgs.push(`./${f}`);
-      }
-    }
-  } else {
-    // Add everything (excludes already set)
-    tarArgs.push('.');
-  }
-  
-  const tar = spawn('tar', tarArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
-  
-  // Count files (non-blocking, approximate)
-  let fileCount = 0;
-  const totalSize = 0;
-  
-  // Quick file count for metadata
+  const excludePaths = withAssets
+    ? [...EXCLUDE_PATHS, 'public/uploads', 'public/outputs', 'public/ai-psd', 'public/gallery']
+    : EXCLUDE_PATHS;
+  let workspace: { present: string[]; fileCount: number; includeEnvExample: boolean };
   try {
-    let findCmd = `find ${PROJECT_ROOT}`;
-    for (const exc of EXCLUDE_COMMON) {
-      if (!exc.startsWith('*.')) {
-        findCmd += ` -path '*/${exc}' -prune -o`;
-      }
-    }
-    findCmd += ` -type f -print | wc -l`;
-    fileCount = parseInt(execSync(findCmd, { timeout: 5000 }).toString().trim()) || 0;
+    const { stdout } = await execFileAsync(process.execPath, [
+      '-e', INSPECT_WORKSPACE, '--', projectRoot,
+      JSON.stringify({ entries, excludeNames: EXCLUDE_NAMES, excludePaths, envExample: ENV_EXAMPLE }),
+    ], { encoding: 'utf8', timeout: 5_000, maxBuffer: 65_536, windowsHide: true, signal });
+    workspace = JSON.parse(stdout);
   } catch {
-    fileCount = -1; // Unknown
+    throw new Error('Project export workspace is unavailable');
   }
-  
-  const stream = Readable.from(tar.stdout);
-  
-  return { stream, fileCount, totalSize };
+  const useBareInputs = entries.length > 0 || workspace.includeEnvExample;
+  const paths = useBareInputs ? excludePaths : excludePaths.map(path => './' + path);
+  const excludes = [...EXCLUDE_NAMES, ...paths, '*.pyc', ...envExcludes(workspace.includeEnvExample)];
+  // With bare root entries, */.env.example excludes all nested templates on
+  // GNU tar, bsdtar and BusyBox while keeping the top-level template.
+  const inputs = useBareInputs ? ['--', ...workspace.present] : ['.'];
+  signal.throwIfAborted();
+  const tarArgs = ['cfz', '-', '-C', projectRoot, ...excludes.map(pattern => `--exclude=${pattern}`), ...inputs];
+
+  const tar = spawn('tar', tarArgs, { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+  const stop = (): void => {
+    if (tar.exitCode === null && tar.signalCode === null) tar.kill();
+    tar.stdout.destroy();
+    signal.removeEventListener('abort', stop);
+  };
+  const finished = new Promise<boolean>(resolve => {
+    tar.once('error', () => resolve(false));
+    tar.once('close', code => {
+      signal.removeEventListener('abort', stop);
+      resolve(code === 0);
+    });
+  });
+  signal.addEventListener('abort', stop, { once: true });
+  if (signal.aborted) stop();
+  const chunks = tar.stdout.iterator({ destroyOnReturn: false });
+  let current: IteratorResult<Buffer>;
+  try {
+    current = await chunks.next();
+    signal.throwIfAborted();
+    if (current.done) throw new Error('Project archive could not be created');
+  } catch (error) {
+    stop();
+    signal.throwIfAborted();
+    throw error;
+  }
+
+  let pending: IteratorResult<Buffer> | undefined = current;
+  let cancelled = false;
+  const stream = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const chunk = pending ?? await chunks.next();
+      pending = undefined;
+      if (cancelled) return;
+      if (!chunk.done) {
+        controller.enqueue(chunk.value);
+        return;
+      }
+      const succeeded = await finished;
+      if (cancelled) return;
+      if (!succeeded || signal.aborted) throw new Error('Project archive was interrupted');
+      controller.close();
+    },
+    cancel() {
+      cancelled = true;
+      stop();
+    },
+  });
+  return { stream, fileCount: workspace.fileCount };
 }
 
 /**
@@ -196,7 +180,7 @@ export async function GET(request: NextRequest) {
 
     try {
       console.log(`[export-project] Starting export, scope=${scope}`);
-      const { stream, fileCount } = await createTarGz(scope);
+      const { stream, fileCount } = await createTarGz(scope, request.signal);
 
       const scopeLabels: Record<string, string> = {
         'source': '无界AI-纯源码',
@@ -207,7 +191,7 @@ export async function GET(request: NextRequest) {
 
       const filename = `${scopeLabels[scope] || 'project'}-${new Date().toISOString().slice(0, 10)}.tar.gz`;
 
-      return new NextResponse(toResponseStream(stream), {
+      return new NextResponse(stream, {
         headers: {
           'Content-Type': 'application/gzip',
           'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
@@ -216,6 +200,7 @@ export async function GET(request: NextRequest) {
         },
       });
     } catch (error: unknown) {
+      if (request.signal.aborted) return new Response(null, { status: 499 });
       console.error('[export-project] Export failed:', error);
       return NextResponse.json(
         { error: `Export failed: ${errorMessage(error)}` },
@@ -247,7 +232,7 @@ export async function GET(request: NextRequest) {
     {
       id: 'full',
       label: '完整项目',
-      description: '所有内容（含用户上传文件、生成图片、PSD 等资源）',
+      description: '源码及用户上传、生成图片、PSD 等资源。环境文件与账号配置另行管理。',
       estimatedSize: '~1.7GB',
     },
   ];
@@ -272,7 +257,7 @@ export async function POST(request: NextRequest) {
     
     console.log(`[export-project] Starting export, scope=${scope}`);
     
-    const { stream, fileCount } = await createTarGz(scope);
+    const { stream, fileCount } = await createTarGz(scope, request.signal);
     
     const scopeLabels: Record<string, string> = {
       'source': '无界AI-纯源码',
@@ -284,7 +269,7 @@ export async function POST(request: NextRequest) {
     const filename = `${scopeLabels[scope] || 'project'}-${new Date().toISOString().slice(0,10)}.tar.gz`;
     
     // Return streaming response
-    return new NextResponse(toResponseStream(stream), {
+    return new NextResponse(stream, {
       headers: {
         'Content-Type': 'application/gzip',
         'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
@@ -293,6 +278,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error: unknown) {
+    if (request.signal.aborted) return new Response(null, { status: 499 });
     console.error('[export-project] Export failed:', error);
     return NextResponse.json(
       { error: `Export failed: ${errorMessage(error)}` },

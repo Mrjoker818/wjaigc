@@ -50,8 +50,12 @@ class CanvasErrorBoundary extends Component<EBProps, EBState> {
 /*  Proxy helper — route through our backend to avoid CORS             */
 /* ------------------------------------------------------------------ */
 function proxyUrl(url: string): string {
-  if (url.startsWith('/')) return url;
-  if (typeof window !== 'undefined' && url.startsWith(window.location.origin)) return url;
+  if (typeof window !== 'undefined') {
+    try {
+      const model = new URL(url, window.location.origin);
+      if (model.protocol === window.location.protocol && model.origin === window.location.origin) return model.href;
+    } catch { /* The proxy returns an error for invalid URLs. */ }
+  }
   return `/api/proxy-3d-model?url=${encodeURIComponent(url)}`;
 }
 
@@ -637,8 +641,7 @@ export default function ModelViewer3D({
   const handleDownload = useCallback(async (url: string, filename: string) => {
     setDownloading(true);
     try {
-      const proxyDownloadUrl = `/api/proxy-3d-model?url=${encodeURIComponent(url)}`;
-      const response = await fetch(proxyDownloadUrl);
+      const response = await fetch(proxyUrl(url));
       if (!response.ok) throw new Error(`Download failed: ${response.status}`);
       const blob = await response.blob();
       const blobUrl = window.URL.createObjectURL(blob);

@@ -1158,8 +1158,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       reader.onload = () => {
         try {
           mgr.importProjectFromWujie(String(reader.result || ''));
-          // Force re-render by toggling state
-          setActiveTab('projects');
+          setProjectRevision(revision => revision + 1);
         } catch {
           alert('导入失败，请选择有效的 .wujie 文件。');
         }

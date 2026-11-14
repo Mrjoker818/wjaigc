@@ -84,6 +84,25 @@ vi.mock('@/lib/op-log', () => ({
 import { POST as generate } from '@/app/api/generate/route';
 import { POST as universal } from '@/app/api/universal-generate/route';
 
+describe('ordinary universal generation input', () => {
+  it.each([
+    [{}, '请选择图像模型'],
+    [{ model: 'exact-image', prompt: '   ' }, '请输入创意描述'],
+  ])('rejects incomplete form values before consulting a model provider', async (body, message) => {
+    const response = await universal(new NextRequest('http://localhost/api/universal-generate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ success: false, error: message });
+    expect(state.providerLookup).not.toHaveBeenCalled();
+    expect(state.billable).not.toHaveBeenCalled();
+    expect(state.network).not.toHaveBeenCalled();
+  });
+});
+
 function request(projectId?: unknown, extra: Record<string, unknown> = {}, headers: Record<string, string> = {}): NextRequest {
   return new NextRequest('http://localhost/api/generate', {
     method: 'POST', headers: { 'content-type': 'application/json', ...headers },

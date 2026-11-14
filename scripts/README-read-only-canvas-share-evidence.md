@@ -29,3 +29,11 @@ pnpm exec tsx scripts/finalize-read-only-canvas-share-evidence.ts --run-id $runI
 ```
 
 初始化和 finalizer 都会拒绝 HEAD 不一致、tracked/index dirty 以及任何未忽略的 untracked 文件。`output/` 下被 Git 忽略的证据目录不影响该门禁。
+
+## 生产构建的补充检查
+
+对隔离的 `next start` 应用运行严格请求检查时，将 `E2E_BASE_URL` 指向该应用，并将 `WUJIE_SHARE_NETWORK_BUILD_DIR` 指向启动时使用的、已封存的 `.next` 目录。负向用例及桌面、移动矩阵按分享页的构建清单核对静态路径，继续逐项检查公开接口、请求方法、来源和主页面身份。此模式将结果写入独立的 Playwright 附件，不会写入或晋级旧的八条记录。
+
+生产构建的允许下载场景使用 `read-only-canvas-share-real-video.spec.ts`，因为 Chromium 的原生下载不会经过页面模拟路由。该用例在 Chromium 和 WebKit 使用 PostgreSQL 的真实分享令牌及原生 MP4，验证点击、下载路径和完整文件校验和。使用 `--reporter=list,json` 或 `--reporter=line`，不保留含令牌的追踪、截图或录屏。
+
+运行前设置 `E2E_SHARE_VIDEO_LOCAL_GATE=1`、`E2E_SHARE_VIDEO_DATABASE_URL`，并提供与该隔离应用匹配的 `E2E_STAGE4_RUN_ID`、专用 `WUJIE_DATA_DIR` 和测试管理员。由隔离环境启动器生成 32 位小写十六进制 `E2E_SHARE_VIDEO_RUN_NONCE`，在专用数据库的 `wujie_qa_share_video_identity(nonce TEXT PRIMARY KEY)` 放入唯一一行同值，且在独占的 `WUJIE_DATA_DIR/uploads` 放入 `qa-share-gate-<nonce>.png`（可用 `tests/fixtures/tiny-test.png`）。用例核对数据库、该文件的真实 HTTP 读回和运行构建后才登录、写合成素材。分享最长有效三分钟，正常结束时立即撤销。

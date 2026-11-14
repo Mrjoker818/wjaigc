@@ -1,6 +1,7 @@
 import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
 
 const HANDOFF_ID = /^[A-Za-z0-9._:/ -]{1,200}$/;
+const SIMPLE_CREATE_PATH = '/simple-create';
 
 export interface SimpleCreateCanvasHandoff {
   projectId: string;
@@ -20,6 +21,17 @@ export function buildSimpleCreateCanvasUrl(
 
 export function buildSimpleCreateLoginUrl(returnTo: string): string {
   return `/?${new URLSearchParams({ returnTo }).toString()}`;
+}
+
+export function readSimpleCreateLoginTarget(returnTo: string | null): string | null {
+  const prefix = `${SIMPLE_CREATE_PATH}?`;
+  if (!returnTo?.startsWith(prefix)) return null;
+
+  const projects = new URLSearchParams(returnTo.slice(prefix.length)).getAll('projectId');
+  const [projectId] = projects;
+  if (projects.length !== 1 || !projectId || !projectId.trim() || !HANDOFF_ID.test(projectId)) return null;
+
+  return `${SIMPLE_CREATE_PATH}?${new URLSearchParams({ projectId })}`;
 }
 
 export function parseSimpleCreateCanvasHandoff(

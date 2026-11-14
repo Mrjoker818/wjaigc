@@ -524,11 +524,11 @@ test('Canvas 与 Workflow 交付同一版本的逐图平台合规报告并隔离
   await page.getByPlaceholder('搜索 Skills...').fill('平台素材合规');
   await page.getByText('平台素材合规检查', { exact: true }).last().click();
   await expect(page.getByRole('status', { name: '来源图片' })).toHaveText('已选择 3 张来源图片');
-  await page.getByLabel('平台').selectOption('Amazon');
-  await page.getByLabel('地区').selectOption('US');
-  await page.getByLabel('素材类型').selectOption('main');
-  await page.getByLabel('商品事实').fill('商品为无文字、无边框的方形耳机主图。');
-  await page.getByLabel('报告语言').selectOption('中文');
+  await page.getByRole('combobox', { name: '平台', exact: true }).selectOption('Amazon');
+  await page.getByRole('combobox', { name: '地区', exact: true }).selectOption('US');
+  await page.getByRole('combobox', { name: '素材类型', exact: true }).selectOption('main');
+  await page.getByRole('textbox', { name: '商品事实', exact: true }).fill('商品为无文字、无边框的方形耳机主图。');
+  await page.getByRole('combobox', { name: '报告语言', exact: true }).selectOption('中文');
 
   const canvasSubmission = page.waitForResponse(response => (
     new URL(response.url()).pathname === '/api/skill-runs'

@@ -10,7 +10,7 @@ describe('project source export authorization contract', () => {
   it('requires an administrator before GET can create an archive', () => {
     const handler = source.slice(source.indexOf('export async function GET(request: NextRequest)'));
     const authorizationIndex = handler.indexOf('requireAdminUser(request)');
-    const archiveIndex = handler.indexOf('createTarGz(scope)');
+    const archiveIndex = handler.indexOf('createTarGz(scope, request.signal)');
 
     expect(authorizationIndex).toBeGreaterThanOrEqual(0);
     expect(archiveIndex).toBeGreaterThan(authorizationIndex);
@@ -20,7 +20,7 @@ describe('project source export authorization contract', () => {
     const handler = source.slice(source.indexOf('export async function POST(request: NextRequest)'));
     const authorizationIndex = handler.indexOf('requireAdminUser(request)');
     const bodyIndex = handler.indexOf('await request.json()');
-    const archiveIndex = handler.indexOf('createTarGz(scope)');
+    const archiveIndex = handler.indexOf('createTarGz(scope, request.signal)');
 
     expect(authorizationIndex).toBeGreaterThanOrEqual(0);
     expect(bodyIndex).toBeGreaterThan(authorizationIndex);

@@ -38,10 +38,11 @@ function Toast({ id, title, description, variant = 'default', onClose }: ToastPr
         )}
       </div>
       <button
+        aria-label="关闭"
         onClick={() => onClose(id)}
         className="ml-4 text-zinc-400 hover:text-zinc-600"
       >
-        <X className="h-4 w-4" />
+        <X aria-hidden="true" className="h-4 w-4" />
       </button>
     </div>
   );

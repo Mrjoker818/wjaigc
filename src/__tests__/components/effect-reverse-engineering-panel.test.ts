@@ -37,7 +37,7 @@ describe('EffectReverseEngineeringPanel contract', () => {
   it('shows task progress, supports cancellation, and returns results to the canvas', () => {
     expect(workspaceSource).toContain('task.progress');
     expect(source).toContain("method: 'DELETE'");
-    expect(source).toContain('onCanvasResult(payload.result)');
+    expect(source).toContain('await active.deliver(payload.result, taskId)');
     expect(source).toContain('taskEventsClient.onTaskEvent');
     expect(source).toContain('pollTask');
   });

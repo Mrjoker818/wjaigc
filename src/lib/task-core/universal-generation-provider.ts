@@ -53,6 +53,13 @@ export async function executePrivateUniversalGeneration(body: UniversalGenerateR
       providerId,
     } = body;
 
+    if (typeof model !== 'string' || !model.trim()) {
+      return NextResponse.json({ success: false, error: '请选择图像模型' }, { status: 400 });
+    }
+    if (typeof prompt !== 'string' || !prompt.trim()) {
+      return NextResponse.json({ success: false, error: '请输入创意描述' }, { status: 400 });
+    }
+
     // Content safety check
     const safetyResult = checkPromptSafety(prompt || '');
     if (safetyResult.level === 'block') {

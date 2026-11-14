@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 
 /**
@@ -13,8 +12,6 @@ import { requireApiAuthOrReject } from '@/lib/api-auth';
  * for knowledge base indexing and AI reference.
  */
 export async function POST(req: NextRequest) {
-  const tmpPath: string | null = null;
-
   const authResult = await requireApiAuthOrReject(req);
   if (authResult instanceof NextResponse) return authResult;
 
@@ -27,31 +24,30 @@ export async function POST(req: NextRequest) {
     }
 
     // Download the file
-    let arrayBuffer: ArrayBuffer;
+    let buffer: Buffer;
 
     if (fileUrl.startsWith('data:')) {
       // Base64 data URL
       const base64 = fileUrl.split(',')[1];
-      arrayBuffer = Buffer.from(base64, 'base64').buffer;
+      buffer = Buffer.from(base64, 'base64');
     } else if (fileUrl.startsWith('http')) {
       // HTTP URL - download
       const resp = await fetch(fileUrl, { signal: AbortSignal.timeout(30000) });
       if (!resp.ok) {
         return NextResponse.json({ error: `Failed to download file: ${resp.status}` }, { status: 400 });
       }
-      arrayBuffer = await resp.arrayBuffer();
+      buffer = Buffer.from(await resp.arrayBuffer());
     } else if (fileUrl.startsWith('/')) {
       // Local file - read from public directory
       const localPath = path.join(process.cwd(), 'public', fileUrl);
       if (!fs.existsSync(localPath)) {
         return NextResponse.json({ error: 'File not found' }, { status: 404 });
       }
-      arrayBuffer = fs.readFileSync(localPath).buffer;
+      buffer = fs.readFileSync(localPath);
     } else {
       return NextResponse.json({ error: 'Unsupported file URL format' }, { status: 400 });
     }
 
-    const buffer = Buffer.from(arrayBuffer);
     const detectedType = fileType || detectFileType(fileUrl);
 
     switch (detectedType) {

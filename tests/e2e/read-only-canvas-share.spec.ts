@@ -137,6 +137,8 @@ test.describe('只读画布分享桌面浏览器矩阵', () => {
   });
 
   test('下载开启：下载按钮只调用分享作用域受控路径', async ({ page, shareEvidence }, testInfo) => {
+    test.skip(Boolean(process.env.WUJIE_SHARE_NETWORK_BUILD_DIR?.trim()),
+      '生产构建由 read-only-canvas-share-real-video.spec.ts 核对原生下载；Chromium 的下载不经过 page.route');
     configureShareEvidence(shareEvidence, 'desktop-download-on', `desktop/${testInfo.project.name}/download-on`);
     await installReadOnlyShareFixture(page, { allowDownload: true });
     await page.goto(`/shared/canvas/${fixtureToken}`);

@@ -1,10 +1,10 @@
 'use client';
 
 import { GripHorizontal, GripVertical, Maximize2, Minimize2, ScanLine, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { taskEventsClient } from '@/lib/task-events-client';
 import { constrainFloatingPanelPosition, getFloatingPanelViewport, subscribeFloatingPanelViewport } from '@/lib/floating-panel-position';
-import type { EffectReverseRegion, EffectReverseTaskRecord, EffectReverseTaskResult, NormalizedPoint, NormalizedQuad } from '@/lib/effect-reverse-engineering/types';
+import type { EffectReverseRegion, EffectReverseResultHandler, EffectReverseTaskRecord, NormalizedPoint, NormalizedQuad } from '@/lib/effect-reverse-engineering/types';
 import { EffectReverseSourcePanel } from './effect-reverse-engineering/source-panel';
 import { EffectReverseWorkspace } from './effect-reverse-engineering/workspace';
 import { REVERSE_COPY } from './effect-reverse-engineering/i18n';
@@ -22,7 +22,7 @@ interface EffectReverseEngineeringPanelProps {
   analyzerOptions?: EffectReverseAnalyzerOption[];
   isMonochrome?: boolean;
   onClose: () => void;
-  onCanvasResult: (result: EffectReverseTaskResult) => void;
+  captureCanvasResult: (source: EffectReverseSource, signal: AbortSignal) => EffectReverseResultHandler;
   onUploadSource?: (file: File) => Promise<EffectReverseSource>;
 }
 
@@ -52,7 +52,7 @@ function isValidPerspective(points: NormalizedPoint[]): points is NormalizedQuad
   return points.length === 4 && points.every((point) => Number.isFinite(point.x) && Number.isFinite(point.y) && point.x >= 0 && point.x <= 1 && point.y >= 0 && point.y <= 1) && area(points) > 0.01;
 }
 
-export function EffectReverseEngineeringPanel({ initialSource, analyzerOptions = [], isMonochrome = false, onClose, onCanvasResult, onUploadSource }: EffectReverseEngineeringPanelProps) {
+export function EffectReverseEngineeringPanel({ initialSource, analyzerOptions = [], isMonochrome = false, onClose, captureCanvasResult, onUploadSource }: EffectReverseEngineeringPanelProps) {
   const [geometry, setGeometry] = useState<WindowGeometry>(loadGeometry);
   const [viewport, setViewport] = useState(viewportSize);
   const [visibleViewport, setVisibleViewport] = useState(getFloatingPanelViewport);
@@ -82,7 +82,13 @@ export function EffectReverseEngineeringPanel({ initialSource, analyzerOptions =
   const resizeRef = useRef<{ x: number; y: number; origin: WindowGeometry } | null>(null);
   const viewportRef = useRef(viewport);
   const desktopGeometryRef = useRef(geometry);
-  const completedTaskRef = useRef<string | null>(null);
+  const activeTaskRef = useRef<{
+    controller: AbortController;
+    taskId: string | null;
+    deliver: EffectReverseResultHandler;
+    settled: boolean;
+  } | null>(null);
+  useLayoutEffect(() => () => activeTaskRef.current?.controller.abort(), []);
   const baseShellGeometry = maximized
     ? { x: 16, y: 16, width: viewport.width - 32, height: viewport.height - 32 }
     : viewport.width < 960
@@ -124,16 +130,33 @@ export function EffectReverseEngineeringPanel({ initialSource, analyzerOptions =
   }, []);
 
   const pollTask = useCallback(async (taskId: string): Promise<EffectReverseTaskRecord | null> => {
+    const active = activeTaskRef.current;
+    if (!active || active.taskId !== taskId || active.settled) return null;
+    const { signal } = active.controller;
     try {
-      const response = await fetch(`/api/effect-reverse-engineering?taskId=${encodeURIComponent(taskId)}`, { cache: 'no-store' });
+      const response = await fetch(`/api/effect-reverse-engineering?taskId=${encodeURIComponent(taskId)}`, { cache: 'no-store', signal });
       const payload = await response.json() as EffectReverseTaskRecord & { success?: boolean; message?: string };
+      if (signal.aborted || activeTaskRef.current !== active || active.settled) return null;
       if (!response.ok) throw new Error(payload.message || `${REVERSE_COPY.taskStatusFailed} (${response.status})`);
+      if (payload.taskId !== taskId) throw new Error(REVERSE_COPY.taskStatusFailed);
+      active.settled = ['completed', 'failed', 'cancelled', 'timeout'].includes(payload.status);
       setTask(payload);
-      if (payload.status === 'completed' && payload.result && completedTaskRef.current !== taskId) { completedTaskRef.current = taskId; onCanvasResult(payload.result); }
-      if (['completed', 'failed', 'cancelled', 'timeout'].includes(payload.status)) setBusy(false);
+      if (payload.status === 'completed' && payload.result) {
+        setMessage('');
+        try {
+          await active.deliver(payload.result, taskId);
+        } catch {
+          if (!signal.aborted) setMessage('暂未确认结果已保存到画布。可下载结果，或在原项目刷新核对。');
+        }
+      }
       return payload;
-    } catch (error) { setMessage(error instanceof Error ? error.message : REVERSE_COPY.taskStatusFailed); return null; }
-  }, [onCanvasResult]);
+    } catch (error) {
+      if (!signal.aborted) setMessage(error instanceof Error ? error.message : REVERSE_COPY.taskStatusFailed);
+      return null;
+    } finally {
+      if (!signal.aborted && activeTaskRef.current === active && active.settled) setBusy(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!task?.taskId || !busy) return;
@@ -163,14 +186,28 @@ export function EffectReverseEngineeringPanel({ initialSource, analyzerOptions =
   };
   const submit = async (action: 'correct' | 'export-png' | 'export-svg' | 'export-pdf' | 'export-zip') => {
     if (!validPerspective) { setMessage(REVERSE_COPY.invalidPerspective); return; }
-    setBusy(true); setMessage(''); completedTaskRef.current = null;
+    if (busy || activeTaskRef.current?.settled === false) return;
+    const controller = new AbortController();
+    const { signal } = controller;
+    setBusy(true); setMessage('');
     try {
-      const response = await fetch('/api/effect-reverse-engineering', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, projectId: source.projectId, sourceImageId: source.imageId, sourceVersionId: source.versionId, imageUrl: source.imageUrl, perspective: points, regions, instruction }) });
+      const active = { controller, taskId: null as string | null, deliver: captureCanvasResult(source, signal), settled: false };
+      activeTaskRef.current = active;
+      setTask(null);
+      const response = await fetch('/api/effect-reverse-engineering', { method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, projectId: source.projectId, sourceImageId: source.imageId, sourceVersionId: source.versionId, imageUrl: source.imageUrl, perspective: points, regions, instruction }) });
       const payload = await response.json() as EffectReverseTaskRecord & { success?: boolean; message?: string };
+      if (signal.aborted) return;
       if (!response.ok || !payload.taskId) throw new Error(payload.message || `${REVERSE_COPY.submissionFailed} (${response.status})`);
+      active.taskId = payload.taskId;
       setTask({ ...payload, userId: '', progress: 0, label: REVERSE_COPY.queued, createdAt: Date.now(), updatedAt: Date.now() });
       void pollTask(payload.taskId);
-    } catch (error) { setBusy(false); setMessage(error instanceof Error ? error.message : REVERSE_COPY.submissionFailed); }
+    } catch (error) {
+      if (activeTaskRef.current?.controller === controller) activeTaskRef.current = null;
+      if (!signal.aborted) {
+        setBusy(false);
+        setMessage(error instanceof Error ? error.message : REVERSE_COPY.submissionFailed);
+      }
+    }
   };
   const cancel = async () => {
     if (!task?.taskId) return;

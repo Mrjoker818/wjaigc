@@ -6,6 +6,7 @@ import {
   clearSimpleCreateCanvasHandoff,
   consumeSimpleCreateCanvasHandoff,
   parseSimpleCreateCanvasHandoff,
+  readSimpleCreateLoginTarget,
 } from '@/lib/simple-create-navigation';
 
 describe('simple create navigation', () => {
@@ -21,6 +22,23 @@ describe('simple create navigation', () => {
     expect(buildSimpleCreateLoginUrl('/simple-create?projectId=p1')).toBe(
       '/?returnTo=%2Fsimple-create%3FprojectId%3Dp1',
     );
+  });
+
+  it('restores a selected project through the fixed quick-create route after login', () => {
+    expect(readSimpleCreateLoginTarget('/simple-create?projectId=project+1')).toBe(
+      '/simple-create?projectId=project+1',
+    );
+    expect(readSimpleCreateLoginTarget('/simple-create?projectId=team%2Fsample')).toBe(
+      '/simple-create?projectId=team%2Fsample',
+    );
+  });
+
+  it('requires the exact quick-create path and one project selection', () => {
+    expect(readSimpleCreateLoginTarget(null)).toBeNull();
+    expect(readSimpleCreateLoginTarget('/simple-create')).toBeNull();
+    expect(readSimpleCreateLoginTarget('/simple-create?projectId=p1&projectId=p2')).toBeNull();
+    expect(readSimpleCreateLoginTarget('/simple-chat?projectId=p1')).toBeNull();
+    expect(readSimpleCreateLoginTarget('https://example.com/simple-create?projectId=p1')).toBeNull();
   });
 
   it('parses and consumes a managed result handoff without losing the project target', () => {

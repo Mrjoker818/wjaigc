@@ -1,3 +1,4 @@
 *.onnx filter=lfs diff=lfs merge=lfs -text
 *.bin filter=lfs diff=lfs merge=lfs -text
 docs/testing/evidence/v588-media-gateway-task9-review-*/** -text -diff
+migrations/*.sql text eol=lf

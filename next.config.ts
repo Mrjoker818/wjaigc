@@ -47,6 +47,7 @@ const nextConfig: NextConfig = {
     '/api/collaboration/document-assets/upload': [
       `assets/wujie-coze-media/${process.arch}/{ffmpeg,ffprobe,LICENSE.txt}`,
     ],
+    '/api/pdf/generate': ['src/lib/pdf/fonts/{WujiePdfSansSC-Regular.ttf,OFL.txt}'],
   },
   outputFileTracingExcludes: {
     '*': LOCAL_BUILD_ARTIFACT_EXCLUDES,

@@ -47,8 +47,8 @@ import { DocumentStatus } from '@/components/collaboration/document-status';
 import { useCollaborativeCanvas, type CollaborativeCanvas } from '@/lib/collaboration/document-client';
 import { runDocumentHistoryCommand, readDocumentHistoryCommandJournal, runDocumentHistoryRestoration, confirmDocumentHistoryRestorationMetadata, recoverDocumentHistoryCommands, documentHistoryCommandStorageKey } from '@/lib/collaboration/document-history-command';
 import type { DocumentHistoryCommandItem } from '@/lib/collaboration/document-history-command';
-import { commitDocumentCanvasFile, DocumentCanvasUploadError, loadDocumentCanvasVideoSize, readGeneratedVideoToolFiles, uniqueDocumentCanvasFiles } from '@/lib/collaboration/document-canvas-upload';
-import type { CanvasVideoToolOutput } from '@/components/infinite-canvas';
+import { commitDocumentCanvasFile, DocumentCanvasUploadError, loadDocumentCanvasVideoSize, readEffectReverseResultFile, readGeneratedVideoToolFiles, uniqueDocumentCanvasFiles } from '@/lib/collaboration/document-canvas-upload';
+import type { CanvasVideoToolOutput, CaptureEffectReverseInsertion } from '@/components/infinite-canvas';
 import { canUseLegacyCanvasPersistence, routeCanvasWorkspaceChange, shouldKeepDirtyCanvasAnnotations } from '@/lib/collaboration/canvas-document-image-bridge';
 import {
   restoreAnnotations,
@@ -4934,6 +4934,59 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
       isCurrent, assertScope, assertWritable };
   }, [isDocumentHistoryRecoveryPending]);
 
+  const captureEffectReverseInsertion = useCallback<CaptureEffectReverseInsertion>((source, signal) => {
+    const actorId = currentUserRef.current?.id;
+    const projectId = source.projectId;
+    const document = collaborativeCanvasRef.current;
+    const epoch = historyTransitionEpochRef.current;
+    if (!actorId || !document || document.projectId !== projectId || document.authority !== 'document') {
+      throw new Error('拆图源与当前协作项目不匹配');
+    }
+    const { recordMediaHistory, refreshMedia } = document;
+    const isCurrent = (): boolean => {
+      const current = collaborativeCanvasRef.current;
+      return !signal.aborted && isMountedRef.current && currentUserRef.current?.id === actorId
+        && currentProjectRef.current?.id === projectId && historyProjectIdRef.current === projectId
+        && historyTransitionEpochRef.current === epoch && current?.projectId === projectId
+        && current.authority === 'document' && current.recordMediaHistory === recordMediaHistory
+        && current.refreshMedia === refreshMedia && !historyLifecyclePendingRef.current
+        && !isDocumentHistoryRecoveryPending();
+    };
+    const isWritable = (): boolean => isCurrent() && collaborativeCanvasRef.current?.isWritable() === true;
+    const assertCurrent = (): void => {
+      if (!isCurrent()) throw new Error('拆图保存作用域已失效');
+    };
+    const assertWritable = (): void => {
+      if (!isWritable()) throw new Error('协作画布当前不可写');
+    };
+    assertWritable();
+    const transform = { x: source.x + source.width + 48, y: source.y,
+      width: source.width, height: source.height, rotation: 0 };
+    return async (url, taskId) => {
+      const name = `${(source.label || '效果图').slice(0, 90)}-反向拆图.png`;
+      const file = await readEffectReverseResultFile(url, taskId, name, signal, assertWritable);
+      let confirmed: CanvasImage | undefined;
+      await commitDocumentCanvasFile({
+        file, expectedActorId: actorId, projectId, signal,
+        isCurrentProject: isCurrent, isWritableProject: isWritable,
+        transform: { ...transform, zIndex: Math.max(0, ...latestImagesRef.current.map(image => image.zIndex ?? 0)) + 1 },
+        refreshMedia: async (documentSequence, receipt) => {
+          assertCurrent();
+          const images = await refreshMedia({ projectId, documentSequence, requireDirectorySequence: true });
+          assertCurrent();
+          const asset = receipt.assetReference;
+          confirmed = images.find(image => image.placementId === receipt.placementId
+            && image.assetVersionId === receipt.assetVersionId && image.assetId === asset.assetId
+            && image.id === asset.entityId && image.url === asset.url);
+          if (!confirmed) throw new Error('协作画布尚未确认拆图结果');
+        },
+      });
+      assertWritable();
+      if (!confirmed) throw new Error('协作画布尚未确认拆图结果');
+      return confirmed;
+    };
+  }, [isDocumentHistoryRecoveryPending]);
+
   const handleAddDocumentEmbeddedMedia = useCallback(async (
     references: CoreWorkspaceAssetReference[],
     meta?: { runId?: string; sourceImageId?: string; restoreDeletedPlacement?: boolean; signal?: AbortSignal },
@@ -8456,6 +8509,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
           onAddImages={handleAddImagesFromUi}
           captureDisplay3dInsertion={captureDisplay3dInsertion}
           onUploadEffectReverseSource={handleUploadEffectReverseSource}
+          captureEffectReverseInsertion={captureEffectReverseInsertion}
           onReferenceSelect={handleCanvasReferenceSelect}
           referenceIds={ctrlRefSelections.map(r => r.id)}
           altRefMarkerIds={altRefMarkers.map(r => r.id)}
