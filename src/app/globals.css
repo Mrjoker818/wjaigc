@@ -79,6 +79,8 @@ main.dashboard-scrollable {
   --color-toolbar-bg: var(--toolbar-bg);
   --color-toolbar-hover: var(--toolbar-hover);
   --color-gold: var(--gold);
+  --color-gold-dark: var(--gold-dark);
+  --color-gold-light: var(--gold-light);
   --color-gold-muted: var(--gold-muted);
   --color-text-bright: var(--text-bright);
   --color-text-dark: var(--text-dark);
@@ -167,6 +169,8 @@ main.dashboard-scrollable {
   --toolbar-bg: #1c2128;
   --toolbar-hover: #262c36;
   --gold: #d4af37;
+  --gold-dark: #b8922a;
+  --gold-light: #e3c463;
   --gold-muted: #8b949e;
   --text-bright: #e6edf3;
   --text-dark: #0d1117;

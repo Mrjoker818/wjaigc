@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { UserPlus, Users, X } from 'lucide-react';
 
@@ -34,6 +34,28 @@ export function PresenceIndicator({ projectId, isOwner, themeStyle }: PresenceIn
   const [busy, setBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const dark = themeStyle === 'gold';
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // The panel is a non-modal popover over the canvas: dismiss it on Escape or
+  // a press outside, so it never lingers over the selected-image toolbar.
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    const onPointerDown = (event: PointerEvent): void => {
+      const target = event.target as Node | null;
+      if (target && (dialogRef.current?.contains(target) || triggerRef.current?.contains(target))) return;
+      setOpen(false);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('pointerdown', onPointerDown, true);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open || !isOwner) return;
@@ -110,6 +132,7 @@ export function PresenceIndicator({ projectId, isOwner, themeStyle }: PresenceIn
       )}
       {isOwner && (
         <button
+          ref={triggerRef}
           type="button"
           aria-label="管理在线成员"
           aria-expanded={open}
@@ -121,11 +144,11 @@ export function PresenceIndicator({ projectId, isOwner, themeStyle }: PresenceIn
       )}
       {open && isOwner && createPortal(
         <div
+          ref={dialogRef}
           role="dialog"
           aria-label="项目在线成员"
           data-modal
           className={`fixed left-1/2 top-16 z-[100] w-[min(20rem,calc(100vw-2rem))] max-h-[calc(100dvh-5rem)] -translate-x-1/2 overflow-y-auto rounded-xl border p-4 shadow-xl ${dark ? 'border-white/10 bg-[#1a1a1a] text-white' : 'border-gray-200 bg-white text-gray-900'}`}
-          onKeyDown={event => { if (event.key === 'Escape') setOpen(false); }}
         >
           <div className="mb-3 flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold">在线成员资格</h2>

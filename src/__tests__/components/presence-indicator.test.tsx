@@ -46,6 +46,22 @@ describe('PresenceIndicator', () => {
     expect(screen.getByRole('button', { name: '撤销二号的在线资格' })).toBeTruthy();
   });
 
+  it('按 Esc 或点击面板外部关闭，面板内操作不关闭', async () => {
+    vi.mocked(useProjectPresence).mockReturnValue({ status: 'online', participants: [] });
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ members: [] }) } as Response);
+    render(<PresenceIndicator projectId="project-a" isOwner themeStyle="gold" />);
+    const trigger = screen.getByRole('button', { name: '管理在线成员' });
+    fireEvent.click(trigger);
+    fireEvent.pointerDown(screen.getByLabelText('成员用户 ID'));
+    expect(screen.getByRole('dialog', { name: '项目在线成员' })).toBeTruthy();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: '项目在线成员' })).toBeNull();
+    fireEvent.click(trigger);
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole('dialog', { name: '项目在线成员' })).toBeNull();
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+  });
+
   it('邀请和撤销使用精确项目/用户身份，失败反馈留在面板', async () => {
     vi.mocked(fetch).mockImplementation(async (_input, init) => {
       if (!init || init.method === 'GET') return { ok: true, json: async () => ({ success: true, members: [] }) } as Response;
