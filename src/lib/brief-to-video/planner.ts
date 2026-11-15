@@ -10,8 +10,31 @@ const MAX_PROMPT_CHARACTERS = 16_000;
 const MAX_RESPONSE_BYTES = 256 * 1024;
 const PLANNER_TIMEOUT_MS = 60_000;
 
-function invalidPlan(): never {
-  throw new Error('BRIEF_VIDEO_PLAN_INVALID');
+/**
+ * A planner call creates no provider task, so every failure has a known submission outcome:
+ * no plan was produced and the step can be retried without risking a duplicate video.
+ */
+export class BriefToVideoPlannerError extends Error {
+  readonly submissionOutcome = 'known';
+
+  constructor(
+    readonly code: 'BRIEF_VIDEO_PLAN_INVALID' | 'BRIEF_VIDEO_PLANNER_UNAVAILABLE',
+    readonly retryable: boolean,
+    readonly providerStatus?: number,
+    options?: ErrorOptions,
+  ) {
+    super(code, options);
+    this.name = 'BriefToVideoPlannerError';
+  }
+}
+
+function invalidPlan(cause?: unknown): never {
+  throw new BriefToVideoPlannerError(
+    'BRIEF_VIDEO_PLAN_INVALID',
+    true,
+    undefined,
+    cause === undefined ? undefined : { cause },
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -86,8 +109,9 @@ export function parseBriefToVideoPlanResponse(response: unknown): BriefToVideoPl
       candidate = JSON.parse(stripJsonFence(content)) as unknown;
     }
     return parseBriefToVideoPlan(candidate);
-  } catch {
-    invalidPlan();
+  } catch (error) {
+    // Keep the schema code (e.g. BRIEF_VIDEO_PLAN_SCENE_INVALID) for diagnostics only.
+    invalidPlan(error instanceof BriefToVideoPlannerError ? error.cause : error);
   }
 }
 
@@ -130,27 +154,36 @@ export async function invokeBriefToVideoPlanner(input: {
   signal: AbortSignal;
 }): Promise<BriefToVideoPlanV1> {
   const signal = AbortSignal.any([input.signal, AbortSignal.timeout(PLANNER_TIMEOUT_MS)]);
-  const response = await fetchWithV1Retry(input.baseUrl, '/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${input.apiKey}`,
-      'X-Request-Id': input.requestId,
-    },
-    body: JSON.stringify({
-      model: input.modelId,
-      messages: [{
-        role: 'user',
-        content: buildBriefToVideoPlanPrompt(input.planInput, input.revisionInstruction),
-      }],
-      stream: false,
-      response_format: { type: 'json_object' },
-    }),
-    signal,
-  }, true, PLANNER_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetchWithV1Retry(input.baseUrl, '/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${input.apiKey}`,
+        'X-Request-Id': input.requestId,
+      },
+      body: JSON.stringify({
+        model: input.modelId,
+        messages: [{
+          role: 'user',
+          content: buildBriefToVideoPlanPrompt(input.planInput, input.revisionInstruction),
+        }],
+        stream: false,
+        response_format: { type: 'json_object' },
+      }),
+      signal,
+    }, true, PLANNER_TIMEOUT_MS);
+  } catch (error) {
+    throw new BriefToVideoPlannerError('BRIEF_VIDEO_PLANNER_UNAVAILABLE', true, undefined, { cause: error });
+  }
   if (!response.ok) {
     await response.body?.cancel().catch(() => undefined);
-    invalidPlan();
+    throw new BriefToVideoPlannerError(
+      'BRIEF_VIDEO_PLANNER_UNAVAILABLE',
+      response.status === 429 || response.status >= 500,
+      response.status,
+    );
   }
   const body = await readBoundedResponse(response);
   let payload: unknown;

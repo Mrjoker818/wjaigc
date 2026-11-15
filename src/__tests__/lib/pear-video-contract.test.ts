@@ -76,7 +76,9 @@ describe('PearAPI video submit contract', () => {
     const body = (model: string, extra: Record<string, unknown>) => JSON.parse(buildVideoSubmitRequest('pearapi-video', {
       baseUrl: BASE, apiKey: KEY, model, prompt: 'p', ...extra,
     }).body);
-    expect(body('doubao-seedance-2-0-260128', { advancedParams: { resolution: '480p' } })).toMatchObject({ resolution: '480P' });
+    expect(body('doubao-seedance-2-0-260128', { advancedParams: { resolution: '720p' } })).toMatchObject({ resolution: '720P' });
+    expect(body('doubao-seedance-2-0-260128', { advancedParams: { resolution: '480p' } })).not.toHaveProperty('resolution');
+    expect(body('doubao-seedance-2-0-fast-260128', { advancedParams: { resolution: '480p' } })).toMatchObject({ resolution: '480P' });
     expect(body('doubao-seedance-2-5-260628', { duration: 20, advancedParams: { resolution: '1080p' } }))
       .toMatchObject({ duration: 20, resolution: '1080P' });
     expect(body('minimax-h3', { advancedParams: { resolution: '2k' } })).toMatchObject({ resolution: '2K' });

@@ -13,6 +13,7 @@ import {
 } from '@/lib/task-core/model-catalog';
 import type { User } from '@/lib/user-types';
 import { isAssetVersionId } from '@/lib/asset-core/asset-version-id';
+import { assertBriefToVideoOperationSupported } from '@/lib/brief-to-video/capabilities';
 import { requireSkillForSurface } from './catalog';
 import { resolveExecutableSkillForUser } from './storage';
 import {
@@ -25,7 +26,7 @@ import { compileSkillPrompt } from './prompt-compiler';
 import { requiredSkillModelRoles, skillStepModelRole } from './types';
 import type { MultiPlatformExportRetryLineage } from '@/lib/multi-platform-export/manifest';
 import { createMultiPlatformExportSkill, MULTI_PLATFORM_EXPORT_SKILL_ID } from './multi-platform-export-preset';
-import { authorizeAndFreezeBindings, authorizeBindingModels, SkillModelBindingError } from './binding-authorization';
+import { authorizeBindingModels, SkillModelBindingError } from './binding-authorization';
 export { requiredSkillModelRoles } from './types';
 export { authorizeAndFreezeBindings, SkillModelBindingError } from './binding-authorization';
 import type {
@@ -58,6 +59,15 @@ export interface SkillRunRequestDependencies {
     skillId: string,
     surface: SkillSurface,
   ) => Promise<SkillDefinition>;
+}
+
+function assertVideoOperationAdmitted(
+  skill: SkillDefinition,
+  inputValues: Record<string, unknown>,
+  models: Partial<Record<SkillModelRole, TaskModelDescriptor>>,
+): void {
+  if (!models.video || !skill.steps.some(step => step.toolId === 'video_generate')) return;
+  assertBriefToVideoOperationSupported(models.video, inputValues);
 }
 
 async function resolveExecutableSkill(
@@ -232,6 +242,7 @@ export async function authorizeSkillAgentRunRequest(
       'Skill model bindings are not server-authorized canonical bindings',
     );
   }
+  assertVideoOperationAdmitted(skill, resolved, models);
   const executionRuntime = requiredSkillModelRoles(skill).length === 0 ? 'local' : 'model';
   if ((request.executionRuntime ?? 'model') !== executionRuntime) {
     throw new SkillModelBindingError(
@@ -284,11 +295,12 @@ export async function buildSkillAgentRunRequest(
     Object.entries(resolved).filter(([, value]) => value !== undefined),
   );
   const sourceVersionIds = assertSourceVersionBindings(skill, resolved, input.sourceVersionIds);
-  const bindings = await authorizeAndFreezeBindings(
+  const { frozen: bindings, models } = await authorizeBindingModels(
     input.modelBindings,
     skill,
     dependencies,
   );
+  assertVideoOperationAdmitted(skill, resolved, models);
   const base: AgentRunRequestBase = {
     projectId: input.projectId,
     workspace: input.surface === 'simple-chat' ? 'chat' : input.surface,

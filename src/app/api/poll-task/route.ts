@@ -98,6 +98,7 @@ import {
 } from '@/lib/media-gateway/artifact-persistence';
 import {
   inspectPersistedVideoFile,
+  stripVideoAudioTrack,
   type PersistedVideoFileMetadata,
 } from '@/lib/asset-core/video-file-metadata';
 
@@ -2657,28 +2658,39 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
                   } : {}),
                 });
                 videoRecoverySourceUrl = downloaded.resolvedSourceUrl;
-                const filename = `video_${taskId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${downloaded.mediaType.extension}`;
+                let videoBuffer = downloaded.buffer;
+                // PearAPI has no audio switch, so a muted request is honoured after download.
+                if (videoProfile === 'pearapi-video' && regResult.generateAudio === false) {
+                  try {
+                    videoBuffer = await stripVideoAudioTrack(downloaded.buffer, downloaded.mediaType.extension);
+                  } catch (muteErr) {
+                    console.warn('[poll-task/video] Could not remove the provider audio track:', muteErr instanceof Error ? muteErr.message : muteErr);
+                  }
+                }
+                // The serve-upload URL is an anonymous capability link (providers and shares fetch it),
+                // so the filename carries 122 random bits instead of guessable time/task fragments.
+                const filename = `video_${randomUUID()}.${downloaded.mediaType.extension}`;
                 const dirPath = path.join(dataRoot, 'uploads', 'video', taskId);
                 await fs.mkdir(dirPath, { recursive: true });
                 const persistedPath = path.join(dirPath, filename);
                 persistedVideoLocalPath = persistedPath;
                 persistedVideoUrl = `/api/serve-upload/video/${taskId}/${filename}`;
-                await fs.writeFile(persistedPath, downloaded.buffer, {
+                await fs.writeFile(persistedPath, videoBuffer, {
                   signal: AbortSignal.timeout(60_000),
                 });
                 persistedVideoMetadata = {
-                  ...await inspectPersistedVideoFile(persistedPath, downloaded.buffer.byteLength),
+                  ...await inspectPersistedVideoFile(persistedPath, videoBuffer.byteLength),
                   mimeType: downloaded.mediaType.mimeType,
                 };
                 if (gatewayVideoTask) {
                   const persisted = await persistGatewayVideoArtifact({
-                    buffer: downloaded.buffer,
+                    buffer: videoBuffer,
                     fileName: `video/${taskId}/${filename}`,
                     mimeType: downloaded.mediaType.mimeType,
                   });
                   gatewayVideoStorageKey = persisted.storageKey;
                 }
-                console.log(`[poll-task/video] Persisted verified video: ${persistedVideoUrl} (${(downloaded.buffer.length / 1024 / 1024).toFixed(1)}MB)`);
+                console.log(`[poll-task/video] Persisted verified video: ${persistedVideoUrl} (${(videoBuffer.length / 1024 / 1024).toFixed(1)}MB)`);
               } catch (persistErr) {
                 console.warn('[poll-task] Video persist failed:', persistErr);
                 videoPersistenceError = persistErr;

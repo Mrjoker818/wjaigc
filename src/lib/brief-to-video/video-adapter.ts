@@ -5,6 +5,7 @@ import {
 } from '@/lib/agent-runtime/downstream-operations';
 import type { TaskModelDescriptor } from '@/lib/task-core/model-capability-contract';
 import { validateTaskModelSelection } from '@/lib/task-core/model-capability-resolution';
+import { briefToVideoOperation } from './capabilities';
 import { parseBriefToVideoInput, parseBriefToVideoPlan } from './schema';
 import type { BriefToVideoInput, BriefToVideoPlanV1 } from './types';
 import { buildBriefToVideoResult } from './result';
@@ -234,11 +235,7 @@ export function buildBriefToVideoVideoSubmission(input: {
   }
   const imageUrl = sourceUrl(brief.startFrame, input.sourceImageUrls);
   const lastFrameImageUrl = sourceUrl(brief.endFrame, input.sourceImageUrls);
-  const operation = lastFrameImageUrl
-    ? 'first-last-frame' as const
-    : imageUrl
-      ? 'image-to-video' as const
-      : 'text-to-video' as const;
+  const operation = briefToVideoOperation(brief);
   const admission = validateTaskModelSelection(descriptor, {
     operation,
     aspectRatio: brief.aspectRatio,

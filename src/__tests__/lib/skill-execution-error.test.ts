@@ -23,6 +23,17 @@ describe('safe Skill execution errors', () => {
       code: 'SKILL_SUBMISSION_UNKNOWN', retryable: false,
     });
   });
+  it('reports planner failures as retryable without an unknown provider outcome', () => {
+    expect(safeSkillExecutionError({ code: 'BRIEF_VIDEO_PLAN_INVALID' })).toMatchObject({
+      code: 'BRIEF_VIDEO_PLAN_INVALID', retryable: true,
+    });
+    expect(safeSkillExecutionError({
+      code: 'BRIEF_VIDEO_PLANNER_UNAVAILABLE', providerStatus: 503, retryable: true,
+    })).toMatchObject({ code: 'BRIEF_VIDEO_PLANNER_UNAVAILABLE', retryable: true, providerStatus: 503 });
+    expect(safeSkillExecutionError({
+      code: 'BRIEF_VIDEO_PLANNER_UNAVAILABLE', providerStatus: 401, retryable: false,
+    })).toMatchObject({ code: 'BRIEF_VIDEO_PLANNER_UNAVAILABLE', retryable: false });
+  });
   it('preserves a bounded parameter rejection without exposing provider text', () => {
     const result = safeSkillExecutionError(Object.assign(new Error('secret prompt sk-secret-token'), {
       providerStatus: 400, providerCode: 'invalid_quality',

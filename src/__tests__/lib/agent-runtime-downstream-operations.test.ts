@@ -212,6 +212,30 @@ describe('durable Agent downstream operations', () => {
     expect(dependencies.complete).not.toHaveBeenCalled();
   });
 
+  it('releases a started submission when the error proves nothing was submitted', async () => {
+    const dependencies: AgentDownstreamOperationDependencies = {
+      prepare: vi.fn(async input => ({ ...input, status: 'prepared', attempts: 1, claimed: true }) as AgentDownstreamOperation),
+      markSubmitted: vi.fn(async input => ({ ...input, status: 'submitted', attempts: 1 }) as AgentDownstreamOperation),
+      markAccepted: vi.fn(), markSubmissionUnknown: vi.fn(), complete: vi.fn(),
+      release: vi.fn(async () => true),
+    };
+    const known = Object.assign(new Error('BRIEF_VIDEO_PLAN_INVALID'), {
+      code: 'BRIEF_VIDEO_PLAN_INVALID', submissionOutcome: 'known',
+    });
+    const input = {
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-plan',
+      toolId: 'brief_video_plan', requestDigest: 'd'.repeat(64),
+      executionFence: { ...executionFence, runId: 'run-plan' },
+    };
+
+    await expect(executeDurableAgentDownstreamOperation(input, async context => {
+      await context.beginSubmission();
+      throw known;
+    }, dependencies)).rejects.toBe(known);
+    expect(dependencies.markSubmissionUnknown).not.toHaveBeenCalled();
+    expect(dependencies.release).toHaveBeenCalledWith(expect.anything(), { knownSubmissionOutcome: true });
+  });
+
   it('propagates the same execution fence into nested downstream operations', async () => {
     const seen: unknown[] = [];
     const dependencies: AgentDownstreamOperationDependencies = {

@@ -529,6 +529,39 @@ async function checkMultiPlatformExport() {
   }
 }
 
+const BRIEF_TO_VIDEO_OPERATIONS = ['text-to-video', 'image-to-video', 'first-last-frame'];
+
+async function readRuntimeVideoCatalog() {
+  if (!remoteUrl) return undefined;
+  try {
+    const response = await fetch(`${remoteUrl}/api/models?type=video`, { signal: AbortSignal.timeout(10_000) });
+    if (!response.ok) return undefined;
+    const body = await response.json();
+    if (!Array.isArray(body?.taskModelCatalog)) return undefined;
+    return body.taskModelCatalog.filter(model => model?.kind === 'video').map(model => ({
+      id: String(model.modelId || ''),
+      operations: model.supportedOperations,
+      durations: model.allowedDurationsSeconds,
+      ratios: model.allowedRatios,
+    }));
+  } catch {
+    return undefined;
+  }
+}
+
+function summarizeBriefToVideoCapability(models) {
+  const gaps = [];
+  for (const model of models) {
+    const operations = Array.isArray(model.operations) ? model.operations : [];
+    const missing = BRIEF_TO_VIDEO_OPERATIONS.filter(operation => !operations.includes(operation));
+    if (!Array.isArray(model.durations) || model.durations.length === 0) missing.push('durations');
+    if (!Array.isArray(model.ratios) || model.ratios.length === 0) missing.push('ratios');
+    if (missing.length === 0) return { capable: true, modelId: model.id };
+    gaps.push(`${model.id || 'unnamed'} lacks ${missing.join('+')}`);
+  }
+  return { capable: false, detail: gaps.length > 0 ? gaps.slice(0, 6).join('; ') : 'no video models' };
+}
+
 async function checkBriefToVideo() {
   const flagEnabled = process.env.BRIEF_TO_VIDEO_SKILL_ENABLED === 'true';
   add(
@@ -574,24 +607,28 @@ async function checkBriefToVideo() {
          FROM wujie_api_providers
          WHERE is_enabled = true AND (type = 'video' OR model_type = 'video')`,
       );
-      const capable = providers.rows.some(row => {
-        const discovered = Array.isArray(row.discovered_models) ? row.discovered_models : [];
-        return discovered.some(model => {
-          if (!model || typeof model !== 'object' || Array.isArray(model)) return false;
-          const operations = Array.isArray(model.supportedOperations) ? model.supportedOperations : [];
-          const durations = Array.isArray(model.allowedDurationsSeconds) ? model.allowedDurationsSeconds : [];
-          const ratios = Array.isArray(model.supportedAspectRatios) ? model.supportedAspectRatios : [];
-          return ['text-to-video', 'image-to-video', 'first-last-frame'].every(operation => operations.includes(operation))
-            && durations.length > 0
-            && ratios.length > 0;
-        });
-      });
+      const stored = providers.rows.flatMap(row => (
+        Array.isArray(row.discovered_models) ? row.discovered_models : []
+      )).flatMap(model => (
+        model && typeof model === 'object' && !Array.isArray(model)
+          ? [{
+              id: String(model.id || ''),
+              operations: model.supportedOperations,
+              durations: model.allowedDurationsSeconds,
+              ratios: model.supportedAspectRatios,
+            }]
+          : []
+      ));
+      // Adapter-derived capabilities (e.g. PearAPI) are never stored, so the live catalog is authoritative.
+      const runtime = await readRuntimeVideoCatalog();
+      const capability = summarizeBriefToVideoCapability(runtime ?? stored);
+      const source = runtime ? 'runtime catalog' : 'stored discovered_models';
       add(
-        capable ? 'PASS' : production ? 'FAIL' : 'BLOCKED',
+        capability.capable ? 'PASS' : production ? 'FAIL' : 'BLOCKED',
         'brief-to-video-provider-capability',
-        capable
-          ? 'an enabled video model declares text, first-frame, first-last-frame, duration, and ratio capabilities'
-          : 'no enabled video model declares the complete Brief-to-video capability contract',
+        capability.capable
+          ? `${source}: ${capability.modelId} declares text, first-frame, first-last-frame, duration, and ratio capabilities`
+          : `${source}: no enabled video model declares the complete Brief-to-video capability contract (${capability.detail})`,
       );
     } catch (error) {
       add('FAIL', 'brief-to-video-database', `verification failed: ${error instanceof Error ? error.message : String(error)}`);

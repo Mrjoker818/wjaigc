@@ -216,7 +216,7 @@ describe('provider capability adapters', () => {
     const pear = provider('pear', 'https://api.pearapi.ai', 'video');
     const caps = (id: string) => resolveProviderCapabilityAdapter(pear, model('pear', id, 'video'));
     expect(caps('doubao-seedance-2-0-260128')).toMatchObject({
-      allowedRatios: ['16:9', '9:16', '1:1', '4:3', '3:4'], allowedSizes: ['720p', '480p'],
+      allowedRatios: ['16:9', '9:16', '1:1', '4:3', '3:4'], allowedSizes: ['720p'],
       maxDurationSeconds: 15, maxReferenceImages: 9,
     });
     expect(caps('doubao-seedance-2-5-260628')?.allowedDurationsSeconds).toHaveLength(27);

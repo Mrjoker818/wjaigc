@@ -45,7 +45,8 @@ const SEEDANCE_2: PearVideoModelSpec = {
 };
 
 export const PEAR_VIDEO_MODEL_SPECS: Readonly<Record<string, PearVideoModelSpec>> = {
-  'doubao-seedance-2-0-260128': SEEDANCE_2,
+  // The docs also list 480P, but live PearAPI tokens reject it with "resolution 参数仅支持 720P" (2026-11-15).
+  'doubao-seedance-2-0-260128': { ...SEEDANCE_2, resolutions: ['720P'] },
   'doubao-seedance-2-0-fast-260128': SEEDANCE_2,
   'doubao-seedance-2-0-mini-260615': { ...SEEDANCE_2, resolutions: ['720P'], maxImages: 10, maxVideos: 10 },
   'doubao-seedance-2-5-260628': { ...SEEDANCE_2, durations: range(4, 30), resolutions: ['480P', '720P', '1080P'] },

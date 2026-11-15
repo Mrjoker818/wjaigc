@@ -128,8 +128,17 @@ describe('video poll terminal durability contract', () => {
     );
     expect(videoSource).toContain('persistedVideoLocalPath = persistedPath;');
     expect(videoSource.indexOf('persistedVideoLocalPath = persistedPath;')).toBeLessThan(
-      videoSource.indexOf('await fs.writeFile(persistedPath, downloaded.buffer'),
+      videoSource.indexOf('await fs.writeFile(persistedPath, videoBuffer'),
     );
+  });
+
+  it('names persisted videos with an unguessable token because serve-upload links are anonymous', () => {
+    const videoStart = source.indexOf("if (registryTask.type === 'video')");
+    const videoEnd = source.indexOf('// Local task types', videoStart);
+    const videoSource = source.slice(videoStart, videoEnd);
+
+    expect(videoSource).toContain('const filename = `video_${randomUUID()}.${downloaded.mediaType.extension}`;');
+    expect(videoSource).not.toContain('const filename = `video_${taskId}_');
   });
 
   it('preserves a provider video thumbnail in the durable result and response', () => {

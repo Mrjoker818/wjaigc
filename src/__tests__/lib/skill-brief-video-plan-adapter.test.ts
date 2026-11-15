@@ -137,7 +137,31 @@ describe('brief video plan Skill adapter', () => {
       inputValues: { brief: '产品发布', goal: '产品转化', audience: '消费者', platform: '通用', durationSeconds: '10', aspectRatio: '16:9' },
       modelBinding: { providerId: 'frozen-chat', modelId: 'gpt-4o' }, requestDigest: 'digest', signal: new AbortController().signal,
       operation: { idempotencyKey: 'key', operationKey: 'plan', recovery: false, signal: new AbortController().signal, beginSubmission: vi.fn(), recordAccepted: vi.fn(), recordLocalAccepted: vi.fn(), executeOperation: vi.fn() },
-    })).rejects.toThrow('BRIEF_VIDEO_PLAN_INVALID');
+    })).rejects.toMatchObject({
+      code: 'BRIEF_VIDEO_PLAN_INVALID', submissionOutcome: 'known', retryable: true,
+    });
+  });
+
+  it('marks an unreachable planner as a known, retryable outcome', async () => {
+    mocks.fetchWithV1Retry.mockResolvedValue(new Response('busy', { status: 503 }));
+    const registry = createProductionSkillStepRegistry({
+      actor: { id: 'user-1', name: 'User', role: 'user', status: 'active', productType: 'canvas', createdAt: 1, updatedAt: 1 },
+      request: {
+        skillId: 'preset-brief-to-video-film', skillVersion: 1, surface: 'canvas',
+        projectId: 'project-1', workspaceId: 'canvas-1', inputValues: {}, sourceVersionIds: [],
+        modelBindings: {}, idempotencyKey: 'run-key',
+      },
+    });
+    await expect(registry.stepAdapters.brief_video_plan({
+      actorUserId: 'user-1', projectId: 'project-1', runId: 'run-1',
+      definition: { id: 'x', version: 1, name: 'x', category: 'x', description: '', systemPrompt: '', allowedSurfaces: ['canvas'], inputs: [], steps: [], enabled: true, builtIn: true, createdAt: 0, updatedAt: 0, usageCount: 0 },
+      step: { id: 'plan-film', label: '规划', toolId: 'brief_video_plan', execution: 'sequential', promptTemplate: '规划', modelRole: 'orchestrator', qualityGateIds: [] },
+      inputValues: { brief: '产品发布', goal: '产品转化', audience: '消费者', platform: '通用', durationSeconds: '10', aspectRatio: '16:9' },
+      modelBinding: { providerId: 'frozen-chat', modelId: 'gpt-4o' }, requestDigest: 'digest', signal: new AbortController().signal,
+      operation: { idempotencyKey: 'key', operationKey: 'plan', recovery: false, signal: new AbortController().signal, beginSubmission: vi.fn(), recordAccepted: vi.fn(), recordLocalAccepted: vi.fn(), executeOperation: vi.fn() },
+    })).rejects.toMatchObject({
+      code: 'BRIEF_VIDEO_PLANNER_UNAVAILABLE', submissionOutcome: 'known', retryable: true, providerStatus: 503,
+    });
   });
 
   it('admits the planner only through a Skill execution', () => {

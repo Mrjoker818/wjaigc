@@ -1,5 +1,7 @@
 import { execFile } from 'node:child_process';
-import { extname } from 'node:path';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { extname, join } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -77,5 +79,30 @@ export async function inspectPersistedVideoFile(
   } catch (error) {
     console.warn('[video-file-metadata] ffprobe unavailable or rejected the persisted video:', error);
     return base;
+  }
+}
+
+/**
+ * Drop every non-video stream without re-encoding. Used when the user turned sound off but the
+ * provider has no audio switch (PearAPI Seedance always returns an AAC track).
+ */
+export async function stripVideoAudioTrack(input: Buffer, extension: string): Promise<Buffer> {
+  if (!/^[a-z0-9]{2,5}$/u.test(extension)) throw new Error('Unsupported video extension');
+  const directory = await mkdtemp(join(tmpdir(), 'wujie-video-mute-'));
+  const source = join(directory, `source.${extension}`);
+  const target = join(directory, `muted.${extension}`);
+  try {
+    await writeFile(source, input);
+    await execFileAsync('ffmpeg', [
+      '-nostdin', '-v', 'error', '-y', '-i', source,
+      '-map', '0:v', '-c', 'copy', '-an', target,
+    ], {
+      timeout: 60_000,
+      maxBuffer: 256 * 1024,
+      windowsHide: true,
+    });
+    return await readFile(target);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 }

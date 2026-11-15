@@ -357,7 +357,8 @@ describe('scoped Skill runtime inventory', () => {
 
     const isolatedFixture = source.indexOf('const skillFixture = structuredClone(fixture);');
     const minimalWorkflow = source.indexOf('nodes: [sourceNode, marketingNode]');
-    const seed = source.indexOf('seedStage4Baseline(page, skillFixture, auth)');
+    // The first seed creates the project for the source transfer; the last one installs the minimal workflow.
+    const seed = source.lastIndexOf('seedStage4Baseline(page, skillFixture, auth)');
 
     expect(isolatedFixture).toBeGreaterThan(0);
     expect(minimalWorkflow).toBeGreaterThan(isolatedFixture);

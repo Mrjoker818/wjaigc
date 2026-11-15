@@ -148,6 +148,48 @@ describe('Skill runtime run requests', () => {
     expect(admitted.modelCapabilities).toEqual({ orchestrator, video });
   });
 
+  it('rejects start and end frames before costing when the video model has no first-last-frame mode', async () => {
+    const skill = createBriefToVideoSkill(true);
+    const video: TaskModelDescriptor = {
+      ...descriptor('pear-video', 'doubao-seedance-2-0-260128', 'video'),
+      sourceType: 'video' as const,
+      protocol: 'video',
+      allowedRatios: ['16:9'],
+      allowedSizes: ['720p'],
+      allowedDurationsSeconds: [5],
+      supportsReferenceImages: true,
+      maxReferenceImages: 9,
+      supportedOperations: ['text-to-video', 'image-to-video', 'multi-reference'],
+      outputKinds: ['mp4'],
+    };
+    const orchestrator = descriptor('pear-chat', 'gemini-3.1-flash', 'chat');
+    const resolveTaskModel = vi.fn(async (providerId: string) => (
+      providerId === video.providerId ? video : orchestrator
+    ));
+    const request = (frames: Record<string, string>): SkillRunRequest => ({
+      skillId: skill.id, skillVersion: skill.version, surface: 'canvas',
+      projectId: 'project-1', workspaceId: 'canvas-1', sourceVersionIds: Object.values(frames),
+      inputValues: {
+        brief: '新品广告', goal: '产品转化', audience: '年轻用户', platform: '抖音',
+        durationSeconds: '5', aspectRatio: '16:9', resolution: '720p', generateAudio: false,
+        ...frames,
+      },
+      modelBindings: {
+        orchestrator: { providerId: orchestrator.providerId, modelId: orchestrator.modelId },
+        video: { providerId: video.providerId, modelId: video.modelId },
+      },
+      idempotencyKey: 'brief-video-frames-1',
+    });
+    const dependencies = { actorUserId: actor.id, resolveTaskModel, resolveSkill: vi.fn(async () => skill) };
+
+    await expect(buildSkillAgentRunRequest(
+      request({ startFrame: 'version-start', endFrame: 'version-end' }), dependencies, skill,
+    )).rejects.toMatchObject({ code: 'MODEL_CAPABILITY_MISMATCH', status: 422, operation: 'first-last-frame' });
+    await expect(buildSkillAgentRunRequest(
+      request({ startFrame: 'version-start' }), dependencies, skill,
+    )).resolves.toMatchObject({ sourceVersionIds: ['version-start'] });
+  });
+
   it('builds a provider-free request for a pure local Skill', async () => {
     const localSkill: SkillDefinition = {
       id: 'local-export', version: 1, name: 'Local export', category: 'export',

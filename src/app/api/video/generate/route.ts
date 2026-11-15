@@ -1033,6 +1033,7 @@ export async function POST(request: NextRequest) {
             model,
             providerId: provider.id,
             usedImagesEndpoint,
+            generateAudio,
           },
         });
       } catch (err: unknown) {

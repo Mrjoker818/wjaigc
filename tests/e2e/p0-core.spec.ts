@@ -263,26 +263,29 @@ test.describe('P0 real user journey', () => {
         });
         if (hasImagesInStorage) break;
       }
-      // Push projects to server using the same API format as user-manager.ts
-      await page.evaluate(async () => {
+      // Push projects to server using the same API format as user-manager.ts.
+      // The server compares projectRevision before writing, so read the current one first.
+      const syncResult = await page.evaluate(async () => {
         const STORAGE_KEY = 'unbounded_ai_user_data';
         const CURRENT_USER_KEY = 'unbounded_ai_current_user';
         const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return;
+        if (!raw) return { ok: false, reason: 'no local user data' };
         const data = JSON.parse(raw);
         const currentUserId = localStorage.getItem(CURRENT_USER_KEY) || '';
-        if (!currentUserId || !data.userData?.[currentUserId]) return;
+        if (!currentUserId || !data.userData?.[currentUserId]) return { ok: false, reason: 'no current user' };
         const projects = data.userData[currentUserId].projects || [];
+        const current = await fetch('/api/user-data/sync?key=projects', { credentials: 'include' });
+        const currentBody = await current.json();
         const resp = await fetch('/api/user-data/sync', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ key: 'projects', value: projects }),
+          body: JSON.stringify({ key: 'projects', value: projects, projectRevision: currentBody.projectRevision }),
         });
-        await resp.json();
-        // Also wait a moment for the server write to settle
-        await new Promise((r) => setTimeout(r, 500));
+        const body = await resp.json();
+        return { ok: resp.ok && body.success === true, status: resp.status, error: body.error };
       });
+      expect(syncResult, `Project sync failed: ${JSON.stringify(syncResult)}`).toMatchObject({ ok: true });
 
       // Get the current project ID so we can reload directly into canvas mode
       const projectId = await page.evaluate(() => {
@@ -332,21 +335,15 @@ test.describe('P0 real user journey', () => {
 
       // Context menu should show 下载 option — try to find it in the menu
       const downloadMenuItem = page.locator('[class*="context-menu"], [class*="ContextMenu"], [role="menu"], .fixed.z-\\[100\\]').getByText('下载', { exact: true });
-      // Fallback: just search for 下载 text anywhere visible
+      // The selected-image toolbar is the only other download entry; a missing entry fails the journey.
       const downloadVisible = await downloadMenuItem.isVisible().catch(() => false);
       if (!downloadVisible) {
-        // Try using the toolbar download button instead
-        // Click on the image to select it, then find the download button in the toolbar
         const toolbarDownload = page.locator('button[title="下载"], [title*="下载"]').first();
-        if (await toolbarDownload.isVisible().catch(() => false)) {
-          const download = page.waitForEvent('download', { timeout: 30_000 });
-          await toolbarDownload.click();
-          const dl = await download;
-          expect(dl.suggestedFilename()).not.toEqual('');
-        } else {
-          // Skip download test if neither context menu nor toolbar works
-          console.log('Download UI not found, skipping download assertion');
-        }
+        await expect(toolbarDownload, 'Neither the context menu nor the toolbar offers 下载').toBeVisible({ timeout: 5_000 });
+        const download = page.waitForEvent('download', { timeout: 30_000 });
+        await toolbarDownload.click();
+        const dl = await download;
+        expect(dl.suggestedFilename()).not.toEqual('');
       } else {
         const download = page.waitForEvent('download', { timeout: 30_000 });
         await downloadMenuItem.click();

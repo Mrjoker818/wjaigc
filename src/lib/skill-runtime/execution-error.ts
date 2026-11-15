@@ -121,6 +121,12 @@ export function safeSkillExecutionError(error: unknown): AgentRunError & { provi
   const status = typeof details.providerStatus === 'number' && Number.isInteger(details.providerStatus)
     && details.providerStatus >= 400 && details.providerStatus <= 599 ? details.providerStatus : undefined;
   const metadata = status === undefined ? {} : { providerStatus: status };
+  if (details.code === 'BRIEF_VIDEO_PLAN_INVALID') {
+    return { code: 'BRIEF_VIDEO_PLAN_INVALID', message: '脚本规划模型返回的内容不符合脚本格式，未提交视频任务，可直接重试', retryable: true };
+  }
+  if (details.code === 'BRIEF_VIDEO_PLANNER_UNAVAILABLE') {
+    return { code: 'BRIEF_VIDEO_PLANNER_UNAVAILABLE', message: '脚本规划模型暂时无法响应，未提交视频任务，请稍后重试', retryable: details.retryable === true, ...metadata };
+  }
   if (status === 400 && details.providerCode === 'invalid_quality') {
     return { code: 'SKILL_IMAGE_QUALITY_REJECTED', message: '所选模型不支持当前图片质量参数，请检查质量设置', retryable: false, ...metadata };
   }
