@@ -2,7 +2,27 @@ import { describe, expect, it } from 'vitest';
 import {
   getConstrainedFixedPanelPosition,
   getConstrainedImageToolbarPosition,
+  getHoverToolbarShift,
 } from '@/lib/image-toolbar-position';
+
+describe('getHoverToolbarShift', () => {
+  it('leaves a toolbar that already fits where it is', () => {
+    expect(getHoverToolbarShift({ anchorCenterX: 500, toolbarWidth: 116, viewportWidth: 1024, occupiedRight: 44 })).toBe(0);
+  });
+
+  it('shifts left so the workspace rail never covers the last action', () => {
+    // Right edge would be 990 + 58 = 1048; usable right edge is 1024 - 44 - 8 = 972.
+    expect(getHoverToolbarShift({ anchorCenterX: 990, toolbarWidth: 116, viewportWidth: 1024, occupiedRight: 44 })).toBe(-76);
+  });
+
+  it('reserves the expanded panel width on desktop', () => {
+    expect(getHoverToolbarShift({ anchorCenterX: 1400, toolbarWidth: 116, viewportWidth: 1920, occupiedRight: 480 })).toBe(-26);
+  });
+
+  it('shifts right when the image hangs off the left edge', () => {
+    expect(getHoverToolbarShift({ anchorCenterX: 20, toolbarWidth: 116, viewportWidth: 1280 })).toBe(46);
+  });
+});
 
 describe('getConstrainedImageToolbarPosition', () => {
   const viewport = { width: 1280, height: 800 };

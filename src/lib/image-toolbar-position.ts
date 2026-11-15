@@ -61,6 +61,37 @@ export function getConstrainedFixedPanelPosition({
   };
 }
 
+export interface HoverToolbarShiftInput {
+  /** Screen-space center of the image the toolbar floats above. */
+  anchorCenterX: number;
+  toolbarWidth: number;
+  viewportWidth: number;
+  /** Width reserved on the right, e.g. the workspace panel rail. */
+  occupiedRight?: number;
+  margin?: number;
+}
+
+/**
+ * Horizontal shift that keeps a center-anchored hover toolbar inside the
+ * usable viewport, so the workspace panel rail never covers its last action.
+ */
+export function getHoverToolbarShift({
+  anchorCenterX,
+  toolbarWidth,
+  viewportWidth,
+  occupiedRight = 0,
+  margin = 8,
+}: HoverToolbarShiftInput): number {
+  const safeMargin = Math.max(0, margin);
+  const width = Math.max(0, toolbarWidth);
+  const availableRight = viewportWidth - Math.max(0, occupiedRight) - safeMargin;
+  const overflowRight = anchorCenterX + width / 2 - availableRight;
+  const overflowLeft = safeMargin - (anchorCenterX - width / 2);
+  if (overflowRight > 0) return -Math.ceil(overflowRight);
+  if (overflowLeft > 0) return Math.ceil(overflowLeft);
+  return 0;
+}
+
 export function getConstrainedImageToolbarPosition({
   image,
   zoom,

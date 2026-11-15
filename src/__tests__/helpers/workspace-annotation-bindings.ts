@@ -1,6 +1,6 @@
 import ts from 'typescript';
 import { createElement, type CSSProperties, type ReactElement } from 'react';
-import { WORKSPACE_PANEL_RAIL_WIDTH, shouldInitiallyCollapseWorkspacePanel } from '@/lib/workspace-panel-layout';
+import { WORKSPACE_PANEL_EXPANDED_WIDTH, WORKSPACE_PANEL_RAIL_WIDTH, shouldInitiallyCollapseWorkspacePanel } from '@/lib/workspace-panel-layout';
 
 export interface WorkspaceBindingSources { workspace: string; canvas: string }
 export interface WorkspaceBindingSnapshot {
@@ -66,6 +66,7 @@ export function observeWorkspaceBindings(sources: WorkspaceBindingSources, viewp
   const workspace = parse('canvas-workspace.tsx', sources.workspace);
   const canvas = parse('infinite-canvas.tsx', sources.canvas);
   const workspaceRail = importName(workspace, 'WORKSPACE_PANEL_RAIL_WIDTH', '@/lib/workspace-panel-layout');
+  const workspaceExpanded = importName(workspace, 'WORKSPACE_PANEL_EXPANDED_WIDTH', '@/lib/workspace-panel-layout');
   const canvasRail = importName(canvas, 'WORKSPACE_PANEL_RAIL_WIDTH', '@/lib/workspace-panel-layout');
   const initialRule = importName(workspace, 'shouldInitiallyCollapseWorkspacePanel', '@/lib/workspace-panel-layout');
   const stateRule = importName(workspace, 'useState', 'react');
@@ -118,7 +119,8 @@ export function observeWorkspaceBindings(sources: WorkspaceBindingSources, viewp
   const read = (): WorkspaceBindingSnapshot => {
     const scope = { panelCollapsed: collapsed, [setterName]: setCollapsed, themeStyle: 'colorful',
       panelHasOpened: retained, setPanelHasOpened: setRetained, currentUser: { id: 'binding-actor' },
-      currentProject: { id: 'binding-project' }, [workspaceRail]: WORKSPACE_PANEL_RAIL_WIDTH };
+      currentProject: { id: 'binding-project' }, [workspaceRail]: WORKSPACE_PANEL_RAIL_WIDTH,
+      [workspaceExpanded]: WORKSPACE_PANEL_EXPANDED_WIDTH };
     evaluate(retentionEffect.getText(workspace), { ...scope, useEffect: (setup: () => void): void => setup() });
     scope.panelHasOpened = retained;
     const canvasCollapsed = evaluate(expression(canvasEntry, 'isPanelCollapsed', workspace), scope);

@@ -24,7 +24,7 @@ import {
   isTerminalProcessingFailure,
   type VideoRetryPayload,
 } from '@/lib/video-processing-state';
-import { getConstrainedImageToolbarPosition, type FixedPanelPosition } from '@/lib/image-toolbar-position';
+import { getConstrainedImageToolbarPosition, getHoverToolbarShift, type FixedPanelPosition } from '@/lib/image-toolbar-position';
 import { getBottomToolbarDrawerPlacement, trackToolbarTransitionFrames, type BottomToolbarDrawerPlacement } from '@/lib/canvas-toolbar-layout';
 import { resolveCanvasBottomDockLayout, type CanvasBottomDockPanel } from '@/lib/canvas-bottom-dock-layout';
 import type { GenerationRouteAudit } from '@/lib/generation-route-audit';
@@ -877,6 +877,8 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   }, []);
 
   // Hover toolbar: shown when hovering over an image (separate from visionHoverImage)
+  // Four 24px buttons, 2px gaps and 4px padding each side, in canvas units.
+  const HOVER_TOOLBAR_CANVAS_WIDTH = 4 * 24 + 3 * 2 + 2 * 4;
   const [hoverToolbarImageId, setHoverToolbarImageId] = useState<string | null>(null);
   const hoverToolbarTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const keepHoverToolbar = useCallback((imageId: string) => {
@@ -14380,7 +14382,16 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                   <div
                     data-toolbar="image-hover-toolbar"
                     className="absolute -top-9 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-0.5 px-1 py-0.5 rounded-lg shadow-lg"
-                    style={{ fontSize: `${Math.max(10, 12 / zoom)}px` }}
+                    style={{
+                      fontSize: `${Math.max(10, 12 / zoom)}px`,
+                      // The surface is scaled by zoom, so convert the screen-space shift back to canvas units.
+                      marginLeft: `${getHoverToolbarShift({
+                        anchorCenterX: (image.x + image.width / 2) * zoom + viewOffset.x,
+                        toolbarWidth: HOVER_TOOLBAR_CANVAS_WIDTH * zoom,
+                        viewportWidth: canvasSize.width,
+                        occupiedRight: canvasOccupiedRight,
+                      }) / zoom}px`,
+                    }}
                     onMouseEnter={() => keepHoverToolbar(image.id)}
                     onMouseLeave={() => hideHoverToolbar()}
                   >

@@ -206,7 +206,7 @@ import {
   shouldConsumeCanvasHydrationGuard,
   type CanvasHydrationGuard,
 } from '@/lib/canvas-autosave-guard';
-import { WORKSPACE_PANEL_RAIL_WIDTH, shouldInitiallyCollapseWorkspacePanel } from '@/lib/workspace-panel-layout';
+import { WORKSPACE_PANEL_EXPANDED_WIDTH, WORKSPACE_PANEL_RAIL_WIDTH, shouldInitiallyCollapseWorkspacePanel } from '@/lib/workspace-panel-layout';
 import { sendUserDataRecord } from '@/lib/user-data-record-client';
 import { withClientImageOutputPreference } from '@/lib/image-generation-output-preference';
 import { getTransparentOutputWarning } from '@/lib/image-generation-output';
@@ -8715,7 +8715,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
       )}
 
       {/* Right Panel - with vertical collapse strip */}
-      <div data-workspace-right-panel className={`fixed right-0 bottom-[calc(72px+env(safe-area-inset-bottom))] md:bottom-0 z-[70] flex transition-all duration-300 ease-in-out ${panelCollapsed ? 'top-0' : 'top-[var(--project-menu-bottom,0px)] md:top-0'}`} style={{ width: panelCollapsed ? WORKSPACE_PANEL_RAIL_WIDTH : 'min(480px, 100vw)' }}>
+      <div data-workspace-right-panel className={`fixed right-0 bottom-[calc(72px+env(safe-area-inset-bottom))] md:bottom-0 z-[70] flex transition-all duration-300 ease-in-out ${panelCollapsed ? 'top-0' : 'top-[var(--project-menu-bottom,0px)] md:top-0'}`} style={{ width: panelCollapsed ? WORKSPACE_PANEL_RAIL_WIDTH : WORKSPACE_PANEL_EXPANDED_WIDTH }}>
         {/* Vertical collapse strip */}
         <button
           onClick={() => setPanelCollapsed(prev => !prev)}
