@@ -9,12 +9,16 @@ import type { User } from '@/lib/user-types';
 const user: User = { id: 'user-a', name: 'A', role: 'user', status: 'active', createdAt: 1, updatedAt: 1 };
 let releaseRead: (response: Response) => void;
 let pendingRead: Promise<Response>;
+let pendingWrite: Promise<Response>;
+let requestedProjects: Array<{ id: string; name: string }>;
 let persistedProjects: Array<{ id: string; name: string }>;
 let hydrationOperations: Promise<boolean>[];
 
 beforeEach(() => {
   vi.useFakeTimers();
   vi.resetModules(); localStorage.clear(); persistedProjects = []; hydrationOperations = [];
+  requestedProjects = [];
+  pendingWrite = Promise.resolve(Response.json({ success: true, projectRevision: 1 }));
   localStorage.setItem('unbounded_ai_current_user', user.id);
   localStorage.setItem('unbounded_ai_user_data', JSON.stringify({ users: [user], userData: {
     [user.id]: { user, projects: [], apiKeys: [], usageStats: [] },
@@ -23,8 +27,10 @@ beforeEach(() => {
   vi.stubGlobal('fetch', async (_input: string, init?: RequestInit): Promise<Response> => {
     if (init?.method === 'POST') {
       const payload = JSON.parse(String(init.body)) as { value: Array<{ id: string; name: string }> };
-      persistedProjects = payload.value;
-      return Response.json({ success: true, projectRevision: 1 });
+      requestedProjects = payload.value;
+      const response = (await pendingWrite).clone();
+      if (response.ok) persistedProjects = payload.value;
+      return response;
     }
     return (await pendingRead).clone();
   });
@@ -40,6 +46,8 @@ afterEach(async () => {
 
 function loadActualCallback(dependencies: Record<string, unknown>): () => Promise<void> {
   dependencies.newProjectPendingRef ??= { current: null };
+  dependencies.projectLoadActiveRef ??= { current: true };
+  dependencies.toast ??= { error: vi.fn() };
   const source = fs.readFileSync(path.resolve(
     process.env.E2E_NEW_PROJECT_CALLBACK_SOURCE || 'src/components/canvas-workspace.tsx',
   ), 'utf8');
@@ -79,6 +87,34 @@ describe('dashboard new project waits for current-account hydration', () => {
     expect(opened).toEqual([manager.getProjects()[0].id]); expect(modes).toEqual(['canvas']);
     await manager.flushProjectsToServer();
     expect(persistedProjects.map(project => project.name)).toEqual(['未命名项目']);
+  });
+
+  it('opens a new canvas only after the server acknowledges the project', async () => {
+    const { UserManager } = await import('@/lib/user-manager');
+    const manager = UserManager.getInstance();
+    await manager.upsertUserFromServer(user);
+    hydrationOperations.push(manager.waitForProjectHydration(user.id));
+    let releaseWrite!: (response: Response) => void;
+    pendingWrite = new Promise(resolve => { releaseWrite = resolve; });
+    const opened: string[] = [];
+    const modes: string[] = [];
+    const create = loadActualCallback({ UserManagerCore: UserManager, currentUser: user,
+      loadProjectById: (id: string): void => { opened.push(id); },
+      setAppMode: (mode: string): void => { modes.push(mode); } });
+    const operation = create();
+    try {
+      releaseRead(Response.json({ success: true, value: [], projectRevision: 0 }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(requestedProjects.map(project => project.name)).toEqual(['未命名项目']);
+      expect(persistedProjects).toEqual([]);
+      expect(opened).toEqual([]);
+      expect(modes).toEqual([]);
+    } finally {
+      releaseWrite(Response.json({ success: true, projectRevision: 1 }));
+      await operation;
+    }
+    expect(opened).toEqual([persistedProjects[0].id]);
+    expect(modes).toEqual(['canvas']);
   });
 
   it('does not create an unsaved project when the initial read fails', async () => {

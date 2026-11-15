@@ -8082,11 +8082,19 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
             // leaving server sync unready and Presence unable to authorize the room.
             const hydrated = await mgr.waitForProjectHydration(userId);
             if (!hydrated || mgr.getCurrentUserId() !== userId) return;
-            const newProject = await mgr.createProject('未命名项目');
-            loadProjectById(newProject.id);
+            const newProject = mgr.createProject('未命名项目');
+            // Collaboration reads project ownership from the saved server snapshot.
+            const { projectIdMap } = await mgr.flushProjectsToServerWithConflictRecovery();
+            if (!projectLoadActiveRef.current || mgr.getCurrentUserId() !== userId) return;
+            const projectId = projectIdMap[newProject.id] ?? newProject.id;
+            if (!mgr.hasAcknowledgedProject(projectId)) throw new Error('项目保存未获确认');
+            loadProjectById(projectId);
             setAppMode('canvas');
           } catch (e) {
             console.error('创建项目失败:', e);
+            if (projectLoadActiveRef.current && mgr.getCurrentUserId() === userId) {
+              toast.error('项目同步失败，请检查网络后重试');
+            }
           } finally {
             if (newProjectPendingRef.current === pending) newProjectPendingRef.current = null;
           }

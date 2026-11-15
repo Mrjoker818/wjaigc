@@ -2650,6 +2650,11 @@ export class UserManager {
     return userData?.projects.find(p => p.id === projectId) || null;
   }
 
+  hasAcknowledgedProject(projectId: string): boolean {
+    const actorId = this.currentUserId;
+    return !!actorId && (this._lastAuthoritativeProjects.get(actorId)?.some(project => project.id === projectId) ?? false);
+  }
+
   hasAcknowledgedProjectWorkflow(projectId: string, workflow: Workflow): boolean {
     const actorId = this.currentUserId;
     if (!actorId) return false;
