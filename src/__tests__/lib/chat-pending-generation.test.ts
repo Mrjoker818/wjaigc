@@ -266,6 +266,35 @@ describe('mergeChatSessionMessages', () => {
     expect(result[0].isGeneratingImage).toBe(true);
   });
 
+  it('does not restore a stored pending task once the incoming message has results', () => {
+    const stored: ChatSessionMessageSnapshot[] = [{
+      id: 'msg-1',
+      isGeneratingImage: true,
+      pendingGenerationTasks: [{ taskId: 'task-1', model: 'gpt-4', providerId: 'p1', type: 'image' as const }],
+    }];
+    const incoming: ChatSessionMessageSnapshot[] = [
+      { id: 'msg-1', isGeneratingImage: false, generatedImages: ['https://cdn.example/a.png'] },
+    ];
+    const result = mergeChatSessionMessages(stored, incoming);
+    expect(result[0].isGeneratingImage).toBe(false);
+    expect(result[0].pendingGenerationTasks).toBeUndefined();
+    expect(result[0].generatedImages).toEqual(['https://cdn.example/a.png']);
+  });
+
+  it('keeps a failed terminal update instead of restoring the stored pending task', () => {
+    const stored: ChatSessionMessageSnapshot[] = [{
+      id: 'msg-1',
+      isGeneratingImage: true,
+      pendingGenerationTasks: [{ taskId: 'task-1', model: 'gpt-4', providerId: 'p1', type: 'image' as const }],
+    }];
+    const incoming: ChatSessionMessageSnapshot[] = [
+      { id: 'msg-1', isGeneratingImage: false, generateError: '图像生成轮询失败' },
+    ];
+    const result = mergeChatSessionMessages(stored, incoming);
+    expect(result[0].isGeneratingImage).toBe(false);
+    expect(result[0].generateError).toBe('图像生成轮询失败');
+  });
+
   it('returns incoming if stored is empty', () => {
     const incoming: ChatSessionMessageSnapshot[] = [
       { id: 'msg-1' },

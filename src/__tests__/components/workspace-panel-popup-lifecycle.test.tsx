@@ -9,7 +9,7 @@ import ts from 'typescript';
 import { installJsdomMediaQueries, runJsdomFixtureCleanup } from '../helpers/jsdom-browser-apis';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { shouldInitiallyCollapseWorkspacePanel, WORKSPACE_PANEL_RAIL_WIDTH } from '@/lib/workspace-panel-layout';
+import { shouldInitiallyCollapseWorkspacePanel, WORKSPACE_PANEL_EXPANDED_WIDTH, WORKSPACE_PANEL_RAIL_WIDTH } from '@/lib/workspace-panel-layout';
 import { panelPopupRootProps, panelPortalProbeSource, panelEscapeEffect } from '../helpers/workspace-panel-popups';
 import { workspacePanelProbeSource } from '../helpers/workspace-panel-lifecycle';
 
@@ -222,9 +222,9 @@ for (const next of [{ actorId: 'actor-b' }, { projectId: 'project-b' }]) {
     }).outputText;
     const icon = (): React.ReactElement => <span />;
     const Host = new Function('React', 'useState', 'useEffect', 'useCallback',
-      'shouldInitiallyCollapseWorkspacePanel', 'WORKSPACE_PANEL_RAIL_WIDTH', 'themeStyle', 'DraftProbe', 'ChevronLeft', 'ChevronRight',
+      'shouldInitiallyCollapseWorkspacePanel', 'WORKSPACE_PANEL_RAIL_WIDTH', 'WORKSPACE_PANEL_EXPANDED_WIDTH', 'themeStyle', 'DraftProbe', 'ChevronLeft', 'ChevronRight',
       code + '\nreturn Host;')(React, useState, useEffect, useCallback, shouldInitiallyCollapseWorkspacePanel,
-      WORKSPACE_PANEL_RAIL_WIDTH, 'gold', DraftProbe, icon, icon) as React.ComponentType<{ actorId?: string; projectId?: string }>;
+      WORKSPACE_PANEL_RAIL_WIDTH, WORKSPACE_PANEL_EXPANDED_WIDTH, 'gold', DraftProbe, icon, icon) as React.ComponentType<{ actorId?: string; projectId?: string }>;
     await act(async () => root?.render(<Host />)); expect(lifecycle.mounts).toBe(0);
     const toggle = async (): Promise<void> => { await act(async () => container?.querySelector<HTMLButtonElement>('[data-workspace-right-panel] > button')?.click()); };
     await toggle(); expect(lifecycle.mounts).toBe(1); await toggle();

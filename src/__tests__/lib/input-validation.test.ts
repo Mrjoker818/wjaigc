@@ -64,6 +64,17 @@ describe('input-validation', () => {
     it('should reject plain strings', () => {
       expect(validateImageUrl('not-a-url')).not.toBeNull();
     });
+
+    it('accepts long presigned URLs up to 100000 characters', () => {
+      const base = 'https://cdn.example/a.png?token=';
+      expect(validateImageUrl(base + 'x'.repeat(20_000))).toBeNull();
+      expect(validateImageUrl(base + 'x'.repeat(100_000 - base.length))).toBeNull();
+      expect(validateImageUrl(base + 'x'.repeat(100_001 - base.length))).toBe('imageUrl 长度超出限制');
+    });
+
+    it('still rejects non-image data URLs', () => {
+      expect(validateImageUrl('data:application/octet-stream;base64,AAAA')).not.toBeNull();
+    });
   });
 
   describe('validateVideoUrl', () => {

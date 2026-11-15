@@ -5,7 +5,7 @@ import React, { act, useCallback, useEffect, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import ts from 'typescript';
 import { afterEach, expect, it } from 'vitest';
-import { shouldInitiallyCollapseWorkspacePanel, WORKSPACE_PANEL_RAIL_WIDTH } from '@/lib/workspace-panel-layout';
+import { shouldInitiallyCollapseWorkspacePanel, WORKSPACE_PANEL_EXPANDED_WIDTH, WORKSPACE_PANEL_RAIL_WIDTH } from '@/lib/workspace-panel-layout';
 import { workspacePanelProbeSource } from '../helpers/workspace-panel-lifecycle';
 
 // Regression: removing the retained child or its hidden/inert boundary must
@@ -42,10 +42,10 @@ async function setup(width: number): Promise<{
   }
   const icon = (): React.ReactElement => <span />;
   const Host = new Function('React', 'useState', 'useEffect', 'useCallback',
-    'shouldInitiallyCollapseWorkspacePanel', 'WORKSPACE_PANEL_RAIL_WIDTH', 'themeStyle',
+    'shouldInitiallyCollapseWorkspacePanel', 'WORKSPACE_PANEL_RAIL_WIDTH', 'WORKSPACE_PANEL_EXPANDED_WIDTH', 'themeStyle',
     'DraftProbe', 'ChevronLeft', 'ChevronRight', compiled + '\nreturn Host;')(
     React, useState, useEffect, useCallback, shouldInitiallyCollapseWorkspacePanel,
-    WORKSPACE_PANEL_RAIL_WIDTH, 'gold', DraftProbe, icon, icon,
+    WORKSPACE_PANEL_RAIL_WIDTH, WORKSPACE_PANEL_EXPANDED_WIDTH, 'gold', DraftProbe, icon, icon,
   ) as React.ComponentType<HostProps>;
   container = document.createElement('div'); document.body.append(container);
   activeRoot = createRoot(container);

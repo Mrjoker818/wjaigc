@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   findProviderForModel: vi.fn(),
   getSessionUser: vi.fn(),
   requireApiAuthOrReject: vi.fn(),
+  webSearch: vi.fn(),
 }));
 
 vi.mock('server-only', () => ({}));
@@ -38,8 +39,8 @@ vi.mock('@/lib/api-auth', async (importOriginal) => {
 
 vi.mock('coze-coding-dev-sdk', () => ({
   SearchClient: class {
-    async webSearch() {
-      return { web_items: [] };
+    async webSearch(...args: unknown[]) {
+      return mocks.webSearch(...args);
     }
   },
   Config: class {},
@@ -122,6 +123,8 @@ describe('simple-chat retry idempotency boundary', () => {
     mocks.findProviderForModel.mockResolvedValue(provider);
     mocks.findProviderById.mockResolvedValue(provider);
     mocks.fetchWithTimeout.mockResolvedValue(chatProviderResponse());
+    mocks.webSearch.mockReset();
+    mocks.webSearch.mockResolvedValue({ web_items: [] });
     vi.stubGlobal('fetch', vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({
         choices: [{ message: { content: '{"steps":[{"step":1,"query":"Research this","rationale":"direct"}]}' } }],
@@ -147,6 +150,61 @@ describe('simple-chat retry idempotency boundary', () => {
       }),
       'chat',
     );
+  });
+
+  it('retries a 404 chat gateway once on /v1 with the same retry key', async () => {
+    const unversioned = { ...provider, baseUrl: 'https://provider.example' };
+    mocks.findProviderForModel.mockResolvedValue(unversioned);
+    mocks.findProviderById.mockResolvedValue(unversioned);
+    mocks.fetchWithTimeout.mockReset();
+    mocks.fetchWithTimeout
+      .mockResolvedValueOnce(new Response('not found', { status: 404 }))
+      .mockResolvedValueOnce(chatProviderResponse());
+    const key = 'simple-chat-retry:task-b:assistant-b';
+    const response = await chatPost(chatRequest(key));
+    await response.text();
+
+    expect(response.status).toBe(200);
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(2);
+    const [first, second] = mocks.fetchWithTimeout.mock.calls;
+    expect(String(first[0])).toBe('https://provider.example/chat/completions');
+    expect(String(second[0])).toBe('https://provider.example/v1/chat/completions');
+    expect(second[1]).toEqual(expect.objectContaining({
+      headers: expect.objectContaining({ 'Idempotency-Key': key }),
+    }));
+  });
+
+  it('does not retry a /v1 provider that answers 404', async () => {
+    mocks.fetchWithTimeout.mockReset();
+    mocks.fetchWithTimeout.mockResolvedValue(new Response('not found', { status: 404 }));
+    const response = await chatPost(chatRequest('simple-chat-retry:task-d:assistant-d'));
+    await response.text();
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not repeat a streamed chat request that already succeeded', async () => {
+    const response = await chatPost(chatRequest('simple-chat-retry:task-c:assistant-c'));
+    await response.text();
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps each web search result field on one line for the client parser', async () => {
+    mocks.webSearch.mockResolvedValue({
+      web_items: [{ title: 'Line one\nline two', url: 'https://a.example', snippet: 'First\r\n  second', summary: 'S1\nS2' }],
+    });
+    const response = await chatPost(new NextRequest('http://localhost/api/simple-chat/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'Hello' }], model: 'chat-model', providerId: 'provider-a', webSearch: true }),
+    }));
+    const body = await response.text();
+    const event = body.split('\n')
+      .filter(line => line.startsWith('data: '))
+      .map(line => { try { return JSON.parse(line.slice(6)); } catch { return null; } })
+      .find(value => value?.type === 'search_status');
+
+    expect(event).toMatchObject({ status: 'completed', resultCount: 1 });
+    expect(event.searchResults).toContain('[1] Line one line two\nURL: https://a.example\n摘要: First second\nAI摘要: S1 S2');
   });
 
   it('derives stable Deep Research phase keys', async () => {

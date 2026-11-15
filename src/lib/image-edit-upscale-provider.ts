@@ -1,6 +1,22 @@
 import { createImageEditProviderCall, type ImageEditProviderCallOptions } from '@/lib/image-edit-provider-boundary';
 import { parse302UpscaleProviderError } from '@/lib/upscale-provider-error';
 
+interface Upscale302Image { url?: unknown; width?: number; height?: number }
+
+/**
+ * 302.AI 放大响应: { image: { url, width, height } }，部分端点返回 { output: "url" }
+ * 或 { images: [{ url, width, height }] }（如 upscale-v6）。
+ */
+function read302UpscaleImage(result: { image?: Upscale302Image; images?: unknown; output?: unknown }) {
+  const image = result.image?.url
+    ? result.image
+    : Array.isArray(result.images) ? result.images[0] as Upscale302Image | undefined : undefined;
+  const url = typeof image?.url === 'string' && image.url
+    ? image.url
+    : typeof result.output === 'string' ? result.output : undefined;
+  return { directUrl: url || undefined, width: image?.width, height: image?.height };
+}
+
 /**
  * 302.AI 超级放大 API 适配器
  * 端点: /302/submit/super-upscale-v2
@@ -57,14 +73,12 @@ export async function submit302aiUpscaleTask(
     const result = JSON.parse(responseText);
     console.debug(`[image-edit] 302.AI upscale response keys:`, Object.keys(result));
 
-    // 响应格式: { image: { url, content_type, file_size, width, height }, seed }
-    // Fallback: some 302.AI endpoints return { output: "url" } instead
-    const directUrl = result.image?.url || (typeof result.output === 'string' ? result.output : undefined);
+    const { directUrl, width, height } = read302UpscaleImage(result);
     if (directUrl) {
       return {
         directUrl,
-        width: result.image?.width,
-        height: result.image?.height,
+        width,
+        height,
         usedModel: '302-super-upscale-v2',
       };
     }
@@ -120,14 +134,12 @@ export async function submit302aiUpscaleV6Task(
     const result = JSON.parse(responseText);
     console.debug(`[image-edit] 302.AI upscale-v6 response keys:`, Object.keys(result));
 
-    // 响应格式: { image: { url, content_type, file_size, width, height }, seed }
-    // Fallback: some 302.AI endpoints return { output: "url" } instead
-    const directUrl = result.image?.url || (typeof result.output === 'string' ? result.output : undefined);
+    const { directUrl, width, height } = read302UpscaleImage(result);
     if (directUrl) {
       return {
         directUrl,
-        width: result.image?.width,
-        height: result.image?.height,
+        width,
+        height,
         usedModel: '302-upscale-v6',
       };
     }
@@ -180,13 +192,12 @@ export async function submit302aiImageUpscaleTask(
     const result = JSON.parse(responseText);
     console.debug(`[image-edit] 302.AI image-upscale response keys:`, Object.keys(result));
 
-    // 响应格式: { image: { url, ... } } or { output: "url" }
-    const directUrl = result.image?.url || (typeof result.output === 'string' ? result.output : undefined);
+    const { directUrl, width, height } = read302UpscaleImage(result);
     if (directUrl) {
       return {
         directUrl,
-        width: result.image?.width,
-        height: result.image?.height,
+        width,
+        height,
         usedModel: '302-image-upscale',
       };
     }
@@ -239,13 +250,12 @@ export async function submit302aiEsrganTask(
     const result = JSON.parse(responseText);
     console.debug(`[image-edit] 302.AI esrgan response keys:`, Object.keys(result));
 
-    // 响应格式: { image: { url, ... } } or { output: "url" }
-    const directUrl = result.image?.url || (typeof result.output === 'string' ? result.output : undefined);
+    const { directUrl, width, height } = read302UpscaleImage(result);
     if (directUrl) {
       return {
         directUrl,
-        width: result.image?.width,
-        height: result.image?.height,
+        width,
+        height,
         usedModel: '302-esrgan',
       };
     }

@@ -5707,8 +5707,11 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             ))}
             </>
           )}
-          {/* 思考中加载指示器 — 当有工具执行步骤时隐藏，避免与工具步骤重叠 */}
-          {isLoading && !(messages.length > 0 && messages[messages.length - 1].role === 'assistant' && messages[messages.length - 1].toolExecutions && messages[messages.length - 1].toolExecutions!.length > 0) && (
+          {/* 思考中加载指示器 — AI 已输出文本、或某个工具步骤正在显示自己的进度时隐藏；工具全部结束、等待模型续写时保持显示 */}
+          {isLoading && !(messages.length > 0 && messages[messages.length - 1].role === 'assistant' && (
+            (messages[messages.length - 1].content?.trim().length ?? 0) > 0
+            || (messages[messages.length - 1].toolExecutions ?? []).some(exec => exec.status === 'running')
+          )) && (
             <div className="flex gap-2.5 justify-start">
               <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
                 isGold ? 'bg-gold/15 text-gold' : 'bg-gray-100 text-gray-600'

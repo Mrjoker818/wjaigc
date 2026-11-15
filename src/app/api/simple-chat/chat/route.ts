@@ -5,7 +5,7 @@ import { findProviderById, findProviderForModel } from '@/lib/server-api-config'
 import type { ApiKind } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { SearchClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
-import { fetchWithTimeout, getInternalApiUrl } from '@/lib/api-helpers';
+import { fetchWithTimeout, getInternalApiUrl, shouldSkipV1Retry } from '@/lib/api-helpers';
 import { assertSafeProviderUrl, PoisonedApiHostError } from '@/lib/poisoned-api-host';
 import { resolveChatControls } from '@/lib/chat-generation-controls';
 import { getInternalRequestHeaders } from '@/lib/api-auth';
@@ -827,8 +827,10 @@ export async function POST(request: NextRequest) {
         const searchResp = await searchClient.webSearch(searchQuery, 5, true);
 
         if (searchResp.web_items && searchResp.web_items.length > 0) {
+          // The client parses one line per field, so provider text must not carry line breaks.
+          const oneLine = (value: string | undefined) => (value || '').replace(/\s*[\r\n]+\s*/g, ' ').trim();
           const items = searchResp.web_items.slice(0, 5).map((item, i) =>
-            `[${i + 1}] ${item.title}\nURL: ${item.url || '无'}\n摘要: ${item.snippet || ''}${item.summary ? '\nAI摘要: ' + item.summary : ''}`
+            `[${i + 1}] ${oneLine(item.title)}\nURL: ${oneLine(item.url) || '无'}\n摘要: ${oneLine(item.snippet)}${item.summary ? '\nAI摘要: ' + oneLine(item.summary) : ''}`
           ).join('\n\n');
 
           searchResults = `## 联网搜索结果\n搜索关键词: "${searchQuery}"\n\n${items}`;
@@ -1007,7 +1009,7 @@ export async function POST(request: NextRequest) {
           },
         ];
 
-        const fetchRes = await fetchWithTimeout(apiUrl, {
+        const chatRequestInit: RequestInit = {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1022,7 +1024,14 @@ export async function POST(request: NextRequest) {
             tool_choice: 'auto',
             ...chatControls.requestParams,
           }),
-        }, 'chat');
+        };
+        let fetchRes = await fetchWithTimeout(apiUrl, chatRequestInit, 'chat');
+        // Gateways that only route /v1 answer 404. Retry only then: a streamed
+        // reply is not JSON, so a content-type based retry would send a second paid request.
+        if (fetchRes.status === 404 && !shouldSkipV1Retry(baseUrl)) {
+          await fetchRes.body?.cancel().catch(() => undefined);
+          fetchRes = await fetchWithTimeout(`${baseUrl}/v1/chat/completions`, chatRequestInit, 'chat');
+        }
 
         if (!fetchRes.ok) {
           const errText = await fetchRes.text().catch(() => '');

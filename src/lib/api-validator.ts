@@ -36,8 +36,8 @@ export function validateImageUrl(url: unknown, fieldName = 'imageUrl'): Validate
   if (t.startsWith('file://') || t.startsWith('javascript:')) return `${fieldName} 包含不安全的协议`;
   // base64 data URL 跳过长度限制（可达数百万字符），单独限制 20MB
   if (isDataUrl && t.length > 27_000_000) return `${fieldName} 数据过大，请压缩后重试`;
-  // HTTP/相对路径URL保留长度限制
-  if (!isDataUrl && t.length > 10000) return `${fieldName} 长度超出限制`;
+  // HTTP/相对路径URL保留长度限制；放宽到 100000 以兼容含签名/令牌的 presigned URL
+  if (!isDataUrl && t.length > 100_000) return `${fieldName} 长度超出限制`;
   return null;
 }
 

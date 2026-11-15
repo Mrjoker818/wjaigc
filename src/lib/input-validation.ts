@@ -24,8 +24,8 @@ export function validateImageUrl(url: unknown, fieldName = 'imageUrl'): string |
     return `${fieldName} 格式不合法，仅支持 http/https URL、/uploads/ 相对路径或 data:image/ base64`;
   }
   // base64 data URL 可达数百万字符（100KB图片≈133K字符），跳过长度限制
-  // HTTP/相对路径URL保留长度限制防止滥用
-  if (!isDataUrl && trimmed.length > 10000) {
+  // HTTP/相对路径URL保留长度限制防止滥用；放宽到 100000 以兼容含签名/令牌的 presigned URL
+  if (!isDataUrl && trimmed.length > 100_000) {
     return `${fieldName} 长度超出限制`;
   }
   // base64 data URL 单独限制：最大 20MB（约 27M 字符）

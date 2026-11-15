@@ -108,6 +108,8 @@ export interface RecoverableChatCloudTask {
 interface PendingGenerationMessage {
   isGeneratingImage?: boolean;
   pendingGenerationTasks?: ChatPendingGenerationTask[];
+  generatedImages?: string[];
+  generateError?: string;
 }
 
 export interface ChatSessionMessageSnapshot extends PendingGenerationMessage {
@@ -143,8 +145,12 @@ export function mergeChatSessionMessages<T extends ChatSessionMessageSnapshot>(
     const persistedTasks = persisted ? getResumableChatGenerationTasks(persisted) : [];
     const incomingTasks = getResumableChatGenerationTasks(incoming);
     let merged = incoming;
+    // Results or an error on the incoming message mean the task already reached a
+    // terminal state; restoring the stale pending task would resume it and
+    // duplicate the image cards or hide the failure.
+    const incomingIsTerminal = (incoming.generatedImages?.length ?? 0) > 0 || Boolean(incoming.generateError);
 
-    if (persistedTasks.length > 0 && incomingTasks.length === 0) {
+    if (persistedTasks.length > 0 && incomingTasks.length === 0 && !incomingIsTerminal) {
       merged = {
         ...persisted,
         ...incoming,

@@ -528,6 +528,13 @@ describe.each(natives)('real native $name', native => {
     expect(await outcome).toEqual({ value: { directUrl: output, width: 300, height: 200, usedModel: native.name } });
     expect(f.sent).toHaveLength(1);
   });
+  it('accepts the images array response shape returned by upscale-v6', async () => {
+    const f = fixture([{ url: base + native.endpoint, identity: { providerId: 'N', modelId: native.name, kind: 'upscale' },
+      response: () => json({ images: [{ url: output, width: 640, height: 480 }] }) }]);
+    expect(await native.call({ providerId: 'N', boundary: f.execution }))
+      .toEqual({ directUrl: output, width: 640, height: 480, usedModel: native.name });
+    expect(f.accepted[0].result).toEqual({ kind: 'image', directUrl: output, width: 640, height: 480 });
+  });
   it('keeps the typed provider error from an explicitly returned rejection', async () => {
     const f = fixture([{ url: base + native.endpoint, identity: { providerId: 'N', modelId: native.name, kind: 'upscale' },
       response: () => json({ error: { message: 'rate limited', code: 'quota-17' } }, 429) }]);
