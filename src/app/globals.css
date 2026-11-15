@@ -386,6 +386,15 @@ input[type="range"] {
   outline: none;
 }
 
+/* appearance:none removes the native track, so sliders without their own
+   background showed only a floating thumb. Base layer: utilities and inline
+   styles still win. */
+@layer base {
+  input[type="range"] {
+    background: linear-gradient(rgba(128,128,128,0.35), rgba(128,128,128,0.35)) center / 100% 4px no-repeat;
+  }
+}
+
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
