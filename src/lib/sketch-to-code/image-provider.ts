@@ -182,8 +182,10 @@ function guardPayload(payload: Record<string, unknown>, body: Body, profile: Api
       if (profile.id === 'apimart' && profile.resolutionTierMode === 'native') {
         // Native tiers are not pixel hints. APImart deliberately strips derived
         // width/height/size_px; require the frozen tier in its actual wire field.
+        // gpt-image-2 documents lower-case tiers (1k/2k/4k), so the case may differ.
+        const wireTier = typeof payload.resolution === 'string' ? payload.resolution.toUpperCase() : payload.resolution;
         if (body.size !== undefined && !/^[124]K$/.test(body.size)
-          || payload.resolution !== body.size
+          || wireTier !== body.size
           || ['width', 'height', 'size_px'].some(key => Object.hasOwn(payload, key))) fail();
       } else if (body.size !== undefined && payload.size_px !== body.size) fail();
     } else if (body.size !== undefined && payload.size !== body.size) fail();

@@ -481,7 +481,11 @@ describe('Task8 APImart native resolution boundary', () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({ method: 'POST', url: '/v1/images/generations',
       headers: { 'x-request-id': requestId },
-      body: { model: modelId, n: 1, size: '4:3', resolution: size, image_urls: [image], idempotency_key: requestId },
+      // docs.apib.ai gpt-image-2: resolution is sent lower-case (1k/2k/4k)
+      body: {
+        model: modelId, n: 1, size: '4:3', resolution: modelId === 'gpt-image-2' ? size.toLowerCase() : size,
+        image_urls: [image], idempotency_key: requestId,
+      },
     });
     for (const key of ['width', 'height', 'size_px', 'quality', 'image', 'images']) {
       expect(requests[0].body).not.toHaveProperty(key);
@@ -498,7 +502,7 @@ describe('Task8 APImart native resolution boundary', () => {
     expect(readSketchImageKnownFailure(error)).toEqual(status === 422
       ? { phase: 'generation', ...binding, kind: 'rejected' } : undefined);
     expect(requests).toHaveLength(1);
-    expect(requests[0].body).toMatchObject({ size: '4:3', resolution: '1K', image_urls: [image] });
+    expect(requests[0].body).toMatchObject({ size: '4:3', resolution: '1k', image_urls: [image] });
   });
 
   it.each(['missing-resolution', 'wrong-resolution', 'width', 'height', 'size_px'] as const)(
