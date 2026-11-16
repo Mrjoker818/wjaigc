@@ -1869,6 +1869,10 @@ input[type="range"]::-moz-range-thumb {
 [data-canvas-toolbar-auxiliary] > button {
   min-height: 2.75rem;
   min-width: 2.75rem;
+  /* The enlarged hit area must stay centered on the icon and its active fill. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 [data-canvas-toolbar-fixed-zoom] { display: none; }
 @media not all and (hover: hover) and (pointer: fine) {

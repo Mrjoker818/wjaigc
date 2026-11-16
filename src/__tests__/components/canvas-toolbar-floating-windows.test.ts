@@ -96,6 +96,15 @@ describe('canvas toolbar floating windows', () => {
     expect(globalsSource).toContain('width: max-content');
   });
 
+  it('centers bottom-toolbar icons inside their enlarged 44px hit areas', () => {
+    const rule = globalsSource.slice(globalsSource.indexOf('[data-canvas-toolbar-auxiliary] > button {'));
+    const body = rule.slice(0, rule.indexOf('}'));
+    expect(body).toContain('min-width: 2.75rem');
+    expect(body).toContain('display: inline-flex');
+    expect(body).toContain('align-items: center');
+    expect(body).toContain('justify-content: center');
+  });
+
   it('isolates bottom-toolbar pointer input from canvas interactions', () => {
     expect(canvasSource).toContain('data-toolbar="bottom-toolbar"');
     expect(canvasSource).toContain('onMouseDown={(event) => event.stopPropagation()}');
