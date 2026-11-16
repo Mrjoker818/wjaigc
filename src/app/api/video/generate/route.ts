@@ -581,6 +581,7 @@ export async function POST(request: NextRequest) {
       'video_generate', pureModel, {
           durationSeconds: parsedDuration,
           resolution: typeof resolution === 'string' && resolution.trim() ? resolution : undefined,
+          audio: generateAudio === true,
           providerId: provider.id,
       },
     );

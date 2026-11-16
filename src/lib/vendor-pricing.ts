@@ -23,9 +23,11 @@ export interface VendorPrice {
   tiers?: Readonly<Record<string, number>>;
   /** 无界清晰度到供应商价格档的映射（如 Flux 的 1MP/4MP）。 */
   tierAliases?: Readonly<Record<string, string>>;
+  /** 开启声音（generate_audio / audio）时的按清晰度价格。 */
+  audioTiers?: Readonly<Record<string, number>>;
 }
 
-type Extra = Pick<VendorPrice, 'tiers' | 'tierAliases'>;
+type Extra = Pick<VendorPrice, 'tiers' | 'tierAliases' | 'audioTiers'>;
 const usd = (unit: VendorPrice['unit'], price: number, extra: Extra = {}): VendorPrice => ({ currency: 'USD', unit, price, ...extra });
 const cny = (unit: VendorPrice['unit'], price: number, extra: Extra = {}): VendorPrice => ({ currency: 'CNY', unit, price, ...extra });
 
@@ -70,7 +72,13 @@ export const VENDOR_PRICES: Readonly<Record<string, VendorPrice>> = {
   'apib::hy-image-v3.5-preview': usd('call', 0.0192, { tiers: { '1K': 0.0192, '2K': 0.0192, '4K': 0.0256 } }),
   'apib::imagen-4.0-apimart': usd('call', 0.04),
   'apib::kling-3.0-turbo': usd('second', 0.1144, { tiers: { '720P': 0.1144, '1080P': 0.1432 } }),
-  'apib::kling-v3-omni': usd('second', 0.0672, { tiers: { '1080P': 0.0896, '4K': 0.42856 } }),
+  // billing_tier_paid_prices：std=默认 $0.0672、sound $0.0896、pro $0.0896、pro-sound $0.112、4k / 4k-sound $0.42856；
+  // 请求按 720p→std、1080p→pro、4k→4k 发送 mode
+  'apib::kling-v3-omni': usd('second', 0.0672, {
+    tiers: { '720P': 0.0672, '1080P': 0.0896, '4K': 0.42856 },
+    audioTiers: { '720P': 0.0896, '1080P': 0.112, '4K': 0.42856 },
+    tierAliases: { '1K': '720P', '2K': '1080P' },
+  }),
   'apib::mai-image-2.6': usd('call', 0.032, { tiers: { '1K': 0.032, '2K': 0.072 } }),
   'apib::mai-image-2.6-flash': usd('call', 0.016, { tiers: { '1K': 0.016, '2K': 0.036 } }),
   'apib::minimax-h3-image': usd('call', 0.08, { tiers: { '1K': 0.024, '2K': 0.024, '4K': 0.08 } }),
@@ -131,7 +139,8 @@ export const VENDOR_PRICES: Readonly<Record<string, VendorPrice>> = {
   'pear::hailuo-2.3': cny('second', 0.06),
   'pear::happyhorse-1.0': cny('second', 0.56),
   'pear::image-layered': cny('call', 0.3),
-  'pear::minimax-h3': cny('second', 0.2),
+  // 模型广场：768P ¥0.2/秒，2K ¥0.29/秒
+  'pear::minimax-h3': cny('second', 0.2, { tiers: { '768P': 0.2, '2K': 0.29 } }),
   'pear::nano-banana': cny('call', 0.08),
   'pear::nano-banana-2': cny('call', 0.1),
   'pear::nano-banana-2-lite': cny('call', 0.06),
@@ -151,10 +160,16 @@ export function getVendorPrice(family: string, modelId: string): VendorPrice | u
   return Object.hasOwn(VENDOR_PRICES, key) ? VENDOR_PRICES[key] : undefined;
 }
 
-function tierPrice(entry: VendorPrice, resolution: string | undefined): number {
-  if (!resolution || !entry.tiers) return entry.price;
-  const tier = resolution.trim().toUpperCase();
-  const key = entry.tierAliases?.[tier] ?? tier;
+function tierPrice(entry: VendorPrice, resolution: string | undefined, audio: boolean): number {
+  const tier = resolution?.trim().toUpperCase();
+  const key = tier ? entry.tierAliases?.[tier] ?? tier : undefined;
+  if (audio && entry.audioTiers) {
+    // 未指定清晰度时取默认档（与 price 同价的档位）的有声价格
+    const defaultTier = Object.entries(entry.tiers ?? {}).find(([, value]) => value === entry.price)?.[0];
+    const audioKey = key ?? defaultTier;
+    return (audioKey ? entry.audioTiers[audioKey] : undefined) ?? Math.max(...Object.values(entry.audioTiers));
+  }
+  if (!key || !entry.tiers) return entry.price;
   return entry.tiers[key] ?? entry.price;
 }
 
@@ -163,9 +178,9 @@ function tierPrice(entry: VendorPrice, resolution: string | undefined): number {
  */
 export function vendorCreditCost(
   entry: VendorPrice,
-  options: { resolution?: string; durationSeconds?: number } = {},
+  options: { resolution?: string; durationSeconds?: number; audio?: boolean } = {},
 ): number {
-  const unitPrice = tierPrice(entry, options.resolution);
+  const unitPrice = tierPrice(entry, options.resolution, options.audio === true);
   const units = entry.unit === 'second' ? Math.max(1, options.durationSeconds || 5) : 1;
   const cnyPrice = unitPrice * units * (entry.currency === 'USD' ? APIMART_USD_TO_CNY : 1);
   // toFixed 去掉浮点误差，避免 1.01 × 100 这类整数结果被多进一位

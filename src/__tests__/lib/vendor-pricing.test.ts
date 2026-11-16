@@ -54,6 +54,21 @@ describe('vendor pricing', () => {
     await expect(calculateConfiguredCreditCost('video_generate', 'seedance-2.0', { providerId: 'apib', resolution: '480p' })).resolves.toBe(244);
   });
 
+  it('charges the sound tier when audio is on and the 2K tier for Pear minimax-h3', async () => {
+    // kling-v3-omni 1080P：pro $0.0896/s，pro-sound $0.112/s；× 7.3 × 5 s × 1.01
+    await expect(calculateConfiguredCreditCost('video_generate', 'kling-v3-omni', { providerId: 'apib', resolution: '1080p' })).resolves.toBe(331);
+    await expect(calculateConfiguredCreditCost('video_generate', 'kling-v3-omni', { providerId: 'apib', resolution: '1080p', audio: true })).resolves.toBe(413);
+    await expect(calculateConfiguredCreditCost('video_generate', 'kling-v3-omni', { providerId: 'apib', resolution: '720p', audio: true })).resolves.toBe(331);
+    // 未指定清晰度按默认 std 档的有声价 $0.0896/s
+    await expect(calculateConfiguredCreditCost('video_generate', 'kling-v3-omni', { providerId: 'apib', audio: true })).resolves.toBe(331);
+    await expect(calculateConfiguredCreditCost('video_generate', 'kling-v3-omni', { providerId: 'apib', resolution: '4k', audio: true })).resolves.toBe(1580);
+    // 不区分声音的模型开声音不加价
+    await expect(calculateConfiguredCreditCost('video_generate', 'seedance-2.0', { providerId: 'apib', resolution: '720p', audio: true })).resolves.toBe(524);
+    // Pear minimax-h3：768P ¥0.2/s，2K ¥0.29/s
+    await expect(calculateConfiguredCreditCost('video_generate', 'minimax-h3', { providerId: 'pear', resolution: '768P' })).resolves.toBe(101);
+    await expect(calculateConfiguredCreditCost('video_generate', 'minimax-h3', { providerId: 'pear', resolution: '2K', durationSeconds: 10 })).resolves.toBe(293);
+  });
+
   it('keeps provider-scoped admin prices first and falls back for other providers', async () => {
     dbGetSystemSetting.mockResolvedValue(JSON.stringify({ modelCredits: { 'pear::gpt-image-2': 9, 'gpt-image-2': 50 } }));
     await expect(calculateConfiguredCreditCost('image_generate', 'gpt-image-2', { providerId: 'pear' })).resolves.toBe(9);
