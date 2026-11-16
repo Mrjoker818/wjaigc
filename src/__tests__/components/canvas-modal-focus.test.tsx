@@ -144,8 +144,7 @@ it('keeps clipboard events from the canvas while allowing a modal text field to 
 it('describes canvas edit capabilities conditionally and preserves the changelog', () => {
   const view = render(<CanvasHelpModal mode="instructions" isMonochrome onClose={() => {}} />);
   const guide = screen.getByRole('region', { name: '使用说明内容' });
-  expect(guide.textContent).toMatch(/擦除.*可用的图像编辑能力/);
-  expect(guide.textContent).toMatch(/移除背景.*可用的去背景能力/);
+  expect(guide.textContent).not.toMatch(/擦除|蒙版|移除背景|编辑元素/);
   expect(guide.textContent).not.toMatch(/LaMa|BiRefNet|Silueta/);
   view.rerender(<CanvasHelpModal mode="changelog" isMonochrome onClose={() => {}} />);
   expect(screen.getByRole('dialog', { name: '更新内容' }).textContent).toContain('LaMa/ZITS/Anime-Lama');

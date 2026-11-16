@@ -212,7 +212,7 @@ async function withSession(theme:Theme,width:number,height:number,options:Option
 
 interface BCEntry {theme:Theme;width:number;height:number}
 const MATRIX=THEMES.flatMap(theme=>[[320,640],[390,844],[640,320]].map(([width,height])=>({theme,width,height})));
-const NAMES=['预览','加入参考图组','加入融图组','放大','移除背景','SVG智能描摹','元素拆解','横竖重组','擦除','蒙版','调色','编辑元素','多角度','图转3D工厂','扩展','裁切','全景生成','精修引擎','人物精修大师','语言修图','Agent编排','下载','删除'];
+const NAMES=['预览','加入参考图组','加入融图组','放大','SVG智能描摹','元素拆解','横竖重组','调色','多角度','图转3D工厂','扩展','裁切','全景生成','精修引擎','人物精修大师','语言修图','Agent编排','下载','删除'];
 let captureIndex=0;
 const bar=(s:Session):Locator=>s.page.locator('[data-mobile-image-actions]');
 const drawer=(s:Session):Locator=>s.page.getByRole('dialog',{name:'图片工具',exact:true});

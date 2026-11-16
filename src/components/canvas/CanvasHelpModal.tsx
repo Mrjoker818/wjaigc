@@ -103,9 +103,6 @@ function InstructionsContent({ isMonochrome }: { isMonochrome: boolean }) {
       <div>
         <div className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isMonochrome ? 'text-gray-600' : 'text-gold'}`}>图片编辑工具</div>
         <div className="space-y-3">
-          <ToolCard icon={Eraser} title="擦除" desc="画笔涂抹消除，自动修复" imageFile="erase-tool.jpeg" detail="涂抹要消除的区域后提交修复。系统使用当前部署中已配置且可用的图像编辑能力，支持取消任务。" isMonochrome={isMonochrome} />
-          <ToolCard icon={Brush} title="蒙版" desc="精准遮罩，AI 重新生成" imageFile="mask-tool.jpeg" detail="画白色区域标记要重新生成的部分，输入提示词描述，AI 仅在蒙版区域生成新内容" isMonochrome={isMonochrome} />
-          <ToolCard icon={Scissors} title="移除背景" desc="一键去背景，输出主体图+蒙版" imageFile="remove-bg.jpeg" detail="使用当前部署中已配置且可用的去背景能力分离主体与背景，同时输出透明底主体图和黑白蒙版图。" isMonochrome={isMonochrome} />
           <ToolCard icon={ZoomIn} title="放大" desc="无损放大，智能补细节" imageFile="upscale.jpeg" detail="AI 放大支持 4 种模型（302 超级放大 V2 / 放大 V6 / 基础放大 / ESRGAN 高清增强），倍率 2x/4x，支持 PNG/JPG/WEBP 输出" isMonochrome={isMonochrome} />
           <ToolCard icon={Pencil} title="语言修图" desc="自然语言描述修改图片" imageFile="lang-edit.jpeg" detail="用自然语言描述修改意图，支持 OpenAI（可区域涂抹）+ Gemini（智能理解），自动裁切适配比例" isMonochrome={isMonochrome} />
           <ToolCard icon={Bot} title="Agent 编排" desc="智能编排多工具" detail="AI 自动选择和组合工具（修图/生图/分析/调色），多轮决策直至完成" isMonochrome={isMonochrome} />
@@ -122,7 +119,7 @@ function InstructionsContent({ isMonochrome }: { isMonochrome: boolean }) {
               <span className={`text-xs font-semibold ${isMonochrome ? 'text-gray-900' : 'text-white'}`}>其他工具</span>
             </div>
             <div className="grid grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2">
-              {[['编辑元素', '按元素智能分层'], ['多角度', '多视角旋转生成'], ['图转3D工厂', '生成3D模型预览'], ['裁切', '自由/预设比例裁切'], ['Logo Pro', 'AI Logo设计与生成'], ['图生图', '基于原图风格生成'], ['品牌工厂', '品牌视觉资产生成'], ['下载', 'PNG/SVG/PSD多格式']].map(([k, v]) => (
+              {[['多角度', '多视角旋转生成'], ['图转3D工厂', '生成3D模型预览'], ['裁切', '自由/预设比例裁切'], ['Logo Pro', 'AI Logo设计与生成'], ['图生图', '基于原图风格生成'], ['品牌工厂', '品牌视觉资产生成'], ['下载', 'PNG/SVG/PSD多格式']].map(([k, v]) => (
                 <SimpleToolCard key={k} title={k} desc={v} isMonochrome={isMonochrome} />
               ))}
             </div>

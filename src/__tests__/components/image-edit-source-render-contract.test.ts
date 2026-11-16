@@ -21,7 +21,9 @@ describe('image edit source rendering contract', () => {
 
   it('does not allow drawing or submission until the editing source has loaded', () => {
     expect(canvasSource).toContain("const [editSourceLoadState, setEditSourceLoadState] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle');");
-    expect(canvasSource).toContain("setEditSourceLoadState('loading');");
+    // 擦除/蒙版入口已从图片工具栏移除，画布不再进入这两种编辑模式
+    expect(canvasSource).not.toContain("setEditMode('erase')");
+    expect(canvasSource).not.toContain("setEditMode('mask')");
     expect(eraseMaskPanelSource).toContain("onLoad={() => setEditSourceLoadState('loaded')}");
     expect(eraseMaskPanelSource).toContain("onError={() => setEditSourceLoadState('error')}");
     expect(eraseMaskPanelSource).toContain("pointerEvents: editSourceLoadState === 'loaded' ? 'auto' : 'none'");

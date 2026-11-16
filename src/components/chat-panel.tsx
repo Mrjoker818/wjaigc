@@ -2969,7 +2969,7 @@ ${agentRecipesList}
 2. 在回复中包含操作指令块，系统会自动执行
 3. 向用户展示操作结果
 
-可执行的操作：upscale(放大)、remove_bg(去背景)、img2img(图生图)、erase(擦除)、extend(扩展)、crop(裁切)、generate(生成)、filter(滤镜风格)
+可执行的操作：upscale(放大)、img2img(图生图)、extend(扩展)、crop(裁切)、generate(生成)、filter(滤镜风格)
 
 操作指令格式（在回复末尾添加）：
 [CANVAS_ACTION]

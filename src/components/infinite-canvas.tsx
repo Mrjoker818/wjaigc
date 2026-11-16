@@ -47,8 +47,8 @@ import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMe
 import { createPortal } from 'react-dom';
 import {
   Plus, Trash2, Download, ZoomIn, Maximize2, Hand,
-  FileText, X, ChevronDown, Eraser,
-  Scissors, Wand2, Expand, Layers, Paintbrush,
+  FileText, X, ChevronDown,
+  Scissors, Wand2, Expand, Layers,
   Check, MousePointer2, Upload, Sparkles,
   RotateCcw, Minus, GitMerge,
   Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, Shield, FolderOpen, Contrast, PenTool, Pencil, Bot, Heart, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, LayoutDashboard, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play, Pause, Package, Store, Globe, Volume2, Loader2, Film, UserRoundCheck, Menu
@@ -11307,29 +11307,6 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     }
   }, [getActiveImageData, createProcessingFrameRightOf, getCurrentModel, updateProcessingFrame, multiAngleMode, multiAngleRotation, multiAngleTilt, multiAngleZoom, getCurrentProviderId, pollForResult, completeProcessingFrame, removeProcessingFrame]);
 
-  // Edit elements - open semantic layer editor directly
-  const handleEditElements = useCallback(async () => {
-    const img = getActiveImageData();
-    if (!img) return;
-    if (!activateCanvasToolSession('edit-elements', 'image-toolbar', [img.id])) return;
-    // Directly open the PSD layer editor with AI semantic analysis
-    setPsdEditorImageUrl(img.url);
-    setPsdEditorInitialResult(null);
-    const effectiveProjectId = projectId || brandProject?.id;
-    setPsdEditorSource(effectiveProjectId ? {
-      projectId: effectiveProjectId,
-      sourceImageId: img.id,
-      sourceVersionId: img.annotationVersionId || buildAnnotationSourceVersionId(
-        img.id,
-        img.createdAt,
-        img.url,
-      ),
-      imageUrl: img.url,
-    } : null);
-    setPsdEditorMode('studio');
-    setShowPsdEditor(true);
-  }, [activateCanvasToolSession, brandProject?.id, getActiveImageData, projectId]);
-
   const handleOpen3D = useCallback((fromToolbar?: boolean) => {
     const sourceImageIds = selectedImageData ? [selectedImageData.id] : [];
     if (!activateCanvasToolSession(
@@ -11639,22 +11616,6 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     }
   }, [brandProject?.id, projectId, getActiveImageData, threeDSingleImageUrl, selectedImageData, threeDMode, threeDPrompt, threeDMultiImages, getCurrentModel, getThreeDProviders, threeDBackend, threeDProviderId, createProcessingFrameRightOf, updateProcessingFrame, threeDType, threeDQuality, threeDTexture, threeDFormat, threeDEnablePBR, threeDFaceCount, threeDPose, threeDLocalEndpoint, threeDLocalModel, completeProcessingFrame]);
 
-  // 4. ERASE - floating window mode
-  const handleOpenErase = useCallback(() => {
-    const img = getActiveImageData();
-    if (!img) return;
-    if (!activateCanvasToolSession('erase', 'image-toolbar', [img.id])) return;
-    setEditImageId(img.id);
-    setEditMode('erase');
-    setEditStrokes([]);
-    setEditSourceLoadState('loading');
-    setCurrentStroke([]);
-    setEditBrushMode('brush');
-    setEditCanvasZoom(1);
-    setEditCanvasPan({ x: 0, y: 0 });
-    setMaskKeyword('');
-  }, [activateCanvasToolSession, getActiveImageData]);
-
   // 参数调色处理
   const colorAdjustingRef = useRef(false);
   const handleOpenColorAdjust = useCallback(() => {
@@ -11859,22 +11820,6 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         setPanoramaViewerUrl(img.url);
       }, []);
 
-  // 5. MASK - floating window mode
-  const handleOpenMask = useCallback(() => {
-    const img = getActiveImageData();
-    if (!img) return;
-    if (!activateCanvasToolSession('mask', 'image-toolbar', [img.id])) return;
-    setEditImageId(img.id);
-    setEditMode('mask');
-    setEditStrokes([]);
-    setEditSourceLoadState('loading');
-    setCurrentStroke([]);
-    setEditBrushMode('brush');
-    setEditCanvasZoom(1);
-    setEditCanvasPan({ x: 0, y: 0 });
-    setMaskKeyword('');
-  }, [activateCanvasToolSession, getActiveImageData]);
-
   // 6. EXPAND - 即梦风格方向性扩展
   const handleOpenExpand = useCallback(() => {
     const img = getActiveImageData();
@@ -12025,19 +11970,12 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     setPendingChatCanvasAction(null);
     switch (pendingChatCanvasAction.type) {
       case 'upscale': handleOpenUpscale(); break;
-      case 'remove_bg':
-        if (!activateCanvasToolSession('remove-bg', 'image-toolbar', [target.id])) return;
-        setRemoveBgTargetImage(target);
-        setRemoveBgQuote(null);
-        setShowRemoveBgPicker(true);
-        break;
-      case 'erase': handleOpenErase(); break;
       case 'extend': handleOpenExpand(); break;
       case 'crop': handleOpenCrop(); break;
       case 'color_adjust': handleOpenColorAdjust(); break;
       case 'img2img': onEditImage?.(target); break;
     }
-  }, [pendingChatCanvasAction, selectedImageData, handleOpenUpscale, activateCanvasToolSession, handleOpenErase, handleOpenExpand, handleOpenCrop, handleOpenColorAdjust, onEditImage]);
+  }, [pendingChatCanvasAction, selectedImageData, handleOpenUpscale, handleOpenExpand, handleOpenCrop, handleOpenColorAdjust, onEditImage]);
 
   // 8. DOWNLOAD - popup with PNG/SVG/PSD
   const handleOpenDownload = useCallback((targetImage?: CanvasImage) => {
@@ -12661,8 +12599,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
 
   // Action toolbar items with distinct monochrome colors
   const monoColors: Record<string, string> = {
-    '放大': 'text-blue-600', '移除背景': 'text-pink-500', 'SVG智能描摹': 'text-blue-500', '元素拆解': 'text-emerald-500', '横竖重组': 'text-lime-600',
-    '擦除': 'text-orange-500', '蒙版': 'text-violet-500', '编辑元素': 'text-cyan-500',
+    '放大': 'text-blue-600', 'SVG智能描摹': 'text-blue-500', '元素拆解': 'text-emerald-500', '横竖重组': 'text-lime-600',
     '多角度': 'text-teal-500', '图转3D工厂': 'text-indigo-500', '扩展': 'text-amber-500',
     '裁切': 'text-rose-500', '精修引擎': 'text-violet-500', '人物精修大师': 'text-emerald-500', '语言修图': 'text-sky-500', 'Agent编排': 'text-fuchsia-500',
     '下载': 'text-gray-600',
@@ -12675,14 +12612,10 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     testId?: string;
   }> = [
     { icon: <ZoomIn size={14} className={isMonochrome ? monoColors['放大'] : ''} />, label: '放大', desc: '智能补细节放大，变大变高清，不改内容', action: handleOpenUpscale },
-    { icon: <Eraser size={14} className={isMonochrome ? monoColors['移除背景'] : ''} />, label: '移除背景', desc: '一键删除背景，只剩透明底主体', action: () => { const image = getActiveImageData(); if (!image || !activateCanvasToolSession('remove-bg', 'image-toolbar', [image.id])) return; setRemoveBgTargetImage(image); setRemoveBgQuote(null); setShowRemoveBgPicker(true); } },
     { icon: <PenTool size={14} className={isMonochrome ? monoColors['SVG智能描摹'] : ''} />, label: 'SVG智能描摹', desc: '矢量描摹/压缩/缩略图', action: handleOpenSvgTrace },
     { icon: <LayoutGrid size={14} className={isMonochrome ? monoColors['元素拆解'] : ''} />, label: '元素拆解', desc: '拆出美陈物料与设计元素，生成平面陈列板', action: handleOpenDisplayDecompose },
     { icon: <LayoutDashboard size={14} className={isMonochrome ? monoColors['横竖重组'] : ''} />, label: '横竖重组', desc: '一键转换图片横竖比例', action: () => { const image = getActiveImageData(); if (image && activateCanvasToolSession('aspect-recompose', 'image-toolbar', [image.id])) { setAspectRecomposeRatio('1:1'); setShowAspectRecomposePanel(true); } } },
-    { icon: <Paintbrush size={14} className={isMonochrome ? monoColors['擦除'] : ''} />, label: '擦除', desc: '涂抹消除，自动无缝补全画面', action: handleOpenErase, testId: 'canvas-erase' },
-    { icon: <Wand2 size={14} className={isMonochrome ? monoColors['蒙版'] : ''} />, label: '蒙版', desc: '精准遮罩控制，只改露出的区域', action: handleOpenMask, testId: 'canvas-mask-edit' },
     { icon: <Palette size={14} className={isMonochrome ? '' : 'text-pink-500'} />, label: '调色', desc: '亮度/对比度/饱和度/色温/色相参数调节', action: handleOpenColorAdjust, testId: 'canvas-color-adjust' },
-    { icon: <Layers size={14} className={isMonochrome ? monoColors['编辑元素'] : ''} />, label: '编辑元素', desc: '按元素分层，独立编辑', action: handleEditElements, testId: 'canvas-edit-elements' },
     { icon: <RotateCcw size={14} className={isMonochrome ? monoColors['多角度'] : ''} />, label: '多角度', desc: '多视角生成', action: handleOpenMultiAngle },
     { icon: <BoxIcon size={14} className={isMonochrome ? monoColors['图转3D工厂'] : ''} />, label: '图转3D工厂', desc: '生成3D模型预览', action: handleOpen3D },
     { icon: <Expand size={14} className={isMonochrome ? monoColors['扩展'] : ''} />, label: '扩展', desc: '向四周延伸画面，自动补齐背景', action: handleOpenExpand },
@@ -12712,7 +12645,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   }
   // 根据媒体类型过滤可用工具
   const getAvailableToolsByMediaType = (mediaType?: 'image' | 'video' | '3d'): string[] => {
-    const imageTools = ['放大', '移除背景', 'SVG智能描摹', '元素拆解', '横竖重组', '擦除', '蒙版', '调色', '编辑元素', '多角度', '图转3D工厂', '扩展', '裁切', '全景生成', '精修引擎', '人物精修大师', '语言修图', 'Agent编排', '下载'];
+    const imageTools = ['放大', 'SVG智能描摹', '元素拆解', '横竖重组', '调色', '多角度', '图转3D工厂', '扩展', '裁切', '全景生成', '精修引擎', '人物精修大师', '语言修图', 'Agent编排', '下载'];
     const videoTools = ['视频抽帧', 'AI配音', '转 GIF', '视频压缩', '下载'];
     const model3DTools = ['下载'];
 

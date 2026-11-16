@@ -12,19 +12,19 @@ describe('image toolbar preference migration', () => {
 
     const preferences = normalizeImageToolbarPreferences(
       legacyOrder,
-      ['蒙版', '元素拆解', '人物精修大师']
+      ['调色', '元素拆解', '人物精修大师']
     );
 
     expect(preferences.order).toEqual(DEFAULT_IMAGE_TOOLBAR_ITEM_ORDER);
-    expect(preferences.hidden).toEqual(['蒙版']);
+    expect(preferences.hidden).toEqual(['调色']);
   });
 
   it('keeps explicit hides for tools that existed in the saved order', () => {
     const preferences = normalizeImageToolbarPreferences(
       DEFAULT_IMAGE_TOOLBAR_ITEM_ORDER,
-      ['蒙版', '人物精修大师']
+      ['调色', '人物精修大师']
     );
 
-    expect(preferences.hidden).toEqual(['蒙版', '人物精修大师']);
+    expect(preferences.hidden).toEqual(['调色', '人物精修大师']);
   });
 });

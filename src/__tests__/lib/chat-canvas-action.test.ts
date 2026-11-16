@@ -17,9 +17,9 @@ function source(path: string): string {
 
 describe('chat canvas action', () => {
   it('resolves a [CANVAS_ACTION] block against the selected image', () => {
-    const action = extractCanvasActionFromAIResponse('好的\n[CANVAS_ACTION]\ntype: remove_bg\ntarget: selected\n[/CANVAS_ACTION]');
+    const action = extractCanvasActionFromAIResponse('好的\n[CANVAS_ACTION]\ntype: upscale\ntarget: selected\n[/CANVAS_ACTION]');
     expect(action).not.toBeNull();
-    expect(resolveChatCanvasAction(action!, images, 'img-1')).toEqual({ type: 'remove_bg', imageId: 'img-1', imageName: '主图' });
+    expect(resolveChatCanvasAction(action!, images, 'img-1')).toEqual({ type: 'upscale', imageId: 'img-1', imageName: '主图' });
   });
 
   it('maps filter to language editing and honours an explicit target', () => {
@@ -28,6 +28,9 @@ describe('chat canvas action', () => {
 
   it('refuses unsupported tools, missing targets and non-image targets', () => {
     expect(resolveChatCanvasAction({ type: 'delete' }, images, 'img-1')).toBeNull();
+    // 去背景和擦除已从画布工具栏移除，对话不再给出这两个入口
+    expect(resolveChatCanvasAction({ type: 'remove_bg' }, images, 'img-1')).toBeNull();
+    expect(resolveChatCanvasAction({ type: 'erase' }, images, 'img-1')).toBeNull();
     expect(resolveChatCanvasAction({ type: 'upscale' }, images, null)).toBeNull();
     expect(resolveChatCanvasAction({ type: 'upscale' }, images, 'missing')).toBeNull();
     expect(resolveChatCanvasAction({ type: 'upscale' }, images, 'vid-1')).toBeNull();
@@ -36,6 +39,7 @@ describe('chat canvas action', () => {
   it('validates event payloads', () => {
     expect(isChatCanvasActionRequest({ type: 'crop', imageId: 'img-1' })).toBe(true);
     expect(isChatCanvasActionRequest({ type: 'delete', imageId: 'img-1' })).toBe(false);
+    expect(isChatCanvasActionRequest({ type: 'remove_bg', imageId: 'img-1' })).toBe(false);
     expect(isChatCanvasActionRequest({ type: 'crop', imageId: '' })).toBe(false);
     expect(isChatCanvasActionRequest(null)).toBe(false);
   });

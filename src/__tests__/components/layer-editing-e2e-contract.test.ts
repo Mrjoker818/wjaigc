@@ -8,12 +8,12 @@ function source(path: string): string {
 }
 
 describe('layer editing browser contract', () => {
-  it('exposes stable image-toolbar and editor controls', () => {
+  it('exposes stable layer editor controls', () => {
     const canvas = source('src/components/infinite-canvas.tsx');
     const editor = source('src/components/psd-editor/PsdLayerEditor.tsx');
 
-    expect(canvas).toContain("'canvas-edit-elements'");
-    expect(canvas).toContain('testId: \'canvas-edit-elements\'');
+    // 编辑元素入口已从图片工具栏移除；图层编辑器仍由元素拆解的可编辑图层输出打开
+    expect(canvas).not.toContain("'canvas-edit-elements'");
     expect(canvas).toContain('data-testid="canvas-image-upload-input"');
     for (const selector of [
       'layer-editor',

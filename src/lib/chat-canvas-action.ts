@@ -7,14 +7,12 @@ export interface ChatCanvasActionRequest {
   imageName?: string;
 }
 
-export type ChatCanvasToolType = 'upscale' | 'remove_bg' | 'erase' | 'extend' | 'crop' | 'color_adjust' | 'img2img';
+export type ChatCanvasToolType = 'upscale' | 'extend' | 'crop' | 'color_adjust' | 'img2img';
 
 export const CHAT_CANVAS_ACTION_EVENT = 'wujie:chat-canvas-action';
 
 const TOOL_LABELS: Record<ChatCanvasToolType, string> = {
   upscale: '放大',
-  remove_bg: '移除背景',
-  erase: '擦除',
   extend: '扩展画面',
   crop: '裁切',
   color_adjust: '调色',
@@ -24,8 +22,6 @@ const TOOL_LABELS: Record<ChatCanvasToolType, string> = {
 // filter 是风格转换，画布上由语言修图承接。
 const ACTION_TO_TOOL: Partial<Record<CanvasAction['type'], ChatCanvasToolType>> = {
   upscale: 'upscale',
-  remove_bg: 'remove_bg',
-  erase: 'erase',
   extend: 'extend',
   crop: 'crop',
   color_adjust: 'color_adjust',
