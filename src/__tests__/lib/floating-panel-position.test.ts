@@ -110,6 +110,16 @@ describe('mobile video-display layout viewport', () => {
       expect(listener).toHaveBeenCalledTimes(2); stop();
     } finally { vi.unstubAllGlobals(); }
   });
+  it('ends desktop panels above the published canvas bottom toolbar, but not on mobile', () => {
+    const style = { getPropertyValue: (name: string) => (name === '--canvas-bottom-toolbar-offset' ? '86px' : '') };
+    vi.stubGlobal('document', { documentElement: { style } });
+    try {
+      vi.stubGlobal('window', Object.assign(new EventTarget(), { innerWidth: 1440, innerHeight: 900 }));
+      expect(api().read()).toEqual({ width: 1440, height: 814, left: 0, top: 0 });
+      vi.stubGlobal('window', Object.assign(new EventTarget(), { innerWidth: 390, innerHeight: 780 }));
+      expect(api().read()).toEqual({ width: 390, height: 780, left: 0, top: 0 });
+    } finally { vi.unstubAllGlobals(); }
+  });
   it('unsubscribes all listeners from the original visual object after replacement', () => {
     const original = new EventTarget(); const replacement = new EventTarget();
     const target = Object.assign(new EventTarget(), { visualViewport: original });

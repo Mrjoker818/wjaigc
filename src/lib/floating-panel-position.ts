@@ -18,12 +18,25 @@ export interface FloatingPanelViewport {
   top: number;
 }
 
+const DESKTOP_MIN_WIDTH = 768;
+
+// The canvas publishes the space its desktop bottom toolbar occupies. Floating
+// panels end above it, so the toolbar never peeks out from under a window.
+function readBottomToolbarReserve(viewportWidth: number): number {
+  if (viewportWidth < DESKTOP_MIN_WIDTH || typeof document === 'undefined') return 0;
+  const raw = document.documentElement?.style.getPropertyValue('--canvas-bottom-toolbar-offset') ?? '';
+  const reserve = Number.parseFloat(raw);
+  return Number.isFinite(reserve) && reserve > 0 ? reserve : 0;
+}
+
 export function getFloatingPanelViewport(): FloatingPanelViewport {
   if (typeof window === 'undefined') return { width: 1056, height: 776, left: 0, top: 0 };
   const viewport = window.visualViewport;
-  return viewport
+  const measured = viewport
     ? { width: viewport.width, height: viewport.height, left: viewport.offsetLeft, top: viewport.offsetTop }
     : { width: window.innerWidth, height: window.innerHeight, left: 0, top: 0 };
+  const reserve = readBottomToolbarReserve(measured.width);
+  return reserve > 0 ? { ...measured, height: Math.max(0, measured.height - reserve) } : measured;
 }
 
 export function subscribeFloatingPanelViewport(listener: () => void): () => void {
