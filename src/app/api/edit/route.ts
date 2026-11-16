@@ -26,7 +26,7 @@ import {
 } from '@/lib/task-registry';
 import { logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
 import { translateApiError } from '@/lib/api-error-translate';
-import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, isEditsEndpointRejected, stripEditsOnlyFields, extractImageUrl } from '@/lib/api-compatibility';
+import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, isEditsEndpointRejected, stripEditsOnlyFields, extractImageUrl, apimartSupportsNativeMask } from '@/lib/api-compatibility';
 import {
   AnnotationIdempotencyConflictError,
   claimAnnotationEditTask,
@@ -1513,6 +1513,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
 
         // 先将原图保存为可访问的 URL（images/generations 需要 URL，不支持 base64）
         let imageUrlForApi = `data:${mimeType};base64,${imageBuffer.toString('base64')}`;
+        let sentImageBuffer = imageBuffer;
         // 如果原图太大，先压缩
         if (imageBuffer.length > 4 * 1024 * 1024) {
           try {
@@ -1521,14 +1522,31 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
               .jpeg({ quality: 85 })
               .toBuffer();
             imageUrlForApi = `data:image/jpeg;base64,${compressed.toString('base64')}`;
+            sentImageBuffer = compressed;
           } catch { /* 压缩失败就用原图 */ }
+        }
+
+        // ★ APIMart 文档列出 mask_url 的模型：发送原生 Alpha 蒙版（尺寸须与 image_urls[0] 一致），不再附加蒙版参考图
+        let nativeMaskUrl: string | null = null;
+        if (openaiMaskBuffer && compatProfile.id === 'apimart' && apimartSupportsNativeMask(apiModelName)) {
+          let maskForApi = openaiMaskBuffer;
+          if (sentImageBuffer !== imageBuffer) {
+            const sentMeta = await safeSharp(sentImageBuffer, { signal: taskSignal }).metadata();
+            if (sentMeta.width && sentMeta.height) {
+              maskForApi = await safeSharp(openaiMaskBuffer, { signal: taskSignal })
+                .resize(sentMeta.width, sentMeta.height, { fit: 'fill', kernel: 'nearest' })
+                .png()
+                .toBuffer();
+            }
+          }
+          nativeMaskUrl = `data:image/png;base64,${maskForApi.toString('base64')}`;
         }
 
         // 先构建 image_urls 数组（需要在 adjustRequestForProfile 之前，这样兼容层才能转换为 images[] 格式）
         const imageUrls: string[] = [imageUrlForApi];
         if (annotationEdit) imageUrls.push(annotationEdit.referenceImage);
         // ★ 蒙版参考图：红色高亮标注编辑区域，让AI理解蒙版位置
-        if (maskImageUrl) {
+        if (maskImageUrl && !nativeMaskUrl) {
           imageUrls.push(maskImageUrl);
           console.info(`[edit] taskId=${taskId} images/generations: 蒙版参考图已添加到image_urls`);
         }
@@ -1551,7 +1569,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
           }
         }
         // ★ 蒙版作为视觉参考图发送（黑白格式：白色=编辑区域, 黑色=保留区域）
-        if (maskBuffer) {
+        if (maskBuffer && !nativeMaskUrl) {
           imageUrls.push(`data:image/png;base64,${maskBuffer.toString('base64')}`);
         }
 
@@ -1566,6 +1584,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
           })()),
           n: Math.min(count, 4),
           image_urls: imageUrls,
+          ...(nativeMaskUrl ? { mask_url: nativeMaskUrl } : {}),
         };
 
         // 使用 adjustRequestForProfile 自动调整请求体（images[] 格式转换、size 格式转换等）
@@ -1578,7 +1597,9 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
         // 增强 prompt：确保 AI 将参考图作为编辑基础
         if (imageUrls.length > 0) {
           let promptPrefix = `[IMAGE-TO-IMAGE MODE] You MUST use the provided reference image as the mandatory source/base for editing. Do NOT generate from scratch. `;
-          if (maskBuffer) {
+          if (nativeMaskUrl) {
+            promptPrefix += 'Only change the area marked by the mask. Preserve everything outside it. ';
+          } else if (maskBuffer) {
             promptPrefix += `The LAST image is a mask overlay: WHITE areas indicate regions to modify/edit, BLACK areas must remain unchanged. Only apply changes within the white mask regions. Preserve all details outside the mask precisely. `;
           }
           adjustedBody.prompt = `${promptPrefix}${String(adjustedBody.prompt || '')}`;

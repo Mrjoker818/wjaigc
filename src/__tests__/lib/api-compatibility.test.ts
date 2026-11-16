@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PROFILE_APIMART,
   PROFILE_4SAPI,
+  apimartSupportsNativeMask,
   PROFILE_OPENAI,
   adjustRequestForProfile,
   parseResponseForProfile,
@@ -244,6 +245,25 @@ describe('provider request contracts', () => {
     const klein = adjustRequestForProfile({ ...base, model: 'flux-3-image-klein' }, PROFILE_APIMART).body;
     expect(klein).toMatchObject({ seed: 7, output_format: 'jpeg' });
     expect(klein).not.toHaveProperty('negative_prompt');
+  });
+
+  it('keeps mask_url only for the APIMart models that document it, with image_urls', () => {
+    // docs.apib.ai images/gpt-image-1, gpt-image-2/official, gpt-image-2.5, gpt-image-2.6 (reviewed 2026-11-17)
+    const mask = 'data:image/png;base64,AAAA';
+    const image = 'https://example.com/a.png';
+    const adjust = (body: Record<string, unknown>) => adjustRequestForProfile(
+      { prompt: 'edit', size: '1:1', mask_url: mask, ...body }, PROFILE_APIMART,
+    ).body;
+    for (const model of ['gpt-image-2-official', 'gpt-image-2.5-flare', 'gpt-image-2.6-sunburst', 'gpt-image-1-official']) {
+      expect(apimartSupportsNativeMask(model)).toBe(true);
+      expect(adjust({ model, image_urls: [image] }).mask_url).toBe(mask);
+    }
+    expect(adjust({ model: 'gpt-image-2.6-flare' })).not.toHaveProperty('mask_url');
+    expect(adjust({ model: 'gpt-image-2.6-flare', image_urls: [image], output_format: 'gif' })).not.toHaveProperty('mask_url');
+    for (const model of ['gpt-image-2', 'gpt-image-2.5-ext', 'gpt-image-2.6-ext', 'flux-3-image', 'seedream-4.5']) {
+      expect(apimartSupportsNativeMask(model)).toBe(false);
+      expect(adjust({ model, image_urls: [image] })).not.toHaveProperty('mask_url');
+    }
   });
 
   it('removes APImart pixel hints that were calculated before compatibility adjustment', () => {

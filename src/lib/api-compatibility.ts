@@ -163,6 +163,17 @@ export function isApimartMidjourneyModel(modelId: string): boolean {
   return /(^|[-_\s])midjourney($|[-_\s])|^mj(?:[-_\s]|$)/i.test(modelId.trim());
 }
 
+// docs.apib.ai images/gpt-image-1, gpt-image-2/official, gpt-image-2.5, gpt-image-2.6: mask_url
+// (PNG with alpha, fully transparent = edit, same size as image_urls[0]). Other APIMart models have no mask field.
+const APIMART_NATIVE_MASK_MODELS = new Set([
+  'gpt-image-1-official', 'gpt-image-1.5-official', 'gpt-image-2-official',
+  'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'gpt-image-2.6-flare', 'gpt-image-2.6-sunburst',
+]);
+
+export function apimartSupportsNativeMask(modelId: string): boolean {
+  return APIMART_NATIVE_MASK_MODELS.has(modelId.trim().toLowerCase());
+}
+
 export function isApimartFamilyUrl(baseUrl: string | undefined): boolean {
   return /(?:apimart|apib)\.ai/i.test(baseUrl || '');
 }
@@ -1934,6 +1945,11 @@ export function adjustRequestForProfile(
       delete body.image_count;
     }
     const apimartModel = typeof body.model === 'string' ? body.model.toLowerCase() : '';
+    // mask_url 需要 image_urls；GIF / SVG 输出不支持蒙版
+    if (body.mask_url !== undefined && (!APIMART_NATIVE_MASK_MODELS.has(apimartModel) || !body.image_urls
+      || body.output_format === 'gif' || body.output_format === 'svg')) {
+      delete body.mask_url;
+    }
     // docs.apib.ai gpt-image-2 / 2.5 / 2.6 (incl. 2.6-ext)：resolution 可选值 1k/2k/4k，使用小写。
     // gpt-image-2.5-ext 文档写的是大写 1K/2K/4K，保持原样。
     if (/^gpt-image-2(?:-ext|-official|\.5-(?:flare|sunburst)|\.6-(?:flare|sunburst|ext))?$/.test(apimartModel)
