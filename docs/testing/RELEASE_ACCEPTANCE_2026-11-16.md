@@ -57,3 +57,22 @@ The remote now has only `main` and `stable`.
 - Completed after about 6.5 minutes and 87 polls. The poll label took only three values, `文生视频 · Seedance 2.0 (AI Link) · 提交中...`, `排队中...` and `生成中...`. The model name stayed and no spaces accumulated, so e56358e6 works on the deployed build.
 - Saved file: `/api/serve-upload/video/video_1794806386683_u5frx3/video_7989a398-7a7a-4d8b-90d3-8ed65b76f6dd.mp4` (UUID token name).
 - ffprobe: one h264 video stream, 1280×720, 4.04 s, no audio stream. The file has 0 `soun` / `mp4a` boxes.
+
+## Native layout tests
+
+All 34 native (Playwright/CDP) layout test files ran against ffc98c7b: 567 of 567 tests pass. `canvas-empty-state-available-width-native.test.tsx` was run separately: 3 consecutive runs, 14 of 14 tests each. The single 1040×720 failure seen earlier did not reproduce. The likely source is the touch-routing checks, which wait at most 1500 ms (`expect.poll` timeout) for scroll or canvas-transform changes after a CDP touch drag and can miss that window on a loaded machine. The test was left unchanged.
+
+## Production deployment of ffc98c7b
+
+- Release: `/srv/wujie-vps/releases/ffc98c7b22d7d3d54989be9a43d2c4a99e8a8e34`, git tree `9fbca7df645700101cdec22470e3ac30ca95aa96`. `.next/BUILD_ID` and `.next/WUJIE_BUILD_COMPLETE` match the tree, and `verify-deploy-package.mjs` and `audit-build-traces.mjs --strict` pass (log: `/srv/wujie-vps/candidate-build-ffc98c7b.log`).
+- Database backup before activation: `/root/db-backups/wujie_vps_validation-pre-ffc98c7b-20261116T063742Z.dump` (57 table data entries in `pg_restore -l`).
+- Activation saved the previous unit and build guard in `/srv/wujie-vps/activation-ffc98c7b.81WMVftK`. Rollback target is release 2d66cb1c, which is kept on disk.
+- After restart: `wujie-vps` is active with 0 restarts and runs from the new release. Both pending migrations applied (`wujie_brand_kits` and `wujie_favorites` exist). `/` and `/api/auth/me` return 200. The served stylesheet contains the drawer scrollbar rule and the toolbar centering rule.
+- The only journal error is `pip3: not found` while installing optional SVG conversion dependencies. It is not fatal and was present before.
+- Production `runtime.env` lacks six keys that QA sets: `BRIEF_TO_VIDEO_SKILL_ENABLED`, `DEPLOY_RUN_PORT`, `INTERNAL_API_SECRET`, `MANDATORY_API_AUTH`, `MULTI_PLATFORM_EXPORT_ENABLED`, `PAYMENT_TOKEN_SECRET`. The previous release reads them the same way, so this deploy did not change behavior. Whether production should set them is an open decision.
+
+## Branches and cleanup
+
+- `stable` (52f7c601) was left as is. It is 52 commits ahead of and 1348 behind `main`, so moving it would need a force push. No force push was done.
+- VPS: inactive QA candidates were removed (only candidate-c2a18012 remains), as were the temporary deploy bundles. No swap file is left active. Disk use went from 92% to 58%.
+- Local: prunable worktrees were pruned. The local `acceptance/vps-p0-79a92dc3` branch was deleted; its tip is kept under `refs/backup/remote-20261116/`.
