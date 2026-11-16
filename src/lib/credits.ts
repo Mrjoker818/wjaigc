@@ -21,7 +21,8 @@ import {
   IMAGE_MODEL_CREDITS, VIDEO_MODEL_CREDITS, CHAT_MODEL_CREDITS,
   OTHER_OPERATION_CREDITS, CREDITS_TO_CNY,
 } from './credits-constants';
-import { loadCreditPricingConfig, resolveConfiguredCreditCost, resolveTokenPricingFromConfig } from './credit-pricing';
+import { buildPricingKey, loadCreditPricingConfig, resolveConfiguredCreditCost, resolveTokenPricingFromConfig } from './credit-pricing';
+import { getVendorPrice, vendorCreditCost, type VendorPrice } from './vendor-pricing';
 import type { CreditPricingConfig, TokenCreditPricing } from './credit-pricing';
 
 export type TaskBillingTransactionKind = 'charge' | 'refund';
@@ -203,6 +204,23 @@ export function calculateCreditCost(
   return getOtherOperationCredits(operation);
 }
 
+/** 按供应商（Pear / APIMart）查找模型的官方价格；无法识别供应商时返回 undefined。 */
+async function resolveVendorPrice(providerId: string | undefined, model: string): Promise<VendorPrice | undefined> {
+  if (!providerId) return undefined;
+  try {
+    const [{ findProviderById }, { classifyProviderCapabilityFamily }] = await Promise.all([
+      import('./server-api-config'),
+      import('./task-core/provider-capability-adapters'),
+    ]);
+    const provider = await findProviderById(providerId);
+    const family = provider ? classifyProviderCapabilityFamily(provider) : null;
+    return family ? getVendorPrice(family, model) : undefined;
+  } catch (error) {
+    console.warn('[credits] vendor price lookup failed:', error instanceof Error ? error.message : error);
+    return undefined;
+  }
+}
+
 export async function calculateConfiguredCreditCost(
   operation: CreditOperation | string,
   model?: string,
@@ -211,6 +229,16 @@ export async function calculateConfiguredCreditCost(
 ): Promise<number> {
   if (!model) return calculateCreditCost(operation, model, options);
   const config = options?.pricingConfig || await loadCreditPricingConfig();
+  // 优先级：后台按供应商配置的价格 > 供应商官方价 × 1.01 > 后台按模型配置的价格 > 内置默认值
+  const scopedOverride = options?.providerId
+    ? config.modelCredits[buildPricingKey(options.providerId, model)]
+    : undefined;
+  if (scopedOverride === undefined) {
+    const vendorPrice = await resolveVendorPrice(options?.providerId, model);
+    if (vendorPrice) {
+      return vendorCreditCost(vendorPrice, { resolution: options?.resolution, durationSeconds: options?.durationSeconds });
+    }
+  }
   if (operation === 'video_generate' || operation === 'video_extend') {
     const fallbackPerSecond = getVideoModelCreditsPerSecond(model);
     const perSecond = resolveConfiguredCreditCost(config, model, undefined, undefined, fallbackPerSecond, options?.providerId);

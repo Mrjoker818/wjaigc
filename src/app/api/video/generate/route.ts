@@ -580,6 +580,7 @@ export async function POST(request: NextRequest) {
     plannedCreditCost = skillBillingContext ? 0 : await calculateConfiguredCreditCost(
       'video_generate', pureModel, {
           durationSeconds: parsedDuration,
+          resolution: typeof resolution === 'string' && resolution.trim() ? resolution : undefined,
           providerId: provider.id,
       },
     );
