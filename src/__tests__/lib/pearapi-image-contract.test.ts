@@ -105,4 +105,20 @@ describe('PearAPI image profile contract', () => {
       });
     }
   });
+
+  it('sends GIF frame fields only to gpt-image-2.6 with output_format gif and in the documented ranges', () => {
+    const gif = { output_format: 'gif', frame_count: 9, frame_duration_ms: 200, fps: 120, loop: true };
+    const v26 = adjustRequestForProfile({ model: 'gpt-image-2.6', prompt: 'p', size: '1:1', ...gif }, PROFILE_PEARAPI).body;
+    expect(v26).toMatchObject({ output_format: 'gif', frame_count: 9, frame_duration_ms: 200, loop: true });
+    expect(v26).not.toHaveProperty('fps');
+
+    const v2 = adjustRequestForProfile({ model: 'gpt-image-2', prompt: 'p', size: '1:1', ...gif }, PROFILE_PEARAPI).body;
+    for (const field of ['output_format', 'frame_count', 'frame_duration_ms', 'fps', 'loop']) expect(v2).not.toHaveProperty(field);
+
+    const png = adjustRequestForProfile({
+      model: 'gpt-image-2.6', prompt: 'p', size: '1:1', output_format: 'png', frame_count: 9,
+    }, PROFILE_PEARAPI).body;
+    expect(png.output_format).toBe('png');
+    expect(png).not.toHaveProperty('frame_count');
+  });
 });

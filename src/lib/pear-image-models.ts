@@ -14,7 +14,18 @@ export interface PearImageModelSpec {
   maxImages: number;
   /** Only /v1/images/edits is documented (images required). */
   editOnly?: boolean;
+  /** output_format values the model page lists. */
+  outputFormats?: string[];
+  /** GIF frame fields (frame_count / frame_duration_ms / fps / loop) are documented. */
+  gif?: boolean;
 }
+
+/** gpt-image-2.6 图像生成（api-533519601）：GIF 帧参数的取值范围，超出范围时不发送。 */
+export const PEAR_GIF_FIELD_RANGES: Readonly<Record<'frame_count' | 'frame_duration_ms' | 'fps', [number, number]>> = {
+  frame_count: [1, 600],
+  frame_duration_ms: [20, 10000],
+  fps: [1, 60],
+};
 
 export const PEAR_IMAGE_MAX_OUTPUTS = 4;
 
@@ -26,6 +37,7 @@ const GPT_QUALITIES = ['auto', 'low', 'medium', 'high'];
 
 const GPT_IMAGE: PearImageModelSpec = {
   ratios: GPT_RATIOS, resolutions: ['1K', '2K', '4K'], qualities: GPT_QUALITIES, maxImages: 16,
+  outputFormats: ['png', 'jpeg', 'webp'],
 };
 // 2.5/2.6: xhigh and max are documented as 需模型支持.
 const GPT_IMAGE_HIGH: PearImageModelSpec = { ...GPT_IMAGE, qualities: [...GPT_QUALITIES, 'xhigh', 'max'] };
@@ -35,7 +47,7 @@ const SEEDREAM: PearImageModelSpec = { ratios: SEEDREAM_RATIOS, resolutions: ['2
 export const PEAR_IMAGE_MODEL_SPECS: Readonly<Record<string, PearImageModelSpec>> = {
   'gpt-image-2': GPT_IMAGE,
   'gpt-image-2.5': GPT_IMAGE_HIGH,
-  'gpt-image-2.6': GPT_IMAGE_HIGH,
+  'gpt-image-2.6': { ...GPT_IMAGE_HIGH, outputFormats: ['png', 'jpeg', 'webp', 'gif'], gif: true },
   'nano-banana': { ...NANO, resolutions: ['1K'] },
   'nano-banana-2': { ...NANO, resolutions: ['0.5K', '1K', '2K', '4K'] },
   'nano-banana-2.1': NANO,

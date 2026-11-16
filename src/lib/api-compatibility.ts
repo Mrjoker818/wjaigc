@@ -20,7 +20,7 @@
  *   const result   = parseResponseForProfile(apiResponse, profile);
  */
 
-import { PEAR_IMAGE_MAX_OUTPUTS, getPearImageModelSpec, getPearImageToolModel } from './pear-image-models';
+import { PEAR_GIF_FIELD_RANGES, PEAR_IMAGE_MAX_OUTPUTS, getPearImageModelSpec, getPearImageToolModel } from './pear-image-models';
 
 
 // ---------------------------------------------------------------------------
@@ -1866,16 +1866,26 @@ export function adjustRequestForProfile(
       else delete body.resolution;
       if (typeof body.quality !== 'string' || !pearSpec.qualities.includes(body.quality)) delete body.quality;
       // pearapi.apifox.cn 没有任何图像模型定义 background / mask / strength / seed / negative_prompt；
-      // output_format 只出现在 gpt-image-2 / 2.5 / 2.6 页面（png/jpeg/webp）
+      // output_format 只出现在 gpt-image-2 / 2.5 / 2.6 页面（png/jpeg/webp，2.6 另有 gif）
       delete body.background;
       delete body.mask;
       delete body.strength;
       delete body.seed;
       delete body.negative_prompt;
-      const pearModel = String(body.model).toLowerCase();
-      if (!pearModel.startsWith('gpt-image-') || !['png', 'jpeg', 'webp'].includes(String(body.output_format))) {
+      if (!pearSpec.outputFormats?.includes(String(body.output_format))) {
         delete body.output_format;
       }
+      // GIF 帧参数只对文档列出的模型、且 output_format 为 gif 时发送
+      const sendGifFields = pearSpec.gif === true && body.output_format === 'gif';
+      for (const [field, [min, max]] of Object.entries(PEAR_GIF_FIELD_RANGES)) {
+        const value = Number(body[field]);
+        if (sendGifFields && body[field] !== undefined && Number.isInteger(value) && value >= min && value <= max) {
+          body[field] = value;
+        } else {
+          delete body[field];
+        }
+      }
+      if (!sendGifFields || typeof body.loop !== 'boolean') delete body.loop;
       flatImages.splice(pearSpec.maxImages);
     }
     const pearTool = typeof body.model === 'string' ? getPearImageToolModel(body.model) : undefined;
