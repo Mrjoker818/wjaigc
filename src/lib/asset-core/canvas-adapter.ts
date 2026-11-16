@@ -201,6 +201,26 @@ export function serializeCanvasPlacements(
   });
 }
 
+/** Older canvas copies reused their source placement identity. Keep the first
+ *  holder and turn later holders into unmanaged copies so the snapshot is valid
+ *  again and deleting a copy can no longer trash the original placement. */
+export function releaseDuplicatePlacementIdentities<TImage extends CanvasPlacementImage>(
+  images: TImage[],
+): TImage[] {
+  const seen = new Set<string>();
+  let changed = false;
+  const released = images.map((image) => {
+    if (!image.placementId) return image;
+    if (!seen.has(image.placementId)) {
+      seen.add(image.placementId);
+      return image;
+    }
+    changed = true;
+    return { ...image, assetId: undefined, assetVersionId: undefined, placementId: undefined };
+  });
+  return changed ? released : images;
+}
+
 export function serializeCanvasWorkspacePlacements(
   images: CanvasViewImage[],
   mode: AssetGraphMode = 'legacy',

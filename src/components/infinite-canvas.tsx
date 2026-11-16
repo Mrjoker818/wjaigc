@@ -4228,6 +4228,11 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
             .map(img => ({
               ...img,
               id: `img-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+              // A copy is a new placement: sharing the source identity makes the
+              // project snapshot invalid and deleting the copy trashes the original.
+              assetId: undefined,
+              assetVersionId: undefined,
+              placementId: undefined,
               x: img.x + offset,
               y: img.y + offset,
             }));

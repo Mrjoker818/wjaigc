@@ -6,6 +6,7 @@ import {
   type RestoredCanvasPlacement,
 } from '@/lib/asset-core/deleted-canvas-placements';
 import {
+  releaseDuplicatePlacementIdentities,
   selectCanvasPlacementSnapshot,
   serializeCanvasWorkspacePlacements,
 } from '@/lib/asset-core/canvas-adapter';
@@ -1997,6 +1998,7 @@ export class UserManager {
         if (!Array.isArray(p.canvasImages)) {
           p.canvasImages = [];
         }
+        p.canvasImages = releaseDuplicatePlacementIdentities(p.canvasImages);
       }
       for (const p of userData.projects) {
         const legacyImages = (p as Project & { images?: Project['canvasImages'] }).images;
@@ -2015,6 +2017,7 @@ export class UserManager {
         if (!Array.isArray(p.canvasImages)) {
           p.canvasImages = [];
         }
+        p.canvasImages = releaseDuplicatePlacementIdentities(p.canvasImages);
       }
 
       // 【数据隔离增强】跨用户ID冲突检测
