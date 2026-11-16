@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PROFILE_PEARAPI, adjustRequestForProfile } from '@/lib/api-compatibility';
-import { getPearImageModelSpec } from '@/lib/pear-image-models';
+import { getPearImageModelSpec, getPearImageToolModel } from '@/lib/pear-image-models';
 
 // PearAPI 图像契约来源：https://pearapi.apifox.cn（gpt-image-2 图像生成 api-533519595，
 // 逐字核对请求体字段）：size 接受比例（"1:1"/"16:9"）或像素（"1024x1024"）；
@@ -88,6 +88,21 @@ describe('PearAPI image profile contract', () => {
     expect(nano).not.toHaveProperty('output_format');
     for (const submitted of [gpt, nano]) {
       for (const field of ['background', 'mask', 'seed', 'negative_prompt']) expect(submitted).not.toHaveProperty(field);
+    }
+  });
+
+  it('sends Pear image tools only the documented edit fields with the lowercase model id', () => {
+    expect(getPearImageToolModel('Real-ESRGAN')).toBe('real-esrgan');
+    expect(getPearImageToolModel('gpt-image-2')).toBeUndefined();
+    for (const model of ['Real-ESRGAN', 'RMBG-2.0', 'SeedVR2-Upscaler', 'Image-Layered']) {
+      const { body, endpoint } = adjustRequestForProfile({
+        model, prompt: 'upscale', size: '2048x2048', n: 1, strength: 0.6, input_fidelity: 'high',
+        image: 'data:image/png;base64,AA', image_urls: ['data:image/png;base64,AA', 'https://e/b.png'],
+      }, PROFILE_PEARAPI, { hasImage: true, isEditEndpoint: true });
+      expect(endpoint).toBe('/images/edits');
+      expect(body).toEqual({
+        model: model.toLowerCase(), n: 1, images: ['data:image/png;base64,AA'], response_format: 'url', task_type: 'sync',
+      });
     }
   });
 });

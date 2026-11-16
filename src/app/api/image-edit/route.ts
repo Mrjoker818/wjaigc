@@ -9,6 +9,7 @@ import { IMAGE_EDIT_QUOTE_LIFETIME_MS, confirmedImageEditQuoteForResponse,
   issueImageEditQuoteToken, verifyImageEditQuoteToken,
   type ImageEditQuoteIdentity } from '@/lib/task-core/image-edit-quote-token';
 import { submitImageTask, autoTrySubmitImageTask, ModelCapabilityError } from '@/lib/image-edit-provider';
+import { PEAR_REAL_ESRGAN_MAX_INPUT_EDGE } from '@/lib/pear-image-models';
 import { autoTryChatVisionFallback } from '@/lib/image-edit-vision-provider';
 import { submit302aiUpscaleTask, submit302aiUpscaleV6Task, submit302aiImageUpscaleTask, submit302aiEsrganTask } from '@/lib/image-edit-upscale-provider';
 import { ImageEditProviderBoundaryError, type ImageEditProviderCallOptions } from '@/lib/image-edit-provider-boundary';
@@ -2591,7 +2592,8 @@ export async function POST(request: NextRequest) {
         // PearAPI不支持/images/edits端点，直接排除
         const baseUrl = c.apiBaseUrl || '';
         if (baseUrl.includes('pearapi.ai') || baseUrl.includes('pearapi')) {
-          return isPearRealEsrganUpscaleCandidate(c);
+          // Pear real-esrgan 要求输入长边不超过 1024 像素，更大的图交给通用模型
+          return isPearRealEsrganUpscaleCandidate(c) && origMaxEdge <= PEAR_REAL_ESRGAN_MAX_INPUT_EDGE;
         }
         return true;
       });

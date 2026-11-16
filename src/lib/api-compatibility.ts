@@ -20,7 +20,7 @@
  *   const result   = parseResponseForProfile(apiResponse, profile);
  */
 
-import { PEAR_IMAGE_MAX_OUTPUTS, getPearImageModelSpec } from './pear-image-models';
+import { PEAR_IMAGE_MAX_OUTPUTS, getPearImageModelSpec, getPearImageToolModel } from './pear-image-models';
 
 
 // ---------------------------------------------------------------------------
@@ -1877,6 +1877,16 @@ export function adjustRequestForProfile(
         delete body.output_format;
       }
       flatImages.splice(pearSpec.maxImages);
+    }
+    const pearTool = typeof body.model === 'string' ? getPearImageToolModel(body.model) : undefined;
+    if (pearTool) {
+      // 图片工具只接受 model / images / n / response_format / task_type
+      for (const key of Object.keys(body)) {
+        if (key !== 'model' && key !== 'n') delete body[key];
+      }
+      body.model = pearTool;
+      flatImages.splice(1);
+      endpoint = '/images/edits';
     }
     if (flatImages.length > 0) body.images = flatImages;
     if (body.n !== undefined) {

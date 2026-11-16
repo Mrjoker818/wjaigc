@@ -53,6 +53,26 @@ export const PEAR_IMAGE_MODEL_SPECS: Readonly<Record<string, PearImageModelSpec>
   'z-image': { ratios: BASIC_RATIOS, resolutions: [], qualities: [], maxImages: 0 },
 };
 
+/**
+ * Pear 图片工具模型（https://pearapi.apifox.cn「图片工具」，api-533519649/51/53/55）：只走 /v1/images/edits，
+ * 请求体只有 model（小写枚举）、images（必填，最多 1 张）、n、response_format、task_type，没有 prompt/size。
+ */
+export const PEAR_IMAGE_TOOL_MODELS: Readonly<Record<string, { maxInputLongEdge?: number }>> = {
+  'image-layered': {},
+  // 「输入图片长边不超过 1024 像素」
+  'real-esrgan': { maxInputLongEdge: 1024 },
+  'rmbg-2.0': {},
+  'seedvr2-upscaler': {},
+};
+
+export const PEAR_REAL_ESRGAN_MAX_INPUT_EDGE = 1024;
+
+/** 返回文档中的小写模型名；不是 Pear 图片工具时返回 undefined。 */
+export function getPearImageToolModel(modelId: string): string | undefined {
+  const id = modelId.trim().toLowerCase();
+  return Object.hasOwn(PEAR_IMAGE_TOOL_MODELS, id) ? id : undefined;
+}
+
 export function getPearImageModelSpec(modelId: string): PearImageModelSpec | undefined {
   const id = modelId.trim().toLowerCase();
   return Object.hasOwn(PEAR_IMAGE_MODEL_SPECS, id) ? PEAR_IMAGE_MODEL_SPECS[id] : undefined;

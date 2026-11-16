@@ -270,7 +270,8 @@ async function submitAtEndpoint(
       headers: requestHeaders(input),
       body: JSON.stringify({
         model: 'image-layered',
-        image: input.image,
+        // Pear 文档：images 为必填数组，最多 1 张。
+        images: [input.image],
         task_type: 'async',
         response_format: 'url',
       }),
