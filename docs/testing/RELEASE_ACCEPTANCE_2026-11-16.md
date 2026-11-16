@@ -75,4 +75,5 @@ All 34 native (Playwright/CDP) layout test files ran against ffc98c7b: 567 of 56
 
 - `stable` (52f7c601) was left as is. It is 52 commits ahead of and 1348 behind `main`, so moving it would need a force push. No force push was done.
 - VPS: inactive QA candidates were removed (only candidate-c2a18012 remains), as were the temporary deploy bundles. No swap file is left active. Disk use went from 92% to 58%.
+- VPS old releases: no systemd unit, cron, nginx config or running process referenced any release other than ffc98c7b (current) and 2d66cb1c (rollback). The other 10 releases, their activation dirs, the stopped `qa-collab-2d66cb1c` test database, the six finished `wujie-vps-build-*` one-shot units and their scripts, the failed 40c0ad1c QA doctor and build units, and the one-off activation scripts were removed. Disk use is now 34%. Production still returns 200 on `/` and `/api/auth/me` with 0 restarts.
 - Local: prunable worktrees were pruned. The local `acceptance/vps-p0-79a92dc3` branch was deleted; its tip is kept under `refs/backup/remote-20261116/`.
