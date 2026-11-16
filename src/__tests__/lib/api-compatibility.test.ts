@@ -182,10 +182,68 @@ describe('provider request contracts', () => {
       quality: 'high',
     }, PROFILE_APIMART);
 
-    expect(body).toMatchObject({ size: '16:9', resolution: '2K', quality: 'high' });
+    // docs.apib.ai gpt-image-2: resolution "可选值：1k / 2k / 4k" (lower case)
+    expect(body).toMatchObject({ size: '16:9', resolution: '2k', quality: 'high' });
     expect(body).not.toHaveProperty('width');
     expect(body).not.toHaveProperty('height');
     expect(body).not.toHaveProperty('size_px');
+  });
+
+  it('keeps the upper-case tier that gpt-image-2.5-ext documents', () => {
+    const { body } = adjustRequestForProfile({
+      model: 'gpt-image-2.5-ext', prompt: 'A poster', size: '16:9', resolution: '2K',
+    }, PROFILE_APIMART);
+    expect(body.resolution).toBe('2K');
+  });
+
+  it('forces a single output for gpt-image-2.6-ext', () => {
+    const { body } = adjustRequestForProfile({
+      model: 'gpt-image-2.6-ext', prompt: 'A poster', image_count: 4,
+    }, PROFILE_APIMART);
+    expect(body.n).toBe(1);
+  });
+
+  it('sends aspect_ratio and drops quality for the APIMart grok-imagine-image models', () => {
+    for (const model of ['grok-imagine-image', 'grok-imagine-image-quality']) {
+      const { body } = adjustRequestForProfile({
+        model, prompt: 'A poster', size: '16:9', resolution: '2K', quality: 'high',
+      }, PROFILE_APIMART);
+      expect(body).toMatchObject({ aspect_ratio: '16:9', resolution: '2k' });
+      expect(body).not.toHaveProperty('size');
+      expect(body).not.toHaveProperty('quality');
+    }
+  });
+
+  it('sends only aspect_ratio for muse-image-ext', () => {
+    const { body } = adjustRequestForProfile({
+      model: 'muse-image-ext', prompt: 'A poster', size: '3:4', resolution: '2K',
+    }, PROFILE_APIMART);
+    expect(body.aspect_ratio).toBe('3:4');
+    expect(body).not.toHaveProperty('size');
+    expect(body).not.toHaveProperty('resolution');
+  });
+
+  it('drops reference images for text-only APIMart models', () => {
+    for (const model of ['imagen-4.0-apimart', 'z-image-turbo']) {
+      const { body } = adjustRequestForProfile({
+        model, prompt: 'A poster', size: '1:1', image_urls: ['https://example.com/a.png'],
+      }, PROFILE_APIMART);
+      expect(body).not.toHaveProperty('image_urls');
+    }
+  });
+
+  it('strips the fields flux-3-image rejects and keeps klein on a supported format', () => {
+    const base = {
+      prompt: 'A poster', size: '1:1', resolution: '2K', seed: 7, negative_prompt: 'blur', output_format: 'webp',
+    };
+    const flux = adjustRequestForProfile({ ...base, model: 'flux-3-image' }, PROFILE_APIMART).body;
+    expect(flux).not.toHaveProperty('seed');
+    expect(flux).not.toHaveProperty('negative_prompt');
+    expect(flux).not.toHaveProperty('output_format');
+    expect(flux.resolution).toBe('2k');
+    const klein = adjustRequestForProfile({ ...base, model: 'flux-3-image-klein' }, PROFILE_APIMART).body;
+    expect(klein).toMatchObject({ seed: 7, output_format: 'jpeg' });
+    expect(klein).not.toHaveProperty('negative_prompt');
   });
 
   it('removes APImart pixel hints that were calculated before compatibility adjustment', () => {

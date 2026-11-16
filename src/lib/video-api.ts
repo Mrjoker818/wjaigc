@@ -1258,33 +1258,60 @@ interface ApiMartVideoSpec {
   sendsDuration: boolean;
   sendsNegativePrompt: boolean;
   sendsSeed: boolean;
+  /** Role name for plain references inside image_with_roles. */
+  referenceRole: 'reference_image' | 'reference';
+  /** Whether the ratio is still sent when image_with_roles carries first/last frames. */
+  ratioWithFrames: boolean;
+  /** Only muse-video-ext documents `n`. */
+  sendsN: boolean;
 }
 
 const LEGACY_APIMART_VIDEO_SPEC: ApiMartVideoSpec = {
   ratioField: 'aspect_ratio', ratioWithImage: true, images: 'flat', audioField: 'generate_audio',
   resolutionField: 'resolution', sendsDuration: true, sendsNegativePrompt: true, sendsSeed: true,
+  referenceRole: 'reference_image', ratioWithFrames: true, sendsN: false,
 };
 
 function getApiMartVideoSpec(modelId: string): ApiMartVideoSpec {
   const id = modelId.toLowerCase();
   const base = { ...LEGACY_APIMART_VIDEO_SPEC, sendsNegativePrompt: false, sendsSeed: false, audioField: null };
-  // Seedance 2.0 / 2.5: size, image_with_roles, generate_audio
-  if (/seedance-2[.-][05]/.test(id)) return { ...LEGACY_APIMART_VIDEO_SPEC, ratioField: 'size', images: 'roles' };
-  // Kling v3 Omni: mode std/pro/4k, audio, negative_prompt
-  if (id.startsWith('kling-v3-omni')) return { ...base, audioField: 'audio', resolutionField: 'mode', sendsNegativePrompt: true };
+  // Seedance 2.0 / 2.5: size, image_with_roles, generate_audio, seed; no negative_prompt field.
+  // 2.5 first/last-frame tasks: "size 仅 adaptive（提交阶段也会同步校验）", so size is omitted (default adaptive).
+  if (/seedance-2[.-][05]/.test(id)) {
+    return {
+      ...LEGACY_APIMART_VIDEO_SPEC, ratioField: 'size', images: 'roles', sendsNegativePrompt: false,
+      ratioWithFrames: !/seedance-2[.-]5/.test(id),
+    };
+  }
+  // Kling v3 Omni: mode std/pro/4k, audio, negative_prompt; frames in image_with_roles, reference role "reference"
+  if (id.startsWith('kling-v3-omni')) {
+    return { ...base, images: 'roles', referenceRole: 'reference', audioField: 'audio', resolutionField: 'mode', sendsNegativePrompt: true };
+  }
   // Kling 3.0 Turbo: first_frame_image; aspect_ratio is ignored for image-to-video
   if (id.startsWith('kling-3.0-turbo')) return { ...base, images: 'first-frame', ratioWithImage: false };
+  // MiniMax Hailuo 2.3 / 2.3-Fast: first_frame_image only, no ratio parameter
+  if (id.includes('hailuo-2.3')) return { ...base, ratioField: null, images: 'first-frame' };
   // MiniMax Hailuo 02: no ratio parameter, first_frame_image / last_frame_image
   if (id.includes('hailuo')) return { ...base, ratioField: null, images: 'frame-fields' };
   // Wan2.5: size only for text-to-video, one first-frame image, negative_prompt and seed
   if (id.startsWith('wan2.5')) return { ...base, ratioField: 'size', ratioWithImage: false, sendsNegativePrompt: true, sendsSeed: true };
   // Veo 3.1: lite does not accept image_urls
   if (id.startsWith('veo3')) return { ...base, images: id.startsWith('veo3.1-lite') ? 'none' : 'flat' };
-  // Grok Imagine video: ratio field is size
+  // Grok official (grok-imagine-video*): aspect_ratio; grok-imagine-1.5-video-*: size
+  if (id.startsWith('grok-imagine-video')) return { ...base, ratioField: 'aspect_ratio' };
   if (id.startsWith('grok-imagine') && id.includes('video')) return { ...base, ratioField: 'size' };
-  // Gemini Omni Flash: no duration parameter
-  if (id.startsWith('gemini-omni')) return { ...base, sendsDuration: false };
+  // Gemini Omni: only flash-preview and 1.1-flash have no duration parameter
+  if (id.startsWith('gemini-omni')) {
+    return { ...base, sendsDuration: !(id.startsWith('gemini-omni-flash-preview') || id.startsWith('gemini-omni-1.1-flash')) };
+  }
+  if (id.startsWith('muse-video-ext')) return { ...base, sendsN: true };
   return LEGACY_APIMART_VIDEO_SPEC;
+}
+
+/** Controls the video panel should show for an APIMart model, derived from the documented request fields. */
+export function getApiMartVideoControlSupport(modelId: string): { negativePrompt: boolean; seed: boolean; audio: boolean } {
+  const spec = getApiMartVideoSpec(modelId);
+  return { negativePrompt: spec.sendsNegativePrompt, seed: spec.sendsSeed, audio: spec.audioField !== null };
 }
 
 /** APImart videos/generations submit.
@@ -1304,7 +1331,11 @@ function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
   const advResolutionRaw = getApiString(params.advancedParams, 'resolution');
   const advResolution = advResolutionRaw ? advResolutionRaw.replace(/K$/, 'k') : undefined;
 
-  if (lowerModel.includes('hailuo') && advResolution === '1080p' && (params.duration ?? 5) > 5) {
+  if (lowerModel.includes('hailuo-2.3') && advResolution === '1080p' && (params.duration ?? 6) !== 6) {
+    throw new Error('MiniMax Hailuo 2.3 的 1080p 仅支持 6 秒，请改为 6 秒或选择 768p');
+  }
+  if (lowerModel.includes('hailuo') && !lowerModel.includes('hailuo-2.3')
+    && advResolution === '1080p' && (params.duration ?? 5) > 5) {
     throw new Error('MiniMax Hailuo 02 的 1080p 仅支持 5 秒，请改为 5 秒或选择 768p');
   }
   if (lowerModel.startsWith('wan2.5') && advResolution === '480p' && params.aspectRatio
@@ -1313,12 +1344,14 @@ function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
   }
 
   const imageFields: Record<string, unknown> = {};
+  let hasFrameRoles = false;
   if (spec.images === 'roles') {
-    const roles: Array<{ url: string; role: 'first_frame' | 'last_frame' | 'reference_image' }> = [];
+    const roles: Array<{ url: string; role: 'first_frame' | 'last_frame' | 'reference_image' | 'reference' }> = [];
     if (params.imageUrl) roles.push({ url: params.imageUrl, role: 'first_frame' });
     if (params.lastFrameImageUrl) roles.push({ url: params.lastFrameImageUrl, role: 'last_frame' });
+    hasFrameRoles = roles.length > 0;
     if (roles.length > 0) {
-      roles.push(...referenceImages.map(url => ({ url, role: 'reference_image' as const })));
+      roles.push(...referenceImages.map(url => ({ url, role: spec.referenceRole })));
       imageFields.image_with_roles = roles;
     } else if (referenceImages.length > 0) {
       imageFields.image_urls = [...referenceImages];
@@ -1340,12 +1373,14 @@ function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
   const omniMode = spec.resolutionField === 'mode' && advResolution
     ? ({ '720p': 'std', '1080p': 'pro', '1k': 'std', '2k': 'pro', '4k': '4k' } as Record<string, string>)[advResolution.toLowerCase()]
     : undefined;
-  const sendRatio = spec.ratioField && params.aspectRatio && (spec.ratioWithImage || !hasInputImage);
+  const sendRatio = spec.ratioField && params.aspectRatio
+    && (spec.ratioWithImage || !hasInputImage)
+    && (spec.ratioWithFrames || !hasFrameRoles);
 
   const body: Record<string, unknown> = {
     model: params.model,
     prompt: params.prompt,
-    n: 1,
+    ...(spec.sendsN ? { n: 1 } : {}),
     ...imageFields,
     ...(sendRatio && spec.ratioField ? { [spec.ratioField]: params.aspectRatio } : {}),
     ...(spec.sendsDuration && params.duration ? { duration: params.duration } : {}),
@@ -1496,8 +1531,7 @@ function buildPearApiVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
     aspect_ratio: pearRatio,
     duration,
     ...(pearResolution ? { resolution: pearResolution } : {}),
-    ...(params.negativePrompt ? { negative_prompt: params.negativePrompt } : {}),
-    ...(params.seed !== undefined ? { seed: params.seed } : {}),
+    // pearapi.apifox.cn video pages define neither negative_prompt nor seed for any model.
   };
 
   if (spec?.referenceArrays) {

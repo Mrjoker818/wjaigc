@@ -1865,6 +1865,17 @@ export function adjustRequestForProfile(
       if (resolution && pearSpec.resolutions.includes(resolution)) body.resolution = resolution;
       else delete body.resolution;
       if (typeof body.quality !== 'string' || !pearSpec.qualities.includes(body.quality)) delete body.quality;
+      // pearapi.apifox.cn 没有任何图像模型定义 background / mask / strength / seed / negative_prompt；
+      // output_format 只出现在 gpt-image-2 / 2.5 / 2.6 页面（png/jpeg/webp）
+      delete body.background;
+      delete body.mask;
+      delete body.strength;
+      delete body.seed;
+      delete body.negative_prompt;
+      const pearModel = String(body.model).toLowerCase();
+      if (!pearModel.startsWith('gpt-image-') || !['png', 'jpeg', 'webp'].includes(String(body.output_format))) {
+        delete body.output_format;
+      }
       flatImages.splice(pearSpec.maxImages);
     }
     if (flatImages.length > 0) body.images = flatImages;
@@ -1903,12 +1914,57 @@ export function adjustRequestForProfile(
       delete body.image_count;
     }
     const apimartModel = typeof body.model === 'string' ? body.model.toLowerCase() : '';
-    if (apimartModel === 'grok-imagine-image-2.0') {
-      // docs.apib.ai images/grok-imagine-2.0-ext/official：比例字段为 aspect_ratio，resolution 仅 1k/2k（小写）
+    // docs.apib.ai gpt-image-2 / 2.5 / 2.6 (incl. 2.6-ext)：resolution 可选值 1k/2k/4k，使用小写。
+    // gpt-image-2.5-ext 文档写的是大写 1K/2K/4K，保持原样。
+    if (/^gpt-image-2(?:-ext|-official|\.5-(?:flare|sunburst)|\.6-(?:flare|sunburst|ext))?$/.test(apimartModel)
+      && typeof body.resolution === 'string') {
+      body.resolution = body.resolution.toLowerCase();
+    }
+    if (apimartModel === 'gpt-image-2.6-ext') {
+      // 文档："当前请使用整数 1"
+      body.n = 1;
+    }
+    if (apimartModel === 'grok-imagine-image-2.0'
+      || apimartModel === 'grok-imagine-image'
+      || apimartModel === 'grok-imagine-image-quality') {
+      // docs.apib.ai grok-imagine-2.0-ext/official 与 grok-imagine/generation：
+      // 比例字段为 aspect_ratio，resolution 仅 1k/2k（小写），这些模型不要发送 quality
       if (typeof body.size === 'string') body.aspect_ratio = body.size;
       delete body.size;
       if (typeof body.resolution === 'string') body.resolution = body.resolution.toLowerCase();
       delete body.quality;
+    } else if (apimartModel === 'muse-image-ext') {
+      // 只接受 aspect_ratio（不含 auto）；"不要发送非空 resolution"
+      if (typeof body.size === 'string' && body.size !== 'auto') body.aspect_ratio = body.size;
+      delete body.size;
+      delete body.resolution;
+      delete body.quality;
+    } else if (apimartModel === 'imagen-4.0-apimart' || apimartModel === 'z-image-turbo') {
+      // 仅文生图："传入 image_urls…会直接报错"；imagen 没有 resolution 字段
+      delete body.image_urls;
+      if (apimartModel === 'imagen-4.0-apimart') delete body.resolution;
+    } else if (apimartModel === 'flux-3-image' || apimartModel === 'flux-3-image-klein') {
+      // flux-3-image：seed / output_format / negative_prompt / mask_url / width / height 均返回 400
+      // flux-3-image-klein：允许 seed、steps，output_format 仅 jpeg/png（不支持 webp）
+      delete body.negative_prompt;
+      delete body.mask;
+      delete body.mask_url;
+      delete body.width;
+      delete body.height;
+      if (apimartModel === 'flux-3-image') {
+        delete body.seed;
+        delete body.steps;
+        delete body.guidance;
+        delete body.output_format;
+      } else if (body.output_format === 'webp') {
+        body.output_format = 'jpeg';
+      }
+      if (typeof body.resolution === 'string') body.resolution = body.resolution.toLowerCase();
+    } else if (apimartModel === 'flux-kontext-pro' || apimartModel === 'flux-kontext-max') {
+      // "resolution 对 Kontext 不生效"；width/height 会导致任务失败
+      delete body.resolution;
+      delete body.width;
+      delete body.height;
     } else if (apimartModel === 'grok-imagine-2.0-ext') {
       // 传 quality 返回 400 invalid_quality；resolution 不是像素档位，也不接受 auto 比例和参考图
       delete body.quality;

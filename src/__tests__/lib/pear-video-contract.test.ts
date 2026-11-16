@@ -44,6 +44,12 @@ describe('PearAPI video submit contract', () => {
     expect(submitBody({ videoUrl: 'https://example.com/v.mp4' })).toMatchObject({ generation_mode: 'video2video' });
   });
 
+  it('does not send negative_prompt or seed, which no Pear video page defines', () => {
+    const submitted = submitBody({ negativePrompt: 'blur', seed: 7 });
+    expect(submitted).not.toHaveProperty('negative_prompt');
+    expect(submitted).not.toHaveProperty('seed');
+  });
+
   it('sends the exact admitted duration and keeps the documented ratio alias', () => {
     expect(submitBody({ aspectRatio: '9:16' })).toMatchObject({ aspect_ratio: '9:16' });
     expect(submitBody({ duration: 5 })).toMatchObject({ duration: 5 });

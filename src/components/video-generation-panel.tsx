@@ -10,7 +10,7 @@ import {
   Clapperboard, SlidersHorizontal, Mountain, ImageIcon, User, RefreshCw, Package
 } from 'lucide-react';
 import MotionBrushCanvas, { type MotionBrushResult, type MotionBrushCanvasHandle } from './motion-brush-canvas';
-import { clampVideoDurationToAllowed, getPlatformVideoDurations, VIDEO_MODEL_REGISTRY, type MotionBrushParams, type CameraControlParams, type VideoGenerateParams as VideoApiGenerateParams } from '@/lib/video-api';
+import { clampVideoDurationToAllowed, getApiMartVideoControlSupport, getPlatformVideoDurations, VIDEO_MODEL_REGISTRY, type MotionBrushParams, type CameraControlParams, type VideoGenerateParams as VideoApiGenerateParams } from '@/lib/video-api';
 import {
   buildContinuationPrompt,
   parseShotPlanCharacters,
@@ -252,6 +252,8 @@ type VideoModelOption = {
   isDefault?: boolean;
   region: 'cn' | 'global';
   features: VideoModelInfo['features'];
+  /** Optional controls the selected model's request actually carries. */
+  controls: { negativePrompt: boolean; seed: boolean };
 };
 
 type StoryCharacterPayload = VideoCharacter & {
@@ -596,6 +598,12 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
     const descriptor = descriptorsByKey.get(taskModelKey(catalogModel.providerId, catalogModel.id));
     const registry = VIDEO_MODEL_REGISTRY[catalogModel.id as keyof typeof VIDEO_MODEL_REGISTRY];
     const operations = descriptor?.supportedOperations ?? [];
+    // The registry is keyed by model id only, so the same id served through Pear or APIMart
+    // would inherit another provider's toggles. Use what the resolved request builder sends.
+    const protocol = descriptor?.protocol;
+    const apimartControls = protocol === 'apimart-video' ? getApiMartVideoControlSupport(catalogModel.id) : null;
+    const isPear = protocol === 'pearapi-video';
+    const audio = apimartControls ? apimartControls.audio : !isPear && (registry?.features.audio || false);
     return {
       id: `${catalogModel.providerId}::${catalogModel.id}`,
       modelId: catalogModel.id,
@@ -609,7 +617,7 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
         multiReference: operations.includes('multi-reference'),
         videoEdit: registry?.features.videoEdit || false,
         videoExtend: operations.includes('video-extend'),
-        audio: registry?.features.audio || false,
+        audio,
         cameraControl: registry?.features.cameraControl || false,
         motionBrush: registry?.features.motionBrush || false,
         characterConsistency: registry?.features.characterConsistency || false,
@@ -621,6 +629,9 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
         aspectRatios: descriptor?.allowedRatios || [],
         resolutions: descriptor?.allowedSizes || [],
       },
+      controls: apimartControls
+        ? { negativePrompt: apimartControls.negativePrompt, seed: apimartControls.seed }
+        : { negativePrompt: !isPear, seed: !isPear },
     };
   }), [catalogModels, descriptorsByKey]);
 
@@ -3258,6 +3269,7 @@ Rules:
                     ))}
                   </div>
                 </div>
+                {currentModel?.controls.negativePrompt !== false && (
                 <div>
                   <label htmlFor={`${videoControlsId}-negative-prompt`} className={labelClass}>反向提示词（可选）</label>
                   <textarea
@@ -3270,6 +3282,8 @@ Rules:
                     style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}` }}
                   />
                 </div>
+                )}
+                {currentModel?.controls.seed !== false && (
                 <div className="flex items-center gap-2">
                   <label htmlFor={`${videoControlsId}-seed`} className="text-[11px] shrink-0 font-medium" style={{ color: subTextColor }}>随机种子</label>
                   <input
@@ -3283,6 +3297,7 @@ Rules:
                   />
                   <button onClick={() => setSeed(Math.floor(Math.random() * 2147483647))} aria-label="生成随机种子" className="px-2.5 py-1.5 rounded-md text-sm cursor-pointer max-md:shrink-0 max-md:min-h-[44px] max-md:min-w-[44px]" style={{ background: inputBg, color: subTextColor, border: `1px solid ${borderColor}` }}>随机</button>
                 </div>
+                )}
               </div>
             </CollapsibleSection>
 

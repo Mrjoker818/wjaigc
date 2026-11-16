@@ -79,4 +79,15 @@ describe('PearAPI image profile contract', () => {
     }, PROFILE_PEARAPI);
     expect(body).toMatchObject({ resolution: '4K', quality: 'high' });
   });
+
+  it('drops fields no Pear image page defines and keeps output_format only for gpt-image', () => {
+    const extra = { background: 'transparent', mask: 'data:image/png;base64,AA', seed: 7, negative_prompt: 'blur', output_format: 'webp' };
+    const gpt = adjustRequestForProfile({ model: 'gpt-image-2', prompt: 'p', size: '1:1', ...extra }, PROFILE_PEARAPI).body;
+    expect(gpt.output_format).toBe('webp');
+    const nano = adjustRequestForProfile({ model: 'nano-banana-pro', prompt: 'p', size: '1:1', ...extra }, PROFILE_PEARAPI).body;
+    expect(nano).not.toHaveProperty('output_format');
+    for (const submitted of [gpt, nano]) {
+      for (const field of ['background', 'mask', 'seed', 'negative_prompt']) expect(submitted).not.toHaveProperty(field);
+    }
+  });
 });

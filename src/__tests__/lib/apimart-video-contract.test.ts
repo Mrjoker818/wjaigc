@@ -78,10 +78,51 @@ describe('APIMart per-model submit fields', () => {
     });
     expect(submitted.mode).toBe('pro');
     expect(submitted.audio).toBe(true);
-    expect(submitted.image_urls).toEqual(['https://example.com/a.png']);
+    // docs.apib.ai kling-v3-omni: frames go in image_with_roles; image_urls are cited references
+    expect(submitted.image_with_roles).toEqual([{ url: 'https://example.com/a.png', role: 'first_frame' }]);
+    expect(submitted).not.toHaveProperty('image_urls');
     expect(submitted).not.toHaveProperty('resolution');
     expect(submitted).not.toHaveProperty('generate_audio');
     expect(body('kling-v3-omni', { advancedParams: { resolution: '4K' } }).mode).toBe('4k');
+  });
+
+  it('uses the kling-v3-omni "reference" role for references next to frames', () => {
+    const submitted = body('kling-v3-omni', {
+      imageUrl: 'https://example.com/a.png',
+      lastFrameImageUrl: 'https://example.com/b.png',
+      referenceImages: ['https://example.com/c.png'],
+    });
+    expect(submitted.image_with_roles).toEqual([
+      { url: 'https://example.com/a.png', role: 'first_frame' },
+      { url: 'https://example.com/b.png', role: 'last_frame' },
+      { url: 'https://example.com/c.png', role: 'reference' },
+    ]);
+  });
+
+  it('does not send the undocumented n or negative_prompt fields', () => {
+    for (const model of ['seedance-2.0', 'seedance-2.5', 'veo3.1-fast', 'kling-3.0-turbo']) {
+      const submitted = body(model, { negativePrompt: 'blur' });
+      expect(submitted).not.toHaveProperty('n');
+      expect(submitted).not.toHaveProperty('negative_prompt');
+    }
+    expect(body('seedance-2.0', { seed: 7 }).seed).toBe(7);
+  });
+
+  it('omits size for seedance-2.5 first/last-frame tasks but keeps it for seedance-2.0', () => {
+    const frames = { aspectRatio: '16:9', imageUrl: 'https://example.com/a.png' };
+    expect(body('seedance-2.5', frames)).not.toHaveProperty('size');
+    expect(body('seedance-2.5', { aspectRatio: '16:9' }).size).toBe('16:9');
+    expect(body('seedance-2.0', frames).size).toBe('16:9');
+  });
+
+  it('sends first_frame_image only and limits 1080p to 6 seconds for MiniMax-Hailuo-2.3', () => {
+    const submitted = body('MiniMax-Hailuo-2.3', {
+      duration: 6, imageUrl: 'https://example.com/a.png', advancedParams: { resolution: '1080p' },
+    });
+    expect(submitted.first_frame_image).toBe('https://example.com/a.png');
+    expect(submitted).not.toHaveProperty('last_frame_image');
+    expect(() => body('MiniMax-Hailuo-2.3', { duration: 10, advancedParams: { resolution: '1080p' } }))
+      .toThrow(/6 秒/);
   });
 
   it('sends first_frame_image and drops aspect_ratio for kling-3.0-turbo image-to-video', () => {

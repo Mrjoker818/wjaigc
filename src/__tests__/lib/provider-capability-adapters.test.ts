@@ -57,26 +57,66 @@ describe('provider capability adapters', () => {
 
   it('uses the audited APIMart GPT Image 2 contract', () => {
     // Source: https://docs.apib.ai/cn/api-reference/images/gpt-image-2/generation
-    // Endpoint: POST /v1/images/generations; reviewed 2026-08-24.
+    // Endpoint: POST /v1/images/generations; reviewed 2026-11-16.
+    // size also accepts auto, n "取值：1", "最多 15 张参考图"; gpt-image-2-ext is a documented alias.
+    for (const id of ['gpt-image-2', 'gpt-image-2-ext']) {
+      const adapter = resolveProviderCapabilityAdapter(
+        provider('apib', 'https://api.apib.ai/v1', 'image'),
+        model('apib', id, 'image'),
+      );
+
+      expect(adapter).toMatchObject({
+        protocol: 'apimart',
+        executionMode: 'async',
+        allowedRatios: [
+          'auto',
+          '1:1', '3:2', '2:3', '4:3', '3:4',
+          '5:4', '4:5', '16:9', '9:16', '2:1',
+          '1:2', '3:1', '1:3', '21:9', '9:21',
+        ],
+        allowedSizes: ['1K', '2K', '4K'],
+        qualityOptions: [],
+        maxOutputs: 1,
+        supportsReferenceImages: true,
+        maxReferenceImages: 15,
+        supportsMask: false,
+        supportedOperations: ['text-to-image', 'image-to-image'],
+      });
+    }
+  });
+
+  it.each([
+    ['gpt-image-2.6-flare', { qualityOptions: ['auto', 'low', 'medium', 'high', 'xhigh', 'max'], maxOutputs: 4, supportsMask: true }],
+    ['gpt-image-2.6-ext', { maxOutputs: 1, maxReferenceImages: 16 }],
+    ['gemini-3-pro-image-preview-official', { allowedSizes: ['1K', '2K', '4K'], maxOutputs: 1, maxReferenceImages: 14 }],
+    ['nano-banana-2', { allowedSizes: ['1K', '2K', '4K'], maxReferenceImages: 14 }],
+    ['gemini-nano-banana-2.1', { allowedSizes: ['1K', '2K', '4K'], maxOutputs: 4 }],
+    ['gemini-nano-banana-2.1-ext', { maxOutputs: 1 }],
+    ['seedream-4.5', { allowedSizes: ['2K', '4K'], maxOutputs: 15 }],
+    ['seedream-5-5', { allowedSizes: ['1K', '2K'], maxOutputs: 1, maxReferenceImages: 10 }],
+    ['grok-imagine-image', { maxReferenceImages: 5, qualityOptions: [] }],
+    ['wan2.7-image', { allowedSizes: ['1K', '2K'], maxReferenceImages: 9 }],
+    ['imagen-4.0-apimart', { supportsReferenceImages: false, maxReferenceImages: 0, supportedOperations: ['text-to-image'] }],
+    ['z-image-turbo', { supportsReferenceImages: false, maxOutputs: 1 }],
+    ['flux-3-image', { maxOutputs: 1, maxReferenceImages: 10 }],
+    ['muse-image-ext', { allowedSizes: [], maxReferenceImages: 9 }],
+  ])('uses the documented APIMart limits for newly listed model %s', (id, expected) => {
+    // Source: docs.apib.ai/cn/api-reference/images/* reviewed 2026-11-16.
     const adapter = resolveProviderCapabilityAdapter(
       provider('apib', 'https://api.apib.ai/v1', 'image'),
-      model('apib', 'gpt-image-2', 'image'),
+      model('apib', id, 'image'),
     );
+    expect(adapter).toMatchObject(expected);
+  });
 
-    expect(adapter).toMatchObject({
-      protocol: 'apimart',
-      executionMode: 'async',
-      allowedRatios: [
-        '1:1', '3:2', '2:3', '4:3', '3:4',
-        '5:4', '4:5', '16:9', '9:16', '2:1',
-        '1:2', '3:1', '1:3', '21:9', '9:21',
-      ],
-      allowedSizes: ['1K', '2K', '4K'],
-      qualityOptions: [],
-      supportsReferenceImages: true,
-      maxReferenceImages: 16,
-      supportedOperations: ['text-to-image', 'image-to-image'],
-    });
+  it('lists only the documented ratios for the APIMart ext and flux models', () => {
+    const ratios = (id: string) => resolveProviderCapabilityAdapter(
+      provider('apib', 'https://api.apib.ai/v1', 'image'),
+      model('apib', id, 'image'),
+    )?.allowedRatios ?? [];
+    expect(ratios('gpt-image-2.5-ext')).not.toContain('2:1');
+    expect(ratios('flux-3-image')).toContain('7:5');
+    expect(ratios('grok-imagine-image')).toContain('19.5:9');
   });
 
   it('does not reuse APIMart capabilities for the same 4S model id', () => {

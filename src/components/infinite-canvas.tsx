@@ -11792,6 +11792,10 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     if (!sourceImg) { toast.error('请先选择一张参考图'); return; }
     setIsGeneratingPanorama(true);
     const tid = toast.loading('正在生成720°全景图...');
+    // 全景图2:1等距圆柱投影比例
+    const frameW = sourceImg.width * 2;
+    const frameH = sourceImg.width;
+    let placeholderId: string | null = null;
     try {
       // 调用现有的图生图接口，用全景提示词
       const prompt = panoramaPrompt + (sourceImg.prompt ? `, based on reference image style: ${sourceImg.prompt}` : '');
@@ -11808,20 +11812,46 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           submitOnly: true,
         }, modelInfo.model)),
       });
-      if (!res.ok) throw new Error('全景生成失败');
-      const data = await res.json();
-      if (data.taskId) {
-        // 创建占位框然后轮询结果
-        createProcessingFrameRightOf(sourceImg, '全景生成中', sourceImg.width * 2, sourceImg.width, '正在生成720度全景图...');
-        pollForResult(data.taskId, modelInfo.model, undefined, 'panorama');
-        toast.dismiss(tid);
+      const data = await res.json().catch(() => ({} as Record<string, unknown>));
+      if (!res.ok || data.success === false) {
+        throw new Error(translateErrorFrontend(String(data.error || `全景生成失败 (${res.status})`)));
       }
+      // 创建占位框，轮询完成后把结果写回同一个占位框
+      placeholderId = createProcessingFrameRightOf(sourceImg, '全景生成中', frameW, frameH, '正在生成720度全景图...');
+      toast.dismiss(tid);
+      const usedModelName = String(data.usedModel || modelInfo.model);
+      let resultUrl = data.imageUrl ? String(data.imageUrl) : '';
+      if (!resultUrl && data.taskId) {
+        const frameId = placeholderId;
+        resultUrl = await pollForResult(String(data.taskId), usedModelName, (progress, status) => {
+          updateProcessingFrame(frameId, { progress, status });
+        }, 'panorama') || '';
+      }
+      if (!resultUrl) {
+        throw new Error(lastPollErrorRef.current || '全景生成超时，请重试');
+      }
+      completeProcessingFrame(placeholderId, resultUrl, frameW, frameH, {
+        originalWidth: Math.round(frameW),
+        originalHeight: Math.round(frameH),
+        prompt,
+        modifyPrompt: '720°全景图',
+        modelName: usedModelName,
+        apiProvider: modelInfo.providerName || '',
+      }, 'img2img');
+      toast.success('全景图生成完成');
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '全景生成失败', { id: tid });
+      const message = e instanceof Error ? e.message : '全景生成失败';
+      if (placeholderId) {
+        const failure = buildFailedProcessingFrame(`全景生成失败：${message}`, '全景生成失败');
+        updateProcessingFrame(placeholderId, failure);
+        toast.error(failure.error, { id: tid });
+      } else {
+        toast.error(message, { id: tid });
+      }
     } finally {
       setIsGeneratingPanorama(false);
     }
-  }, [getActiveImageData, panoramaPrompt, getCurrentModel, createProcessingFrameRightOf, pollForResult]);
+  }, [getActiveImageData, panoramaPrompt, getCurrentModel, createProcessingFrameRightOf, pollForResult, updateProcessingFrame, completeProcessingFrame]);
 
   // 全景查看器
   const [panoramaViewerUrl, setPanoramaViewerUrl] = useState<string | null>(null);
