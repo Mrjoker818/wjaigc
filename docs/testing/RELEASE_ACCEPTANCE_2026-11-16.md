@@ -50,3 +50,10 @@ Each branch was compared against HEAD (commit count, `git cherry` patch-ID check
 | sync/merged-20261103 | 0 | Fully merged | Deleted |
 
 The remote now has only `main` and `stable`.
+
+## Paid silent-video re-run on candidate c2a18012
+
+- Task video_1794806386683_u5frx3: text-to-video, Seedance 2.0 (AI Link), 16:9, 4 s, 1x, sound off in the panel. The request carried generateAudio=false.
+- Completed after about 6.5 minutes and 87 polls. The poll label took only three values, `文生视频 · Seedance 2.0 (AI Link) · 提交中...`, `排队中...` and `生成中...`. The model name stayed and no spaces accumulated, so e56358e6 works on the deployed build.
+- Saved file: `/api/serve-upload/video/video_1794806386683_u5frx3/video_7989a398-7a7a-4d8b-90d3-8ed65b76f6dd.mp4` (UUID token name).
+- ffprobe: one h264 video stream, 1280×720, 4.04 s, no audio stream. The file has 0 `soun` / `mp4a` boxes.
