@@ -94,7 +94,9 @@ export const VENDOR_PRICES: Readonly<Record<string, VendorPrice>> = {
   'apib::seedance-2.0-fast-face': usd('second', 0.172, { tiers: { '480P': 0.08, '720P': 0.172 } }),
   'apib::seedance-2.0-mini': usd('second', 0.0390344, { tiers: { '480P': 0.0181512, '720P': 0.0390344 } }),
   'apib::seedance-2.5': usd('second', 0.216, { tiers: { '480P': 0.09608, '720P': 0.216, '1080P': 0.5346 } }),
-  'apib::seedream-4.0': usd('call', 0.8),
+  // 文档：seedream-4.0 与 seedream-4-0 是同一模型；官网价格表只列 seedream-4-0（$0.0195），
+  // 价格接口对 seedream-4.0 这个别名返回的 $0.8 与官网不符，按官网计价
+  'apib::seedream-4.0': usd('call', 0.0195),
   'apib::seedream-4.5': usd('call', 0.026),
   'apib::seedream-5-0-flash': usd('call', 0.0137144),
   'apib::seedream-5-0-lite': usd('call', 0.028),
