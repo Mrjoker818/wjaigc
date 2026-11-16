@@ -26,6 +26,13 @@ Candidate on the VPS QA service: 88e009cd. main now points to e56358e6, which is
 - Stale-cache impact on earlier candidates: none found. candidate-88e009cd's stylesheet contains `scrollbar-color:#4a4a4a`, the class 1ee077fd added for the drawer, and candidate-cc242fc2 (built before it) does not. So the earlier drawer and floating-panel checks ran against current CSS. d93ed924 changed no styles. Only bec5044b's first build was affected.
 - Browser check at 1440×900 on candidate-bec5044b-r2: all 15 toolbar buttons are 44px wide, compute to `display: flex`, and have 0px icon offset horizontally and vertically.
 
+## Phone-width expanded panel (c2a18012)
+
+- Defect: 60f26992 set the expanded workspace panel to `min(480px, calc(100vw - 96px))` to keep the left toolbar column uncovered. Below 576px wide that reserve applies, so at 320px the panel was 224px wide and its tabs and headings wrapped one character per line. This is what the 4 `canvas-toolbar-available-width-native.test.tsx` failures (`expected 224 to be close to 320`) reported.
+- Fix: `WORKSPACE_PANEL_EXPANDED_WIDTH` is `min(480px, 100vw)` again. On phones the panel opens as a full-width sheet that the 44px rail collapses again. At 576px and wider the value is 480px either way, so desktop and tablet layouts are unchanged.
+- Tests: `workspace-panel-layout.test.ts`, `canvas-toolbar-floating-windows.test.ts`, `canvas-toolbar-available-width-native.test.tsx` and `image-toolbar-position.test.ts` pass (41 tests). The other suites that use the panel width also pass: announcement-mobile, empty-state, minimap, viewport-wiring, draft and popup lifecycle. One empty-state 1040×720 case failed once and passed on rerun with and without the change, then the whole file passed (14 tests), so it is flaky. `tsc` reports only the missing local `@pdf-lib/fontkit` module.
+- QA: clean build of candidate-c2a18012 with a temporary 1.5GB swap file (removed afterwards). Inactive QA candidates' `.next/cache` folders were deleted to free disk. In a 320×568 frame on the QA service the panel goes from 44px to 316px when expanded, and the 快速创作 tab is 77×36px on one line.
+
 ## Remote branch cleanup
 
 Each branch was compared against HEAD (commit count, `git cherry` patch-ID check, and a line-level check that the added code is present in HEAD). The branch tips are kept locally under `refs/backup/remote-20261116/*`.
