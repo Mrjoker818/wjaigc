@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { randomUUID } from 'node:crypto';
 import { confirmedImageEditQuoteForResponse } from '@/lib/task-core/image-edit-quote-token';
+import { buildVideoProgressLabel } from '@/lib/video-task-polling';
 import { readAcceptedImageEditPhaseResult } from '@/lib/task-core/image-edit-provider-checkpoint';
 import { persistOutpaintDirectResult, readOutpaintResultSize } from '@/lib/task-core/outpaint-direct-result';
 import { persistInpaintAcceptedResult } from '@/lib/task-core/inpaint-task';
@@ -2881,7 +2882,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
 
           // 仍在处理中 - 更新进度
           const progress = videoResult.progress || Math.min(registryTask.progress + 5, 90);
-          const updatedLabel = `${registryTask.label?.split('·')[0] || '视频生成'} · ${videoResult.status === 'running' ? '生成中' : '排队中'}...`;
+          const updatedLabel = buildVideoProgressLabel(registryTask.label, videoResult.status === 'running');
           updateTaskProgress(taskId, {
             progress,
             label: updatedLabel,
