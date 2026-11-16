@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   submitElementBoardProviderTask: vi.fn(),
   pollElementBoardProviderTask: vi.fn(),
   cancelElementBoardProviderTask: vi.fn(),
+  finalizeElementBoardResult: vi.fn(),
 }));
 
 // @ts-expect-error Vitest supports virtual module mocks at runtime.
@@ -25,6 +26,9 @@ vi.mock('@/lib/cloud-task-storage', () => ({
 }));
 vi.mock('@/lib/element-decomposition/board-provider', () => ({
   resolveElementBoardProvider: mocks.resolveElementBoardProvider,
+}));
+vi.mock('@/lib/element-decomposition/board-result', () => ({
+  finalizeElementBoardResult: mocks.finalizeElementBoardResult,
 }));
 vi.mock('@/lib/element-decomposition/board-provider-client', () => ({
   submitElementBoardProviderTask: mocks.submitElementBoardProviderTask,
@@ -58,6 +62,9 @@ describe('element board persistent executor', () => {
     mocks.completeCloudTask.mockResolvedValue(true);
     mocks.terminateCloudTaskAndRefund.mockResolvedValue({ transitioned: true, refunded: true, creditCost: 7 });
     mocks.updateCloudTask.mockResolvedValue(true);
+    mocks.finalizeElementBoardResult.mockResolvedValue({
+      imageUrl: '/uploads/element-boards/board.png', width: 1024, height: 576, report: { sha256: 'b'.repeat(64) },
+    });
   });
 
   it('authorizes and prices the exact model before returning the local board task', async () => {
@@ -81,7 +88,7 @@ describe('element board persistent executor', () => {
     mocks.getCloudTaskForUser.mockResolvedValue({
       id: 'board_local', userId: 'user-1', type: 'element-board', status: 'processing',
       providerId: 'image-provider', model: 'gpt-image-1', remoteTaskId: 'remote-1',
-      progress: 10, creditStatus: 'pending', creditCost: 7, createdAt: 1, updatedAt: 1,
+      progress: 10, creditStatus: 'pending', creditCost: 7, createdAt: Date.now(), updatedAt: 1,
       result: { request: input },
     });
     mocks.pollElementBoardProviderTask.mockResolvedValue({ status: 'completed', progress: 100, imageUrl: '/result.png' });
@@ -89,15 +96,78 @@ describe('element board persistent executor', () => {
     const result = await pollElementBoard({ taskId: 'board_local', userId: 'user-1', userRole: 'user' });
 
     expect(mocks.pollElementBoardProviderTask).toHaveBeenCalledWith(expect.objectContaining({ remoteTaskId: 'remote-1' }));
+    expect(mocks.finalizeElementBoardResult).toHaveBeenCalledWith(expect.objectContaining({
+      resultUrl: '/result.png', sourceHash: input.sourceHash, background: 'transparent', modelId: 'gpt-image-1',
+    }));
     expect(mocks.completeCloudTask).toHaveBeenCalledTimes(1);
-    expect(result).toMatchObject({ taskId: 'board_local', status: 'completed', result: { imageUrl: '/result.png' } });
+    expect(mocks.completeCloudTask).toHaveBeenCalledWith('board_local', expect.objectContaining({
+      imageUrl: '/uploads/element-boards/board.png', width: 1024, height: 576,
+    }));
+    expect(result).toMatchObject({
+      taskId: 'board_local', status: 'completed', result: { imageUrl: '/uploads/element-boards/board.png' },
+    });
+  });
+
+  it('fails and refunds a completed provider result that does not pass the quality gate', async () => {
+    mocks.getCloudTaskForUser.mockResolvedValue({
+      id: 'board_local', userId: 'user-1', type: 'element-board', status: 'processing',
+      providerId: 'image-provider', model: 'gpt-image-1', remoteTaskId: 'remote-1',
+      progress: 10, creditStatus: 'pending', creditCost: 7, createdAt: Date.now(), updatedAt: 1,
+      result: { request: input },
+    });
+    mocks.pollElementBoardProviderTask.mockResolvedValue({ status: 'completed', progress: 100, imageUrl: '/result.png' });
+    mocks.finalizeElementBoardResult.mockRejectedValue(new Error('模型 gpt-image-1 未返回真实透明背景'));
+    const { pollElementBoard } = await import('@/lib/element-decomposition/board-executor');
+
+    await expect(pollElementBoard({ taskId: 'board_local', userId: 'user-1', userRole: 'user' }))
+      .resolves.toMatchObject({ status: 'failed', error: '模型 gpt-image-1 未返回真实透明背景' });
+    expect(mocks.terminateCloudTaskAndRefund).toHaveBeenCalledWith('board_local', 'failed', '模型 gpt-image-1 未返回真实透明背景');
+    expect(mocks.completeCloudTask).not.toHaveBeenCalled();
+  });
+
+  it('times out and refunds a task that stays unfinished past the deadline', async () => {
+    const { ELEMENT_BOARD_DEADLINE_MS, pollElementBoard } = await import('@/lib/element-decomposition/board-executor');
+    mocks.getCloudTaskForUser.mockResolvedValue({
+      id: 'board_local', userId: 'user-1', type: 'element-board', status: 'processing',
+      providerId: 'image-provider', model: 'gpt-image-1', remoteTaskId: 'remote-1',
+      progress: 30, creditStatus: 'pending', creditCost: 7,
+      createdAt: Date.now() - ELEMENT_BOARD_DEADLINE_MS - 1, updatedAt: 1,
+      result: { request: input },
+    });
+
+    await expect(pollElementBoard({ taskId: 'board_local', userId: 'user-1', userRole: 'user' }))
+      .resolves.toMatchObject({ status: 'timeout' });
+    expect(mocks.terminateCloudTaskAndRefund).toHaveBeenCalledWith('board_local', 'timeout', expect.stringContaining('已退回积分'));
+    expect(mocks.pollElementBoardProviderTask).not.toHaveBeenCalled();
+  });
+
+  it('keeps polling after a transient provider error and fails on a permanent one', async () => {
+    mocks.getCloudTaskForUser.mockResolvedValue({
+      id: 'board_local', userId: 'user-1', type: 'element-board', status: 'processing',
+      providerId: 'image-provider', model: 'gpt-image-1', remoteTaskId: 'remote-1',
+      progress: 30, creditStatus: 'pending', creditCost: 7, createdAt: Date.now(), updatedAt: 1,
+      result: { request: input },
+    });
+    const { pollElementBoard } = await import('@/lib/element-decomposition/board-executor');
+
+    mocks.pollElementBoardProviderTask.mockRejectedValueOnce(new Error('fetch failed'));
+    await expect(pollElementBoard({ taskId: 'board_local', userId: 'user-1', userRole: 'user' }))
+      .resolves.toMatchObject({ status: 'processing' });
+    expect(mocks.terminateCloudTaskAndRefund).not.toHaveBeenCalled();
+
+    mocks.resolveElementBoardProvider.mockRejectedValueOnce(
+      Object.assign(new Error('model no longer assigned'), { code: 'ELEMENT_BOARD_MODEL_FORBIDDEN' }),
+    );
+    await expect(pollElementBoard({ taskId: 'board_local', userId: 'user-1', userRole: 'user' }))
+      .resolves.toMatchObject({ status: 'failed', error: 'model no longer assigned' });
+    expect(mocks.terminateCloudTaskAndRefund).toHaveBeenCalledWith('board_local', 'failed', 'model no longer assigned');
   });
 
   it('does not report cancellation when downstream cancellation fails', async () => {
     mocks.getCloudTaskForUser.mockResolvedValue({
       id: 'board_local', userId: 'user-1', type: 'element-board', status: 'processing',
       providerId: 'image-provider', model: 'gpt-image-1', remoteTaskId: 'remote-1',
-      progress: 10, creditStatus: 'pending', creditCost: 7, createdAt: 1, updatedAt: 1,
+      progress: 10, creditStatus: 'pending', creditCost: 7, createdAt: Date.now(), updatedAt: 1,
     });
     mocks.cancelElementBoardProviderTask.mockRejectedValue(new Error('provider does not support cancellation'));
     const { cancelElementBoard } = await import('@/lib/element-decomposition/board-executor');
@@ -126,7 +196,7 @@ describe('element board persistent executor', () => {
     mocks.getCloudTaskForUser.mockResolvedValue({
       id: 'board_local', userId: 'user-1', type: 'element-board', status: 'processing',
       providerId: 'image-provider', model: 'gpt-image-1', remoteTaskId: 'remote-1',
-      progress: 40, creditStatus: 'pending', creditCost: 7, createdAt: 1, updatedAt: 2,
+      progress: 40, creditStatus: 'pending', creditCost: 7, createdAt: Date.now(), updatedAt: 2,
       result: { request: input },
     });
     mocks.pollElementBoardProviderTask.mockResolvedValue({ status: 'failed', progress: 80, error: 'provider failed' });
@@ -143,7 +213,7 @@ describe('element board persistent executor', () => {
     const liveTask = {
       id: 'board_local', userId: 'user-1', type: 'element-board', status: 'processing',
       providerId: 'image-provider', model: 'gpt-image-1', remoteTaskId: 'remote-1',
-      progress: 40, creditStatus: 'pending', creditCost: 7, createdAt: 1, updatedAt: 2,
+      progress: 40, creditStatus: 'pending', creditCost: 7, createdAt: Date.now(), updatedAt: 2,
       result: { request: input },
     };
     mocks.getCloudTaskForUser
@@ -162,7 +232,7 @@ describe('element board persistent executor', () => {
     mocks.getCloudTaskForUser.mockResolvedValue({
       id: 'board_local', userId: 'user-1', type: 'element-board', status: 'processing',
       providerId: 'image-provider', model: 'gpt-image-1', remoteTaskId: 'remote-1',
-      progress: 40, creditStatus: 'pending', creditCost: 7, createdAt: 1, updatedAt: 2,
+      progress: 40, creditStatus: 'pending', creditCost: 7, createdAt: Date.now(), updatedAt: 2,
     });
     mocks.cancelElementBoardProviderTask.mockResolvedValue(undefined);
     const { cancelElementBoard } = await import('@/lib/element-decomposition/board-executor');

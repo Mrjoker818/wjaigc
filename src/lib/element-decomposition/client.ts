@@ -4,9 +4,10 @@ import type {
   ElementDecomposeRequest,
 } from '@/lib/element-decomposition/types';
 import type { CloudTaskCreditStatus } from '@/lib/cloud-task-storage';
-import type { LayerDecompositionResult, LayerUpstreamError } from '@/lib/layer-decomposition/types';
+import type { LayerDecompositionResult, LayerTaskPhase, LayerUpstreamError } from '@/lib/layer-decomposition/types';
 import type { LayerDocumentSource } from '@/lib/layer-documents/types';
 import {
+  getLayerPhasePresentation,
   resolveDefaultLayerTarget,
   type LayerFetchLike,
 } from '@/lib/layer-decomposition-client';
@@ -72,6 +73,39 @@ export function resolveCompletedElementLayersEditorPayload(
     } : null,
     mode: 'studio',
   };
+}
+
+const BRANCH_STATUS_LABELS: Record<ElementBranchStatus, string> = {
+  queued: '排队中',
+  processing: '处理中',
+  completed: '已完成',
+  failed: '失败',
+  cancelled: '已取消',
+  timeout: '已超时',
+};
+
+/** 分支当前阶段的中文说明（设计规格 §7）：图层分支沿用分层任务的 phase，拆解板分支按进度区分生成与检查。 */
+export function describeElementBranchStage(
+  branch: ElementBranch,
+  state: Pick<ElementDecomposeBranchResponse, 'status' | 'progress' | 'result'>,
+): string {
+  if (state.status !== 'queued' && state.status !== 'processing') return BRANCH_STATUS_LABELS[state.status];
+  if (state.status === 'queued') return '正在冻结原始图片';
+  if (branch === 'board') return state.progress >= 95 ? '正在检查并保存拆解板' : '正在生成拆解板';
+  const phase = state.result && typeof state.result.phase === 'string' ? state.result.phase as LayerTaskPhase : undefined;
+  return getLayerPhasePresentation(phase, state.progress).label;
+}
+
+/** 汇总未完成分支的失败原因，用于结束提示。 */
+export function summarizeElementBranchErrors(task: ElementDecomposeTaskResponse): string {
+  return (['board', 'layers'] as const)
+    .map((branch) => {
+      const state = task.branches[branch];
+      if (!state || state.status === 'completed' || !state.error) return '';
+      return `${branch === 'board' ? '拆解板' : '可编辑图层'}：${state.error}`;
+    })
+    .filter(Boolean)
+    .join('；');
 }
 
 const REFUNDED_LOCAL_LAYER_FALLBACK_MESSAGE = 'Pear 云端分层未完成，已退款并使用本地分层';
@@ -146,28 +180,102 @@ export function createElementDecompositionRequest(
   };
 }
 
+interface PublicBoardModel {
+  id?: string;
+  providerId?: string;
+  type?: string;
+  maxReferenceImages?: number;
+  supportedOperations?: string[];
+}
+
+export const ELEMENT_BOARD_MODEL_UNAVAILABLE_MESSAGE = '当前账号没有可用的图片编辑模型，无法生成拆解板。请联系管理员分配图片编辑模型，或改用“可编辑图层”。';
+
+function acceptsSourceImage(model: PublicBoardModel): boolean {
+  if (model.type === 'imageEdit') return true;
+  if (typeof model.maxReferenceImages === 'number') return model.maxReferenceImages > 0;
+  if (Array.isArray(model.supportedOperations)) {
+    return model.supportedOperations.some(item => item === 'image-to-image' || item === 'multi-reference');
+  }
+  return true;
+}
+
+/**
+ * 拆解板需要能接收原图的图片编辑模型。生成面板里选中的模型只在它对当前账号已授权且支持图生图时沿用，
+ * 否则取已授权的第一个图片编辑模型（先 imageEdit，再 image）。
+ */
+export async function resolveDefaultBoardTarget(
+  fetcher: LayerFetchLike,
+  signal?: AbortSignal,
+  preferred?: { providerId?: string; modelId?: string },
+): Promise<{ providerId: string; modelId: string } | null> {
+  const candidates: Array<{ providerId: string; modelId: string }> = [];
+  for (const type of ['imageEdit', 'image'] as const) {
+    const response = await fetcher(`/api/workflow/models?type=${type}`, { method: 'GET', signal, cache: 'no-store' });
+    let body: Record<string, unknown> = {};
+    try {
+      body = await response.json() as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    if (!response.ok || body.success === false || !Array.isArray(body.models)) continue;
+    for (const model of body.models as PublicBoardModel[]) {
+      if (typeof model.id !== 'string' || typeof model.providerId !== 'string' || !acceptsSourceImage(model)) continue;
+      candidates.push({ providerId: model.providerId, modelId: model.id });
+    }
+  }
+  const match = preferred?.modelId
+    ? candidates.find(item => item.modelId === preferred.modelId
+      && (!preferred.providerId || item.providerId === preferred.providerId))
+    : undefined;
+  return match || candidates[0] || null;
+}
+
 export async function createResolvedElementDecompositionRequest(
   source: ElementDecomposeSourceInput,
   options: ElementDecomposeRequestOptions,
   runtime: { fetcher?: LayerFetchLike; signal?: AbortSignal } = {},
 ): Promise<ElementDecomposeRequest> {
-  const outputMode = options.outputMode ?? 'both';
+  let resolvedOptions = options;
+  let outputMode = options.outputMode ?? 'both';
+  const fetcher = runtime.fetcher || fetch;
+
+  if (outputMode !== 'layers') {
+    let boardTarget: { providerId: string; modelId: string } | null = null;
+    try {
+      boardTarget = await resolveDefaultBoardTarget(fetcher, runtime.signal, {
+        providerId: options.boardProviderId,
+        modelId: options.boardModelId,
+      });
+    } catch (error) {
+      if (runtime.signal?.aborted) throw error;
+    }
+    if (boardTarget) {
+      resolvedOptions = { ...resolvedOptions, boardProviderId: boardTarget.providerId, boardModelId: boardTarget.modelId };
+    } else if (outputMode === 'both') {
+      // 没有可用的拆解板模型时只输出可编辑图层，不让整个任务因拆解板 400 而失败。
+      outputMode = 'layers';
+      resolvedOptions = { ...resolvedOptions, outputMode, boardProviderId: undefined, boardModelId: undefined };
+    } else {
+      throw new ElementDecompositionClientError('ELEMENT_BOARD_PROVIDER_REQUIRED', ELEMENT_BOARD_MODEL_UNAVAILABLE_MESSAGE, 400, false);
+    }
+  }
+
   const needsLayerTarget = outputMode !== 'board'
-    && options.engine !== 'local'
-    && (!options.layerProviderId || !options.layerModelId);
-  if (!needsLayerTarget) return createElementDecompositionRequest(source, options);
+    && resolvedOptions.engine !== 'local'
+    && (!resolvedOptions.layerProviderId || !resolvedOptions.layerModelId);
+  if (!needsLayerTarget) return createElementDecompositionRequest(source, resolvedOptions);
 
   let target: { providerId: string; modelId: string } | null = null;
   try {
-    target = await resolveDefaultLayerTarget(runtime.fetcher || fetch, runtime.signal);
+    target = await resolveDefaultLayerTarget(fetcher, runtime.signal);
   } catch (error) {
-    if (runtime.signal?.aborted || options.engine === 'cloud') throw error;
+    if (runtime.signal?.aborted || resolvedOptions.engine === 'cloud') throw error;
   }
   return createElementDecompositionRequest(source, target ? {
-    ...options,
+    ...resolvedOptions,
     layerProviderId: target.providerId,
     layerModelId: target.modelId,
-  } : options);
+  } : resolvedOptions);
 }
 
 async function parseResponse(response: Response): Promise<ElementDecomposeTaskResponse> {

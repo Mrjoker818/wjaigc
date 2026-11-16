@@ -156,20 +156,29 @@ describe('dual-output element decomposition canvas wiring', () => {
     expect(canvasSource).toContain('打开编辑器');
   });
 
-  it('clears a previous decomposition before hiding or directly reopening the PSD editor', () => {
+  it('clears a previous decomposition before hiding the PSD editor', () => {
     const closeStart = canvasSource.indexOf('const closeCanvasToolPanels = useCallback');
     const closeEnd = canvasSource.indexOf('const activateCanvasToolSession = useCallback', closeStart);
     const closeBlock = canvasSource.slice(closeStart, closeEnd);
-    const openStart = canvasSource.indexOf('const handleEditElements = useCallback');
-    const openEnd = canvasSource.indexOf('const handleOpen3D = useCallback', openStart);
-    const openBlock = canvasSource.slice(openStart, openEnd);
 
     expect(closeBlock).toMatch(/setShowPsdEditor\(false\);\s*setPsdEditorInitialResult\(null\);/);
     expect(closeBlock).toContain('setPsdEditorSource(null)');
-    expect(openBlock).toContain('setPsdEditorImageUrl(img.url)');
-    expect(openBlock).toContain('setPsdEditorInitialResult(null)');
-    expect(openBlock).toContain('setPsdEditorSource(effectiveProjectId ? {');
-    expect(openBlock).toContain("setPsdEditorMode('studio')");
+    // 编辑元素入口已删除，图层编辑器只从元素拆解的图层结果打开
+    expect(canvasSource).not.toContain('const handleEditElements = useCallback');
+  });
+
+  it('places the board with its own size and shows branch stages and errors', () => {
+    const boardStart = canvasSource.indexOf('const completeElementBoardResult = useCallback');
+    const boardEnd = canvasSource.indexOf('const handleDisplayDecomposeConfirm = useCallback', boardStart);
+    const boardBlock = canvasSource.slice(boardStart, boardEnd);
+
+    expect(boardBlock).toContain("typeof result?.width === 'number'");
+    expect(boardBlock).toContain('completeProcessingFrame(placeholderId, imageUrl, frameWidth, frameHeight, {');
+    expect(boardBlock).toContain('originalWidth: boardWidth');
+    expect(canvasSource).toContain('{describeElementBranchStage(branch, state)} · {state.progress}%');
+    expect(canvasSource).toContain('data-element-branch-error={branch}');
+    expect(canvasSource).toContain('summarizeElementBranchErrors(finalTask)');
+    expect(canvasSource).toContain('透明背景（关闭为浅灰背景）');
   });
 
   it('consumes a retried board result and opens retried layers from the frozen source', () => {

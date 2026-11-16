@@ -26,6 +26,13 @@ export interface ElementBoardProviderSubmission {
   usedModel?: string;
 }
 
+export interface FinalizedElementBoard {
+  imageUrl: string;
+  width: number;
+  height: number;
+  report: object;
+}
+
 export interface ElementBoardExecutionResult {
   taskId: string;
   remoteTaskId?: string;
@@ -52,6 +59,8 @@ export async function executeElementBoardTask(input: {
   request: ElementBoardExecutionRequest;
   creditCost: number;
   submit: () => Promise<ElementBoardProviderSubmission>;
+  /** 质量闸门与转存；抛错时任务失败并退款，不把未通过检查的结果标记为完成。 */
+  finalize?: (resultUrl: string) => Promise<FinalizedElementBoard>;
 }): Promise<ElementBoardExecutionResult> {
   const requestHash = createElementBoardRequestHash(input.request);
   const claim = await claimElementBoardTask({
@@ -87,10 +96,13 @@ export async function executeElementBoardTask(input: {
   try {
     const submitted = await input.submit();
     if (submitted.directUrl) {
+      const finalized = input.finalize ? await input.finalize(submitted.directUrl) : undefined;
+      const imageUrl = finalized?.imageUrl || submitted.directUrl;
       const result = {
-        imageUrl: submitted.directUrl,
+        imageUrl,
         usedModel: submitted.usedModel || input.request.modelId,
         requestHash,
+        ...(finalized ? { width: finalized.width, height: finalized.height, qualityReport: finalized.report } : {}),
       };
       const completed = await completeCloudTask(claim.taskId, result);
       if (!completed) throw new Error('Element board task reached a terminal state before completion');
@@ -98,7 +110,7 @@ export async function executeElementBoardTask(input: {
         taskId: claim.taskId,
         status: 'completed',
         progress: 100,
-        imageUrl: submitted.directUrl,
+        imageUrl,
         usedModel: submitted.usedModel || input.request.modelId,
       };
     }

@@ -15,7 +15,11 @@ import {
   submitElementBoardProviderTask,
 } from '@/lib/element-decomposition/board-provider-client';
 import { resolveElementBoardProvider } from '@/lib/element-decomposition/board-provider';
+import { finalizeElementBoardResult } from '@/lib/element-decomposition/board-result';
 import { executeElementBoardTask } from '@/lib/element-decomposition/board-task';
+
+/** 供应商异步任务超过该时长仍未完成时判定超时并退款，避免前端无限轮询。 */
+export const ELEMENT_BOARD_DEADLINE_MS = 15 * 60 * 1000;
 
 type BoardStatus = Extract<CloudTaskStatus, 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'timeout'>;
 
@@ -77,6 +81,13 @@ export async function submitElementBoard(input: {
     idempotencyKey: input.idempotencyKey,
     request,
     creditCost,
+    finalize: resultUrl => finalizeElementBoardResult({
+      resultUrl,
+      sourceHash: input.sourceHash,
+      background: input.background,
+      modelId: resolved.modelId,
+      providerId: resolved.provider.id,
+    }),
     submit: () => submitElementBoardProviderTask({
       provider: resolved.provider,
       modelId: resolved.modelId,
@@ -101,23 +112,66 @@ export async function pollElementBoard(input: {
 }): Promise<ElementBoardTaskResponse> {
   const task = await requireBoardTask(input.taskId, input.userId);
   if (terminal(task.status)) return responseFromTask(task);
-  if (!task.providerId || !task.model || !task.remoteTaskId) {
-    throw new Error('Element board task is missing persisted provider execution data');
+  const settleFailure = async (
+    status: 'failed' | 'timeout',
+    reason: string,
+    progress = task.progress,
+  ): Promise<ElementBoardTaskResponse> => {
+    const settled = await terminateCloudTaskAndRefund(task.id, status, reason);
+    if (!settled.transitioned) return responseFromTask(await requireBoardTask(task.id, input.userId));
+    return { taskId: task.id, status, progress, error: reason };
+  };
+  if (Date.now() - task.createdAt > ELEMENT_BOARD_DEADLINE_MS) {
+    return settleFailure('timeout', '拆解板生成超时（超过 15 分钟），已退回积分，请重试或换用其他模型');
   }
-  const resolved = await resolveElementBoardProvider({
-    userId: input.userId,
-    userRole: input.userRole,
-    providerId: task.providerId,
-    modelId: task.model,
-  });
-  const polled = await pollElementBoardProviderTask({
-    provider: resolved.provider,
-    modelId: resolved.modelId,
-    remoteTaskId: task.remoteTaskId,
-  });
+  if (!task.providerId || !task.model || !task.remoteTaskId) {
+    return settleFailure('failed', 'Element board task is missing persisted provider execution data');
+  }
+  let polled: Awaited<ReturnType<typeof pollElementBoardProviderTask>>;
+  let resolved: Awaited<ReturnType<typeof resolveElementBoardProvider>>;
+  try {
+    resolved = await resolveElementBoardProvider({
+      userId: input.userId,
+      userRole: input.userRole,
+      providerId: task.providerId,
+      modelId: task.model,
+    });
+    polled = await pollElementBoardProviderTask({
+      provider: resolved.provider,
+      modelId: resolved.modelId,
+      remoteTaskId: task.remoteTaskId,
+    });
+  } catch (error) {
+    // 授权变更或供应商不支持轮询属于不可恢复错误；其余（网络/5xx）留给下一次轮询，直到超时。
+    const message = error instanceof Error ? error.message : String(error);
+    const permanent = (error as { code?: string })?.code?.startsWith('ELEMENT_BOARD_')
+      || /does not support task polling/.test(message);
+    if (permanent) return settleFailure('failed', message);
+    return { ...responseFromTask(task), status: 'processing', error: undefined };
+  }
 
   if (polled.status === 'completed' && polled.imageUrl) {
-    const result = { ...(task.result || {}), imageUrl: polled.imageUrl, usedModel: resolved.modelId };
+    const request = (task.result?.request || {}) as { sourceHash?: unknown; background?: unknown };
+    let finalized: Awaited<ReturnType<typeof finalizeElementBoardResult>>;
+    try {
+      finalized = await finalizeElementBoardResult({
+        resultUrl: polled.imageUrl,
+        sourceHash: typeof request.sourceHash === 'string' ? request.sourceHash : '',
+        background: request.background === 'transparent' ? 'transparent' : 'light-gray',
+        modelId: resolved.modelId,
+        providerId: resolved.provider.id,
+      });
+    } catch (error) {
+      return settleFailure('failed', error instanceof Error ? error.message : String(error), polled.progress);
+    }
+    const result = {
+      ...(task.result || {}),
+      imageUrl: finalized.imageUrl,
+      width: finalized.width,
+      height: finalized.height,
+      qualityReport: finalized.report,
+      usedModel: resolved.modelId,
+    };
     const committed = await completeCloudTask(task.id, result);
     if (!committed) return responseFromTask(await requireBoardTask(task.id, input.userId));
     return { taskId: task.id, status: 'completed', progress: 100, result };

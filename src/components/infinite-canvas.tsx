@@ -229,12 +229,14 @@ import { AspectRecomposePanel } from '@/components/aspect-recompose-panel';
 import {
   cancelElementDecomposition,
   createResolvedElementDecompositionRequest,
+  describeElementBranchStage,
   getRefundedLocalLayerFallbackMessage,
   pollElementDecomposition,
   recoverElementDecomposition,
   resolveCompletedElementLayersEditorPayload,
   retryElementDecompositionBranch,
   submitElementDecomposition,
+  summarizeElementBranchErrors,
   type ElementDecomposeTaskResponse,
 } from '@/lib/element-decomposition/client';
 import type { ElementDecomposeOutputMode } from '@/lib/element-decomposition/types';
@@ -10691,20 +10693,27 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
 
     const sourceImage = imagesRef.current.find(image => image.id === task.source.sourceImageId);
     if (!sourceImage) return false;
+    // 拆解板按自身像素尺寸和比例放置，显示尺寸沿用原图的最长边。
+    const boardWidth = typeof result?.width === 'number' && result.width > 0 ? result.width : task.source.width;
+    const boardHeight = typeof result?.height === 'number' && result.height > 0 ? result.height : task.source.height;
+    const displaySide = Math.max(sourceImage.width, sourceImage.height);
+    const displayScale = displaySide / Math.max(boardWidth, boardHeight, 1);
+    const frameWidth = Math.max(1, Math.round(boardWidth * displayScale));
+    const frameHeight = Math.max(1, Math.round(boardHeight * displayScale));
     let placeholderId = elementDecomposePlaceholderRef.current;
     if (!placeholderId || !imagesRef.current.some(image => image.id === placeholderId)) {
       placeholderId = createProcessingFrameRightOf(
         sourceImage,
         '元素拆解',
-        sourceImage.width,
-        sourceImage.height,
+        frameWidth,
+        frameHeight,
         '正在完成元素拆解板...',
       );
       elementDecomposePlaceholderRef.current = placeholderId;
     }
-    completeProcessingFrame(placeholderId, imageUrl, sourceImage.width, sourceImage.height, {
-      originalWidth: task.source.width,
-      originalHeight: task.source.height,
+    completeProcessingFrame(placeholderId, imageUrl, frameWidth, frameHeight, {
+      originalWidth: boardWidth,
+      originalHeight: boardHeight,
       prompt: '元素拆解',
       modifyPrompt: '美陈拆解 / 元素物料板',
     }, 'edit');
@@ -10776,11 +10785,10 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         if (controller.signal.aborted || activeCanvasToolProjectIdRef.current !== sourceSnapshot.projectId) return;
         setElementDecomposeTask(task);
         if (placeholderId) {
+          const board = task.branches.board;
           updateProcessingFrame(placeholderId, {
-            progress: task.progress,
-            status: task.branches.layers?.status === 'processing'
-              ? '正在生成并解析可编辑图层...'
-              : '正在生成元素拆解板...',
+            progress: board?.progress ?? task.progress,
+            status: `${board ? describeElementBranchStage('board', board) : '正在生成拆解板'}...`,
           });
         }
       }, controller.signal);
@@ -10796,6 +10804,10 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         removeProcessingFrame(placeholderId);
         elementDecomposePlaceholderRef.current = null;
       }
+      if (elementDecomposeOutputMode === 'both' && !finalTask.branches.board) {
+        toast.warning('当前账号没有可用的图片编辑模型，本次只生成可编辑图层');
+      }
+      const branchErrors = summarizeElementBranchErrors(finalTask);
 
       const layerBranch = finalTask.branches.layers;
       const layerResult = layerBranch?.result as LayerDecompositionResult | undefined;
@@ -10817,7 +10829,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         if (layerFallbackMessage) {
           toast.warning(`${layerFallbackMessage}；其他分支未完成，可在状态面板重试`);
         } else {
-          toast.warning('元素拆解部分完成，可在状态面板重试失败分支');
+          toast.warning(`元素拆解部分完成，可在状态面板重试失败分支${branchErrors ? `（${branchErrors}）` : ''}`);
         }
       } else if (finalTask.overallStatus === 'completed') {
         if (layerFallbackMessage) {
@@ -10826,7 +10838,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           toast.success('元素拆解完成');
         }
       } else {
-        toast.error('元素拆解未完成，请查看分支状态');
+        toast.error(branchErrors ? `元素拆解未完成：${branchErrors}` : '元素拆解未完成，请查看分支状态');
       }
     } catch (error) {
       if (controller.signal.aborted) return;
@@ -18921,7 +18933,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                 </button>
               </div>
               <div className={`text-[11px] leading-relaxed mb-3 ${isMonochrome ? 'text-gray-500' : 'text-gold-muted/80'}`}>
-                识别画面中的视觉元素与设计构件，提取关键材质、色彩与样式，生成可复用的元素拆解板。开启自动去背景后输出透明 PNG。
+                识别画面中的视觉元素与设计构件，提取关键材质、色彩与样式，生成可复用的元素拆解板。开启透明背景后，只有真实透明的结果才会保留，否则任务失败并退回积分。
               </div>
               {elementDecomposeRecoveryFailed && (
                 <div role="alert" className={`mb-3 rounded-lg px-2.5 py-2 text-xs leading-relaxed break-words ${isMonochrome ? 'bg-red-50 text-red-700' : 'bg-red-500/10 text-red-300'}`}>
@@ -18959,7 +18971,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                     : isMonochrome ? 'bg-gray-50 border-gray-200 text-gray-500' : 'bg-white/5 border-white/[0.1] text-gold-muted/60'
                 }`}
               >
-                <span className="text-[11px] font-medium">自动去背景（透明 PNG）</span>
+                <span className="text-[11px] font-medium">透明背景（关闭为浅灰背景）</span>
                 <div className={`w-8 h-4 rounded-full transition-colors relative flex-shrink-0 ${
                   displayDecomposeAutoRemoveBg
                     ? isMonochrome ? 'bg-emerald-500' : 'bg-gold'
@@ -19032,11 +19044,20 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                       >
                         <div className="flex items-center justify-between gap-2 text-[11px]">
                           <span>{branch === 'board' ? '拆解板' : '可编辑图层'}</span>
-                          <span>{state.status} · {state.progress}%</span>
+                          <span data-element-branch-stage>{describeElementBranchStage(branch, state)} · {state.progress}%</span>
                         </div>
                         <div className={`mt-1 h-1 overflow-hidden rounded ${isMonochrome ? 'bg-gray-200' : 'bg-white/10'}`}>
                           <div className="h-full bg-emerald-500" style={{ width: `${Math.max(0, Math.min(100, state.progress))}%` }} />
                         </div>
+                        {state.error && state.status !== 'completed' && (
+                          <div
+                            role="alert"
+                            data-element-branch-error={branch}
+                            className={`mt-1.5 text-[10px] leading-4 break-words ${isMonochrome ? 'text-red-700' : 'text-red-300'}`}
+                          >
+                            {state.error}
+                          </div>
+                        )}
                         {branch === 'layers' && layerResult?.engine && (
                           <div className={`mt-1.5 text-[10px] ${isMonochrome ? 'text-gray-500' : 'text-gold-muted'}`}>
                             实际引擎：{layerResult.engine === 'pear' ? 'Pear 云端分层' : '本地分层'}

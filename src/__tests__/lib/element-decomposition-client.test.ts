@@ -4,12 +4,14 @@ import {
   cancelElementDecomposition,
   createElementDecompositionRequest,
   createResolvedElementDecompositionRequest,
+  describeElementBranchStage,
   getRefundedLocalLayerFallbackMessage,
   pollElementDecomposition,
   recoverElementDecomposition,
   resolveCompletedElementLayersEditorPayload,
   retryElementDecompositionBranch,
   submitElementDecomposition,
+  summarizeElementBranchErrors,
   type ElementDecomposeTaskResponse,
 } from '@/lib/element-decomposition/client';
 
@@ -227,6 +229,64 @@ describe('element decomposition client', () => {
         modelId: undefined,
       },
     });
+  });
+
+  it('keeps the selected board model only when it is an authorized image-edit model', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => response({
+      success: true,
+      models: String(input).includes('type=imageEdit')
+        ? [{ id: 'gpt-image-2', providerId: 'edit-provider', type: 'imageEdit' }]
+        : [
+          { id: 'text-only', providerId: 'image-provider', type: 'image', maxReferenceImages: 0 },
+          { id: 'nano-banana', providerId: 'image-provider', type: 'image', maxReferenceImages: 4 },
+        ],
+    }));
+
+    const preferred = await createResolvedElementDecompositionRequest(source, {
+      outputMode: 'board', aspectRatio: '1:1', boardProviderId: 'image-provider', boardModelId: 'nano-banana',
+    }, { fetcher: fetchMock });
+    expect(preferred.board).toMatchObject({ providerId: 'image-provider', modelId: 'nano-banana' });
+
+    const unauthorized = await createResolvedElementDecompositionRequest(source, {
+      outputMode: 'board', aspectRatio: '1:1', boardProviderId: 'image-provider', boardModelId: 'text-only',
+    }, { fetcher: fetchMock });
+    expect(unauthorized.board).toMatchObject({ providerId: 'edit-provider', modelId: 'gpt-image-2' });
+  });
+
+  it('downgrades both-output to layers when no board model is available', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => response({
+      success: true,
+      models: String(input).includes('type=layer')
+        ? [{ id: 'Image-Layered', providerId: 'pear-layer-provider', type: 'layer' }]
+        : [],
+    }));
+
+    const request = await createResolvedElementDecompositionRequest(source, {
+      outputMode: 'both', aspectRatio: '1:1', engine: 'smart', boardModelId: 'chat-model',
+    }, { fetcher: fetchMock });
+    expect(request.outputMode).toBe('layers');
+    expect(request.board).toMatchObject({ providerId: undefined, modelId: undefined });
+    expect(request.layers).toMatchObject({ providerId: 'pear-layer-provider', modelId: 'Image-Layered' });
+
+    await expect(createResolvedElementDecompositionRequest(source, {
+      outputMode: 'board', aspectRatio: '1:1',
+    }, { fetcher: fetchMock })).rejects.toMatchObject({ code: 'ELEMENT_BOARD_PROVIDER_REQUIRED' });
+  });
+
+  it('labels branch stages and summarizes branch errors in Chinese', () => {
+    expect(describeElementBranchStage('board', { status: 'processing', progress: 40 })).toBe('正在生成拆解板');
+    expect(describeElementBranchStage('board', { status: 'timeout', progress: 40 })).toBe('已超时');
+    expect(describeElementBranchStage('layers', {
+      status: 'processing', progress: 40, result: { phase: 'waiting-for-pear' },
+    })).toBe('Pear 正在生成 PSD');
+    expect(summarizeElementBranchErrors({
+      taskId: 'parent', status: 'failed', overallStatus: 'partial', progress: 50,
+      source: { sourceImageId: 'image-1', canonicalUrl: '', managedUrl: '', sha256: '', width: 1, height: 1, mimeType: 'image/png' },
+      branches: {
+        board: { branch: 'board', taskId: 'b', status: 'failed', progress: 100, error: '未返回真实透明背景' },
+        layers: { branch: 'layers', taskId: 'l', status: 'completed', progress: 100 },
+      },
+    })).toBe('拆解板：未返回真实透明背景');
   });
 
   it('submits exactly once with an idempotency key', async () => {
