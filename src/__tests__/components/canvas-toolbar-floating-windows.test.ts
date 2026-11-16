@@ -183,7 +183,7 @@ describe('canvas toolbar floating windows', () => {
         const state = controller.read();
         expect(state.collapsed).toBe(collapsed);
         expect(state.canvasCollapsed).toBe(collapsed);
-        expect(state.panelStyle.width).toBe(collapsed ? 44 : 'min(480px, calc(100vw - 96px))');
+        expect(state.panelStyle.width).toBe(collapsed ? 44 : 'min(480px, 100vw)');
         expect(state.buttonProps.style).toMatchObject({ width: 44, minHeight: 44 });
         expect(state.buttonProps['aria-label']).toBe(collapsed ? '展开面板' : '收起面板');
         expect(state.buttonProps['aria-expanded']).toBe(!collapsed);
@@ -191,7 +191,7 @@ describe('canvas toolbar floating windows', () => {
         expect(state.contentContainer !== null).toBe(index > 0 || !collapsed);
         const markup = renderToStaticMarkup(createElement('div', { style: state.panelStyle },
           createElement('button', state.buttonProps), state.contentContainer));
-        expect(markup).toContain(collapsed ? 'width:44px' : 'width:min(480px, calc(100vw - 96px))');
+        expect(markup).toContain(collapsed ? 'width:44px' : 'width:min(480px, 100vw)');
         expect(markup).toContain(collapsed ? 'aria-label="展开面板"' : 'aria-label="收起面板"');
         expect(markup).toContain(collapsed ? 'aria-expanded="false"' : 'aria-expanded="true"');
         if (index < scenario.states.length - 1) controller.clickToggle();

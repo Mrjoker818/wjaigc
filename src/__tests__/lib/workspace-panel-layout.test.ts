@@ -14,8 +14,8 @@ describe('workspace panel layout', () => {
     expect(shouldInitiallyCollapseWorkspacePanel(1920)).toBe(false);
   });
 
-  it('keeps the left toolbar clear of an expanded panel on narrow viewports', () => {
-    // The left toolbar spans 16px + 64px; the panel must leave that column uncovered.
-    expect(WORKSPACE_PANEL_EXPANDED_WIDTH).toBe('min(480px, calc(100vw - 96px))');
+  it('opens the expanded panel as a full-width sheet on phones', () => {
+    // Reserving the left toolbar column squeezed the panel to 224px at 320px wide.
+    expect(WORKSPACE_PANEL_EXPANDED_WIDTH).toBe('min(480px, 100vw)');
   });
 });
