@@ -15,7 +15,16 @@ Candidate on the VPS QA service: 88e009cd. main now points to e56358e6, which is
 
 - Each poll rebuilt the processing label from the text before the first `·`. That dropped the model name and added one space per poll, for example `文生视频      · 生成中...`.
 - Fix e56358e6: `buildVideoProgressLabel` keeps the mode and model segments and replaces only the trailing status. Covered by `src/__tests__/lib/video-task-polling.test.ts`. That file and the poll-task contract test pass (16 tests).
-- Not yet deployed to the QA service.
+- Deployed to the QA service in candidate bec5044b-r2 (see below). A paid video was not re-run against it.
+
+## Bottom-toolbar icon centering (bec5044b)
+
+- Defect: the 44px minimum hit area added to bottom-toolbar buttons kept `display: block` with `p-2`, so each 16px icon sat 6–7px left of center and outside the round active fill (select, AI generator, minimap).
+- Fix: `globals.css` makes those buttons `inline-flex` and centers their content. A source-contract case was added to `canvas-toolbar-floating-windows.test.ts`.
+- Tests: `canvas-toolbar-floating-windows.test.ts` and `canvas-minimap-gg-native.test.tsx` pass. `canvas-toolbar-available-width-native.test.tsx` has 4 failures at 320×568 and 375×812 (`expected 224 to be close to 320`). The same 4 fail with the CSS change stashed, so they predate this fix.
+- QA build: the first bec5044b build reused `.next/cache` and served the old stylesheet (`0t7bap0lxzdvs.css`, without the rule). A clean rebuild (candidate-bec5044b-r2, `.next` removed) was OOM-killed on the 4GB host with no swap. It succeeded with a temporary 1.5GB swap file, which was removed afterwards. The served stylesheet `3rry_yq53j5x2.css` contains the rule.
+- Stale-cache impact on earlier candidates: none found. candidate-88e009cd's stylesheet contains `scrollbar-color:#4a4a4a`, the class 1ee077fd added for the drawer, and candidate-cc242fc2 (built before it) does not. So the earlier drawer and floating-panel checks ran against current CSS. d93ed924 changed no styles. Only bec5044b's first build was affected.
+- Browser check at 1440×900 on candidate-bec5044b-r2: all 15 toolbar buttons are 44px wide, compute to `display: flex`, and have 0px icon offset horizontally and vertically.
 
 ## Remote branch cleanup
 
