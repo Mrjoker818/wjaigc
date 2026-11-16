@@ -162,7 +162,7 @@ describe('Agent runtime route rollout modes', () => {
       const source = routeSource(path);
       const exactResolution = source.indexOf('resolveTaskModel(');
       const firstProviderCall = path.includes('simple-chat')
-        ? source.indexOf('const fetchRes = await fetchWithTimeout')
+        ? source.indexOf('let fetchRes = await fetchWithTimeout')
         : source.indexOf('const response = await fetchWithV1Retry');
       expect(exactResolution).toBeGreaterThan(0);
       expect(firstProviderCall).toBeGreaterThan(0);

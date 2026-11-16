@@ -61,6 +61,6 @@ describe('chat agent-v2 and confirmed tool calls', () => {
     expect(panel).toContain('setPendingToolConfirmations(current => [...current, {');
     expect(panel).toContain('setPendingToolConfirmations(current => current.slice(1));');
     expect(panel).toContain("const intentLevel = options?.confirmedToolCall ? 'clear' : intentResult.clarity;");
-    expect(panel).toContain('const newMessages = options?.confirmedToolCall ? messages : [...messages, userMessage];');
+    expect(panel).toContain('const newMessages = options?.confirmedToolCall ? messages : [...historyMessages, userMessage];');
   });
 });
