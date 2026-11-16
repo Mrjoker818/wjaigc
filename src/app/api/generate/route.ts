@@ -23,7 +23,7 @@ import { fetchWithSmartRetry } from '@/lib/smart-retry';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
 import { checkPromptSafety, logSafetyWarning } from '@/lib/prompt-safety';
 import { validateImageUrl } from '@/lib/input-validation';
-import { calculateConfiguredCreditCost, checkCredits, consumeCredits } from '@/lib/credits';
+import { calculateConfiguredCreditCost, checkCredits, consumeCredits, refundCredits } from '@/lib/credits';
 
 import { resolveCompatProfile } from '@/lib/api-compatibility';
 import { registerTask, updateTaskProgress, isTaskCancelled, getTaskInfo } from '@/lib/task-registry';
@@ -161,6 +161,9 @@ export async function POST(request: NextRequest) {
   const agentProviderIdempotencyKey = strictAgentRouting
     ? request.headers.get('idempotency-key')?.trim() || ''
     : '';
+  // 同步路径扣费后、任务记录建立前失败时退款；之后由任务记录（poll-task / 取消）结算
+  let refundSyncCharge: (() => Promise<void>) | undefined;
+  let syncChargeHandedOff = false;
   try {
     let deductedCredits = 0;
     let sessionUser: import('@/lib/user-types').User | null = null;
@@ -1668,6 +1671,17 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: creditResult.message || '积分不足' }, { status: 402 });
       }
       deductedCredits = creditResult.cost;
+      const chargedUserId = sessionUser.id;
+      const chargedCredits = deductedCredits;
+      const refundReference = `generate-sync-${randomUUID()}`;
+      let refundSettled = false;
+      refundSyncCharge = async () => {
+        if (refundSettled || syncChargeHandedOff || chargedCredits <= 0) return;
+        refundSettled = true;
+        const refunded = await refundCredits(chargedUserId, chargedCredits, '图像生成提交失败退款', refundReference)
+          .catch(() => ({ success: false, balance: 0 }));
+        if (!refunded.success) console.error(`[generate] 同步提交失败退款未完成: ${refundReference}`);
+      };
     }
 
     const immediateReferenceImages = accessibleReferenceImages.map(url => localReferenceSnapshots.get(url) || url);
@@ -1883,6 +1897,7 @@ export async function POST(request: NextRequest) {
           // ★ 使用增强的错误翻译
           const translatedError = translateApiError(errMsg);
           if (errMsg.includes('abort') || errMsg.includes('timeout') || isCloudflareTimeout) {
+            await refundSyncCharge?.();
             return NextResponse.json({
               success: false,
               error: isCloudflareTimeout 
@@ -1895,6 +1910,7 @@ export async function POST(request: NextRequest) {
           
           if (i === 0) {
             const parameterRejected = strictAgentRouting && errorStatus === 400;
+            await refundSyncCharge?.();
             return NextResponse.json({
               success: false,
               error: `${usedModelName} 提交失败: ${translatedError}`,
@@ -1912,12 +1928,15 @@ export async function POST(request: NextRequest) {
     }
 
     if (taskIds.length === 0 && directImageUrls.length === 0) {
+      await refundSyncCharge?.();
       return NextResponse.json({
         success: false,
         error: `所有可用模型均提交失败，请稍后重试或联系管理员配置`,
         modelName: usedModelName,
       }, { status: 500 });
     }
+    // 下面开始建立带 creditCost 的任务记录，失败退款改由任务记录结算，避免重复退款
+    syncChargeHandedOff = true;
 
     const generationRouteAudit = buildGenerationRouteAudit({
       requested: requestedRoute,
@@ -2158,6 +2177,7 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (apiError: unknown) {
+    await refundSyncCharge?.();
     if (apiError instanceof CanvasGenerationAdmissionError) {
       return NextResponse.json({ success: false, code: apiError.code, error: apiError.message,
         taskIds: apiError.partialTaskIds }, { status: apiError.status });
