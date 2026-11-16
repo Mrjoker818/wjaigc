@@ -19870,7 +19870,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
               ? { bottom: bottomToolbarDrawerPlacement.bottom }
               : { top: bottomToolbarDrawerPlacement.top }),
           } : undefined}
-          className={`fixed z-[70] max-h-[min(60vh,520px)] overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden rounded-xl border p-2 shadow-2xl backdrop-blur-md transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${isMonochrome ? 'border-gray-200 bg-white/95' : 'border-white/[0.10] bg-[#1a1a1a]/95'} ${
+          className={`fixed z-[70] max-h-[min(60vh,520px)] overflow-y-auto overscroll-contain [scrollbar-width:thin] rounded-xl border p-2 shadow-2xl transition-all duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${isMonochrome ? 'border-gray-200 bg-white [scrollbar-color:#d1d5db_transparent]' : 'border-white/[0.10] bg-[#1a1a1a] [scrollbar-color:#4a4a4a_transparent]'} ${
             bottomToolbarDrawerOpen && bottomToolbarDrawerPlacement ? 'flex flex-col gap-2 opacity-100 pointer-events-auto' : 'hidden opacity-0 pointer-events-none'
           }`}
         >

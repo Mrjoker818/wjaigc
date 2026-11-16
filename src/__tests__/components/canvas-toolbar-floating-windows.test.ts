@@ -53,6 +53,12 @@ describe('canvas toolbar floating windows', () => {
     expect(canvasSource).toContain('getBottomToolbarDrawerPlacement');
     expect(canvasSource).toContain('max-h-[min(60vh,520px)]');
     expect(canvasSource).toContain("'flex flex-col gap-2 opacity-100 pointer-events-auto'");
+    // The drawer floats over canvas media: keep it opaque and show that it scrolls.
+    const drawerClass = canvasSource.slice(canvasSource.indexOf('fixed z-[70] max-h-[min(60vh,520px)]'));
+    const drawerClassLine = drawerClass.slice(0, drawerClass.indexOf('\n'));
+    expect(drawerClassLine).toContain('[scrollbar-width:thin]');
+    expect(drawerClassLine).not.toContain('[scrollbar-width:none]');
+    expect(drawerClassLine).not.toMatch(/bg-(?:white|\[#1a1a1a\])\/\d+/);
   });
 
   it('portals the fixed bottom-toolbar drawer outside the translated toolbar containing block', () => {
