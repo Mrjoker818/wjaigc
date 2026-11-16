@@ -85,8 +85,12 @@ import {
 import { MULTI_PLATFORM_EXPORT_SKILL_ID } from '@/lib/skill-runtime/multi-platform-export-preset';
 import { BRIEF_TO_VIDEO_SKILL_ID } from '@/lib/skill-runtime/brief-to-video-preset';
 import { createMultiPlatformExportRequestFingerprint } from '@/lib/skill-runtime/multi-platform-export-client';
+import { buildChatRequestHistory, findChatTurnUserMessage, isLatestChatTurnMessage, restoreChatMessageImages } from '@/lib/canvas-chat-history';
 
 const CHAT_RENDER_WINDOW = 80;
+// 发给模型的历史上限：消息条数，以及仍携带图片的最近消息条数（更早的只保留文字）
+const CHAT_REQUEST_HISTORY_LIMIT = 40;
+const CHAT_REQUEST_HISTORY_IMAGE_LIMIT = 6;
 
 interface Message {
   id: string;
@@ -2799,9 +2803,18 @@ export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAutho
     toast.info('已取消这次操作');
   }, []);
 
-  const handleSend = useCallback(async (overrideText?: string, options?: { systemPromptOverride?: string; confirmedToolCall?: { name: string; arguments: Record<string, unknown> } }) => {
-    const textToSend = overrideText ?? input;
-    if (textToSend.trim() || isLoading || options?.confirmedToolCall) {
+  const handleSend = useCallback(async (overrideText?: string, options?: { systemPromptOverride?: string; confirmedToolCall?: { name: string; arguments: Record<string, unknown> }; regenerateFromUserMessageId?: string }) => {
+    // 重新生成：复用原用户消息（含图片锚点），并丢弃它之后的回复，而不是追加一条重复的用户消息。
+    const regenerateIndex = options?.regenerateFromUserMessageId
+      ? messages.findIndex(m => m.id === options.regenerateFromUserMessageId && m.role === 'user')
+      : -1;
+    const regeneratedUserMessage = regenerateIndex >= 0 ? messages[regenerateIndex] : undefined;
+    if (options?.regenerateFromUserMessageId && !regeneratedUserMessage) return;
+    const textToSend = regeneratedUserMessage ? regeneratedUserMessage.content : overrideText ?? input;
+    const requestMentions = regeneratedUserMessage ? [] : activeMentions;
+    const requestPendingImages = regeneratedUserMessage ? restoreChatMessageImages(regeneratedUserMessage) : pendingImages;
+    const historyMessages = regeneratedUserMessage ? messages.slice(0, regenerateIndex) : messages;
+    if (textToSend.trim() || isLoading || options?.confirmedToolCall || regeneratedUserMessage) {
       // continue
     } else {
       return;
@@ -2823,7 +2836,7 @@ export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAutho
 
     // P0-2: 增强意图分类 - 使用新版意图分类器
     // 确认请求不带新的用户文本，不能按空输入判定为极度模糊，否则会禁用工具。
-    const intentResult = classifyIntent(trimmedInput, { hasImages: pendingImages.length > 0 || activeMentions.some(m => m.type === 'canvas-image') });
+    const intentResult = classifyIntent(trimmedInput, { hasImages: requestPendingImages.length > 0 || requestMentions.some(m => m.type === 'canvas-image') });
     const intentLevel = options?.confirmedToolCall ? 'clear' : intentResult.clarity;
 
     // 收集图片锚点（来自pendingImages、@图片引用）
@@ -2835,7 +2848,7 @@ export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAutho
       assetVersionId?: string;
       placementId?: string;
     }> = [];
-    activeMentions.filter(m => m.type === 'canvas-image').forEach(m => {
+    requestMentions.filter(m => m.type === 'canvas-image').forEach(m => {
       if (!imageAnchors.find(a => a.imageId === m.id)) {
         imageAnchors.push({
           imageId: m.id,
@@ -2848,7 +2861,7 @@ export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAutho
       }
     });
     // Add pending images as anchors
-    pendingImages.forEach(img => {
+    requestPendingImages.forEach(img => {
       if (!imageAnchors.find(a => a.imageId === img.id)) {
         imageAnchors.push({
           imageId: img.id,
@@ -2861,7 +2874,7 @@ export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAutho
       }
     });
 
-    const userMessage: Message = {
+    const userMessage: Message = regeneratedUserMessage || {
       id: `user-${Date.now()}`,
       role: 'user',
       content: trimmedInput,
@@ -2870,14 +2883,14 @@ export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAutho
     };
 
     // 确认请求只是继续上一次暂停的工具，不新增用户消息，也不清空输入框里正在写的内容。
-    const newMessages = options?.confirmedToolCall ? messages : [...messages, userMessage];
+    const newMessages = options?.confirmedToolCall ? messages : [...historyMessages, userMessage];
     if (!options?.confirmedToolCall) {
       setMessages(newMessages);
-      setInput('');
+      if (!regeneratedUserMessage) setInput('');
     }
     // Capture pending images before clearing
-    const capturedPendingImages = [...pendingImages];
-    setPendingImages([]);
+    const capturedPendingImages = [...requestPendingImages];
+    if (!regeneratedUserMessage) setPendingImages([]);
     setIsLoading(true);
 
     try {
@@ -3015,7 +3028,7 @@ ${clarificationMessage}` : `
 
       // P0-2: 意图类别处理 - 根据意图类别调整AI响应策略
       // 先计算hasCanvasImages（变量需要在使用前定义）
-      const hasCanvasImages = pendingImages.length > 0 || activeMentions.some(m => m.type === 'canvas-image');
+      const hasCanvasImages = requestPendingImages.length > 0 || requestMentions.some(m => m.type === 'canvas-image');
       if (intentResult.category === 'operate' && !hasCanvasImages) {
         // 操作意图但无选中图片
         enhancedSystemPrompt += `
@@ -3038,7 +3051,7 @@ ${clarificationMessage}` : `
       }
 
       // P1-3: 品牌资产注入 - 如果有@品牌引用，注入BrandDNA到systemPrompt
-      const brandMention = activeMentions.find(m => m.type === 'brand');
+      const brandMention = requestMentions.find(m => m.type === 'brand');
       if (brandMention?.data) {
         const dna = brandMention.data;
         enhancedSystemPrompt += `
@@ -3062,7 +3075,7 @@ ${dna.styleDescription || dna['styleDescription'] ? `- 风格描述: ${dna.style
         assetVersionId?: string;
         placementId?: string;
       }> = [];
-      activeMentions.forEach(m => {
+      requestMentions.forEach(m => {
         if (m.type === 'canvas-image' && m.imageUrl && !allRefImageList.find(r => r.id === m.id)) {
           allRefImageList.push({
             id: m.id,
@@ -3157,7 +3170,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
         });
       }
 
-      messages.forEach(msg => {
+      buildChatRequestHistory(historyMessages, CHAT_REQUEST_HISTORY_LIMIT, CHAT_REQUEST_HISTORY_IMAGE_LIMIT).forEach(msg => {
         // Include images from imageAnchors or legacy imageUrl as multimodal content
         const msgImages: string[] = [];
         if (msg.imageUrl) msgImages.push(msg.imageUrl);
@@ -3187,7 +3200,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       });
 
       // P1-1: @引用系统 - 构建包含引用图片的用户消息
-      const mentionedPrompts = activeMentions.filter(m => m.type === 'prompt' && m.data?.content);
+      const mentionedPrompts = requestMentions.filter(m => m.type === 'prompt' && m.data?.content);
       
       // Build context prefix from mentions
       let mentionContext = '';
@@ -3225,7 +3238,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       }
 
       // Clear mentions after sending
-      setActiveMentions([]);
+      if (!regeneratedUserMessage) setActiveMentions([]);
       setShowImagePicker(false);
 
       // ====== 图像生成：改为LLM驱动模式 ======
@@ -3908,7 +3921,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
             }
           })();
         }
-      } else if (!hasToolGeneratedImages && pendingImages.length > 0) {
+      } else if (!hasToolGeneratedImages && capturedPendingImages.length > 0) {
         // ====== 兜底：意图检测（既无工具调用也无 [GENERATE] 标签，但用户意图明确） ======
         const userWantsImage = isImageGenerationIntent(trimmedInput);
         if (userWantsImage) {
@@ -5612,19 +5625,13 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                       {copiedId === message.id ? '已复制' : '复制'}
                     </button>
                     {/* 重试/重新生成按钮 */}
-                    {!isLoading && (
+                    {!isLoading && isLatestChatTurnMessage(messages, message.id) && (
                       <button
                         onClick={() => {
-                          if (message.role === 'user') {
-                            // 用户消息：重新发送该消息
-                            handleSend(message.content);
-                          } else {
-                            // AI消息：找到上一条用户消息并重新发送
-                            const msgIndex = messages.findIndex(m => m.id === message.id);
-                            const prevUserMsg = [...messages].slice(0, msgIndex).reverse().find(m => m.role === 'user');
-                            if (prevUserMsg) {
-                              handleSend(prevUserMsg.content);
-                            }
+                          // 只对最后一轮生效：用原用户消息替换这一轮的回复，不追加重复消息
+                          const sourceUserMessage = findChatTurnUserMessage(messages, message.id);
+                          if (sourceUserMessage) {
+                            handleSend(undefined, { regenerateFromUserMessageId: sourceUserMessage.id });
                           }
                         }}
                         className={`text-xs flex items-center gap-1 transition-colors ${

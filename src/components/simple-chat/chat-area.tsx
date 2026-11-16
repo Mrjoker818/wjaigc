@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, useId } from "react";
-import { Check, Menu, Paperclip, ArrowUp, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search, Eye, EyeOff, Image, Download, Send, Shield, ThumbsUp, ThumbsDown, Pencil, PenSquare, Brain, PenLine, ScanSearch, Clock } from "lucide-react";
+import { Check, Menu, Paperclip, ArrowUp, Square, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search, Eye, EyeOff, Image, Download, Send, Shield, ThumbsUp, ThumbsDown, Pencil, PenSquare, Brain, PenLine, ScanSearch, Clock } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { MarkdownRenderer } from "./markdown-renderer";
 import { ImageLightbox } from "./image-lightbox";
@@ -228,6 +228,17 @@ export function hasSimpleChatAssistantOperationPayload(message: SimpleChatMessag
   return Boolean(message.content || message.images?.length);
 }
 
+export const SIMPLE_CHAT_STOPPED_TEXT = '已停止生成。';
+
+export function buildSimpleChatRegenerateIdempotencyKey(taskId: string, assistantMessageId: string): string {
+  const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  return `simple-chat-regenerate:${taskId}:${assistantMessageId}:${suffix}`.slice(0, 256);
+}
+
+export function isLatestSimpleChatAssistantMessage(messages: readonly SimpleChatMessage[], messageId: string): boolean {
+  return messages.findLast(message => message.role === 'assistant')?.id === messageId;
+}
+
 export function shouldRenderSimpleChatWorkspaceActions(
   message: SimpleChatMessage,
   isStreaming: boolean,
@@ -443,6 +454,7 @@ export default function ChatArea({
   const requestScopeEpochRef = useRef({ scope: draftScope, epoch: 0 });
   const ordinaryRequestEpochRef = useRef<number | null>(null);
   const activeSendRef = useRef<{ epoch: number } | null>(null);
+  const streamAbortRef = useRef<AbortController | null>(null);
   if (requestScopeEpochRef.current.scope !== draftScope) {
     requestScopeEpochRef.current = { scope: draftScope, epoch: requestScopeEpochRef.current.epoch + 1 };
   }
@@ -1684,6 +1696,9 @@ export default function ChatArea({
     };
     if (!requestScopeIsCurrent()) return;
 
+    const abortController = new AbortController();
+    streamAbortRef.current = abortController;
+    const requestIsActive = () => requestScopeIsCurrent() && !abortController.signal.aborted;
     ordinaryRequestEpochRef.current = requestEpoch;
     setIsStreaming(true);
     updateRequestMessages(previous => previous.map(message => (
@@ -1732,6 +1747,19 @@ export default function ChatArea({
     let fullContent = '';
     let streamError: string | null = null;
 
+    const markStopped = () => {
+      updateRequestMessages(previous => previous.map(message => (
+        message.id === context.assistantMessageId
+          ? {
+            ...message,
+            content: message.content || SIMPLE_CHAT_STOPPED_TEXT,
+            status: 'completed',
+            error: undefined,
+            retryContext: context,
+          }
+          : message
+      )));
+    };
     const failMessage = (errorMessage: string, content?: string) => {
       updateRequestMessages(previous => previous.map(message => (
         message.id === context.assistantMessageId
@@ -1749,6 +1777,7 @@ export default function ChatArea({
     try {
       const response = await fetch('/api/simple-chat/chat', {
         method: 'POST',
+        signal: abortController.signal,
         headers: {
           'Content-Type': 'application/json',
           'Idempotency-Key': context.idempotencyKey,
@@ -1780,9 +1809,9 @@ export default function ChatArea({
       if (!response.body) throw new Error('No response body');
 
       const streamResult = await consumeSimpleChatJsonStream(response.body, {
-        isActive: requestScopeIsCurrent,
+        isActive: requestIsActive,
         onEvent(value) {
-          if (streamError || !requestScopeIsCurrent()) return;
+          if (streamError || !requestIsActive()) return;
           const parsed = readSimpleChatStreamPayload(value);
           if (!parsed) return;
           if (parsed.type === 'generation_controls') {
@@ -1908,7 +1937,11 @@ export default function ChatArea({
           }
         },
       });
-      if (streamResult === 'cancelled' || !requestScopeIsCurrent()) return;
+      if (!requestScopeIsCurrent()) return;
+      if (streamResult === 'cancelled') {
+        if (abortController.signal.aborted) markStopped();
+        return;
+      }
       if (!streamError) {
         updateRequestMessages(previous => previous.map(message => (
           message.id === context.assistantMessageId
@@ -1918,6 +1951,10 @@ export default function ChatArea({
       }
     } catch (error) {
       if (!requestScopeIsCurrent()) return;
+      if (abortController.signal.aborted) {
+        markStopped();
+        return;
+      }
       const errorMessage = error instanceof SimpleChatSseProtocolError
         ? error.message
         : error instanceof Error && /^HTTP \d+$/u.test(error.message)
@@ -1925,6 +1962,7 @@ export default function ChatArea({
           : '抱歉，请求失败，请重试。';
       failMessage(errorMessage);
     } finally {
+      if (streamAbortRef.current === abortController) streamAbortRef.current = null;
       if (!requestScopeIsCurrent()) return;
       if (ordinaryRequestEpochRef.current === requestEpoch) ordinaryRequestEpochRef.current = null;
       setIsStreaming(false);
@@ -2127,6 +2165,22 @@ export default function ChatArea({
     );
     if (!requestScopeIsCurrent() || context.kind !== 'deep-research' || !context.query) return;
 
+    const abortController = new AbortController();
+    streamAbortRef.current = abortController;
+    const requestIsActive = () => requestScopeIsCurrent() && !abortController.signal.aborted;
+    const markStopped = () => {
+      setMessages(previous => previous.map(message => (
+        message.id === context.assistantMessageId
+          ? {
+            ...message,
+            content: message.content || SIMPLE_CHAT_STOPPED_TEXT,
+            status: 'completed',
+            error: undefined,
+            retryContext: context,
+          }
+          : message
+      )));
+    };
     setIsStreaming(true);
     setMessages(previous => previous.map(message => message.id === context.assistantMessageId
       ? {
@@ -2143,6 +2197,7 @@ export default function ChatArea({
     try {
       const response = await fetch('/api/simple-chat/deep-research', {
         method: 'POST',
+        signal: abortController.signal,
         headers: {
           'Content-Type': 'application/json',
           'Idempotency-Key': context.idempotencyKey,
@@ -2162,9 +2217,9 @@ export default function ChatArea({
       let streamError: string | null = null;
 
       const streamResult = await consumeSimpleChatJsonStream(response.body, {
-        isActive: requestScopeIsCurrent,
+        isActive: requestIsActive,
         onEvent(value) {
-          if (!requestScopeIsCurrent() || streamError) return;
+          if (!requestIsActive() || streamError) return;
           const parsed = readSimpleChatStreamPayload(value);
           if (!parsed) return;
           if (parsed.type === 'phase') {
@@ -2224,7 +2279,11 @@ export default function ChatArea({
           }
         },
       });
-      if (streamResult === 'cancelled' || !requestScopeIsCurrent()) return;
+      if (!requestScopeIsCurrent()) return;
+      if (streamResult === 'cancelled') {
+        if (abortController.signal.aborted) markStopped();
+        return;
+      }
       if (!streamError) {
         setMessages(previous => previous.map(message => (
           message.id === context.assistantMessageId
@@ -2234,6 +2293,10 @@ export default function ChatArea({
       }
     } catch (error) {
       if (!requestScopeIsCurrent()) return;
+      if (abortController.signal.aborted) {
+        markStopped();
+        return;
+      }
       const errorMessage = error instanceof SimpleChatSseProtocolError
         ? error.message
         : 'Deep Research 失败，请重试。';
@@ -2249,6 +2312,7 @@ export default function ChatArea({
           : message
       )));
     } finally {
+      if (streamAbortRef.current === abortController) streamAbortRef.current = null;
       if (requestScopeIsCurrent()) setIsStreaming(false);
     }
   }, []);
@@ -2662,7 +2726,36 @@ export default function ChatArea({
     }
     await executeChatRequest(context, userMessage);
   }, [executeChatRequest, executeDeepResearchRequest, isStreaming]);
-  const regenerateLast = () => { if (messages.length < 2) return; const lastUser = [...messages].reverse().find(m => m.role === 'user'); if (lastUser) { setMessages(prev => prev.slice(0, -2)); setInput(lastUser.content); setTimeout(() => { const btn = document.getElementById('send-btn') as HTMLButtonElement; btn?.click(); }, 50); } };
+  const stopStreaming = useCallback(() => {
+    streamAbortRef.current?.abort();
+  }, []);
+  const regenerateMessage = useCallback(async (messageId: string) => {
+    if (isStreaming) return;
+    if (!isLatestSimpleChatAssistantMessage(messagesRef.current, messageId)) return;
+    const assistantMessage = messagesRef.current.find(message => message.id === messageId);
+    const context = readSimpleChatRetryContext(assistantMessage?.retryContext, {
+      assistantMessageId: messageId,
+      projectId: projectIdRef.current,
+      taskId: taskIdRef.current,
+    });
+    const userMessage = context
+      ? messagesRef.current.find(message => message.id === context.userMessageId)
+      : undefined;
+    if (!context || !userMessage || userMessage.role !== 'user') {
+      setSearchStatus('这条回复缺少原始请求信息，无法重新生成。请重新发送问题。');
+      return;
+    }
+    // 重新生成是一次新请求：换新的幂等键，避免命中上一次回复的去重结果
+    const regenerated: SimpleChatRetryContextV1 = {
+      ...context,
+      idempotencyKey: buildSimpleChatRegenerateIdempotencyKey(context.taskId, messageId),
+    };
+    if (regenerated.kind === 'deep-research') {
+      await executeDeepResearchRequest(regenerated);
+      return;
+    }
+    await executeChatRequest(regenerated, userMessage);
+  }, [executeChatRequest, executeDeepResearchRequest, isStreaming]);
   const continueConversation = (msg: SimpleChatMessage) => { setInput('继续'); };
   const makeShorter = (msg: SimpleChatMessage) => {
     if (msg?.role === 'assistant') setInput(`请将上面的回答缩短，保留核心要点。`);
@@ -3141,7 +3234,7 @@ export default function ChatArea({
                       ? "flex max-w-full flex-nowrap gap-0.5 mt-1 px-1 overflow-x-auto overscroll-x-contain"
                       : "flex flex-wrap gap-0.5 mt-1 px-1 opacity-100 sm:opacity-0 sm:hover:opacity-100 sm:focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity flex-wrap"}>
                     <button onClick={() => copyMessage(msg.content)} className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-muted text-muted-foreground" title="复制"><Copy className="w-3 h-3" /></button>
-                    <button onClick={regenerateLast} className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-muted text-muted-foreground" title="重新生成"><RefreshCw className="w-3 h-3" /></button>
+                    <button onClick={() => { void regenerateMessage(msg.id); }} disabled={!isLatestSimpleChatAssistantMessage(messages, msg.id)} className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-muted text-muted-foreground disabled:opacity-40 disabled:hover:bg-transparent" title="重新生成"><RefreshCw className="w-3 h-3" /></button>
                     <button onClick={() => makeShorter(msg)} className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-muted text-muted-foreground" title="更短"><Minimize2 className="w-3 h-3" /></button>
                     <button onClick={() => makeLonger(msg)} className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-muted text-muted-foreground" title="更长"><Maximize2 className="w-3 h-3" /></button>
                     <button onClick={() => continueConversation(msg)} className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-muted text-muted-foreground" title="继续"><MoreHorizontal className="w-3 h-3" /></button>
@@ -3397,11 +3490,19 @@ export default function ChatArea({
                 title="多模型对比 (Ctrl+M)">
                 <GitBranch className="w-4 h-4" />
               </button>
-              <button onClick={handleSend} disabled={!input.trim() && uploadedImages.length === 0}
-                className="ml-auto p-1.5 rounded-lg bg-primary text-primary-foreground disabled:opacity-40 transition-all hover:bg-primary/90"
-                aria-label="发送消息">
-                {isStreaming ? <div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" /> : <ArrowUp className="w-4 h-4" />}
-              </button>
+              {isStreaming ? (
+                <button type="button" onClick={stopStreaming}
+                  className="ml-auto p-1.5 rounded-lg bg-primary text-primary-foreground transition-all hover:bg-primary/90"
+                  aria-label="停止生成" title="停止生成">
+                  <Square className="w-4 h-4 fill-current" />
+                </button>
+              ) : (
+                <button onClick={handleSend} disabled={!input.trim() && uploadedImages.length === 0}
+                  className="ml-auto p-1.5 rounded-lg bg-primary text-primary-foreground disabled:opacity-40 transition-all hover:bg-primary/90"
+                  aria-label="发送消息">
+                  <ArrowUp className="w-4 h-4" />
+                </button>
+              )}
             </div>
             <input id="chat-file-upload" type="file" accept="image/*" multiple className="hidden"
               onChange={e => {
