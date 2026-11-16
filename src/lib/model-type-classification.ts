@@ -76,6 +76,13 @@ export function inferModelType(
     || id.includes('image2video')
     || id.includes('i2v')
     || id.includes('pyramid-flow')
+    // APIMart video ids without a generic video keyword
+    || id.includes('happyhorse')
+    || id.includes('pixverse')
+    || id.includes('skyreels')
+    || id === 'apimart-zoe'
+    || id.startsWith('gemini-omni')
+    || (id.startsWith('minimax-h3') && !id.includes('image'))
   ) {
     return 'video';
   }

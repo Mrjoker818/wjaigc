@@ -156,6 +156,8 @@ function secondsRange(start: number, end: number): number[] {
 const SEEDANCE_APIMART_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'];
 const APIMART_OMNI_MODEL = 'gemini-omni-flash-preview';
 const APIMART_OMNI_NOMINAL_DURATION = 10;
+/** APIMart Omni models without a duration field: the model picks the length, billed at the nominal duration. */
+const APIMART_NOMINAL_DURATION_MODELS = new Set([APIMART_OMNI_MODEL, 'gemini-omni-1.1-flash']);
 
 export const VIDEO_MODEL_REGISTRY: Record<string, VideoModelInfo> = {
   // === 国内模型 ===
@@ -567,11 +569,11 @@ function videoCapabilityMismatch(modelId: string, field: string, received: unkno
   });
 }
 
-/** Resolve provider-specific seconds before admission. APIMart Omni has a nominal duration only. */
+/** Resolve provider-specific seconds before admission. APIMart Omni flash-preview / 1.1 have a nominal duration only. */
 export function resolveVideoSubmitDuration(profile: VideoCompatProfile, model: string, requested: unknown): number | undefined {
   const allowed = profile === 'pearapi-video'
     ? getPearVideoModelSpec(model)?.durations ?? PEAR_VIDEO_DEFAULT_DURATIONS
-    : profile === 'apimart-video' && model.toLowerCase() === APIMART_OMNI_MODEL
+    : profile === 'apimart-video' && APIMART_NOMINAL_DURATION_MODELS.has(model.toLowerCase())
       ? [APIMART_OMNI_NOMINAL_DURATION]
       : undefined;
   if (!allowed) return undefined;
@@ -1251,8 +1253,11 @@ interface ApiMartVideoSpec {
   ratioField: 'size' | 'aspect_ratio' | null;
   /** Whether the ratio is still sent when an input image decides the frame. */
   ratioWithImage: boolean;
-  /** roles: image_with_roles; flat: image_urls; frame-fields: first/last_frame_image; first-frame: first_frame_image only. */
-  images: 'roles' | 'flat' | 'frame-fields' | 'first-frame' | 'none';
+  /**
+   * roles: image_with_roles; flat: image_urls; frame-fields: first/last_frame_image; first-frame: first_frame_image only;
+   * first-or-references: first_frame_image for image-to-video, otherwise image_urls (the two are exclusive).
+   */
+  images: 'roles' | 'flat' | 'frame-fields' | 'first-frame' | 'first-or-references' | 'none';
   audioField: 'generate_audio' | 'audio' | null;
   resolutionField: 'resolution' | 'mode';
   sendsDuration: boolean;
@@ -1264,12 +1269,19 @@ interface ApiMartVideoSpec {
   ratioWithFrames: boolean;
   /** Only muse-video-ext documents `n`. */
   sendsN: boolean;
+  /** Send references inside image_with_roles even without frames, because bare image_urls would mean frames. */
+  referencesAsRoles: boolean;
+  /** Frames and reference images cannot be combined in one request. */
+  framesExcludeReferences: boolean;
+  /** Documented resolution case: lower (720p / 4k) or upper (720P / 2K). */
+  resolutionCase: 'lower' | 'upper';
 }
 
 const LEGACY_APIMART_VIDEO_SPEC: ApiMartVideoSpec = {
   ratioField: 'aspect_ratio', ratioWithImage: true, images: 'flat', audioField: 'generate_audio',
   resolutionField: 'resolution', sendsDuration: true, sendsNegativePrompt: true, sendsSeed: true,
   referenceRole: 'reference_image', ratioWithFrames: true, sendsN: false,
+  referencesAsRoles: false, framesExcludeReferences: false, resolutionCase: 'lower',
 };
 
 function getApiMartVideoSpec(modelId: string): ApiMartVideoSpec {
@@ -1283,26 +1295,97 @@ function getApiMartVideoSpec(modelId: string): ApiMartVideoSpec {
       ratioWithFrames: !/seedance-2[.-]5/.test(id),
     };
   }
+  // Seedance 1.0 Pro / 1.5 Pro: aspect_ratio, image_with_roles first/last frame, seed; only 1.5 has audio
+  if (/^seedance-1-[05]-pro/.test(id)) {
+    return { ...base, images: 'roles', sendsSeed: true, audioField: id.startsWith('seedance-1-5') ? 'audio' : null };
+  }
+  // APIMart Zoe: image_with_roles; "首尾帧不能与参考素材混用"
+  if (id === 'apimart-zoe') {
+    return { ...base, images: 'roles', framesExcludeReferences: true, audioField: 'audio', sendsSeed: true };
+  }
   // Kling v3 Omni: mode std/pro/4k, audio, negative_prompt; frames in image_with_roles, reference role "reference"
   if (id.startsWith('kling-v3-omni')) {
     return { ...base, images: 'roles', referenceRole: 'reference', audioField: 'audio', resolutionField: 'mode', sendsNegativePrompt: true };
   }
   // Kling 3.0 Turbo: first_frame_image; aspect_ratio is ignored for image-to-video
   if (id.startsWith('kling-3.0-turbo')) return { ...base, images: 'first-frame', ratioWithImage: false };
+  // Kling V4 / V4 Flash: resolution field, always with sound (audio:false is rejected), no negative_prompt.
+  // Bare image_urls mean first/last frame, so references carry the reference_image role; the frame decides the ratio.
+  if (id.startsWith('kling-v4')) {
+    return { ...base, images: 'roles', referencesAsRoles: true, framesExcludeReferences: true, ratioWithFrames: false };
+  }
+  // Kling v3 / v2.6 / Video O1: mode std/pro(/4k); image_urls 1 = first frame, 2 = first + last; O1 has no audio
+  if (id.startsWith('kling-v3') || id.startsWith('kling-v2-6') || id.startsWith('kling-video-o1')) {
+    const o1 = id.startsWith('kling-video-o1');
+    return { ...base, resolutionField: 'mode', audioField: o1 ? null : 'audio', sendsNegativePrompt: !o1 };
+  }
+  // MiniMax H3 / H3 Max: upper-case resolution (2K / 768P), image_with_roles; bare image_urls are references
+  if (id.startsWith('minimax-h3')) return { ...base, images: 'roles', resolutionCase: 'upper' };
   // MiniMax Hailuo 2.3 / 2.3-Fast: first_frame_image only, no ratio parameter
   if (id.includes('hailuo-2.3')) return { ...base, ratioField: null, images: 'first-frame' };
   // MiniMax Hailuo 02: no ratio parameter, first_frame_image / last_frame_image
   if (id.includes('hailuo')) return { ...base, ratioField: null, images: 'frame-fields' };
+  // Flux 3 Video: image_urls are keyframes (the first starts the video, the last ends it); audio
+  if (id === 'flux-3-video') return { ...base, audioField: 'audio' };
+  // SkyReels V4: first_frame_image (I2V); aspect_ratio is ignored for image-to-video
+  if (id.startsWith('skyreels-v4')) return { ...base, images: 'first-frame', ratioWithImage: false };
+  // HappyHorse: first_frame_image (I2V, ratio from the image) or image_urls (R2V, size applies); upper-case resolution, seed
+  if (id.startsWith('happyhorse')) {
+    return {
+      ...base, ratioField: 'size', ratioWithFrames: false, images: 'first-or-references', resolutionCase: 'upper', sendsSeed: true,
+    };
+  }
   // Wan2.5: size only for text-to-video, one first-frame image, negative_prompt and seed
   if (id.startsWith('wan2.5')) return { ...base, ratioField: 'size', ratioWithImage: false, sendsNegativePrompt: true, sendsSeed: true };
+  // Wan2.6: aspect_ratio only for text-to-video, one image; wan2.6-i2v* have no ratio and wan2.6-i2v has no audio field
+  if (id.startsWith('wan2.6')) {
+    const i2v = id.startsWith('wan2.6-i2v');
+    return {
+      ...base, ratioField: i2v ? null : 'aspect_ratio', ratioWithImage: false, audioField: id === 'wan2.6-i2v' ? null : 'audio',
+      sendsNegativePrompt: true, sendsSeed: true,
+    };
+  }
+  // Wan2.7: size only for text-to-video, image_urls 1 = first frame, 2 = first + last, upper-case resolution
+  if (id.startsWith('wan2.7')) {
+    return { ...base, ratioField: 'size', ratioWithImage: false, resolutionCase: 'upper', sendsNegativePrompt: true, sendsSeed: true };
+  }
+  // Wan3.0: bare image_urls mean first/last frame, so references carry the reference_image role; "两族素材互斥"
+  if (id.startsWith('wan3.0-video')) {
+    return {
+      ...base, ratioField: 'size', images: 'roles', referencesAsRoles: true, framesExcludeReferences: true,
+      audioField: 'audio', resolutionCase: 'upper', sendsSeed: true,
+    };
+  }
+  // Vidu Q4: first_frame role for image-to-video, reference_image otherwise (not mixed); aspect_ratio only for references
+  if (id.startsWith('viduq4')) {
+    return {
+      ...base, images: 'roles', referencesAsRoles: true, framesExcludeReferences: true, ratioWithFrames: false,
+      audioField: 'audio', sendsSeed: true,
+    };
+  }
+  // Vidu Q3 Pro / Turbo: image_urls 1 = first frame, 2 = first + last; aspect_ratio only for text-to-video
+  if (id.startsWith('viduq3-pro') || id.startsWith('viduq3-turbo')) {
+    return { ...base, ratioWithImage: false, audioField: 'audio', sendsSeed: true };
+  }
+  // Vidu Q3 / Q3 Mix: 1-7 reference images in image_urls
+  if (id.startsWith('viduq3')) return { ...base, sendsSeed: true };
+  // PixVerse V6 Max: aspect_ratio; V6: size and negative_prompt. Both take one image, which decides the ratio.
+  if (id.startsWith('pixverse-v6')) {
+    const max = id.startsWith('pixverse-v6-max');
+    return {
+      ...base, ratioField: max ? 'aspect_ratio' : 'size', ratioWithImage: false, audioField: 'audio', sendsSeed: true,
+      sendsNegativePrompt: !max,
+    };
+  }
   // Veo 3.1: lite does not accept image_urls
   if (id.startsWith('veo3')) return { ...base, images: id.startsWith('veo3.1-lite') ? 'none' : 'flat' };
   // Grok official (grok-imagine-video*): aspect_ratio; grok-imagine-1.5-video-*: size
   if (id.startsWith('grok-imagine-video')) return { ...base, ratioField: 'aspect_ratio' };
   if (id.startsWith('grok-imagine') && id.includes('video')) return { ...base, ratioField: 'size' };
-  // Gemini Omni: only flash-preview and 1.1-flash have no duration parameter
+  // Gemini Omni: only flash-preview and 1.1-flash have no duration parameter; 1.1 / 1.2 take frames in image_with_roles
   if (id.startsWith('gemini-omni')) {
-    return { ...base, sendsDuration: !(id.startsWith('gemini-omni-flash-preview') || id.startsWith('gemini-omni-1.1-flash')) };
+    const preview = id.startsWith('gemini-omni-flash-preview');
+    return { ...base, images: preview ? 'flat' : 'roles', sendsDuration: !(preview || id.startsWith('gemini-omni-1.1-flash')) };
   }
   if (id.startsWith('muse-video-ext')) return { ...base, sendsN: true };
   return LEGACY_APIMART_VIDEO_SPEC;
@@ -1327,9 +1410,16 @@ function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
   const referenceImages = params.referenceImages || [];
   const lowerModel = params.model.toLowerCase();
 
-  // The gateway rejects uppercase tier suffixes ("1K" → invalid_resolution), so normalize the trailing K.
+  // Most models reject uppercase tier suffixes ("1K" → invalid_resolution), so normalize the trailing K;
+  // MiniMax H3, HappyHorse, Wan2.7 and Wan3.0 document upper-case values (2K / 768P / 1080P).
   const advResolutionRaw = getApiString(params.advancedParams, 'resolution');
-  const advResolution = advResolutionRaw ? advResolutionRaw.replace(/K$/, 'k') : undefined;
+  const advResolution = advResolutionRaw
+    ? (spec.resolutionCase === 'upper' ? advResolutionRaw.toUpperCase() : advResolutionRaw.replace(/K$/, 'k'))
+    : undefined;
+  // Kling models with `mode` validate std/pro/4k and ignore `resolution`.
+  const klingMode = spec.resolutionField === 'mode' && advResolution
+    ? ({ '720p': 'std', '1080p': 'pro', '1k': 'std', '2k': 'pro', '4k': '4k' } as Record<string, string>)[advResolution.toLowerCase()]
+    : undefined;
 
   if (lowerModel.includes('hailuo-2.3') && advResolution === '1080p' && (params.duration ?? 6) !== 6) {
     throw new Error('MiniMax Hailuo 2.3 的 1080p 仅支持 6 秒，请改为 6 秒或选择 768p');
@@ -1342,6 +1432,22 @@ function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
     && !['16:9', '9:16', '1:1'].includes(params.aspectRatio) && !params.imageUrl) {
     throw new Error('Wan2.5 的 480p 仅支持 16:9、9:16、1:1，请换比例或选择 720p/1080p');
   }
+  if (lowerModel.startsWith('kling-v2-6')) {
+    if (params.lastFrameImageUrl && params.generateAudio) {
+      throw new Error('可灵 v2.6 的尾帧与声音不能同时使用，请关闭声音或去掉尾帧');
+    }
+    if ((params.lastFrameImageUrl || params.generateAudio) && klingMode !== 'pro') {
+      throw new Error('可灵 v2.6 的首尾帧和声音仅支持 1080p，请改选 1080p');
+    }
+  }
+  if (lowerModel.startsWith('gemini-omni-1.2') && params.lastFrameImageUrl && (params.duration ?? 10) > 10) {
+    throw new Error('Gemini Omni 1.2 的首尾帧仅支持 3–10 秒，请缩短时长');
+  }
+  const hasFrames = Boolean(params.imageUrl || params.lastFrameImageUrl);
+  if (hasFrames && referenceImages.length > 0
+    && (spec.framesExcludeReferences || spec.images === 'first-or-references')) {
+    throw new Error(`${params.model} 的首尾帧不能与参考图同时使用，请去掉参考图或首尾帧`);
+  }
 
   const imageFields: Record<string, unknown> = {};
   let hasFrameRoles = false;
@@ -1350,7 +1456,7 @@ function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
     if (params.imageUrl) roles.push({ url: params.imageUrl, role: 'first_frame' });
     if (params.lastFrameImageUrl) roles.push({ url: params.lastFrameImageUrl, role: 'last_frame' });
     hasFrameRoles = roles.length > 0;
-    if (roles.length > 0) {
+    if (roles.length > 0 || (spec.referencesAsRoles && referenceImages.length > 0)) {
       roles.push(...referenceImages.map(url => ({ url, role: spec.referenceRole })));
       imageFields.image_with_roles = roles;
     } else if (referenceImages.length > 0) {
@@ -1366,13 +1472,13 @@ function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
   } else if (spec.images === 'first-frame') {
     const firstFrame = params.imageUrl || referenceImages[0];
     if (firstFrame) imageFields.first_frame_image = firstFrame;
+  } else if (spec.images === 'first-or-references') {
+    hasFrameRoles = Boolean(params.imageUrl);
+    if (params.imageUrl) imageFields.first_frame_image = params.imageUrl;
+    else if (referenceImages.length > 0) imageFields.image_urls = [...referenceImages];
   }
   const hasInputImage = Object.keys(imageFields).length > 0;
 
-  // kling-v3-omni validates `mode` (std/pro/4k) and ignores `resolution`.
-  const omniMode = spec.resolutionField === 'mode' && advResolution
-    ? ({ '720p': 'std', '1080p': 'pro', '1k': 'std', '2k': 'pro', '4k': '4k' } as Record<string, string>)[advResolution.toLowerCase()]
-    : undefined;
   const sendRatio = spec.ratioField && params.aspectRatio
     && (spec.ratioWithImage || !hasInputImage)
     && (spec.ratioWithFrames || !hasFrameRoles);
@@ -1385,7 +1491,7 @@ function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
     ...(sendRatio && spec.ratioField ? { [spec.ratioField]: params.aspectRatio } : {}),
     ...(spec.sendsDuration && params.duration ? { duration: params.duration } : {}),
     ...(spec.resolutionField === 'mode'
-      ? (omniMode ? { mode: omniMode } : {})
+      ? (klingMode ? { mode: klingMode } : {})
       : advResolution ? { resolution: advResolution } : {}),
     ...(spec.audioField && params.generateAudio !== undefined ? { [spec.audioField]: params.generateAudio } : {}),
     ...(spec.sendsNegativePrompt && params.negativePrompt ? { negative_prompt: params.negativePrompt } : {}),

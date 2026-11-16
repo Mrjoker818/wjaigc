@@ -25,19 +25,24 @@ export interface VendorPrice {
   tierAliases?: Readonly<Record<string, string>>;
   /** 开启声音（generate_audio / audio）时的按清晰度价格。 */
   audioTiers?: Readonly<Record<string, number>>;
+  /** 输入图片按张计费（input_image_paid_price），前 free 张免费。 */
+  inputImage?: Readonly<{ price: number; free?: number }>;
 }
 
-type Extra = Pick<VendorPrice, 'tiers' | 'tierAliases' | 'audioTiers'>;
+type Extra = Pick<VendorPrice, 'tiers' | 'tierAliases' | 'audioTiers' | 'inputImage'>;
 const usd = (unit: VendorPrice['unit'], price: number, extra: Extra = {}): VendorPrice => ({ currency: 'USD', unit, price, ...extra });
 const cny = (unit: VendorPrice['unit'], price: number, extra: Extra = {}): VendorPrice => ({ currency: 'CNY', unit, price, ...extra });
 
 export const VENDOR_PRICES: Readonly<Record<string, VendorPrice>> = {
   'apib::minimax-hailuo-02': usd('second', 0.04, { tiers: { '512P': 0.0104, '768P': 0.04, '1080P': 0.08 } }),
+  'apib::apimart-zoe': usd('second', 0.1836, { tiers: { '480P': 0.0816, '720P': 0.1836, '1080P': 0.4556, '2K': 1.122, '4K': 1.2308 } }),
   'apib::flux-2-flex': usd('call', 0.04, { tiers: { '1MP': 0.04, '2MP': 0.08, '3MP': 0.12, '4MP': 0.16 }, tierAliases: { '1K': '1MP', '2K': '4MP', '4K': '4MP' } }),
   'apib::flux-2-max': usd('call', 0.08, { tiers: { '1MP': 0.056, '2MP': 0.08, '3MP': 0.104, '4MP': 0.128 }, tierAliases: { '1K': '1MP', '2K': '4MP', '4K': '4MP' } }),
   'apib::flux-2-pro': usd('call', 0.024, { tiers: { '1MP': 0.024, '2MP': 0.036, '3MP': 0.048, '4MP': 0.06 }, tierAliases: { '1K': '1MP', '2K': '4MP', '4K': '4MP' } }),
   'apib::flux-3-image': usd('call', 0.0384, { tiers: { '1K': 0.0384, '2K': 0.08, '4K': 0.4856, '1.5K': 0.056, '768SQ': 0.0328 } }),
   'apib::flux-3-image-klein': usd('call', 0.0072, { tiers: { '1K': 0.0072, '2K': 0.0112, '4K': 0.0288, '1.5K': 0.0088, '768SQ': 0.0064 } }),
+  // 开关声音同价；hd = 720p，fhd = 1080p
+  'apib::flux-3-video': usd('second', 0.136, { tiers: { HD: 0.136, FHD: 0.232 }, tierAliases: { '720P': 'HD', '1080P': 'FHD' } }),
   'apib::flux-kontext-max': usd('call', 0.064),
   'apib::flux-kontext-pro': usd('call', 0.032),
   'apib::gemini-2.5-flash-image-preview': usd('call', 0.008),
@@ -50,6 +55,8 @@ export const VENDOR_PRICES: Readonly<Record<string, VendorPrice>> = {
   'apib::gemini-3.1-flash-lite-image-ext': usd('call', 0.008),
   'apib::gemini-nano-banana-2.1': usd('call', 0.02688, { tiers: { '1K': 0.02688, '2K': 0.04032, '4K': 0.09072 } }),
   'apib::gemini-nano-banana-2.1-ext': usd('call', 0.02, { tiers: { '1K': 0.012, '2K': 0.014, '4K': 0.018 } }),
+  'apib::gemini-omni-1.1-flash': usd('second', 0.088, { tiers: { '360P': 0.0296, '720P': 0.088, '1080P': 0.132, '4K': 0.264 } }),
+  'apib::gemini-omni-1.2-flash': usd('second', 0.06, { tiers: { '360P': 0.02, '720P': 0.06, '1080P': 0.0904, '4K': 0.1808 } }),
   'apib::gemini-omni-flash-preview': usd('second', 0.088, { tiers: { '720P': 0.088 } }),
   'apib::gpt-image-1-official': usd('call', 0.16, { tiers: { '1K': 0.16 } }),
   'apib::gpt-image-1.5-official': usd('call', 0.128, { tiers: { '1K': 0.128 } }),
@@ -69,9 +76,23 @@ export const VENDOR_PRICES: Readonly<Record<string, VendorPrice>> = {
   'apib::grok-imagine-image': usd('call', 0.016, { tiers: { '1K': 0.016, '2K': 0.016 } }),
   'apib::grok-imagine-image-2.0': usd('call', 0.048, { tiers: { '1K': 0.048, '2K': 0.064 } }),
   'apib::grok-imagine-image-quality': usd('call', 0.04, { tiers: { '1K': 0.04, '2K': 0.056 } }),
+  'apib::grok-imagine-video': usd('second', 0.04, { tiers: { '480P': 0.04, '720P': 0.056 }, inputImage: { price: 0.0016 } }),
+  'apib::grok-imagine-video-1.5': usd('second', 0.064, {
+    tiers: { '480P': 0.064, '720P': 0.112, '1080P': 0.2 }, inputImage: { price: 0.008 },
+  }),
+  'apib::happyhorse-1.0': usd('second', 0.23, { tiers: { '720P': 0.13, '1080P': 0.23 } }),
+  'apib::happyhorse-1.1': usd('second', 0.172, { tiers: { '720P': 0.13, '1080P': 0.172 } }),
   'apib::hy-image-v3.5-preview': usd('call', 0.0192, { tiers: { '1K': 0.0192, '2K': 0.0192, '4K': 0.0256 } }),
   'apib::imagen-4.0-apimart': usd('call', 0.04),
   'apib::kling-3.0-turbo': usd('second', 0.1144, { tiers: { '720P': 0.1144, '1080P': 0.1432 } }),
+  // std（720p）无声；pro（1080p）$0.0625，pro-sound $0.125
+  'apib::kling-v2-6': usd('second', 0.0368, { tiers: { '720P': 0.0368, '1080P': 0.0625 }, audioTiers: { '1080P': 0.125 } }),
+  // std $0.0672、sound $0.1008、pro $0.0896、pro-sound $0.1344、4k / 4k-sound $0.42856
+  'apib::kling-v3': usd('second', 0.0672, {
+    tiers: { '720P': 0.0672, '1080P': 0.0896, '4K': 0.42856 },
+    audioTiers: { '720P': 0.1008, '1080P': 0.1344, '4K': 0.42856 },
+    tierAliases: { '1K': '720P', '2K': '1080P' },
+  }),
   // billing_tier_paid_prices：std=默认 $0.0672、sound $0.0896、pro $0.0896、pro-sound $0.112、4k / 4k-sound $0.42856；
   // 请求按 720p→std、1080p→pro、4k→4k 发送 mode
   'apib::kling-v3-omni': usd('second', 0.0672, {
@@ -79,10 +100,22 @@ export const VENDOR_PRICES: Readonly<Record<string, VendorPrice>> = {
     audioTiers: { '720P': 0.0896, '1080P': 0.112, '4K': 0.42856 },
     tierAliases: { '1K': '720P', '2K': '1080P' },
   }),
+  // V4 始终有声，价格已含声音
+  'apib::kling-v4': usd('second', 0.14, { tiers: { '720P': 0.14, '1080P': 0.21 } }),
+  'apib::kling-v4-flash': usd('second', 0.0857144, { tiers: { '720P': 0.0857144 } }),
+  'apib::kling-video-o1': usd('second', 0.0672, { tiers: { '720P': 0.0672, '1080P': 0.0896 }, tierAliases: { '1K': '720P', '2K': '1080P' } }),
   'apib::mai-image-2.6': usd('call', 0.032, { tiers: { '1K': 0.032, '2K': 0.072 } }),
   'apib::mai-image-2.6-flash': usd('call', 0.016, { tiers: { '1K': 0.016, '2K': 0.036 } }),
+  // 输入图片前 5 张免费，之后 $0.02288/张
+  'apib::minimax-h3': usd('second', 0.09144, { tiers: { '768P': 0.05712, '2K': 0.09144 }, inputImage: { price: 0.02288, free: 5 } }),
   'apib::minimax-h3-image': usd('call', 0.08, { tiers: { '1K': 0.024, '2K': 0.024, '4K': 0.08 } }),
   'apib::minimax-h3-image-highspeed': usd('call', 0.152, { tiers: { '1K': 0.04, '2K': 0.04, '4K': 0.152 } }),
+  // 输入图片前 2 张免费，之后 $0.05712/张
+  'apib::minimax-h3-max': usd('second', 0.05712, {
+    tiers: { '480P': 0.03768, '768P': 0.05712, '1080P': 0.128 }, inputImage: { price: 0.05712, free: 2 },
+  }),
+  'apib::minimax-hailuo-2.3': usd('second', 0.0488, { tiers: { '768P': 0.0488, '1080P': 0.072 } }),
+  'apib::minimax-hailuo-2.3-fast': usd('second', 0.0248, { tiers: { '768P': 0.0248, '1080P': 0.0424 } }),
   'apib::muse-image-ext': usd('call', 0.0048),
   'apib::nano-banana': usd('call', 0.0312),
   'apib::nano-banana-2': usd('call', 0.0536, { tiers: { '0.5K': 0.0536, '1K': 0.0536, '2K': 0.0808, '4K': 0.1208 } }),
@@ -92,10 +125,23 @@ export const VENDOR_PRICES: Readonly<Record<string, VendorPrice>> = {
   'apib::nano-banana-ext': usd('call', 0.008),
   'apib::nano-banana-pro': usd('call', 0.1072, { tiers: { '4K': 0.192 } }),
   'apib::nano-banana-pro-ext': usd('call', 0.02, { tiers: { '4K': 0.03 } }),
+  'apib::pixverse-v6': usd('second', 0.024, {
+    tiers: { '360P': 0.016, '540P': 0.024, '720P': 0.032, '1080P': 0.064 },
+    audioTiers: { '360P': 0.024, '540P': 0.032, '720P': 0.04, '1080P': 0.08 },
+  }),
+  'apib::pixverse-v6-max': usd('second', 0.032, {
+    tiers: { '360P': 0.0213336, '540P': 0.032, '720P': 0.0391112, '1080P': 0.0782224 },
+    audioTiers: { '360P': 0.032, '540P': 0.0391112, '720P': 0.0533336, '1080P': 0.0995552 },
+  }),
   'apib::qwen-image-2.0': usd('call', 0.02),
   'apib::qwen-image-2.0-pro': usd('call', 0.05),
   'apib::qwen-image-3.0': usd('call', 0.0205712, { tiers: { '1K': 0.0205712, '2K': 0.0205712 } }),
   'apib::qwen-image-3.0-pro': usd('call', 0.0285712, { tiers: { '1K': 0.0285712, '2K': 0.0571432 } }),
+  // seedance-1-0-pro 默认 1080p
+  'apib::seedance-1-0-pro-fast': usd('second', 0.0416, { tiers: { '480P': 0.0088, '720P': 0.02, '1080P': 0.0416 } }),
+  'apib::seedance-1-0-pro-quality': usd('second', 0.104, { tiers: { '480P': 0.0204, '720P': 0.044, '1080P': 0.104 } }),
+  'apib::seedance-1-5-pro': usd('second', 0.044, { tiers: { '480P': 0.0204, '720P': 0.044, '1080P': 0.108 } }),
+  'apib::seedance-2-5-flash': usd('second', 0.14192, { tiers: { '480P': 0.06312, '720P': 0.14192 } }),
   'apib::seedance-2.0': usd('second', 0.142, { tiers: { '480P': 0.066, '720P': 0.142, '1080P': 0.3544, '4K': 0.722 } }),
   'apib::seedance-2.0-face': usd('second', 0.2136, { tiers: { '480P': 0.0992, '720P': 0.2136, '1080P': 0.5 } }),
   'apib::seedance-2.0-fast': usd('second', 0.0856, { tiers: { '480P': 0.03984, '720P': 0.0856 } }),
@@ -110,12 +156,31 @@ export const VENDOR_PRICES: Readonly<Record<string, VendorPrice>> = {
   'apib::seedream-5-0-lite': usd('call', 0.028),
   'apib::seedream-5-0-pro': usd('call', 0.036, { tiers: { '1K': 0.02925, '2K': 0.0585, '1.5K': 0.02925 } }),
   'apib::seedream-5-5': usd('call', 0.02275, { tiers: { '1K': 0.013, '2K': 0.02275, '1.5K': 0.013 } }),
+  // 文档默认 1080p
+  'apib::skyreels-v4-fast': usd('second', 0.22, { tiers: { '480P': 0.064, '720P': 0.088, '1080P': 0.22 } }),
+  'apib::skyreels-v4-std': usd('second', 0.28, { tiers: { '480P': 0.088, '720P': 0.112, '1080P': 0.28 } }),
   'apib::veo3.1-fast': usd('call', 0.14, { tiers: { '4K': 0.64 } }),
   'apib::veo3.1-lite': usd('call', 0.07, { tiers: { '4K': 0.57 } }),
   'apib::veo3.1-quality': usd('call', 1, { tiers: { '4K': 1.5 } }),
+  'apib::viduq3': usd('second', 0.08, { tiers: { '540P': 0.04, '720P': 0.08, '1080P': 0.1 } }),
+  'apib::viduq3-mix': usd('second', 0.1, { tiers: { '720P': 0.1, '1080P': 0.12 } }),
+  'apib::viduq3-pro': usd('second', 0.12, { tiers: { '540P': 0.056, '720P': 0.12, '1080P': 0.128 } }),
+  'apib::viduq3-turbo': usd('second', 0.048, { tiers: { '540P': 0.032, '720P': 0.048, '1080P': 0.056 } }),
+  // 开关声音同价
+  'apib::viduq4-preview': usd('second', 0.0912, { tiers: { '540P': 0.0448, '720P': 0.0912, '1080P': 0.1024, '2K': 0.1624, '4K': 0.3328 } }),
   'apib::wan2.5-preview': usd('second', 0.0664, { tiers: { '480P': 0.0336, '720P': 0.0664, '1080P': 0.1096 } }),
+  'apib::wan2.6': usd('second', 0.05, { tiers: { '720P': 0.05, '1080P': 0.084 } }),
+  'apib::wan2.6-i2v': usd('second', 0.0664, { tiers: { '720P': 0.0664, '1080P': 0.1096 } }),
+  // 文档默认有声；请求总会发送 audio
+  'apib::wan2.6-i2v-flash': usd('second', 0.0168, {
+    tiers: { '720P': 0.0168, '1080P': 0.028 }, audioTiers: { '720P': 0.0336, '1080P': 0.0552 },
+  }),
+  // wan2.7 / wan3.0 默认 1080P
+  'apib::wan2.7': usd('second', 0.1096, { tiers: { '720P': 0.0664, '1080P': 0.1096 } }),
   'apib::wan2.7-image': usd('call', 0.0216),
   'apib::wan2.7-image-pro': usd('call', 0.0544),
+  'apib::wan3.0-video': usd('second', 0.131504, { tiers: { '480P': 0.03288, '720P': 0.065752, '1080P': 0.131504 } }),
+  'apib::wan3.0-video-prime': usd('second', 0.2057144, { tiers: { '480P': 0.0514288, '720P': 0.1028568, '1080P': 0.2057144 } }),
   'apib::z-image-turbo': usd('call', 0.01),
   'pear::boogu-image-0.1': cny('call', 0.1),
   'pear::doubao-seedance-2-0-260128': cny('second', 0.32),
@@ -174,15 +239,19 @@ function tierPrice(entry: VendorPrice, resolution: string | undefined, audio: bo
 }
 
 /**
- * 一次调用的积分：按秒计价时乘以时长（默认 5 秒），总价 × 1.01 后向上取整，最低 1 积分。
+ * 一次调用的积分：按秒计价时乘以时长（默认 5 秒），加上按张计费的输入图片，总价 × 1.01 后向上取整，最低 1 积分。
  */
 export function vendorCreditCost(
   entry: VendorPrice,
-  options: { resolution?: string; durationSeconds?: number; audio?: boolean } = {},
+  options: { resolution?: string; durationSeconds?: number; audio?: boolean; inputImages?: number } = {},
 ): number {
   const unitPrice = tierPrice(entry, options.resolution, options.audio === true);
   const units = entry.unit === 'second' ? Math.max(1, options.durationSeconds || 5) : 1;
-  const cnyPrice = unitPrice * units * (entry.currency === 'USD' ? APIMART_USD_TO_CNY : 1);
+  const billedImages = entry.inputImage
+    ? Math.max(0, Math.floor(options.inputImages || 0) - (entry.inputImage.free ?? 0))
+    : 0;
+  const vendorPrice = unitPrice * units + billedImages * (entry.inputImage?.price ?? 0);
+  const cnyPrice = vendorPrice * (entry.currency === 'USD' ? APIMART_USD_TO_CNY : 1);
   // toFixed 去掉浮点误差，避免 1.01 × 100 这类整数结果被多进一位
   const credits = Number((cnyPrice * VENDOR_PRICE_MARKUP * CNY_TO_CREDITS).toFixed(6));
   return Math.max(1, Math.ceil(credits));

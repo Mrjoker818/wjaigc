@@ -225,7 +225,7 @@ export async function calculateConfiguredCreditCost(
   operation: CreditOperation | string,
   model?: string,
   options?: { quality?: string; resolution?: string; durationSeconds?: number; providerId?: string;
-    pricingConfig?: Readonly<CreditPricingConfig>; audio?: boolean },
+    pricingConfig?: Readonly<CreditPricingConfig>; audio?: boolean; inputImages?: number },
 ): Promise<number> {
   if (!model) return calculateCreditCost(operation, model, options);
   const config = options?.pricingConfig || await loadCreditPricingConfig();
@@ -238,6 +238,7 @@ export async function calculateConfiguredCreditCost(
     if (vendorPrice) {
       return vendorCreditCost(vendorPrice, {
         resolution: options?.resolution, durationSeconds: options?.durationSeconds, audio: options?.audio,
+        inputImages: options?.inputImages,
       });
     }
   }

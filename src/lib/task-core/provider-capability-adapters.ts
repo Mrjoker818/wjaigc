@@ -2,6 +2,7 @@ import type { ApiProvider, ModelInfo } from '@/lib/universal-api-types';
 import type { CapabilityLayer, SupportedOperation } from './model-capability-contract';
 import { PEAR_IMAGE_MAX_OUTPUTS, getPearImageModelSpec } from '@/lib/pear-image-models';
 import { PEAR_VIDEO_GENERATE_OPERATIONS, getPearVideoModelSpec } from '@/lib/pear-video-models';
+import { getApiMartVideoModelSpec } from '@/lib/apimart-video-models';
 
 export type ProviderCapabilityFamily = 'pear' | 'apib' | '4s' | 'ai-link' | '302';
 
@@ -485,6 +486,22 @@ function pearCapabilities(modelId: string): CapabilityLayer | undefined {
   };
 }
 
+/** APIMart video models listed in apimart-video-models.ts (docs.apib.ai/cn, reviewed 2026-11-16). */
+function apimartVideoCapabilities(modelId: string): CapabilityLayer | undefined {
+  const video = getApiMartVideoModelSpec(modelId);
+  if (!video) return undefined;
+  return {
+    allowedRatios: [...video.ratios],
+    allowedSizes: [...video.resolutions],
+    qualityOptions: [],
+    allowedDurationsSeconds: [...video.durations],
+    maxDurationSeconds: Math.max(...video.durations),
+    supportsReferenceImages: video.maxImages > 0,
+    maxReferenceImages: video.maxImages,
+    supportedOperations: [...video.operations],
+  };
+}
+
 const PRESET_FAMILIES: Readonly<Record<string, ProviderCapabilityFamily>> = {
   pear: 'pear',
   pearapi: 'pear',
@@ -558,5 +575,6 @@ export function resolveProviderCapabilityAdapter(
   if (!family) return undefined;
   const layer = EXACT_MODEL_CAPABILITIES[`${family}::${model.id}`];
   if (layer) return cloneLayer(layer);
-  return family === 'pear' ? pearCapabilities(model.id) : undefined;
+  if (family === 'pear') return pearCapabilities(model.id);
+  return family === 'apib' ? apimartVideoCapabilities(model.id) : undefined;
 }

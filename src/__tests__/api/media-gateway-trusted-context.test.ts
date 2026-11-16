@@ -330,7 +330,7 @@ describe('provider video admission', () => {
     const response = await generateVideo(request(input));
     expect(response.status).toBe(200);
     expect(calculateConfiguredCreditCost).toHaveBeenCalledWith('video_generate', 'model' in input ? input.model : model, {
-      providerId: 'video-provider', durationSeconds: duration,
+      providerId: 'video-provider', durationSeconds: duration, resolution: undefined, audio: false, inputImages: urls.length,
     });
     expect(mocks.recordVideoTaskSubmitted).toHaveBeenCalledWith(expect.objectContaining({
       submissionPayload: expect.objectContaining({ duration }),
@@ -356,7 +356,7 @@ describe('provider video admission', () => {
     const accepted = await generateVideo(request({ model: omni }));
     expect(accepted.status).toBe(200);
     expect(calculateConfiguredCreditCost).toHaveBeenCalledWith('video_generate', omni, {
-      providerId: 'video-provider', durationSeconds: 10,
+      providerId: 'video-provider', durationSeconds: 10, resolution: undefined, audio: false, inputImages: 0,
     });
     await (vi.mocked(after).mock.calls[0]?.[0] as () => Promise<void>)();
     expect(fetcher).toHaveBeenCalledExactlyOnceWith('https://api.apib.ai/v1/videos/generations', expect.objectContaining({ method: 'POST' }));

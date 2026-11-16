@@ -69,6 +69,31 @@ describe('vendor pricing', () => {
     await expect(calculateConfiguredCreditCost('video_generate', 'minimax-h3', { providerId: 'pear', resolution: '2K', durationSeconds: 10 })).resolves.toBe(293);
   });
 
+  it('prices the APIMart video models added on 2026-11-16', () => {
+    const cost = (id: string, options: Parameters<typeof vendorCreditCost>[1] = {}) => {
+      const entry = getVendorPrice('apib', id);
+      expect(entry, id).toBeDefined();
+      return vendorCreditCost(entry!, options);
+    };
+    // kling-v3 pro-sound $0.1344/s × 7.3 × 5 s × 1.01
+    expect(cost('kling-v3', { resolution: '1080p', audio: true })).toBe(496);
+    // flux-3-video: 720p = hd $0.136/s, 1080p = fhd $0.232/s
+    expect(cost('flux-3-video', { resolution: '720p' })).toBe(502);
+    expect(cost('flux-3-video', { resolution: '1080p' })).toBe(856);
+    // wan2.6-i2v-flash 720P $0.0168/s, 720P-audio $0.0336/s
+    expect(cost('wan2.6-i2v-flash', { resolution: '720p' })).toBe(62);
+    expect(cost('wan2.6-i2v-flash', { resolution: '720p', audio: true })).toBe(124);
+  });
+
+  it('adds per-image input fees after the free images', () => {
+    const cost = (id: string, options: Parameters<typeof vendorCreditCost>[1]) => vendorCreditCost(getVendorPrice('apib', id)!, options);
+    // MiniMax-H3 2K: $0.09144/s × 5 s，前 5 张免费，之后 $0.02288/张
+    expect(cost('MiniMax-H3', { resolution: '2K', inputImages: 5 })).toBe(338);
+    expect(cost('MiniMax-H3', { resolution: '2K', inputImages: 7 })).toBe(371);
+    // grok-imagine-video-1.5 720P: $0.112/s × 5 s + 2 × $0.008
+    expect(cost('grok-imagine-video-1.5', { resolution: '720p', inputImages: 2 })).toBe(425);
+  });
+
   it('keeps provider-scoped admin prices first and falls back for other providers', async () => {
     dbGetSystemSetting.mockResolvedValue(JSON.stringify({ modelCredits: { 'pear::gpt-image-2': 9, 'gpt-image-2': 50 } }));
     await expect(calculateConfiguredCreditCost('image_generate', 'gpt-image-2', { providerId: 'pear' })).resolves.toBe(9);

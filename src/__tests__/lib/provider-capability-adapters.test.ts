@@ -282,4 +282,22 @@ describe('provider capability adapters', () => {
       supportedOperations: ['image-to-video'], allowedDurationsSeconds: [6, 10],
     });
   });
+
+  it('derives APIMart video capabilities from the documented model specs', () => {
+    const apib = provider('apib', 'https://api.apimart.ai/v1', 'video');
+    const caps = (id: string) => resolveProviderCapabilityAdapter(apib, model('apib', id, 'video'));
+    expect(caps('kling-v4')).toMatchObject({
+      allowedSizes: ['720p', '1080p'], maxDurationSeconds: 30, maxReferenceImages: 10,
+      supportedOperations: ['text-to-video', 'image-to-video', 'first-last-frame', 'multi-reference'],
+    });
+    expect(caps('MiniMax-Hailuo-2.3-Fast')?.supportedOperations).toEqual(['image-to-video']);
+    expect(caps('viduq4-preview')).toMatchObject({ supportedOperations: ['image-to-video', 'multi-reference'], maxReferenceImages: 15 });
+    expect(caps('gemini-omni-1.1-flash')?.allowedDurationsSeconds).toEqual([10]);
+    expect(caps('MiniMax-H3')?.allowedSizes).toEqual(['768p', '2K']);
+    // the AI Link entry for the same id keeps its own layer
+    const aiLink = provider('ai', 'https://api.ai-link.shop', 'video');
+    const aiLinkLayer = resolveProviderCapabilityAdapter(aiLink, model('ai', 'kling-v3', 'video'));
+    expect(aiLinkLayer?.protocol).toBe('ai-link');
+    expect(aiLinkLayer).not.toHaveProperty('allowedSizes');
+  });
 });

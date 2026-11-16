@@ -582,6 +582,7 @@ export async function POST(request: NextRequest) {
           durationSeconds: parsedDuration,
           resolution: typeof resolution === 'string' && resolution.trim() ? resolution : undefined,
           audio: generateAudio === true,
+          inputImages: referenceImageCount,
           providerId: provider.id,
       },
     );
