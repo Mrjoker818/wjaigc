@@ -25,7 +25,7 @@ import {
   updateTaskProgress,
 } from '@/lib/task-registry';
 import { logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
-import { translateApiError } from '@/lib/api-error-translate';
+import { toUserFacingError, translateApiError } from '@/lib/api-error-translate';
 import { resolveCompatProfile, adjustRequestForProfile, parseResponseForProfile, buildPollUrl, isEditsEndpointRejected, stripEditsOnlyFields, extractImageUrl, apimartSupportsNativeMask } from '@/lib/api-compatibility';
 import {
   AnnotationIdempotencyConflictError,
@@ -2263,7 +2263,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
         error: error.message,
       }, { status: error.statusCode });
     }
-    return NextResponse.json({ success: false, error: `任务创建失败: ${message}` }, { status: 500 });
+    return NextResponse.json({ success: false, error: `任务创建失败: ${toUserFacingError(message)}` }, { status: 500 });
   }
 } // end POST
 

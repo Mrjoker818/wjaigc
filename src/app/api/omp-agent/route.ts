@@ -13,7 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { findProviderForFeature, findProviderForModel, findProviderById } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { parseAgentGenerateResult, parseEcommerceGenerateResult, type AgentTemplateCategory, type EcommerceConfig } from '@/lib/omp-agent-parsers';
-import { translateApiError } from '@/lib/api-error-translate';
+import { toUserFacingError, translateApiError } from '@/lib/api-error-translate';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
@@ -419,7 +419,7 @@ export async function POST(request: NextRequest) {
       } catch (refundErr) { console.error('[omp-agent] Refund failed:', refundErr); }
     }
     return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : 'Agent 生成失败' },
+      { success: false, error: toUserFacingError(error instanceof Error ? error.message : '') },
       { status: 500 }
     );
   }

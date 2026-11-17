@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { toUserFacingError } from '@/lib/api-error-translate';
 import { randomUUID } from 'node:crypto';
 import { findProviderForFeature, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
@@ -962,6 +963,6 @@ export async function POST(req: NextRequest) {
         await refundCredits(sessionUser.id, deductedCredits, `矢量化失败退款: ${(error instanceof Error ? error.message : 'Unknown').substring(0, 100)}`, refundReference);
       } catch (refundErr) { console.error('[vectorize] Refund failed:', refundErr); }
     }
-    return NextResponse.json({ success: false, error: error instanceof Error ? error.message : 'vectorize failed' }, { status: 500 });
+    return NextResponse.json({ success: false, error: toUserFacingError(error instanceof Error ? error.message : '') }, { status: 500 });
   }
 }

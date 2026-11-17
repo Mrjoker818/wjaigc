@@ -99,3 +99,15 @@ export function translateApiError(rawMsg: string): string {
   }
   return cleanedMsg;
 }
+
+/**
+ * 最终返回给用户的错误文案。translateApiError 的兜底会保留供应商原文，供内部重试判断使用；
+ * 这里在响应边界把未识别的原文（英文、JSON 等）换成通用提示，原文应已写入服务端日志。
+ */
+export function toUserFacingError(rawMsg: string): string {
+  const translated = translateApiError(rawMsg);
+  if (translated.startsWith('API 返回错误:') || !/[\u4e00-\u9fff]/.test(translated)) {
+    return '服务暂时出错，请稍后重试或切换模型';
+  }
+  return translated;
+}

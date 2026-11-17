@@ -16,7 +16,7 @@ import { logOperation, logError, startTimer, OP_ACTIONS, sanitizeRequestData } f
 import { getInternalRequestHeaders, requireApiAuthOrReject } from '@/lib/api-auth';
 import { authorizeGenerationProject, GenerationProjectAccessError } from '@/lib/collaboration/generation-project-access';
 import { admitCanvasGenerationBatch, prepareCanvasGenerationPublication, parseCanvasGenerationPublication, normalizeCanvasGenerationReferences, canvasGenerationRequestDigest, readTerminalCanvasGenerationBatch, CanvasGenerationAdmissionError } from '@/lib/collaboration/canvas-generation-batch-admission';
-import { translateApiError } from '@/lib/api-error-translate';
+import { toUserFacingError, translateApiError } from '@/lib/api-error-translate';
 import { classifyApiError, type ClassifiedError, isCloudflareTimeoutError, translateApiError as translateApiErrorV2 } from '@/lib/api-error-translator';
 import { repairSize } from '@/lib/size-auto-repair';
 import { fetchWithSmartRetry } from '@/lib/smart-retry';
@@ -2225,7 +2225,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: false,
-      error: `生成失败: ${errMsg}`,
+      error: `生成失败: ${toUserFacingError(errMsg)}`,
     }, { status: 500 });
   }
 }

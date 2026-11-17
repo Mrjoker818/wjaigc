@@ -7,6 +7,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
+import { toUserFacingError } from '@/lib/api-error-translate';
 import { authorizeGenerationProject, GenerationProjectAccessError } from '@/lib/collaboration/generation-project-access';
 import { prepareVideoCanvasPublication, completeDocumentVideoTask, VideoCompletionUnknownError } from '@/lib/video-document-admission';
 import { CanvasOrdinaryAdmissionError } from '@/lib/collaboration/canvas-ordinary-generation-admission';
@@ -925,9 +926,11 @@ export async function POST(request: NextRequest) {
             const errorJson = JSON.parse(errorText);
             errorMessage = errorJson.message || errorJson.error?.message || errorJson.msg || errorMessage;
           } catch { /* ignore */ }
-          const settled = await terminateCloudTaskAndRefund(taskId, 'failed', errorMessage);
+          // 供应商原文已写入上面的服务端日志；任务记录只保存可展示给用户的说明
+          const userMessage = toUserFacingError(errorMessage);
+          const settled = await terminateCloudTaskAndRefund(taskId, 'failed', userMessage);
           if (!settled.transitioned) return;
-          updateTaskProgress(taskId, { status: 'failed', error: errorMessage, progress: 0 });
+          updateTaskProgress(taskId, { status: 'failed', error: userMessage, progress: 0 });
           return;
         }
 

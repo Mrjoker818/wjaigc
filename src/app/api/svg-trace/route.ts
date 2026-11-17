@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { toUserFacingError } from '@/lib/api-error-translate';
 import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import { execFile } from 'child_process';
@@ -2849,7 +2850,7 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: toUserFacingError(error instanceof Error ? error.message : ''),
     }, { status: 500 });
   }
 }

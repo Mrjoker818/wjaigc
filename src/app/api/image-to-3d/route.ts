@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { toUserFacingError } from '@/lib/api-error-translate';
 import { createHash, randomUUID } from 'node:crypto';
 import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getRequestUser } from '@/lib/api-auth';
@@ -1453,7 +1454,7 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({
       success: false,
-      error: error instanceof Error ? error.message : 'Image to 3D failed',
+      error: toUserFacingError(error instanceof Error ? error.message : ''),
     }, { status: 500 });
   }
 }

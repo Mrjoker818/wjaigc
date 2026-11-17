@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { toUserFacingError } from '@/lib/api-error-translate';
 import { randomUUID } from 'node:crypto';
 import { appendUserJsonl } from '@/lib/server-user-storage';
 import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/lib/server-api-config';
@@ -784,7 +785,7 @@ export async function POST(request: NextRequest) {
       } catch (refundErr) { console.error('[chat] Refund failed:', refundErr); }
     }
     return NextResponse.json(
-      { error: `服务器错误: ${error instanceof Error ? error.message : '未知错误'}` },
+      { error: `服务器错误: ${toUserFacingError(error instanceof Error ? error.message : '')}` },
       { status: 500 }
     );
   }

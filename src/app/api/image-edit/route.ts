@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { toUserFacingError } from '@/lib/api-error-translate';
 import { createHash, randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { captureImageEditRequestIdentity, digestImageEditInputIdentity, digestRequested302UpscaleIdentity } from '@/lib/task-core/image-edit-request-identity';
@@ -3991,6 +3992,6 @@ export async function POST(request: NextRequest) {
         await refundCredits(sessionUser.id, deductedCredits, `图像编辑异常退款: ${errMsg.substring(0, 100)}`, refundReference);
       } catch (refundErr) { console.error('[image-edit] Refund failed:', refundErr); }
     }
-    return NextResponse.json({ success: false, error: errMsg }, { status: 500 });
+    return NextResponse.json({ success: false, error: toUserFacingError(errMsg) }, { status: 500 });
   }
 }

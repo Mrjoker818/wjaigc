@@ -37,7 +37,7 @@ import {
   updateTaskProgress,
   type TaskType,
 } from '@/lib/task-registry';
-import { translateApiError } from '@/lib/api-error-translate';
+import { toUserFacingError, translateApiError } from '@/lib/api-error-translate';
 import { classifyApiError, isCloudflareTimeoutError } from '@/lib/api-error-translator';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getRefineResult } from '@/app/api/refine-engine/result-store';
@@ -2555,7 +2555,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
               console.warn(`[poll-task] Video poll 4xx (${pollResp.status}): ${errorBody.slice(0, 200)}`);
               const errorMsg = errorBody.includes('not found') || errorBody.includes('Not Found')
                 ? '视频任务不存在或已过期'
-                : `API 返回错误: ${errorBody.slice(0, 200)}`;
+                : toUserFacingError(errorBody.slice(0, 200));
               if (hasDurableVideoTask) {
                 const settled = await terminateCloudTaskAndRefund(taskId, 'failed', errorMsg);
                 if (!settled.transitioned) return getDurableVideoTerminalResponse();
@@ -3372,7 +3372,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
         if (errMsg.includes('abort') || errMsg.includes('timeout')) {
           return NextResponse.json({ success: false, status: 'timeout', error: '查询超时，请重试', retryable: true }, { status: 200 });
         }
-        return NextResponse.json({ success: false, status: 'error', error: `网络错误: ${errMsg}`, retryable: true }, { status: 200 });
+        return NextResponse.json({ success: false, status: 'error', error: '网络连接失败，请稍后重试', retryable: true }, { status: 200 });
       }
     }
 
