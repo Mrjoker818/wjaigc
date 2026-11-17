@@ -1,7 +1,6 @@
 /** Video post-production helpers. */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createReadStream } from 'fs';
 import { writeFile, mkdir, mkdtemp, rm, readdir, stat } from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
@@ -12,6 +11,8 @@ import { getServerDataRoot } from '@/lib/server-data-root';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { isSafeVideoSource } from '@/lib/api-validator';
 import { isGeneratedAudioLocation, readGeneratedAudioFromUrl } from '@/lib/generated-audio-storage';
+import { buildRenderPlan } from '@/lib/drama/render';
+import { downloadToBuffer, probeRenderClip } from '@/lib/video-media-io';
 
 const execFileAsync = promisify(execFile);
 
@@ -21,8 +22,6 @@ export const maxDuration = 300;
 const VIDEO_DIR = path.join(getServerDataRoot(), 'generated-videos');
 const VIDEO_URL_PREFIX = '/api/serve-upload/generated-videos';
 const MAX_STORY_CLIPS = 12;
-const MAX_CLIP_BYTES = 150 * 1024 * 1024;
-const CLIP_TOO_LARGE = '视频片段过大，无法合成';
 const MAX_EXTRACTED_FRAMES = 30;
 
 async function ensureDir(): Promise<void> {
@@ -32,94 +31,6 @@ async function ensureDir(): Promise<void> {
 function assertAllowedVideoSource(url: unknown): asserts url is string {
   if (!isSafeVideoSource(url)) throw new Error('视频地址无效或不允许访问内网地址');
   if (!url.startsWith('/') && !url.startsWith('https://')) throw new Error('仅支持 HTTPS 视频地址或本平台视频地址');
-}
-
-function resolveWithinDirectory(directory: string, relativePath: string): string | null {
-  const resolved = path.resolve(directory, relativePath);
-  const difference = path.relative(directory, resolved);
-  return difference && !difference.startsWith('..') && !path.isAbsolute(difference) ? resolved : null;
-}
-
-async function readClipBuffer(source: AsyncIterable<Uint8Array>): Promise<Buffer> {
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for await (const chunk of source) {
-    size += chunk.byteLength;
-    if (size > MAX_CLIP_BYTES) throw new Error(CLIP_TOO_LARGE);
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks, size);
-}
-
-async function* readResponseChunks(body: ReadableStream<Uint8Array>): AsyncGenerator<Uint8Array> {
-  const reader = body.getReader();
-  let finished = false;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) {
-        finished = true;
-        return;
-      }
-      yield value;
-    }
-  } finally {
-    if (!finished) void reader.cancel().catch(() => undefined);
-    reader.releaseLock();
-  }
-}
-
-async function readLocalVideoBuffer(url: string): Promise<Buffer | null> {
-  if (!url.startsWith('/')) return null;
-
-  let requestPath: string;
-  try {
-    requestPath = decodeURIComponent(url.split(/[?#]/, 1)[0]);
-  } catch {
-    return null;
-  }
-
-  const dataRoot = getServerDataRoot();
-  const candidates: string[] = [];
-  if (requestPath.startsWith('/api/serve-upload/')) {
-    const localPath = resolveWithinDirectory(dataRoot, requestPath.slice('/api/serve-upload/'.length));
-    if (localPath) candidates.push(localPath);
-  } else if (requestPath.startsWith('/uploads/')) {
-    const localPath = resolveWithinDirectory(path.join(dataRoot, 'uploads'), requestPath.slice('/uploads/'.length));
-    if (localPath) candidates.push(localPath);
-  } else {
-    const localPath = resolveWithinDirectory(path.join(process.cwd(), 'public'), requestPath.slice(1));
-    if (localPath) candidates.push(localPath);
-  }
-
-  for (const candidate of candidates) {
-    try {
-      if ((await stat(candidate)).size > MAX_CLIP_BYTES) throw new Error(CLIP_TOO_LARGE);
-      // The inclusive end allows one extra byte to detect growth after stat.
-      return await readClipBuffer(createReadStream(candidate, { end: MAX_CLIP_BYTES }));
-    } catch (error) {
-      if (error instanceof Error && error.message === CLIP_TOO_LARGE) throw error;
-    }
-  }
-  return null;
-}
-
-async function downloadToBuffer(url: string): Promise<Buffer> {
-  const localBuffer = await readLocalVideoBuffer(url);
-  if (localBuffer) return localBuffer;
-
-  const base = process.env.COZE_PROJECT_DOMAIN_DEFAULT
-    ? `https://${process.env.COZE_PROJECT_DOMAIN_DEFAULT}`
-    : `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
-  const fullUrl = url.startsWith('http') ? url : `${base}${url}`;
-  const response = await fetch(fullUrl, { signal: AbortSignal.timeout(90_000) });
-  const contentLength = Number(response.headers.get('content-length') || 0);
-  if (!response.ok || contentLength > MAX_CLIP_BYTES) {
-    void response.body?.cancel().catch(() => undefined);
-    if (!response.ok) throw new Error(`下载视频失败: ${response.status}`);
-    throw new Error(CLIP_TOO_LARGE);
-  }
-  return response.body ? readClipBuffer(readResponseChunks(response.body)) : Buffer.alloc(0);
 }
 
 async function ensureFfmpeg(): Promise<void> {
@@ -351,14 +262,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           await writeFile(clipPath, await downloadToBuffer(videoUrls[index]));
           clipPaths.push(clipPath);
         }
-        const listPath = path.join(workDir, 'concat.txt');
-        const listContents = clipPaths.map((clipPath) => `file '${clipPath.replace(/'/g, "'\\''")}'`).join('\n');
-        await writeFile(listPath, listContents, 'utf8');
-        await execFileAsync('ffmpeg', [
-          '-f', 'concat', '-safe', '0', '-i', listPath,
-          '-an', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
-          '-y', outputPath,
-        ], { timeout: 280_000, maxBuffer: 1024 * 1024 });
+        const probed = [];
+        for (const clipPath of clipPaths) probed.push(await probeRenderClip(clipPath));
+        // Every clip keeps its own audio; clips without audio get silence so the tracks stay aligned.
+        const plan = buildRenderPlan({
+          clips: probed.map(({ path: clipPath, durationSec, hasAudio }) => ({ path: clipPath, durationSec, hasAudio })),
+          width: probed[0].width, height: probed[0].height, outputPath,
+        });
+        await execFileAsync('ffmpeg', plan.args, { timeout: 280_000, maxBuffer: 1024 * 1024 });
         await execFileAsync('ffmpeg', [
           '-ss', '0.2', '-i', outputPath, '-frames:v', '1', '-q:v', '2', '-y', thumbnailPath,
         ], { timeout: 60_000, maxBuffer: 1024 * 1024 });

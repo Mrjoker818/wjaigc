@@ -38,16 +38,12 @@ export type ToneStyle =
   | 'warm' | 'cool' | 'desaturated' | 'vibrant' | 'monochrome'
   | 'teal-orange' | 'film-grain' | 'pastel' | 'noir-contrast';
 
-export type DirectorStyle = 'cinematic' | 'realistic' | 'anime' | 'commercial' | 'documentary' | 'vlog' | 'artistic';
-export const DIRECTOR_STYLE_LABELS: Record<DirectorStyle, string> = {
-  cinematic: '电影感',
-  realistic: '写实',
-  anime: '二次元',
-  commercial: '广告',
-  documentary: '纪录',
-  vlog: 'Vlog',
-  artistic: '艺术',
-};
+import type { DirectorStyle } from './director-styles';
+export {
+  DIRECTOR_STYLE_IDS, DIRECTOR_STYLES, DIRECTOR_STYLE_LIST, DIRECTOR_STYLE_LABELS,
+  isDirectorStyle, normalizeDirectorStyle,
+  type DirectorStyle, type DirectorStyleDefinition,
+} from './director-styles';
 
 export interface VideoShotContract {
   /** 镜头核心意图（一句话），如 "女孩听见身后声音，回头" */

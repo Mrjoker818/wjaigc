@@ -23,6 +23,7 @@ import type {
   VideoProp,
 } from '@/lib/video-director/continuity';
 import type { DirectorStyle, VideoReferenceBinding } from '@/lib/video-director/prompt-compiler';
+import { DIRECTOR_STYLE_LIST } from '@/lib/video-director/director-styles';
 import { selectInitialModel } from '@/lib/model-defaults';
 import { useTaskModelCatalog } from '@/hooks/use-task-model-catalog';
 import { taskModelKey } from '@/lib/task-core/model-capability-contract';
@@ -2084,19 +2085,15 @@ Rules:
                 </button>
               </div>
               <div className="grid grid-cols-3 gap-1.5">
-                {([
-                  { v: 'cinematic', label: '🎬 电影感', desc: '景别/运镜/光影' },
-                  { v: 'documentary', label: '📹 纪录片', desc: '纪实/手持/自然光' },
-                  { v: 'commercial', label: '📺 广告片', desc: '高光/特写/节奏' },
-                  { v: 'music-video', label: '🎵 MV', desc: '节奏/光影/色彩' },
-                  { v: 'anime', label: '🎨 动漫', desc: '风格化/夸张/张力' },
-                  { v: 'minimal', label: '◻️ 极简', desc: '留白/克制/长镜头' },
-                ] as Array<{ v: DirectorStyle; label: string; desc: string }>).map(s => {
-                  const active = useDirector && directorStyle === s.v;
+                {DIRECTOR_STYLE_LIST.map(s => {
+                  const active = useDirector && directorStyle === s.id;
                   return (
                     <button
-                      key={s.v}
-                      onClick={() => { setDirectorStyle(s.v); if (!useDirector) setUseDirector(true); }}
+                      key={s.id}
+                      type="button"
+                      title={s.hint}
+                      aria-pressed={active}
+                      onClick={() => { setDirectorStyle(s.id); if (!useDirector) setUseDirector(true); }}
                       className="max-md:min-h-11! max-md:min-w-11 [@media(any-pointer:coarse)]:min-h-11! [@media(any-pointer:coarse)]:min-w-11 flex flex-col items-center gap-0.5 px-1 py-1.5 rounded-md text-[10px] font-medium transition-all cursor-pointer"
                       style={{
                         background: active ? accentColor : isMonochrome ? '#f9fafb' : 'rgba(255,255,255,0.03)',
@@ -2105,8 +2102,8 @@ Rules:
                         boxShadow: active ? `0 2px 6px ${accentColor}40` : 'none',
                       }}
                     >
-                      <span className="text-sm leading-none">{s.label.split(' ')[0]}</span>
-                      <span className="leading-tight text-center">{s.label.split(' ')[1]}</span>
+                      <span className="text-sm leading-none" aria-hidden="true">{s.icon}</span>
+                      <span className="leading-tight text-center">{s.label}</span>
                     </button>
                   );
                 })}

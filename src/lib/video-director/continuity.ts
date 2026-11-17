@@ -1,5 +1,5 @@
 // 连续性模块：多镜头续写状态管理、分镜计划 AI 解析
-import type { DirectorStyle } from './prompt-compiler';
+import { DIRECTOR_STYLES, isDirectorStyle, normalizeDirectorStyle, type DirectorStyle } from './director-styles';
 import type {
   CameraControlParams as VideoCameraControlParams,
   MotionBrushParams as VideoMotionBrushParams,
@@ -277,15 +277,9 @@ export function buildNextShotFirstFramePrompt(prev: VideoShotPlan): string {
 
 // === 分镜规划 AI 交互消息构建 ===
 
-const SHOT_PLAN_STYLE_DESC: Record<DirectorStyle, string> = {
-  cinematic: '电影感叙事，景别清晰、运镜克制、光影写实、声音层次分明。',
-  realistic: '写实风格，真实光线、自然表演、贴近生活场景。',
-  anime: '二次元/动漫感，色彩饱和、线条清晰、动作略带夸张、表情富有张力。',
-  commercial: '广告/产品感，主体为视觉中心、镜头平稳环绕或推进、打光精致、背景简洁。',
-  documentary: '纪录片风格，手持真实感、自然光、环境声主导、节奏沉稳。',
-  vlog: 'vlog 日常记录感，镜头贴近人物、手持自然、光线明亮、节奏轻快。',
-  artistic: '艺术/实验风格，构图大胆、色彩风格化、节奏自由。',
-};
+function shotPlanStyleDescription(style: unknown): string {
+  return DIRECTOR_STYLES[normalizeDirectorStyle(style)].planDescription;
+}
 
 export function buildShotPlanSystemPrompt(
   styleOrDuration?: DirectorStyle | number,
@@ -298,14 +292,14 @@ export function buildShotPlanSystemPrompt(
   if (typeof styleOrDuration === 'number') {
     duration = styleOrDuration;
     if (typeof shotCountOrStyle === 'number') shotCount = shotCountOrStyle;
-    if (typeof styleOrAspect === 'string' && (styleOrAspect in SHOT_PLAN_STYLE_DESC)) style = styleOrAspect as DirectorStyle;
+    if (isDirectorStyle(styleOrAspect)) style = styleOrAspect;
     else if (typeof styleOrAspect === 'string') aspectRatio = styleOrAspect;
     if (typeof aspectRatioOrNothing === 'string') aspectRatio = aspectRatioOrNothing;
   } else if (typeof styleOrDuration === 'string') {
     style = styleOrDuration as DirectorStyle;
   }
   const nShots = Math.max(2, Math.min(10, shotCount || Math.min(6, Math.ceil((duration || 10) / 4))));
-  const styleDesc = SHOT_PLAN_STYLE_DESC[style] || SHOT_PLAN_STYLE_DESC.cinematic;
+  const styleDesc = shotPlanStyleDescription(style);
   return `你是一名资深视频导演和分镜师，将用户的故事梗概拆解成结构化的多镜头计划。
 
 要求：
@@ -765,7 +759,7 @@ export interface StoryAssetsPlanResult {
 
 export function buildStoryAssetsPrompt(req: StoryAssetsPlanRequest): string {
   const { storyIdea, shots, characters = [], scenes = [], props = [], style = 'cinematic' } = req;
-  const styleDesc = SHOT_PLAN_STYLE_DESC[style] || SHOT_PLAN_STYLE_DESC.cinematic;
+  const styleDesc = shotPlanStyleDescription(style);
   return `你是电影美术指导与制片资产生成顾问。根据故事梗概、分镜、已有角色/场景/道具清单，输出需要用 AI 图像生成的资产任务列表（prompts[]）。
 
 【故事梗概】

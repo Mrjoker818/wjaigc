@@ -9,7 +9,7 @@ import {
   type VideoCharacter,
   type VideoScene,
   type VideoProp,
-  type DirectorStyle,
+  normalizeDirectorStyle,
 } from '@/lib/video-director';
 
 export const runtime = 'nodejs';
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
       characters: characters as VideoCharacter[],
       scenes: scenes as VideoScene[],
       props: props as VideoProp[],
-      style: style as DirectorStyle,
+      style: normalizeDirectorStyle(style),
       aspectRatio,
     });
 

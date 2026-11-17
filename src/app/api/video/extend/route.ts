@@ -38,7 +38,7 @@ import {
   getVideoModelInfo,
   type VideoGenerateParams,
 } from '@/lib/video-api';
-import { buildDirectorPrompt, type DirectorStyle } from '@/lib/video-director';
+import { buildDirectorPrompt, normalizeDirectorStyle } from '@/lib/video-director';
 import { recordVideoTaskRemotePolling, recordVideoTaskSubmitted } from '@/lib/cloud-task-persistence';
 import {
   chargeCloudTaskCredits,
@@ -271,7 +271,7 @@ export async function POST(request: NextRequest) {
     const safePrompt = rawPrompt && rawPrompt.trim() ? rawPrompt : '请延续视频内容和画面，保持角色和场景一致';
     let finalPrompt = safePrompt;
     let finalNegativePrompt = negativePrompt || '';
-    const resolvedStyle = directorStyle || directorMode || 'cinematic';
+    const resolvedStyle = normalizeDirectorStyle(directorStyle || directorMode);
     if (useDirector !== false) {
       try {
         const directorMsg = buildDirectorPrompt({
@@ -281,7 +281,7 @@ export async function POST(request: NextRequest) {
           model: pureModel,
           duration: extendDuration,
           audio: generateAudio,
-          style: resolvedStyle as DirectorStyle,
+          style: resolvedStyle,
           camera: typeof cameraControl === 'string' ? cameraControl : cameraControl?.type,
           includeNegative: true,
           verbosity: 'standard',

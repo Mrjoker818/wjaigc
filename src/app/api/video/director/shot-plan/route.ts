@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { normalizeDirectorStyle } from '@/lib/video-director/director-styles';
 import { buildShotPlanSystemPrompt, parseShotPlanFullResponse, type VideoCharacter, type VideoProp, type VideoScene, type VideoShotPlan } from '@/lib/video-director/continuity';
 import { findProviderForFeature } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
@@ -70,7 +71,7 @@ export async function POST(req: NextRequest) {
     const storyIdea: string = String(body.storyIdea || body.story || body.prompt || '').trim();
     const totalDur = Number(body.duration) || 10;
     const n = Math.max(2, Math.min(10, Number(body.shotCount) || Math.min(6, Math.ceil(totalDur / 4))));
-    const style = String(body.style || body.directorStyle || 'cinematic');
+    const style = normalizeDirectorStyle(body.style || body.directorStyle);
     const aspectRatio = String(body.aspectRatio || '16:9');
     if (!storyIdea) return NextResponse.json({ error: '请输入故事梗概' }, { status: 400 });
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { VIDEO_DIRECTOR_SYSTEM_PROMPT, buildDirectorUserMessage, parseDirectorResponse, type VideoDirectorMode, type DirectorStyle } from '@/lib/video-director/prompt-compiler';
+import { VIDEO_DIRECTOR_SYSTEM_PROMPT, buildDirectorUserMessage, parseDirectorResponse, type VideoDirectorMode } from '@/lib/video-director/prompt-compiler';
+import { DIRECTOR_STYLES, normalizeDirectorStyle } from '@/lib/video-director/director-styles';
 import { findProviderForFeature } from '@/lib/server-api-config';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 
@@ -19,16 +20,6 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
-/** 按导演风格自适应温度：电影感/音乐视频需要更高创意度，纪录片/商业需要更精确 */
-const STYLE_TEMPERATURE: Record<string, number> = {
-  cinematic: 0.85,
-  documentary: 0.55,
-  commercial: 0.6,
-  'music-video': 0.9,
-  anime: 0.8,
-  minimal: 0.5,
-};
-
 export async function POST(req: NextRequest) {
   const authResult = await requireApiAuthOrReject(req);
   if (authResult instanceof NextResponse) return authResult;
@@ -39,7 +30,7 @@ export async function POST(req: NextRequest) {
       mode = 'text2video',
       aspectRatio = '16:9',
       duration = 5,
-      style = 'cinematic',
+      style: rawStyle,
       language = 'zh',
       firstFrameDesc,
       lastFrameDesc,
@@ -51,6 +42,7 @@ export async function POST(req: NextRequest) {
       camera,
       references,
     } = body || {};
+    const style = normalizeDirectorStyle(rawStyle);
 
     if (!userIdea || typeof userIdea !== 'string' || !userIdea.trim()) {
       return NextResponse.json({ error: '请输入视频创意描述' }, { status: 400 });
@@ -61,7 +53,7 @@ export async function POST(req: NextRequest) {
       userPrompt: userIdea.trim(),
       modelId,
       model: modelId,
-      style: style as DirectorStyle,
+      style,
       aspectRatio,
       duration: Number(duration) || 5,
       firstFrameNote: firstFrameDesc,
@@ -77,15 +69,7 @@ export async function POST(req: NextRequest) {
     });
 
     // 1) 规则增强版 prompt（无 LLM 时的智能 fallback）
-    const stylePhrases: Record<string, { opening: string; quality: string; mood: string }> = {
-      cinematic: { opening: '史诗级电影镜头', quality: '电影级画质，35mm胶片质感，浅景深，电影级调色', mood: '宏大叙事感，强烈的视觉冲击力' },
-      documentary: { opening: '纪实风格镜头', quality: '自然光线，手持摄影质感，真实色彩还原', mood: '真实记录感，自然不做作' },
-      commercial: { opening: '商业广告级镜头', quality: '专业影棚光效，产品级画质，高饱和度色彩', mood: '精致高级感，吸引眼球的视觉呈现' },
-      'music-video': { opening: 'MV风格镜头', quality: '节奏感画面，动态光效，高对比度色彩', mood: '充满节奏感和情绪张力' },
-      anime: { opening: '动画风格镜头', quality: '流畅动作，细腻线条，鲜艳色彩', mood: '二次元美感，生动的角色表现' },
-      minimal: { opening: '极简风格镜头', quality: '干净构图，柔和自然光，低饱和度调色', mood: '宁静致远的极简美学' },
-    };
-    const sp = stylePhrases[style] || stylePhrases.cinematic;
+    const sp = DIRECTOR_STYLES[style].rule;
     const rulePrompt = [
       `${sp.opening}：${sp.quality}。`,
       camera ? `运镜方式：${camera}。` : '运镜方式：平滑推进或横摇。',
@@ -122,7 +106,7 @@ export async function POST(req: NextRequest) {
                 { role: 'system', content: VIDEO_DIRECTOR_SYSTEM_PROMPT },
                 { role: 'user', content: userPrompt },
               ],
-              temperature: STYLE_TEMPERATURE[style] ?? 0.8,
+              temperature: DIRECTOR_STYLES[style].temperature,
               max_tokens: 2000,
             }),
             signal: AbortSignal.timeout(40000),

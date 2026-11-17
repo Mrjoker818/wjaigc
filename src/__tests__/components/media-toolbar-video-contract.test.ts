@@ -6,6 +6,7 @@ const readSource = (path: string) => readFileSync(resolve(process.cwd(), path), 
 
 const canvasSource = readSource('src/components/infinite-canvas.tsx');
 const videoToolsSource = readSource('src/app/api/video/tools/route.ts');
+const videoMediaIoSource = readSource('src/lib/video-media-io.ts');
 const videoEditPanelSource = readSource('src/components/video-edit-panel.tsx');
 const serveUploadSource = readSource('src/app/api/serve-upload/[...path]/route.ts');
 const videoDownloadSource = readSource('src/app/api/video/download/route.ts');
@@ -30,8 +31,9 @@ describe('media toolbar video contracts', () => {
   });
 
   it('reads same-platform video inputs from disk instead of recursively fetching its own server', () => {
-    expect(videoToolsSource).toContain('readLocalVideoBuffer(url)');
-    expect(videoToolsSource).toContain("path.join(process.cwd(), 'public')");
+    expect(videoToolsSource).toContain('downloadToBuffer(videoUrl)');
+    expect(videoMediaIoSource).toContain('readLocalVideoBuffer(url)');
+    expect(videoMediaIoSource).toContain("path.join(process.cwd(), 'public')");
   });
 
   it('downloads same-platform videos from disk without a recursive server fetch', () => {
