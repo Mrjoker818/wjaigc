@@ -264,17 +264,7 @@ describe('task result asset projection wiring', () => {
     expect(route).not.toContain('sourceEntityId: `${body.responseMessageId}:${authoritativeTaskId}`');
   });
 
-  it('passes workflow identity to each authoritative child task without projecting the aggregate', () => {
-    const route = source('src/app/api/workflow/execute/route.ts');
-    expect(route).not.toContain('projectCompletedTaskToAssets');
-    expect(route).toContain('projectId: execState.projectId');
-    expect(route).toContain("sessionId: `workflow:${execState.projectId}`");
-    expect(route).toContain('sourceEntityId = `${executionId}:${node.id}`');
-    expect(route).toContain('messageId: sourceEntityId');
-    expect(route).toContain('`${executionId}:${node.id}:scene:${si}`');
-    expect(route).toContain("trackedHeaders.set('x-idempotency-key'");
-    expect(route).not.toMatch(/const sceneResult = await executeAsyncTask\(/);
-
+  it('passes caller identity to each authoritative child task route', () => {
     const videoRoute = source('src/app/api/video/generate/route.ts');
     expect(videoRoute).toMatch(/projectId,\s*sessionId,\s*messageId/);
     expect(videoRoute).toContain('sessionId: typeof sessionId');
@@ -303,13 +293,6 @@ describe('task result asset projection wiring', () => {
     expect(threeDRoute).toMatch(/projectId\?: string;[\s\S]*sessionId\?: string;[\s\S]*messageId\?: string;/);
     expect(threeDRoute).toContain('sessionId: body.sessionId');
     expect(threeDRoute).toContain('messageId: body.messageId');
-
-    const workflowEngine = source('src/lib/workflow-engine.ts');
-    expect(workflowEngine).toMatch(/case 'ai-3d-model'[\s\S]*endpoint: '\/api\/image-to-3d'/);
-    expect(workflowEngine).not.toMatch(/case 'ai-3d-model'[\s\S]*endpoint: '\/api\/poll-3d-task'/);
-    expect(route).toContain("'/api/image-to-3d'");
-    expect(route).toContain("nodeType === 'ai-3d-model'");
-    expect(route).toContain("'/api/poll-3d-task'");
   });
 
   it('projects a completed agent terminal through the shared idempotent projection boundary', () => {

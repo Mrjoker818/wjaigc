@@ -341,7 +341,6 @@ describe('canvas share owner UI', () => {
     const forbiddenSurfaces = [
       'src/components/canvas/CanvasImageActionToolbar.tsx',
       'src/components/simple-chat/share-dialog.tsx',
-      'src/components/node-editor.tsx',
     ].map(path => readFileSync(resolve(process.cwd(), path), 'utf8')).join('\n');
 
     expect(canvasWorkspace).toContain('<CanvasShareCreateDialog');

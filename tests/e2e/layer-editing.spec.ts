@@ -273,36 +273,6 @@ test.describe('Pear hybrid layer editing', () => {
     });
   });
 
-  test('configures the ai-segment node without executing a provider call', async ({ page }, testInfo) => {
-    test.setTimeout(90_000);
-    await capture(page, testInfo, 'layer-node-configuration', async () => {
-      await loginAndCreateProject(page);
-      await uploadSource(page);
-      await page.getByRole('button', { name: '节点模式' }).click();
-      const confirm = page.getByRole('button', { name: /继续|确认/ });
-      if (await confirm.isVisible().catch(() => false)) await confirm.click();
-
-      const libraryToggle = page.getByRole('button', { name: '切换节点库面板', exact: true });
-      await expect(libraryToggle).toBeVisible();
-      if (await libraryToggle.getAttribute('aria-pressed') !== 'true') {
-        await libraryToggle.click();
-      }
-      const segmentTemplate = page.getByRole('complementary', { name: '节点库' })
-        .locator('[data-node-type="ai-segment"]');
-      await expect(segmentTemplate).toBeVisible();
-      await segmentTemplate.click();
-      const node = page.locator('[data-node-id]').filter({ hasText: '元素分层' }).last();
-      await expect(node).toBeVisible();
-      await node.click();
-
-      const engine = page.locator('[data-node-field="engine"] select');
-      await expect(engine).toBeVisible();
-      await engine.selectOption('local');
-      await expect(engine).toHaveValue('local');
-      await expect(page.locator('[data-node-field="model"] select')).toBeVisible();
-    });
-  });
-
   test('completes a real authorized Pear cloud task from one guarded UI submission', async ({ page }, testInfo) => {
     test.skip(
       !enablePaidLayering || !providerId || !modelId,
@@ -312,7 +282,7 @@ test.describe('Pear hybrid layer editing', () => {
 
     await capture(page, testInfo, 'layer-editor-pear-completed', async () => {
       await loginAndCreateProject(page);
-      const configured = await page.request.get('/api/workflow/models?type=layer');
+      const configured = await page.request.get('/api/models?type=layer');
       expect(configured.ok()).toBeTruthy();
       const modelList = await configured.json() as {
         models?: Array<{ id?: string; providerId?: string }>;

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse, after } from 'next/server';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import { findProviderForModel, findProviderById, normalizeApiBaseUrl, getApiProviders } from '@/lib/server-api-config';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
@@ -56,10 +56,6 @@ import { authorizeGenerationProject, GenerationProjectAccessError } from '@/lib/
 import { parseCanvasEditPublication, validateCanvasEditSources, CanvasEditAdmissionError, classifyCanvasEditError,
   readCanvasEditTask, validateCanvasEditReplay, isCanvasEditTerminal } from '@/lib/collaboration/canvas-edit-admission';
 import type { CanvasTaskPublicationInput } from '@/lib/collaboration/task-publication';
-import { WorkflowEditIntentConflictError, WorkflowEditSourceError,
-  resolveLegacyWorkflowEditSource, type WorkflowEditPublicationInput } from '@/lib/collaboration/workflow-edit-publication';
-import { completeWorkflowEditTask } from '@/lib/collaboration/workflow-edit-terminal';
-import { probeWorkflowEditAcceptanceStorage } from '@/lib/s3-storage';
 import { parseTrustedAnnotationEdit, validateCompiledAnnotationReference, validateAnnotationEditSource,
   privateAnnotationSourceIdentity, assertPrivateAnnotationTaskIdentity, AnnotationEditContextError } from '@/lib/annotation-edit-context';
 import { AnnotationSourceAdmissionError, assertPrivateAnnotationSourceLocked } from '@/lib/annotation-authorized-source';
@@ -100,8 +96,6 @@ interface EditRequestBody {
   messageId?: string;
   assetParentVersionIds?: string[];
   assetSourcePlacementId?: string;
-  workflowId?: string;
-  nodeId?: string;
   sourceEntityId?: string;
   assetProjectionMode?: 'derived' | 'revision';
   image?: string;
@@ -404,7 +398,6 @@ export async function POST(request: NextRequest) {
   let sessionUser: import('@/lib/user-types').User | null = null;
   let annotationTaskId = '';
   let canvasPublication: CanvasTaskPublicationInput | undefined;
-  let workflowPublication: WorkflowEditPublicationInput | undefined;
   let privateTaskIdentity: PrivateAnnotationTaskIdentity | undefined;
   let privateTaskCreated = false;
   let privateAnnotationRequest = false;
@@ -431,6 +424,10 @@ export async function POST(request: NextRequest) {
       parsedRequestBody = JSON.parse(rawBody) as EditRequestBody;
     } else {
       parsedRequestBody = await request.json() as EditRequestBody;
+    }
+    if (parsedRequestBody.assetWorkspace === 'workflow') {
+      return NextResponse.json({ success: false, code: 'WORKFLOW_WORKSPACE_RETIRED',
+        error: '节点模式已下线，请在画布中修图' }, { status: 410 });
     }
     const annotationEdit = parseTrustedAnnotationEdit(parsedRequestBody, authResult.source, authResult.userId);
     if (annotationEdit) await validateCompiledAnnotationReference(annotationEdit.referenceImage, request.signal);
@@ -459,30 +456,6 @@ export async function POST(request: NextRequest) {
     }
     privateAnnotationRequest = Boolean(annotationEdit && !canvasPublication);
     if (privateAnnotationRequest) await validateAnnotationEditSource(annotationEdit!);
-    if (projectAccess.kind === 'document' && parsedRequestBody.assetWorkspace === 'workflow'
-      && (parsedRequestBody.workflowId !== undefined || parsedRequestBody.nodeId !== undefined
-        || parsedRequestBody.sourceEntityId !== undefined || parsedRequestBody.assetSourcePlacementId !== undefined)) {
-      const sourceVersionId = parsedRequestBody.assetParentVersionIds?.length === 1
-        ? parsedRequestBody.assetParentVersionIds[0] : '';
-      workflowPublication = {
-        access: projectAccess,
-        workflowId: parsedRequestBody.workflowId || '',
-        nodeId: parsedRequestBody.nodeId || '',
-        sourceEntityId: parsedRequestBody.sourceEntityId || '',
-        sourceVersionId,
-        sourcePlacementId: parsedRequestBody.assetSourcePlacementId || '',
-        imageUrl: parsedRequestBody.image || '',
-        origin: request.nextUrl.origin,
-      };
-    } else if (projectAccess.kind === 'document' && parsedRequestBody.assetWorkspace === 'workflow') {
-      workflowPublication = await resolveLegacyWorkflowEditSource({
-        access: projectAccess,
-        imageUrl: parsedRequestBody.image || '',
-        origin: request.nextUrl.origin,
-        nodeId: `legacy-edit-${createHash('sha256').update(annotationIdempotencyKey || requestId).digest('hex').slice(0, 32)}`,
-        sourceVersionIds: parsedRequestBody.assetParentVersionIds,
-      });
-    }
     const {
       image,         // base64 data URL（客户端已转换）
       prompt,        // 编辑指令（自然语言）
@@ -599,16 +572,6 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    if (workflowPublication) {
-      let storageReady = false;
-      try { storageReady = await probeWorkflowEditAcceptanceStorage(); }
-      catch { /* A failed private write, read or cleanup must reject this billable submission. */ }
-      if (!storageReady) {
-        return NextResponse.json({ success: false, code: 'WORKFLOW_EDIT_ACCEPTANCE_STORAGE_UNAVAILABLE',
-          error: '工作流修图结果存储暂不可用，请稍后重试' }, { status: 503 });
-      }
-    }
-
     type EditAdmission = {
       taskId: string | null;
       creditCost: number;
@@ -696,7 +659,6 @@ export async function POST(request: NextRequest) {
           requestDigest: requestHash,
           creditCost: plannedCreditCost,
           ...(canvasPublication ? { canvasPublication } : {}),
-          ...(workflowPublication ? { workflowPublication } : {}),
           ...(annotationEdit && !canvasPublication ? {
             beforeCharge: async (client): Promise<void> => assertPrivateAnnotationSourceLocked(client, annotationEdit.source),
           } : {}),
@@ -719,8 +681,6 @@ export async function POST(request: NextRequest) {
               submissionPayload: {
                 assetParentVersionIds: assetParentVersionIds || [],
                 assetProjectionMode: assetProjectionMode === 'revision' ? 'revision' : 'derived',
-                ...(workflowPublication ? { assetWorkspace: 'workflow',
-                  workflowId: workflowPublication.workflowId, nodeId: workflowPublication.nodeId } : {}),
               },
             },
             createdAt: now,
@@ -907,23 +867,10 @@ export async function POST(request: NextRequest) {
             }),
             ...safeResult,
           };
-          const completion = workflowPublication
-            ? await completeWorkflowEditTask({ actorId: authResult.userId, taskId,
-              requestDigest: requestHash, providerId: actualProviderId, modelId: pureModel,
-              result: completedResult })
-            : (privateTaskIdentity && leaseOwner
-              ? await completePrivateAnnotationTask(privateTaskIdentity, completedResult, leaseOwner, deadlineAt)
-              : await completeCloudTask(taskId, completedResult,
-                leaseOwner ? { leaseOwner, deadlineAt } : undefined)) ? 'completed' : 'terminal';
-          if (completion === 'denied') {
-            failLocalTask(taskId, '工作流图片来源已失效');
-            return false;
-          }
-          if (completion === 'rejected') {
-            failLocalTask(taskId, '生成结果不是可用图片，积分已退还');
-            return false;
-          }
-          const committed = completion === 'completed';
+          const committed = privateTaskIdentity && leaseOwner
+            ? await completePrivateAnnotationTask(privateTaskIdentity, completedResult, leaseOwner, deadlineAt)
+            : await completeCloudTask(taskId, completedResult,
+              leaseOwner ? { leaseOwner, deadlineAt } : undefined);
           if (!committed) return false;
           await projectPersistedCompletedTask(taskId, authResult.userId);
         }
@@ -2196,8 +2143,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       catch { console.error('[edit] Private annotation creation compensation deferred: billing identity unavailable or conflicting'); }
     }
     if (error instanceof AnnotationEditContextError || error instanceof AnnotationSourceAdmissionError
-      || error instanceof GenerationProjectAccessError || error instanceof CanvasEditAdmissionError
-      || error instanceof WorkflowEditSourceError || error instanceof WorkflowEditIntentConflictError) {
+      || error instanceof GenerationProjectAccessError || error instanceof CanvasEditAdmissionError) {
       return NextResponse.json({ success: false, code: error.code, error: error.message }, { status: error.status });
     }
     if (privateAnnotationRequest) {

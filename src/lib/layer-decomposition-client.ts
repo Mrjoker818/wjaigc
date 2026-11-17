@@ -188,7 +188,7 @@ export async function resolveDefaultLayerTarget(
   fetcher: LayerFetchLike,
   signal?: AbortSignal,
 ): Promise<{ providerId: string; modelId: string } | null> {
-  const response = await fetcher('/api/workflow/models?type=layer', {
+  const response = await fetcher('/api/models?type=layer', {
     method: 'GET', signal, cache: 'no-store',
   });
   const body = await readJson(response);

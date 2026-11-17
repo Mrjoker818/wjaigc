@@ -5,7 +5,6 @@ import {
   AgentEditExecutionDescriptorError, type AgentEditExecutionDescriptorV1,
 } from '@/lib/agent-runtime/agent-edit-execution-descriptor';
 import type { CanvasTaskPublicationInput, PreparedCanvasTaskPublication } from '@/lib/collaboration/task-publication';
-import type { WorkflowEditPublicationInput, PreparedWorkflowEditSource } from '@/lib/collaboration/workflow-edit-publication';
 import {
   createTaskBillingTransactionId,
   InsufficientCreditsError,
@@ -277,7 +276,6 @@ export interface CloudTaskFallbackTransitionResult extends CloudTaskCreditRefund
 export interface CreateBillableCloudTaskInput {
   agentExecutionDescriptor?: { descriptor: AgentEditExecutionDescriptorV1; descriptorDigest: string };
   canvasPublication?: CanvasTaskPublicationInput;
-  workflowPublication?: WorkflowEditPublicationInput;
   activeImageEditInputDigest?: string;
   /** Server-owned admission check, executed under the same transaction as the first charge. */
   beforeCharge?: (client: PoolClient) => Promise<void>;
@@ -509,16 +507,6 @@ export class CanvasBatchCommitUnknownError extends Error {
   }
 }
 
-export class WorkflowEditCommitUnknownError extends Error {
-  readonly code = 'WORKFLOW_EDIT_COMMIT_UNKNOWN';
-  readonly status = 503;
-
-  constructor() {
-    super('工作流编辑任务提交结果待核对，请用原请求标识查询，不要重新扣费');
-    this.name = 'WorkflowEditCommitUnknownError';
-  }
-}
-
 /** Another key already owns this actor/project's still-active 302 request. */
 export class ActiveImageEditAttemptError extends Error {
   readonly code = 'IMAGE_EDIT_ACTIVE_ATTEMPT';
@@ -537,16 +525,11 @@ export async function createBillableCloudTask(
   if (input.task.type === 'image-edit' && input.canvasPublication !== undefined) {
     input = { ...input, canvasPublication: structuredClone(input.canvasPublication) };
   }
-  if (input.workflowPublication !== undefined) {
-    input = { ...input, workflowPublication: structuredClone(input.workflowPublication) };
-  }
   const creditCost = normalizeBillableCreditCost(input.creditCost);
   let client: PoolClient | undefined;
   let discardClient = false;
   let batchCommitIssued = false;
-  let workflowCommitIssued = false;
   let publicationModule: typeof import('@/lib/collaboration/task-publication') | undefined;
-  let workflowModule: typeof import('@/lib/collaboration/workflow-edit-publication') | undefined;
   const isCanvasBatch = input.canvasPublication?.access?.kind === 'document'
     && Boolean(input.canvasPublication.batchAdmission || input.canvasPublication.batchPlacement);
   const singleTaskIdentity = input.canvasPublication?.singleAdmission ? {
@@ -564,12 +547,6 @@ export async function createBillableCloudTask(
     await ensureCloudTaskTables();
     client = await getPool().connect();
     await client.query('BEGIN');
-    if (input.workflowPublication && (input.task.type !== 'edit' || input.canvasPublication
-      || input.workflowPublication.access.actorUserId !== input.userId
-      || input.workflowPublication.access.projectId !== input.task.projectId)) {
-      throw new IdempotencyConflictError({ userId: input.userId, idempotencyKey: input.idempotencyKey,
-        existingDigest: 'workflow-edit-scope-conflict', requestDigest: input.requestDigest });
-    }
     // Validate inside the authoritative admission transaction, before any charge.
     let privateDescriptor: (NonNullable<CreateBillableCloudTaskInput['agentExecutionDescriptor']>
       & { admissionVersion: 2 }) | undefined;
@@ -668,34 +645,7 @@ export async function createBillableCloudTask(
         }
       }
 
-      if (existingRow.type === 'edit' || input.workflowPublication) {
-        const availability = await client.query<{ relation: string | null }>(
-          "SELECT to_regclass('wujie_workflow_edit_publications')::text AS relation",
-        );
-        if (!availability.rows[0]?.relation && input.workflowPublication) {
-          workflowModule = await import('@/lib/collaboration/workflow-edit-publication');
-          throw new workflowModule.WorkflowEditSourceError('WORKFLOW_EDIT_SOURCE_UNAVAILABLE');
-        }
-        const hasIntent = availability.rows[0]?.relation
-          ? (await client.query('SELECT task_id FROM wujie_workflow_edit_publications WHERE task_id=$1',
-            [existingRow.id])).rowCount === 1
-          : false;
-        if (hasIntent !== Boolean(input.workflowPublication)) {
-          workflowModule = await import('@/lib/collaboration/workflow-edit-publication');
-          throw new workflowModule.WorkflowEditIntentConflictError();
-        }
-      }
-      if (input.workflowPublication) {
-        workflowModule = await import('@/lib/collaboration/workflow-edit-publication');
-        const source = await workflowModule.prepareWorkflowEditSourceInTransaction(client, input.workflowPublication);
-        await workflowModule.assertWorkflowEditIntentReplayInTransaction(client, {
-          publication: input.workflowPublication, source,
-          identity: { taskId: String(existingRow.id), requestDigest: input.requestDigest,
-            providerId: input.task.providerId || '', modelId: input.task.model || '' },
-        });
-      }
       batchCommitIssued = isCanvasBatch;
-      workflowCommitIssued = Boolean(input.workflowPublication);
       await client.query('COMMIT');
       return {
         task: rowToPersistedCloudTask(existingRow),
@@ -727,11 +677,6 @@ export async function createBillableCloudTask(
       publication = await publicationModule.prepareCanvasTaskPublicationInTransaction(client, {
         actorUserId: input.userId, projectId: input.task.projectId || '', publication: input.canvasPublication, taskIdentity, singleTaskIdentity,
       });
-    }
-    let workflowSource: PreparedWorkflowEditSource | undefined;
-    if (input.workflowPublication) {
-      workflowModule = await import('@/lib/collaboration/workflow-edit-publication');
-      workflowSource = await workflowModule.prepareWorkflowEditSourceInTransaction(client, input.workflowPublication);
     }
     await input.beforeCharge?.(client);
     const now = Date.now();
@@ -840,15 +785,7 @@ export async function createBillableCloudTask(
     if (publication && publicationModule) {
       await publicationModule.persistCanvasTaskPublicationInTransaction(client, { taskId: task.id, publication });
     }
-    if (input.workflowPublication && workflowSource && workflowModule) {
-      await workflowModule.persistWorkflowEditIntentInTransaction(client, {
-        publication: input.workflowPublication, source: workflowSource,
-        identity: { taskId: task.id, requestDigest: input.requestDigest,
-          providerId: task.providerId || '', modelId: task.model || '' },
-      });
-    }
     batchCommitIssued = isCanvasBatch;
-    workflowCommitIssued = Boolean(input.workflowPublication);
     await client.query('COMMIT');
     return {
       task: rowToPersistedCloudTask(
@@ -862,10 +799,6 @@ export async function createBillableCloudTask(
       // Even a successful later ROLLBACK cannot disprove a committed transaction.
       discardClient = true;
       throw new CanvasBatchCommitUnknownError();
-    }
-    if (workflowCommitIssued) {
-      discardClient = true;
-      throw new WorkflowEditCommitUnknownError();
     }
     if (client) {
       try { await client.query('ROLLBACK'); }

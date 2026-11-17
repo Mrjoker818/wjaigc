@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import { NODE_TYPE_LABELS, PORT_COMPATIBILITY } from '@/lib/workflow-engine';
-
 import {
   collectStage4Inventory,
   extractSkillIds,
@@ -57,16 +55,13 @@ const expectedSkillIds = [
 ];
 
 describe('Stage 4 inventory generator', () => {
-  it('captures the three legacy workspaces and their structured coverage details', async () => {
+  it('captures the legacy workspaces and their structured coverage details', async () => {
     const inventory = await collectStage4Inventory(process.cwd());
 
     expect(inventory.workspaces.map(item => item.id)).toEqual([
       'canvas',
-      'workflow',
       'simple-chat',
     ]);
-    expect(inventory.nodeTypes).toEqual(Object.keys(NODE_TYPE_LABELS).sort());
-    expect(inventory.portTypes).toEqual(Object.keys(PORT_COMPATIBILITY).sort());
     expect(inventory.routes).toContain('/api/chat');
     expect(inventory.routes).toContain('/api/simple-chat/chat');
     expect(inventory.routes).toContain('/api/agent-edit');

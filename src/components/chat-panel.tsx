@@ -25,7 +25,6 @@ import { ThirdPartyModelDialog } from '@/components/third-party-model-dialog';
 import { UniversalApiManager } from '@/lib/universal-api-manager';
 import type { ApiProvider } from '@/lib/universal-api-types';
 import type { CanvasImage } from '@/components/infinite-canvas';
-import type { Workflow } from '@/lib/workflow-engine';
 import { getModelDisplayName } from '@/lib/model-name-map';
 import { readPersistedImageModelSelection, selectInitialModel } from '@/lib/model-defaults';
 import { getPromptTemplates, searchTemplates, type PromptTemplate } from '@/lib/prompt-templates';
@@ -119,7 +118,6 @@ interface Message {
   suggestions?: NextSuggestion[]; // 建议下一步操作
   isClarifying?: boolean; // 是否为追问消息
   toolExecutions?: ToolExecution[]; // Agent工具执行记录
-  workflow?: Workflow; // build_workflow 产出的工作流，渲染为预览卡
   canvasAction?: ChatCanvasActionRequest; // 模型给出的 [CANVAS_ACTION]，由用户点击后在画布打开对应工具
 }
 
@@ -582,8 +580,6 @@ interface ChatPanelProps {
   onSuggestionAction?: (action: string, data?: Record<string, string>) => void;
   /** Called when user clicks "generate image" suggestion - triggers image generation directly */
   onGenerateImage?: (prompt: string, outputCount?: number, aspectRatio?: string, quality?: string) => void;
-  /** 模型通过 build_workflow 创建了工作流：写入节点模式并切过去 */
-  onApplyWorkflow?: (workflow: Workflow) => void;
   brandDna?: Record<string, unknown> | null;
   onInjectBrandDna?: (dna: Record<string, unknown>) => void;
   /** Image sent from canvas right-click menu "发送到聊天修改" */
@@ -1317,7 +1313,7 @@ function extractPromptForGeneration(content: string): string {
 /* ========== 智能体搭建弹窗 ========== */
 /* AgentBuilderDialog 已提取至 src/components/chat/AgentBuilderDialog.tsx */
 
-export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAuthority = 'legacy', onAddToPrompt, onAddImages, onAddGeneratedImage, onAddGeneratedImages, canvasImages = [], selectedCanvasImage, onResolveCanvasImageForChat, onChatModelChange, onSuggestionAction, onGenerateImage, onApplyWorkflow, brandDna, onInjectBrandDna, chatInitialImage, chatInitialImageResolved = false, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage, externalPrompt, onExternalPromptConsumed }: ChatPanelProps) {
+export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAuthority = 'legacy', onAddToPrompt, onAddImages, onAddGeneratedImage, onAddGeneratedImages, canvasImages = [], selectedCanvasImage, onResolveCanvasImageForChat, onChatModelChange, onSuggestionAction, onGenerateImage, brandDna, onInjectBrandDna, chatInitialImage, chatInitialImageResolved = false, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage, externalPrompt, onExternalPromptConsumed }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [showFullHistory, setShowFullHistory] = useState(false);
   const visibleMessages = useMemo(() => (showFullHistory ? messages : messages.slice(-CHAT_RENDER_WINDOW)).filter(Boolean), [messages, showFullHistory]);
@@ -3315,7 +3311,6 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       const toolPendingTaskIds: Array<{ taskId: string; model: string; providerId: string; type: 'image' | 'video'; runId?: string }> = []; // 工具返回的异步任务，需轮询
       let toolGeneratedVideo: string | undefined; // 工具生成的视频URL
       let toolSkillRunId: string | undefined; // 模型通过 run_skill 启动的技能运行
-      let toolWorkflow: Workflow | undefined; // 模型通过 build_workflow 创建的工作流
       let currentSSEEvent = ''; // 当前SSE事件类型
       let sseBuffer = ''; // SSE buffer拼接，防止跨chunk JSON破裂
 
@@ -3499,9 +3494,6 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                       }
                     }
                   }
-                  if (parsed.workflow && Array.isArray(parsed.workflow.nodes)) {
-                    toolWorkflow = parsed.workflow as Workflow;
-                  }
                   continue;
                 }
 
@@ -3579,15 +3571,6 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
       const generateMatches = [...assistantContent.matchAll(/\[GENERATE:\s*([\s\S]+?)\]/g)];
       const hasGenerateTags = generateMatches.length > 0;
       const hasToolGeneratedImages = toolGeneratedImages.length > 0 || !!toolGeneratedVideo || toolPendingTaskIds.length > 0;
-
-      // build_workflow 不产出图片，单独处理：消息上挂预览卡，并写入节点模式。
-      if (toolWorkflow) {
-        const builtWorkflow = toolWorkflow;
-        setMessages(prev => prev.map(msg =>
-          msg.id === assistantMessageId ? { ...msg, workflow: builtWorkflow } : msg
-        ));
-        onApplyWorkflow?.(builtWorkflow);
-      }
 
       // 优先使用 Function Calling 工具生成的图片
       if (hasToolGeneratedImages) {
@@ -4131,7 +4114,6 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
         role: 'assistant' as const,
         content: assistantContent,
         timestamp: Date.now(),
-        ...(toolWorkflow ? { workflow: toolWorkflow } : {}),
         ...(canvasActionRequest ? { canvasAction: canvasActionRequest } : {}),
       }];
       saveSession(finalMessages, model, systemPrompt, taskSessionId);
@@ -5396,40 +5378,6 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                       </div>
                     </div>
                   )}
-                  {/* build_workflow 工作流预览卡 */}
-                  {message.role === 'assistant' && message.workflow && Array.isArray(message.workflow.nodes) && (() => {
-                    const workflow = message.workflow;
-                    return (
-                      <div data-testid="chat-workflow-preview" className={`mt-2 rounded-xl overflow-hidden ${isGold ? 'bg-black/30 border border-gold/15' : 'bg-gray-50 border border-gray-200'}`}>
-                        <div className={`px-3 py-1.5 flex items-center gap-2 ${isGold ? 'bg-gold/5 border-b border-gold/10' : 'bg-gray-100 border-b border-gray-200'}`}>
-                          <Zap size={12} className={isGold ? 'text-gold' : 'text-blue-500'} />
-                          <span className={`text-xs font-medium flex-1 truncate ${isGold ? 'text-gold/90' : 'text-gray-700'}`}>{workflow.name}</span>
-                          <span className={`text-[10px] ${isGold ? 'text-gold/60' : 'text-gray-500'}`}>{workflow.nodes.length} 个节点</span>
-                        </div>
-                        <div className="px-3 py-2 flex flex-wrap items-center gap-1">
-                          {workflow.nodes.slice(0, 8).map((node, nodeIdx) => (
-                            <span key={node.id} className="flex items-center gap-1">
-                              {nodeIdx > 0 && <ArrowRight size={10} className={isGold ? 'text-gold/40' : 'text-gray-400'} />}
-                              <span className={`text-[11px] px-1.5 py-0.5 rounded ${isGold ? 'bg-gold/10 text-gold/80' : 'bg-white border border-gray-200 text-gray-700'}`}>{node.label || node.type}</span>
-                            </span>
-                          ))}
-                          {workflow.nodes.length > 8 && <span className={`text-[10px] ${isGold ? 'text-gold/50' : 'text-gray-400'}`}>…</span>}
-                        </div>
-                        {onApplyWorkflow && (
-                          <div className="px-3 pb-2">
-                            <button
-                              type="button"
-                              data-testid="chat-workflow-open"
-                              onClick={() => onApplyWorkflow(workflow)}
-                              className={`text-xs px-2.5 py-1 rounded-lg ${isGold ? 'bg-gold/15 text-gold hover:bg-gold/25' : 'bg-blue-500 text-white hover:bg-blue-600'}`}
-                            >
-                              在节点模式打开
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
                   {/* [CANVAS_ACTION] 画布操作：点击后在画布打开对应工具，由用户确认参数和费用 */}
                   {message.role === 'assistant' && message.canvasAction && (() => {
                     const action = message.canvasAction;

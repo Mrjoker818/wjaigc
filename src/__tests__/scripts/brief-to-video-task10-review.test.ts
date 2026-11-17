@@ -7,12 +7,11 @@ async function source(path: string): Promise<string> {
 }
 
 describe('Task 10 independent review contracts', () => {
-  it('drives all three workspace chains through browser-visible controls', async () => {
-    const [spec, helper, canvas, workflow] = await Promise.all([
+  it('drives both workspace chains through browser-visible controls', async () => {
+    const [spec, helper, canvas] = await Promise.all([
       source('tests/e2e/brief-to-video-finished-film.spec.ts'),
       source('tests/helpers/brief-to-video.ts'),
       source('src/components/chat-panel.tsx'),
-      source('src/components/node-editor.tsx'),
     ]);
 
     for (const action of [
@@ -20,7 +19,6 @@ describe('Task 10 independent review contracts', () => {
       'reviseFromUi',
       'approveFromUi',
       'cancelFromUi',
-      'runWorkflowThroughUi',
       'runSimpleChatThroughUi',
       'assertNoVideoChildInDatabase',
     ]) {
@@ -31,25 +29,20 @@ describe('Task 10 independent review contracts', () => {
     expect(helper).toContain("getByRole('button', { name: '修改脚本'");
     expect(helper).toContain("getByRole('button', { name: '取消任务'");
     expect(helper).toContain("getByRole('button', { name: '返回画布'");
-    expect(helper).toContain("getByRole('button', { name: '执行工作流'");
     expect(helper).not.toContain('createRun: runRequest');
     expect(spec).toContain('assertCanvasSkillCatalogCount(30)');
-    expect(spec).toContain('workflow.catalogCount).toBe(30)');
     expect(spec).toContain('simpleChat.catalogCount).toBe(16)');
     expect(helper).toContain('beforeRunIds');
     expect(helper).toContain('findNewBriefVideoRunId');
     expect(canvas).toContain('data-canvas-skill-id={skill.id}');
-    expect(workflow).toContain('data-workflow-skill-id={skill.id}');
   });
 
-  it('requires Workflow output projection and full mobile interaction geometry', async () => {
+  it('requires full mobile interaction geometry', async () => {
     const [spec, helper] = await Promise.all([
       source('tests/e2e/brief-to-video-finished-film.spec.ts'),
       source('tests/helpers/brief-to-video.ts'),
     ]);
 
-    expect(spec).toContain('workflow.videoAssetVersionId');
-    expect(spec).toContain("workflow.outputNodeType).toBe('output-video')");
     expect(helper).toContain('assertNoOverlap');
     expect(helper).toContain('viewportWidth');
     expect(helper).toContain('scrollHeight');

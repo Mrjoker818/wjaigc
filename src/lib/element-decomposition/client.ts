@@ -210,7 +210,7 @@ export async function resolveDefaultBoardTarget(
 ): Promise<{ providerId: string; modelId: string } | null> {
   const candidates: Array<{ providerId: string; modelId: string }> = [];
   for (const type of ['imageEdit', 'image'] as const) {
-    const response = await fetcher(`/api/workflow/models?type=${type}`, { method: 'GET', signal, cache: 'no-store' });
+    const response = await fetcher(`/api/models?type=${type}`, { method: 'GET', signal, cache: 'no-store' });
     let body: Record<string, unknown> = {};
     try {
       body = await response.json() as Record<string, unknown>;

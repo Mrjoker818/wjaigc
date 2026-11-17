@@ -14,7 +14,6 @@ vi.mock('@/lib/server-user-storage', () => ({ appendUserJsonl: mocks.log }));
 vi.mock('@/lib/api-helpers', () => ({ fetchWithV1Retry: mocks.upstream }));
 import { POST as upscale } from '@/app/api/image/upscale/route';
 import { POST as optimize } from '@/app/api/optimize-prompt/route';
-import { buildNodeExecutionRequest, type WorkflowNode } from '@/lib/workflow-engine';
 
 const provider = { id: 'pear-test', isEnabled: true, type: 'chat', apiKey: 'test-key', baseUrl: 'https://provider.example', selectedModels: ['gpt-4o'] };
 const image = 'data:image/png;base64,iVBORw0KGgo=';
@@ -47,15 +46,6 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('upscale preflight and AI delegation', () => {
-  it.each([undefined, '2', '4'])('accepts the real workflow request for scale %s', async scale => {
-    const node: WorkflowNode = { id: 'upscale-node', type: 'ai-upscale', label: 'Upscale', x: 0, y: 0, width: 200, height: 100, ports: [], config: { ...(scale ? { scale } : {}) } };
-    const execution = buildNodeExecutionRequest(node, { imageUrl: image });
-    expect(execution?.endpoint).toBe('/api/image/upscale');
-    const response = await upscale(request(execution!.body));
-    expect(response.status).toBe(200);
-    const delegated = mocks.imageEdit.mock.calls[0][0] as NextRequest;
-    expect(await delegated.json()).toMatchObject({ action: 'upscale', upscaleMode: 'ai', scale: scale === '4' ? 4 : 2 });
-  });
   it.each([undefined, 2, 4, '2', '4'])('normalizes valid scale %s and delegates to image-edit', async scale => {
     const response = await upscale(request({ imageUrl: image, scale }));
     expect(response.status).toBe(200);

@@ -42,7 +42,6 @@ describe('Agent runtime accounting and result projection boundaries', () => {
     expect(qualityWorkflow).toContain('tests/integration/stage-4-agent-accounting-postgres.test.ts');
     expect(qualityWorkflow).toContain('tests/integration/stage-4-agent-events-postgres.test.ts');
     expect(qualityWorkflow).toContain('E2E_STAGE4_EXPECTED_AGENT_MODE: agent-v2');
-    expect(qualityWorkflow).toContain('E2E_STAGE4_EXPECTED_WORKFLOW_RENDERER_MODE: react-flow-v2');
     expect(qualityWorkflow).toContain('pnpm test:e2e:stage-4');
   });
 });

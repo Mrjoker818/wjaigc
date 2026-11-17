@@ -6,19 +6,11 @@ import type { Page } from '@playwright/test';
 import { Pool } from 'pg';
 import sharp from 'sharp';
 
-import {
-  createEmptyWorkflow,
-  createWorkflowNode,
-  type Workflow,
-  type WorkflowConnection,
-  type WorkflowNode,
-} from '../../src/lib/workflow-engine';
 import type { PlatformComplianceReportV1 } from '../../src/lib/platform-compliance/types';
 import {
   expect,
   openStage4CanvasProject,
   openStage4ChatProject,
-  readStage4PersistedWorkflowNodeCount,
   seedStage4Baseline,
   stage4FixtureForProject,
   test,
@@ -274,86 +266,6 @@ async function seedTask11Runtime(input: {
   return sources;
 }
 
-async function buildWorkflow(page: Page, sources: ManagedSource[], projectId: string, profile: string): Promise<Workflow & {
-  skillNode: WorkflowNode;
-  downstreamNode: WorkflowNode;
-}> {
-  const workflowId = `task11-workflow-${profile}`;
-  const imageNodes: WorkflowNode[] = [];
-  for (const [index, source] of sources.entries()) {
-    const node = createWorkflowNode('input-image', 80, 80 + index * 240, `来源图 ${index + 1}`);
-    const transferResponse = await page.request.post('/api/assets/transfer', {
-      data: {
-        sourceVersion: source.assetVersionId,
-        targetProject: projectId,
-        targetWorkspace: workflowId,
-        entityType: 'workflow-input',
-        entityId: node.id,
-        idempotencyKey: `task11:${profile}:workflow-input:${index + 1}`,
-        metadata: { source: 'task11-e2e', sourceImageId: source.entityId },
-      },
-    });
-    expect(transferResponse.ok(), `第 ${index + 1} 张图片转入 Workflow 返回 HTTP ${transferResponse.status()}`)
-      .toBe(true);
-    const transferred = await transferResponse.json() as {
-      assetId: string;
-      assetVersionId: string;
-      placementId: string;
-      url: string;
-    };
-    expect(transferred.assetVersionId).toBe(source.assetVersionId);
-    node.config = {
-      ...node.config,
-      projectId,
-      imageUrl: transferred.url,
-      assetId: transferred.assetId,
-      assetVersionId: transferred.assetVersionId,
-      placementId: transferred.placementId,
-    };
-    imageNodes.push(node);
-  }
-  const skillNode = createWorkflowNode('ai-skill', 480, 240, '平台素材合规检查');
-  skillNode.config = {
-    ...skillNode.config,
-    skillId: SKILL_ID,
-    version: 1,
-    inputValues: {
-      platform: 'Amazon', region: 'US', assetType: 'main', productCategory: '',
-      productFacts: '商品为无文字、无边框的方形耳机主图。', claims: '', reportLanguage: '中文',
-    },
-    modelBindings: {
-      orchestrator: { providerId: PROVIDER_ID, modelId: MODEL_ID },
-      vision: { providerId: PROVIDER_ID, modelId: MODEL_ID },
-    },
-  };
-  const downstreamNode = createWorkflowNode('condition-if', 840, 240, '合规报告下游消费');
-  downstreamNode.condition = 'result.status == "completed"';
-  const connections: WorkflowConnection[] = imageNodes.map((node, index) => ({
-    id: `task11-source-${profile}-${index + 1}`,
-    fromNodeId: node.id,
-    fromPortId: 'out-image',
-    toNodeId: skillNode.id,
-    toPortId: 'in-image',
-    type: 'image' as const,
-  }));
-  connections.push({
-    id: `task11-report-consumer-${profile}`,
-    fromNodeId: skillNode.id,
-    fromPortId: 'out-task',
-    toNodeId: downstreamNode.id,
-    toPortId: 'in-data',
-    type: 'data',
-  });
-  return {
-    ...createEmptyWorkflow('Task 11 平台合规工作流'),
-    id: workflowId,
-    nodes: [...imageNodes, skillNode, downstreamNode],
-    connections,
-    skillNode,
-    downstreamNode,
-  };
-}
-
 async function readRun(page: Page, runId: string): Promise<SkillRunEvidence> {
   const response = await page.request.get(`/api/skill-runs/${encodeURIComponent(runId)}?observeOnly=true`);
   expect(response.ok(), `Skill Run ${runId} 返回 HTTP ${response.status()}`).toBe(true);
@@ -436,7 +348,7 @@ async function readManagedSources(
   });
 }
 
-test('Canvas 与 Workflow 交付同一版本的逐图平台合规报告并隔离 Simple Chat', async ({
+test('Canvas 交付逐图平台合规报告并隔离 Simple Chat', async ({
   page,
   stage4Evidence,
 }, testInfo) => {
@@ -486,29 +398,17 @@ test('Canvas 与 Workflow 交付同一版本的逐图平台合规报告并隔离
     placementId: source.placementId,
   }));
 
-  const workflow = await buildWorkflow(page, sources, projectId, fixture.browserProfile);
   fixture.canvasProject = {
     ...fixture.canvasProject,
     canvasImages: managedCanvasImages,
-    metadata: {
-      ...(fixture.canvasProject.metadata as Record<string, unknown>),
-      workflow: { ...workflow, name: 'Task 11 平台合规工作流' },
-    },
   };
-  fixture.nodeCount = workflow.nodes.length;
   await seedStage4Baseline(page, fixture, auth);
-  await expect.poll(() => readStage4PersistedWorkflowNodeCount(page, projectId))
-    .toBe(workflow.nodes.length);
   await openStage4CanvasProject(page, projectId);
 
   const canvasCatalogResponse = await page.request.get('/api/skills?surface=canvas');
-  const workflowCatalogResponse = await page.request.get('/api/skills?surface=workflow');
   const canvasCatalog = await canvasCatalogResponse.json() as { skills: Array<{ id: string; version: number }> };
-  const workflowCatalog = await workflowCatalogResponse.json() as { skills: Array<{ id: string; version: number }> };
   expect(canvasCatalog.skills).toHaveLength(28);
-  expect(workflowCatalog.skills).toHaveLength(28);
-  expect(workflowCatalog.skills.map(skill => `${skill.id}@${skill.version}`).sort())
-    .toEqual(canvasCatalog.skills.map(skill => `${skill.id}@${skill.version}`).sort());
+
 
   await page.locator('[data-canvas-image-id]').first().click();
   const expandPanel = page.getByRole('button', { name: '展开面板', exact: true });
@@ -549,67 +449,6 @@ test('Canvas 与 Workflow 交付同一版本的逐图平台合规报告并隔离
   const canvasDocuments = await assertReportDocuments(page, projectId, canvasRun);
   await expect(page.getByRole('region', { name: '平台素材合规报告' })).toHaveCount(3);
 
-  const collapsePanel = page.getByRole('button', { name: '收起面板', exact: true });
-  if (await collapsePanel.isVisible().catch(() => false)) await collapsePanel.click();
-  await page.getByTitle('节点模式').first().click();
-  await page.getByLabel('平台素材合规检查').last().click();
-  const skillSelect = page.getByRole('combobox', { name: 'Skill' });
-  await expect(skillSelect).toHaveValue(SKILL_ID, { timeout: 20_000 });
-  await expect(page.getByRole('status', { name: '来源图片' })).toHaveText('已选择 3 张来源图片');
-  await expect(page.getByRole('combobox', { name: 'vision 模型' })).toHaveValue(`${PROVIDER_ID}::${MODEL_ID}`);
-
-  const workflowSubmission = page.waitForResponse(response => (
-    new URL(response.url()).pathname === '/api/workflow/execute'
-    && response.request().method() === 'POST'
-    && Boolean(response.request().postData()?.includes('"action":"start"'))
-  ));
-  await page.getByRole('button', { name: '执行工作流', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Skill 费用预估', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: '确认执行', exact: true }).click();
-  const workflowSubmissionResponse = await workflowSubmission;
-  expect(workflowSubmissionResponse.ok()).toBe(true);
-  const workflowSubmissionPayload = await workflowSubmissionResponse.json() as { executionId: string };
-  await expect(page.getByText('执行完成', { exact: true })).toBeVisible({ timeout: 120_000 });
-  const workflowStatusResponse = await page.request.post('/api/workflow/execute', {
-    data: { action: 'status', executionId: workflowSubmissionPayload.executionId },
-  });
-  expect(workflowStatusResponse.ok()).toBe(true);
-  const workflowStatus = await workflowStatusResponse.json() as {
-    status: string;
-    results: Record<string, {
-      status?: string;
-      output?: {
-        runId?: string;
-        documentAssetVersionIds?: string[];
-        complianceReports?: PlatformComplianceReportV1[];
-        result?: {
-          status?: string;
-          documentAssetVersionIds?: string[];
-          complianceReports?: PlatformComplianceReportV1[];
-        };
-      };
-    }>;
-  };
-  expect(workflowStatus.status).toBe('completed');
-  const workflowOutput = workflowStatus.results[workflow.skillNode.id]?.output;
-  expect(workflowOutput?.documentAssetVersionIds).toHaveLength(3);
-  const workflowRun = await waitForCompletedRun(page, String(workflowOutput?.runId));
-  const workflowDocuments = await assertReportDocuments(page, projectId, workflowRun);
-  expect(workflowRun.skillId).toBe(canvasRun.skillId);
-  expect(workflowRun.skillVersion).toBe(canvasRun.skillVersion);
-  expect(workflowRun.sourceVersionIds).toEqual(canvasRun.sourceVersionIds);
-  expect(reportDigestsBySource(workflowDocuments.reports))
-    .toEqual(reportDigestsBySource(canvasDocuments.reports));
-
-  const downstreamResult = workflowStatus.results[workflow.downstreamNode.id];
-  expect(downstreamResult?.status).toBe('success');
-  expect(downstreamResult?.output?.result?.status).toBe('completed');
-  expect(downstreamResult?.output?.result?.documentAssetVersionIds)
-    .toEqual(workflowOutput?.documentAssetVersionIds);
-  expect(reportDigestsBySource(downstreamResult?.output?.result?.complianceReports ?? []))
-    .toEqual(reportDigestsBySource(workflowDocuments.reports));
-  await expect(page.locator('[data-workflow-compliance-summary]')).toContainText('3 份报告');
-
   const simpleCatalogResponse = await page.request.get('/api/skills?surface=simple-chat');
   expect(simpleCatalogResponse.ok()).toBe(true);
   const simpleCatalog = await simpleCatalogResponse.json() as { skills: Array<{ id: string }> };
@@ -638,17 +477,6 @@ test('Canvas 与 Workflow 交付同一版本的逐图平台合规报告并隔离
       runId: canvasRun.runId,
       reportAssetVersionIds: canvasRun.assetVersionIds,
       reports: canvasDocuments.reports.map(report => ({
-        reportId: report.reportId,
-        sourceVersionId: report.sourceVersionId,
-        verdict: report.verdict,
-        unknown: report.summary.unknown,
-        ruleSetDigest: report.ruleSetDigest,
-      })),
-    },
-    workflow: {
-      runId: workflowRun.runId,
-      reportAssetVersionIds: workflowRun.assetVersionIds,
-      reports: workflowDocuments.reports.map(report => ({
         reportId: report.reportId,
         sourceVersionId: report.sourceVersionId,
         verdict: report.verdict,

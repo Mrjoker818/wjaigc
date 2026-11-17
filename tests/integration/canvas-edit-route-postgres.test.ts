@@ -36,7 +36,6 @@ import { abortTaskExecution } from '@/lib/task-core/task-abort';
 import { getTaskInfo } from '@/lib/task-registry';
 import { getPool } from '@/lib/db-client';
 import { assetBinaryFileOps } from '@/lib/asset-core/binary-file-ops';
-import { buildNodeExecutionRequest, createWorkflowNode } from '@/lib/workflow-engine';
 
 beforeEach((): void => { boundary.deniedNetworkCalls = 0; vi.stubGlobal('fetch', async (): Promise<never> => { boundary.deniedNetworkCalls++; throw new Error('Unconfigured provider boundary'); }); });
 
@@ -863,29 +862,6 @@ it.each([
   });
 }, 60_000);
 
-it.each(['ai-edit', 'ai-color-adjust'] as const)('B: %s workflow request without a parent version cannot charge a document project', async type => {
-  await withIsolatedPostgres('task8cb3g_workflow_edit', async ({ query, databaseUrl, schemaName }) => {
-    await seedCanvasEdit(query, databaseUrl, schemaName);
-    const node = createWorkflowNode(type, 0, 0);
-    node.config.imageUrl = '/api/serve-upload/shared.png';
-    node.config.prompt = 'Make the sky blue';
-    node.config.model = 'provider::gpt-image-1';
-    const built = buildNodeExecutionRequest(node, {});
-    expect(built?.endpoint).toBe('/api/edit');
-    const before = await canvasBilling(query);
-    const response = await POST(request({
-      ...built!.body,
-      projectId: 'shared',
-      sessionId: 'workflow:shared',
-      messageId: `workflow-test:${node.id}`,
-    }, `workflow-edit-${type}`));
-    expect(response.status).toBe(400);
-    expect(boundary.callbacks).toHaveLength(0);
-    expect(boundary.deniedNetworkCalls).toBe(0);
-    expect(await canvasBilling(query)).toEqual(before);
-  });
-}, 60_000);
-
 it.each(['presence', 'owner', 'actor', 'archive', 'disable', 'global', 'nonimage', 'unavailable', 'foreign', 'cross-project', 'cross-owner'])('B: real %s denial has no task or charge', async scenario => {
   await withIsolatedPostgres('task8cb3g_forbidden', async ({ query, databaseUrl, schemaName }) => {
     await seedCanvasEdit(query, databaseUrl, schemaName);
@@ -973,7 +949,7 @@ it('E: revocation during provider execution retains personal result and GET neve
   });
 }, 60_000);
 
-it.each(['private', 'personal', 'chat', 'workflow', 'document-chat', 'internal-chat', 'fake-internal'])('E: %s compatibility retains one task charge and correct dispatch scope', async scenario => {
+it.each(['private', 'personal', 'chat', 'document-chat', 'internal-chat', 'fake-internal'])('E: %s compatibility retains one task charge and correct dispatch scope', async scenario => {
   await withIsolatedPostgres('task8cb3g_compat', async ({ query, databaseUrl, schemaName }) => {
     await seedCanvasEdit(query, databaseUrl, schemaName);
     await query("INSERT INTO wujie_projects(id,owner_id,name) VALUES ('personal','editor','Personal')");
@@ -981,7 +957,7 @@ it.each(['private', 'personal', 'chat', 'workflow', 'document-chat', 'internal-c
     boundary.source = scenario === 'internal-chat' ? 'internal' : 'session';
     const body = scenario === 'fake-internal' ? editBody() : editBody({ projectId: scenario === 'personal' ? 'personal' : scenario.startsWith('document-') ? 'shared' : undefined,
       image: `data:image/png;base64,${png}`, assetParentVersionIds: undefined, assetSelectedEntityIds: undefined,
-      ...(['chat', 'workflow', 'document-chat', 'document-workflow'].includes(scenario) ? { assetWorkspace: scenario.replace('document-', '') } : {}) });
+      ...(['chat', 'document-chat'].includes(scenario) ? { assetWorkspace: scenario.replace('document-', '') } : {}) });
     const headers = { 'x-wujie-agent-defer-execution': 'true', 'x-wujie-agent-resume-execution': 'true' };
     const response = await POST(request(body, 'compat', scenario === 'fake-internal' ? headers : scenario === 'internal-chat' ? { 'x-wujie-agent-defer-execution': 'true' } : {}));
     expect(response.status, await response.clone().text()).toBe(200); const { taskId } = await response.json();
@@ -995,35 +971,14 @@ it.each(['private', 'personal', 'chat', 'workflow', 'document-chat', 'internal-c
   });
 }, 60_000);
 
-it('E: document workflow rejects an unbound data image before charging', async (): Promise<void> => {
-  await withIsolatedPostgres('task8cb3g_workflow_unbound', async ({ query, databaseUrl, schemaName }) => {
+it('E: retired workflow workspace edits are rejected before charging', async (): Promise<void> => {
+  await withIsolatedPostgres('task8cb3g_workflow_retired', async ({ query, databaseUrl, schemaName }) => {
     await seedCanvasEdit(query, databaseUrl, schemaName);
-    const png = readFileSync(join(process.env.WUJIE_DATA_DIR!, 'shared.png')).toString('base64');
-    const response = await POST(request(editBody({ projectId: 'shared', assetWorkspace: 'workflow',
-      image: `data:image/png;base64,${png}`, assetParentVersionIds: undefined,
-      assetSelectedEntityIds: undefined }), 'workflow-unbound'));
-    expect(response.status).toBe(400);
-    expect(await response.json()).toMatchObject({ code: 'WORKFLOW_EDIT_SOURCE_INVALID' });
-    const state = await canvasBilling(query);
-    expect(state.tasks).toHaveLength(0);
-    expect(state.transactions).toHaveLength(0);
-    expect(state.credits.map(row => [row.user_id, Number(row.balance)])).toEqual([['editor', 100], ['owner', 100]]);
-    expect(boundary.callbacks).toHaveLength(0);
-  });
-}, 60_000);
-
-it('E: document workflow rejects a valid source when acceptance storage is unavailable', async (): Promise<void> => {
-  await withIsolatedPostgres('task8cb3g_workflow_storage', async ({ query, databaseUrl, schemaName }) => {
-    await seedCanvasEdit(query, databaseUrl, schemaName);
-    await query(`INSERT INTO wujie_workspace_placements
-      (id,owner_id,project_id,asset_id,asset_version_id,workspace_kind,workspace_id,entity_type,entity_id)
-      VALUES ('placement-workflow-shared','owner','shared','asset-shared','version-shared',
-        'workflow','workflow-a','workflow-input','input-shared')`);
     const response = await POST(request(editBody({ projectId: 'shared', assetWorkspace: 'workflow',
       image: '/api/serve-upload/shared.png', assetParentVersionIds: undefined,
-      assetSelectedEntityIds: undefined }), 'workflow-storage-unavailable'));
-    expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({ code: 'WORKFLOW_EDIT_ACCEPTANCE_STORAGE_UNAVAILABLE' });
+      assetSelectedEntityIds: undefined }), 'workflow-retired'));
+    expect(response.status).toBe(410);
+    expect(await response.json()).toMatchObject({ code: 'WORKFLOW_WORKSPACE_RETIRED' });
     const state = await canvasBilling(query);
     expect(state.tasks).toHaveLength(0);
     expect(state.transactions).toHaveLength(0);

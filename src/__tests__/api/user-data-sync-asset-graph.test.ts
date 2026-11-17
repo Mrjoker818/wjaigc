@@ -68,7 +68,6 @@ const projects = [{
 describe('user-data asset graph sync route', () => {
   const originalMode = process.env.WUJIE_ASSET_GRAPH_MODE;
   const originalCanvasKernelMode = process.env.WUJIE_CANVAS_KERNEL_MODE;
-  const originalWorkflowRendererMode = process.env.WUJIE_WORKFLOW_RENDERER_MODE;
 
   beforeEach(() => {
     Object.values(mocks).forEach((mock) => {
@@ -104,8 +103,6 @@ describe('user-data asset graph sync route', () => {
     else process.env.WUJIE_ASSET_GRAPH_MODE = originalMode;
     if (originalCanvasKernelMode === undefined) delete process.env.WUJIE_CANVAS_KERNEL_MODE;
     else process.env.WUJIE_CANVAS_KERNEL_MODE = originalCanvasKernelMode;
-    if (originalWorkflowRendererMode === undefined) delete process.env.WUJIE_WORKFLOW_RENDERER_MODE;
-    else process.env.WUJIE_WORKFLOW_RENDERER_MODE = originalWorkflowRendererMode;
   });
 
   it('returns shadow projects, revision and deleted identities from one authoritative snapshot', async () => {
@@ -366,22 +363,6 @@ describe('user-data asset graph sync route', () => {
       success: true,
       canvasKernelMode: 'shadow',
     });
-  });
-
-  it.each([
-    ['legacy', 'legacy'],
-    ['shadow', 'shadow'],
-    ['react-flow-v2', 'react-flow-v2'],
-  ] as const)('clamps server workflow renderer mode %s to %s at the route', async (configured, delivered) => {
-    process.env.WUJIE_ASSET_GRAPH_MODE = 'legacy';
-    process.env.WUJIE_WORKFLOW_RENDERER_MODE = configured;
-    mocks.dbGetUserData.mockResolvedValue(projects);
-
-    const response = await GET(new NextRequest('http://localhost/api/user-data/sync?key=projects'));
-
-    const body = await response.json();
-    expect(response.status, JSON.stringify(body)).toBe(200);
-    expect(body).toMatchObject({ workflowRendererMode: delivered });
   });
 
   it('injects the established data URL persistence boundary into atomic shadow sync', async () => {

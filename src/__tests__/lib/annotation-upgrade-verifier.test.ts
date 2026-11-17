@@ -18,7 +18,6 @@ const requiredTargets = [
   'src/features/annotations/annotation-bundle.ts',
   'src/features/annotations/annotation-composer.tsx',
   'src/features/annotations/annotation-overlay.tsx',
-  'src/features/annotations/node-annotation-workspace.tsx',
   'src/features/annotations/use-annotation-controller.ts',
   'src/lib/annotation-mask.ts',
   'src/lib/annotation-provider-adapter.ts',

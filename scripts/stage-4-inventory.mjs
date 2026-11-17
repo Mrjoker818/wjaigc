@@ -346,14 +346,6 @@ export function extractSkillIdsForSurface(
   ) ? uniqueInOrder(records.map(record => record.id)) : [];
 }
 
-function extractObjectKeys(source, exportName) {
-  const match = source.match(new RegExp(`export\\s+const\\s+${exportName}[^=]*=\\s*\\{([\\s\\S]*?)\\n\\};`));
-  if (!match) return [];
-  return uniqueSorted(
-    [...match[1].matchAll(/^\s*['"]?([a-zA-Z0-9:-]+)['"]?\s*:/gm)].map(entry => entry[1]),
-  );
-}
-
 function extractWorkspaceRoutes(source) {
   const routes = extractLiteralApiRoutes(source);
   return routes;
@@ -361,16 +353,6 @@ function extractWorkspaceRoutes(source) {
 
 function hasCoverage(testSources, patterns) {
   return patterns.some(pattern => testSources.some(source => source.includes(pattern)));
-}
-
-function deriveRisk(routes, taskTypes) {
-  if (
-    routes.some(route => route.startsWith('/api/workflow') || route === '/api/agent-edit')
-    || taskTypes.some(type => /workflow|agent|generate|video/i.test(type))
-  ) {
-    return 'high';
-  }
-  return routes.length >= 4 || taskTypes.length >= 2 ? 'medium' : 'low';
 }
 
 function renderWorkspaceTable(workspaces) {
@@ -391,12 +373,9 @@ function renderStage4InventoryMarkdown(inventory) {
 - Generated at: ${inventory.generatedAt}
 - Root: \`${inventory.root}\`
 - Workspaces: ${inventory.workspaces.length}
-- Node types: ${inventory.nodeTypes.length}
-- Port types: ${inventory.portTypes.length}
 - Agent tools: ${inventory.agentTools.length}
 - Skills: ${inventory.skills.length}
 - Canvas Skills: ${inventory.skillCatalogs.canvas.length}
-- Workflow Skills: ${inventory.skillCatalogs.workflow.length}
 - Simple Chat Skills: ${inventory.skillCatalogs.simpleChat.length}
 - Routes: ${inventory.routes.length}
 
@@ -414,13 +393,6 @@ ${inventory.agentTools.map(tool => `- \`${tool}\``).join('\n')}
 
 ${inventory.skills.map(skill => `- \`${skill}\``).join('\n')}
 
-## Node types
-
-${inventory.nodeTypes.map(nodeType => `- \`${nodeType}\``).join('\n')}
-
-## Port types
-
-${inventory.portTypes.map(portType => `- \`${portType}\``).join('\n')}
 
 ## Routes
 
@@ -433,11 +405,9 @@ async function collectWorkspaceSources(root) {
     readFile(join(root, 'src/app/page.tsx'), 'utf8'),
     readFile(join(root, 'src/components/canvas-workspace.tsx'), 'utf8'),
     readFile(join(root, 'src/components/infinite-canvas.tsx'), 'utf8'),
-    readFile(join(root, 'src/components/node-editor.tsx'), 'utf8'),
     readFile(join(root, 'src/app/simple-chat/page.tsx'), 'utf8'),
     readFile(join(root, 'src/components/chat-panel.tsx'), 'utf8'),
     readFile(join(root, 'src/lib/agent-engine.ts'), 'utf8'),
-    readFile(join(root, 'src/lib/workflow-engine.ts'), 'utf8'),
     readFile(join(root, 'src/lib/skill-runtime/canvas-presets.ts'), 'utf8'),
     readFile(join(root, 'src/lib/skill-runtime/marketing-presets.ts'), 'utf8'),
     readFile(join(root, 'src/lib/skill-runtime/content-commerce-presets.ts'), 'utf8'),
@@ -451,18 +421,16 @@ async function collectWorkspaceSources(root) {
     homePageSource: files[0],
     canvasWorkspaceSource: files[1],
     canvasSource: files[2],
-    nodeEditorSource: files[3],
-    simpleChatPageSource: files[4],
-    chatPanelSource: files[5],
-    agentSource: files[6],
-    workflowSource: files[7],
-    canvasSkillsSource: files[8],
-    marketingSkillsSource: files[9],
-    contentCommerceSkillsSource: files[10],
-    platformComplianceSkillsSource: files[11],
-    simpleChatSkillsSource: files[12],
-    multiPlatformExportSkillSource: files[13],
-    briefToVideoSkillSource: files[14],
+    simpleChatPageSource: files[3],
+    chatPanelSource: files[4],
+    agentSource: files[5],
+    canvasSkillsSource: files[6],
+    marketingSkillsSource: files[7],
+    contentCommerceSkillsSource: files[8],
+    platformComplianceSkillsSource: files[9],
+    simpleChatSkillsSource: files[10],
+    multiPlatformExportSkillSource: files[11],
+    briefToVideoSkillSource: files[12],
   };
 }
 
@@ -472,11 +440,9 @@ export async function collectStage4Inventory(root = process.cwd()) {
     homePageSource,
     canvasWorkspaceSource,
     canvasSource,
-    nodeEditorSource,
     simpleChatPageSource,
     chatPanelSource,
     agentSource,
-    workflowSource,
     canvasSkillsSource,
     marketingSkillsSource,
     contentCommerceSkillsSource,
@@ -501,9 +467,7 @@ export async function collectStage4Inventory(root = process.cwd()) {
   const routeSet = uniqueSorted([
     ...repository.apiRoutes.map(route => route.route),
     ...extractWorkspaceRoutes(canvasSource),
-    ...extractWorkspaceRoutes(nodeEditorSource),
     ...extractWorkspaceRoutes(chatPanelSource),
-    ...extractWorkspaceRoutes(workflowSource),
   ]);
 
   const taskTypes = uniqueSorted(
@@ -511,23 +475,14 @@ export async function collectStage4Inventory(root = process.cwd()) {
       extractTaskTypes(await readFile(join(root, 'src/lib/task-registry.ts'), 'utf8')),
       extractTaskTypes(await readFile(join(root, 'src/app/api/agent-edit/route.ts'), 'utf8')),
       extractTaskTypes(await readFile(join(root, 'src/app/api/generate/route.ts'), 'utf8')),
-      extractTaskTypes(await readFile(join(root, 'src/app/api/workflow/execute/route.ts'), 'utf8')),
     ),
   );
 
-  const nodeTypes = extractObjectKeys(workflowSource, 'NODE_TYPE_LABELS');
-  const portTypes = extractObjectKeys(workflowSource, 'PORT_COMPATIBILITY');
   const legacyCanvasSkills = extractSkillIdsForSurface(
     canvasSkillsSource,
     'RAW_CANVAS_PRESET_SKILLS',
     'canvasSurfaces',
     'canvas',
-  );
-  const legacyWorkflowSkills = extractSkillIdsForSurface(
-    canvasSkillsSource,
-    'RAW_CANVAS_PRESET_SKILLS',
-    'canvasSurfaces',
-    'workflow',
   );
   const marketingCanvasSkills = extractSkillIdsForSurface(
     marketingSkillsSource,
@@ -535,35 +490,17 @@ export async function collectStage4Inventory(root = process.cwd()) {
     'surfaces',
     'canvas',
   );
-  const marketingWorkflowSkills = extractSkillIdsForSurface(
-    marketingSkillsSource,
-    'LOVART_MARKETING_SKILLS',
-    'surfaces',
-    'workflow',
-  );
   const contentCommerceCanvasSkills = extractSkillIdsForSurface(
     contentCommerceSkillsSource,
     'LOVART_CONTENT_COMMERCE_SKILLS',
     'surfaces',
     'canvas',
   );
-  const contentCommerceWorkflowSkills = extractSkillIdsForSurface(
-    contentCommerceSkillsSource,
-    'LOVART_CONTENT_COMMERCE_SKILLS',
-    'surfaces',
-    'workflow',
-  );
   const platformComplianceCanvasSkills = extractSkillIdsForSurface(
     platformComplianceSkillsSource,
     'LOVART_PLATFORM_COMPLIANCE_SKILLS',
     'surfaces',
     'canvas',
-  );
-  const platformComplianceWorkflowSkills = extractSkillIdsForSurface(
-    platformComplianceSkillsSource,
-    'LOVART_PLATFORM_COMPLIANCE_SKILLS',
-    'surfaces',
-    'workflow',
   );
   const optionalCanvasWorkflowSkills = [
     stringValue(
@@ -584,13 +521,6 @@ export async function collectStage4Inventory(root = process.cwd()) {
     ...platformComplianceCanvasSkills,
     ...optionalCanvasWorkflowSkills,
   ]);
-  const workflowSkills = uniqueInOrder([
-    ...legacyWorkflowSkills,
-    ...marketingWorkflowSkills,
-    ...contentCommerceWorkflowSkills,
-    ...platformComplianceWorkflowSkills,
-    ...optionalCanvasWorkflowSkills,
-  ]);
   const simpleChatSkills = extractSkillIdsForSurface(
     simpleChatSkillsSource,
     'RAW_SIMPLE_CHAT_PRESET_SKILLS',
@@ -599,7 +529,6 @@ export async function collectStage4Inventory(root = process.cwd()) {
   );
   const skillCatalogs = {
     canvas: canvasSkills,
-    workflow: workflowSkills,
     simpleChat: simpleChatSkills,
   };
   const skills = uniqueSorted([...canvasSkills, ...simpleChatSkills]);
@@ -634,39 +563,6 @@ export async function collectStage4Inventory(root = process.cwd()) {
         'stage-2-cross-workspace',
       ]),
       risk: 'high',
-    },
-    {
-      id: 'workflow',
-      name: 'Workflow workspace',
-      entryRoute: '/?projectId=<project>',
-      entryFile: 'src/components/node-editor.tsx',
-      entrypoints: ['canvas toolbar 节点模式', 'workflow metadata restore'],
-      components: uniqueSorted([
-        'src/components/canvas-workspace.tsx',
-        'src/components/node-editor.tsx',
-        'src/lib/workflow-engine.ts',
-      ]),
-      routes: uniqueSorted([
-        '/api/workflow/execute',
-        '/api/workflow/models',
-        '/api/workflow/save',
-        '/api/workflow/ai-build',
-        ...extractWorkspaceRoutes(nodeEditorSource),
-        ...extractWorkspaceRoutes(workflowSource),
-      ]),
-      taskTypes: taskTypes.filter(type => /workflow|generate|agent/i.test(type)),
-      assetInputs: ['project metadata workflow', 'canvas image references', 'prompt inputs'],
-      assetOutputs: ['workflow execution outputs', 'canvas transfers', 'saved workflow records'],
-      hasAutomatedCoverage: hasCoverage(testSources, [
-        '执行工作流',
-        'workflow',
-        'project workflow restoration',
-        'stage-2-cross-workspace',
-      ]),
-      risk: deriveRisk(
-        ['/api/workflow/execute', '/api/workflow/ai-build', '/api/chat'],
-        taskTypes.filter(type => /workflow|agent|generate/i.test(type)),
-      ),
     },
     {
       id: 'simple-chat',
@@ -713,8 +609,6 @@ export async function collectStage4Inventory(root = process.cwd()) {
     root: posixPath(resolve(root)),
     generatedAt: new Date().toISOString(),
     workspaces,
-    nodeTypes,
-    portTypes,
     routes: routeSet,
     agentTools,
     skills,
@@ -741,8 +635,6 @@ if (isMain) {
   process.stdout.write(`${JSON.stringify({
     routes: inventory.routes.length,
     workspaces: inventory.workspaces.length,
-    nodeTypes: inventory.nodeTypes.length,
-    portTypes: inventory.portTypes.length,
     jsonPath: posixPath(artifacts.jsonPath),
     markdownPath: posixPath(artifacts.markdownPath),
   }, null, 2)}\n`);

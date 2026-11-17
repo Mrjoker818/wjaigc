@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, useId } from "react";
-import { Check, Menu, Paperclip, ArrowUp, Square, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search, Eye, EyeOff, Image, Download, Send, Shield, ThumbsUp, ThumbsDown, Pencil, PenSquare, Brain, PenLine, ScanSearch, Clock } from "lucide-react";
+import { Check, Clapperboard, Menu, Paperclip, ArrowUp, Square, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search, Eye, EyeOff, Image, Download, Send, Shield, ThumbsUp, ThumbsDown, Pencil, PenSquare, Brain, PenLine, ScanSearch, Clock } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { MarkdownRenderer } from "./markdown-renderer";
 import { ImageLightbox } from "./image-lightbox";
@@ -23,7 +23,7 @@ import {
   ProjectInstructions, ProjectKnowledgeItem,
   PRESET_SKILLS, PresetSkill, alignSimpleChatMediaSlots, buildSimpleChatMessageSourceTrace,
   buildSimpleChatManagedAttachmentSelection,
-  canSendSimpleChatMessageToNodeMode, canTransferSimpleChatMedia,
+  canSendSimpleChatMessageToDrama, canTransferSimpleChatMedia,
   readSimpleChatStreamAssetReference,
   sendSimpleChatExportToCanvas, sendSimpleChatMediaToCanvas,
   type WorkspaceAssetReference
@@ -36,12 +36,6 @@ import { AgentProgressTimeline } from "@/components/agent-runtime/AgentProgressT
 import { useAgentRunEvents } from "@/components/agent-runtime/use-agent-run-events";
 import { isWorkspaceResultScopeCurrent } from "@/lib/asset-core/workspace-transfer";
 import { completedChatImageMessageContent } from "@/lib/chat-pending-generation";
-import {
-  buildWorkflowChatReturnTransfer,
-  createWorkflowChatReturnMessage,
-  hasAmbiguousWorkflowChatReturnParameters,
-  parseWorkflowChatReturnIntent,
-} from "@/lib/asset-core/workflow-chat-return";
 import {
   SimpleChatSseProtocolError,
   consumeSimpleChatJsonStream,
@@ -256,15 +250,15 @@ export function SimpleChatWorkspaceActions({
   onNotice,
   navigate = url => window.location.assign(url),
 }: SimpleChatWorkspaceActionsProps) {
-  const canSendToNodeMode = canSendSimpleChatMessageToNodeMode(message);
+  const canSendToDrama = canSendSimpleChatMessageToDrama(message);
   const canSendToCanvas = canTransferSimpleChatMedia(message.images || [], message.imageRefs || []);
-  const sendToNodeMode = () => {
+  const sendToDrama = () => {
     if (!selectedCanvasProjectId || !project || !task) {
       onNotice('请先选择目标画布项目');
       return;
     }
-    if (!canSendToNodeMode) {
-      onNotice('仅非空文本或已登记图片可发送到节点模式');
+    if (!canSendToDrama) {
+      onNotice('仅非空文本或已登记图片可发送到短剧工作台');
       return;
     }
     navigate(buildSimpleChatWorkspaceHandoffUrl({
@@ -295,17 +289,17 @@ export function SimpleChatWorkspaceActions({
         </button>
       )}
       <button
-        onClick={sendToNodeMode}
-        disabled={!canSendToNodeMode}
+        onClick={sendToDrama}
+        disabled={!canSendToDrama}
         className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-amber-500/10 text-amber-500 transition-colors disabled:text-muted-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent"
         title={!selectedCanvasProjectId || !project || !task
           ? '请先选择目标画布项目'
-          : canSendToNodeMode
-            ? '发送到节点模式'
-            : '仅非空文本或已登记图片可发送到节点模式'}
-        aria-label="发送到节点模式"
+          : canSendToDrama
+            ? '发送到短剧工作台'
+            : '仅非空文本或已登记图片可发送到短剧工作台'}
+        aria-label="发送到短剧工作台"
       >
-        <GitBranch className="w-3 h-3" />
+        <Clapperboard className="w-3 h-3" />
       </button>
     </div>
   );
@@ -441,7 +435,6 @@ export default function ChatArea({
   const [searchResults, setSearchResults] = useState<Array<{ taskId: string; taskName: string; messageIndex: number; snippet: string }>>([]);
   const [branchBaseMessageId, setBranchBaseMessageId] = useState<string | null>(null);
   const [searchStatus, setSearchStatus] = useState<string | null>(null);
-  const [workflowReturnConflict, setWorkflowReturnConflict] = useState(false);
   // Brand DNA injection
   const [brandActive, setBrandActive] = useState(false);
 
@@ -746,8 +739,6 @@ export default function ChatArea({
   const projectIdRef = useRef(project?.id);
   const taskIdRef = useRef(task?.id);
   const latestTaskRef = useRef(task);
-  const workflowReturnHandledRef = useRef<string | null>(null);
-  const workflowReturnPersistenceGuardRef = useRef<{ scope: string; messageId: string } | null>(null);
   messageScopeRef.current = messageScope;
   projectIdRef.current = project?.id;
   taskIdRef.current = task?.id;
@@ -757,80 +748,6 @@ export default function ChatArea({
   useEffect(() => {
     if (project?.id) localStorage.setItem('wujie_last_simple_chat_project', project.id);
   }, [project?.id]);
-
-  useEffect(() => {
-    const ambiguous = hasAmbiguousWorkflowChatReturnParameters(window.location.search);
-    setWorkflowReturnConflict(ambiguous);
-    if (ambiguous || !project?.id || !task?.id) return;
-    const intent = parseWorkflowChatReturnIntent(window.location.search);
-    if (!intent) return;
-    const initialParams = new URLSearchParams(window.location.search);
-    if ((initialParams.has('projectId') && initialParams.get('projectId') !== project.id)
-      || (initialParams.has('taskId') && initialParams.get('taskId') !== task.id)) return;
-    const intentPath = window.location.pathname;
-    const intentKey = `${project.id}:${intent.executionId}:${intent.outputNodeId}:${intent.sourceVersionId}`;
-    if (workflowReturnHandledRef.current === intentKey) return;
-    workflowReturnHandledRef.current = intentKey;
-    let cancelled = false;
-    let guardedMessageId: string | null = null;
-    void (async () => {
-      try {
-        const response = await fetch('/api/assets/transfer', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-wujie-expected-actor-id': user.id },
-          body: JSON.stringify(buildWorkflowChatReturnTransfer(intent, project.id)),
-        });
-        if (!response.ok) throw new Error(`Asset transfer failed (${response.status})`);
-        const reference = readWorkspaceAssetReference(await response.json());
-        if (!reference?.assetVersionId || !reference.placementId || !reference.entityId) {
-          throw new Error('Asset transfer returned an incomplete reference');
-        }
-        if (cancelled || messageScopeRef.current !== messageScope || projectIdRef.current !== project.id || taskIdRef.current !== task.id) return;
-        const returned = createWorkflowChatReturnMessage(intent, reference);
-        const latestTask = latestTaskRef.current;
-        if (!latestTask || latestTask.id !== task.id) return;
-        const persistedMessages = (latestTask.messages || []).some(message => message.id === returned.id)
-          ? latestTask.messages
-          : [...(latestTask.messages || []), returned];
-        guardedMessageId = returned.id;
-        workflowReturnPersistenceGuardRef.current = {
-          scope: messageScope,
-          messageId: returned.id,
-        };
-        await onPersistTask({ ...latestTask, messages: persistedMessages, updatedAt: Date.now() });
-        if (cancelled || messageScopeRef.current !== messageScope || projectIdRef.current !== project.id || taskIdRef.current !== task.id) return;
-        const currentMessages = messagesRef.current;
-        const mergedMessages = currentMessages.some(message => message.id === returned.id)
-          ? [...currentMessages]
-          : [...currentMessages, returned];
-        if (workflowReturnPersistenceGuardRef.current?.scope === messageScope
-          && workflowReturnPersistenceGuardRef.current.messageId === returned.id) {
-          workflowReturnPersistenceGuardRef.current = null;
-        }
-        setMessages(mergedMessages);
-        const current = new URL(window.location.href);
-        const currentIntent = parseWorkflowChatReturnIntent(current.search);
-        if (current.pathname !== intentPath || !currentIntent
-          || JSON.stringify(currentIntent) !== JSON.stringify(intent)
-          || (current.searchParams.has('projectId') && current.searchParams.get('projectId') !== project.id)
-          || (current.searchParams.has('taskId') && current.searchParams.get('taskId') !== task.id)) return;
-        for (const key of [
-          'assetProjectId', 'workflowVersionId', 'sourceVersionId', 'workflowId', 'workflowExecutionId',
-          'workflowOutputNodeId', 'workflowOutputLabel',
-        ]) current.searchParams.delete(key);
-        window.history.replaceState(null, '', `${current.pathname}${current.search}${current.hash}`);
-      } catch {
-        if (!cancelled) setSearchStatus('工作流结果返回失败，请重试');
-      }
-    })();
-    return () => {
-      cancelled = true;
-      if (workflowReturnPersistenceGuardRef.current?.scope === messageScope
-        && workflowReturnPersistenceGuardRef.current.messageId === guardedMessageId) {
-        workflowReturnPersistenceGuardRef.current = null;
-      }
-    };
-  }, [onPersistTask, project?.id, task?.id, user.id]);
 
   // Keep unsent text and images attached to their account, task and chat mode.
   useEffect(() => {
@@ -1336,10 +1253,6 @@ export default function ChatArea({
   // Sync task to parent（临时聊天模式下跳过保存）
   useEffect(() => {
     if (!task || !project || tempChat || messagesScope !== messageScope) return;
-    const workflowReturnGuard = workflowReturnPersistenceGuardRef.current;
-    if (workflowReturnGuard?.scope === messageScope) {
-      return;
-    }
     // Switching chat modes must not create a timestamp-only local mutation.
     // Real message/model/control changes still use the original sync path.
     if (task.model === selectedModel && task.providerId === selectedProviderId
@@ -2813,7 +2726,6 @@ export default function ChatArea({
     return (
       <div className="flex-1 flex items-center justify-center bg-background">
         <div className="text-center space-y-3">
-          {workflowReturnConflict && <p role="alert" className="text-sm text-muted-foreground">工作流返回参数存在冲突，未处理。请返回工作流重新发送。</p>}
           <BookOpen className="w-12 h-12 mx-auto text-muted-foreground/30" />
           <p className="text-muted-foreground text-lg">选择或创建一个对话</p>
           <button onClick={() => onCreateTask(project?.id || '')} className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm">
@@ -3950,11 +3862,6 @@ export default function ChatArea({
       />
 
       {/* Search results info bar */}
-      {workflowReturnConflict && (
-        <div role="alert" className="px-4 py-2 bg-primary/5 border-b border-primary/10 text-xs text-muted-foreground shrink-0">
-          工作流返回参数存在冲突，未处理。请返回工作流重新发送。
-        </div>
-      )}
       {searchStatus && (
         <div className="flex items-center gap-2 px-4 py-2 bg-primary/5 border-b border-primary/10 text-xs text-muted-foreground shrink-0">
           <Globe className="w-3.5 h-3.5 text-primary animate-pulse" />

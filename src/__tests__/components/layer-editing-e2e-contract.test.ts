@@ -29,15 +29,12 @@ describe('layer editing browser contract', () => {
     expect(editor).toContain('data-layer-engine={item.value}');
   });
 
-  it('exposes stable layer-row operations and node configuration fields', () => {
+  it('exposes stable layer-row operations', () => {
     const layerRow = source('src/components/psd-editor/LayerRow.tsx');
-    const nodeEditor = source('src/components/node-editor.tsx');
 
     expect(layerRow).toContain('data-layer-row={layer.id}');
     expect(layerRow).toContain('data-layer-action="visibility"');
     expect(layerRow).toContain('data-layer-action="lock"');
-    expect(nodeEditor).toContain('data-node-type={t.type}');
-    expect(nodeEditor).toContain('data-node-field={field.key}');
   });
 
   it('guards the layer submission synchronously against rapid duplicate clicks', () => {

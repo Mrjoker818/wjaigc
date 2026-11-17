@@ -93,10 +93,9 @@ describe('Agent result workspace projection', () => {
     expect(isWorkspaceResultScopeCurrent('project-1', activeProjectId)).toBe(false);
   });
 
-  it('wires the same project scope guard into all three result surfaces', () => {
+  it('wires the same project scope guard into both result surfaces', () => {
     const paths = [
       'src/components/canvas-workspace.tsx',
-      'src/components/node-editor.tsx',
       'src/components/simple-chat/chat-area.tsx',
     ];
     for (const path of paths) {

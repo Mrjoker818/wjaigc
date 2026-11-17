@@ -791,23 +791,12 @@ function resolveAgentRuntimeMode(raw) {
   return raw === 'shadow' || raw === 'agent-v2' ? raw : 'legacy';
 }
 
-function resolveWorkflowRendererMode(raw) {
-  return raw === 'shadow' || raw === 'react-flow-v2' ? raw : 'legacy';
-}
-
 function checkStage4Modes() {
   const rawAgentMode = process.env.WUJIE_AGENT_RUNTIME_MODE?.trim();
   const resolvedAgentMode = resolveAgentRuntimeMode(rawAgentMode);
   add('PASS', 'agent-runtime-mode', rawAgentMode ? resolvedAgentMode : 'legacy (default)');
   if (rawAgentMode && resolvedAgentMode === 'legacy' && rawAgentMode !== 'legacy') {
     add('WARN', 'agent-runtime-mode', 'unsupported value; runtime falls back to legacy');
-  }
-
-  const rawWorkflowMode = process.env.WUJIE_WORKFLOW_RENDERER_MODE?.trim();
-  const resolvedWorkflowMode = resolveWorkflowRendererMode(rawWorkflowMode);
-  add('PASS', 'workflow-renderer-mode', rawWorkflowMode ? resolvedWorkflowMode : 'legacy (default)');
-  if (rawWorkflowMode && resolvedWorkflowMode === 'legacy' && rawWorkflowMode !== 'legacy') {
-    add('WARN', 'workflow-renderer-mode', 'unsupported value; runtime falls back to legacy');
   }
 }
 

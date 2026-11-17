@@ -47,8 +47,8 @@ describe('CI approved Stage 3/4 browser fixture boundary', () => {
   // The real Playwright collector is exercised; no browser/server/database is started.
   it.each([
     ['stage-3-canvas-kernel', 'Run five-browser Canvas matrix', 60],
-    // Four approved cases per browser, including the narrow-toolbar regression.
-    ['stage-4-workspace-interoperability', 'Run five-browser Stage 4 workspace matrix', 20],
+    // One approved chat/agent case per browser; the node-mode cases were retired with node mode.
+    ['stage-4-workspace-interoperability', 'Run five-browser Stage 4 workspace matrix', 5],
   ] as const)('%s discovers every approved case and no unseeded browser project', (jobName, stepName, caseCount) => {
     const command = workflow.jobs[jobName].steps.find(step => step.name === stepName)?.run;
     if (!command) throw new Error(`Missing workflow command: ${stepName}`);
@@ -73,7 +73,6 @@ describe('CI approved Stage 3/4 browser fixture boundary', () => {
         ]))]))),
         E2E_STAGE3_EXPECTED_CANVAS_MODE: 'legacy',
         E2E_STAGE4_EXPECTED_AGENT_MODE: 'agent-v2',
-        E2E_STAGE4_EXPECTED_WORKFLOW_RENDERER_MODE: 'react-flow-v2',
       },
       encoding: 'utf8', timeout: 10_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true,
     });
@@ -90,10 +89,7 @@ describe('CI approved Stage 3/4 browser fixture boundary', () => {
       const cases = discoveredCases(report.suites);
       for (const profile of ['chromium', 'chromium-1080p', 'firefox', 'webkit', 'mobile-chromium']) {
         expect(cases.filter(test => test.projectName === profile).map(test => test.title).sort()).toEqual([
-          'completes chat to canvas to workflow to chat with durable lineage and refresh recovery',
           'executes ordinary chat, vision stop, agent cancel, and refresh recovery',
-          'keeps the annotation action fully inside the workflow toolbar on narrow screens',
-          'keeps the selected workflow renderer server-authoritative at 100 nodes',
         ]);
       }
     }

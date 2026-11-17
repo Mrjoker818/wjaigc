@@ -68,34 +68,4 @@ describe('simple-chat transfer idempotency', () => {
     expect(long.entityId).toMatch(/^simple-chat:[a-f0-9]{64}$/);
     expect(long.idempotencyKey).toMatch(/^simple-chat-canvas:[a-f0-9]{64}$/);
   });
-
-  it('bounds workflow handoff idempotency keys while preserving the existing short format', () => {
-    const build = handoffClient.buildSimpleChatWorkflowTransfer;
-    const createInput = (value: string) => ({
-      intent: {
-        targetProjectId: value,
-        chatProjectId: value,
-        chatTaskId: value,
-        chatMessageId: value,
-      },
-      workflowId: value,
-      pending: {
-        nodeId: `${value}-input`,
-        imageIndex: 0,
-        sourceTrace: { source: 'simple-chat' },
-        assetRef: { url: '/image.png', assetVersionId: value },
-      },
-    });
-
-    const short = createInput('a');
-    expect(build(short.intent as never, short.workflowId, short.pending as never).idempotencyKey)
-      .toBe('simple-chat-workflow:["a","a","a","a","a",0,"a"]');
-
-    const long = createInput('identity-'.repeat(40));
-    const first = build(long.intent as never, long.workflowId, long.pending as never).idempotencyKey;
-    const repeated = build(long.intent as never, long.workflowId, long.pending as never).idempotencyKey;
-    expect(first.length).toBeLessThanOrEqual(256);
-    expect(first).toBe(repeated);
-    expect(first).toMatch(/^simple-chat-workflow:[a-f0-9]{64}$/);
-  });
 });

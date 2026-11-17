@@ -1438,7 +1438,7 @@ describe('mobile simple-chat page layout', () => {
           expect(box.height, 'real page reading v low-height actions reserve one row rather than displace body').toBeLessThanOrEqual(52);
           expect(await operations.evaluate(element => Number(getComputedStyle(element).opacity)), 'real page reading v low-height actions never depend on hover').toBe(1);
           expect((await v5Observe(s, 'short-initial')).readable, 'real page reading v actual last message remains painted').toBe(true);
-          const titles = ['复制', '重新生成', '更短', '更长', '继续', '转生图提示词', '从此分支', '保存为 Artifact', '发送到节点模式', '有帮助', '无帮助', '在 Canvas 中编辑'];
+          const titles = ['复制', '重新生成', '更短', '更长', '继续', '转生图提示词', '从此分支', '保存为 Artifact', '发送到短剧工作台', '有帮助', '无帮助', '在 Canvas 中编辑'];
           const buttons = operations.getByRole('button');
           expect(await buttons.evaluateAll(elements => elements.map(element => element.getAttribute('title'))), 'real page reading v retains every original action').toEqual(titles);
           await s.context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: T5_ORIGIN });

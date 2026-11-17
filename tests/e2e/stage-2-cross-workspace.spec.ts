@@ -114,40 +114,6 @@ test.describe('Stage 2 cross-workspace flows', () => {
     }
   });
 
-  test('runs a seeded workflow through the node-mode UI and returns its real output to canvas', async ({ page, stage2Evidence }, testInfo) => {
-    const projectId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_WORKFLOW_PROJECT_IDS');
-    await loginRealUser(page, stage2Evidence);
-    const snapshot = await readProjects(page, stage2Evidence);
-    const originalProject = snapshot.projects.find(project => project.id === projectId);
-    expect(originalProject).toBeTruthy();
-    const placementBaseline = await stage2PlacementBaseline(page, stage2Evidence, projectId);
-    await openCanvasProject(page, projectId);
-    await page.getByTitle('节点模式').first().click();
-    const execute = page.getByRole('button', { name: '执行工作流', exact: true });
-    await expect(execute).toBeVisible({ timeout: 20_000 });
-    const placementIds = new Set<string>();
-    const saves = observeProjectGraphSaves(page, projectId);
-    try {
-      const started = page.waitForResponse(response => response.url().includes('/api/workflow/execute') && response.request().method() === 'POST');
-      const outputTransfer = page.waitForResponse(response => response.url().includes('/api/assets/transfer') && response.request().method() === 'POST', { timeout: 180_000 });
-      await execute.click();
-      const startedPayload = await recordJsonResponse(await started, payload => stage2Evidence.recordPayload(payload));
-      expect(Object.entries(startedPayload).some(([key, value]) => /(?:task|execution)_?id/i.test(key) && typeof value === 'string' && value.length > 0)).toBe(true);
-      const payload = await recordJsonResponse(await outputTransfer, value => stage2Evidence.recordPayload(value));
-      if (typeof payload.placementId === 'string') placementIds.add(payload.placementId);
-      const created = expectTransfer(payload);
-      const back = page.getByRole('button', { name: '返回画布', exact: true });
-      await expect(back).toBeVisible();
-      await back.click();
-      await expect(await canvasImageByUrl(page, created.url)).toBeVisible();
-      await saves.waitFor(created, 180_000);
-      await assertSingleNewProjectPlacement(placementBaseline, projectId, created);
-    } finally {
-      saves.dispose();
-      await cleanupNewProjectPlacements(page, stage2Evidence, originalProject!, placementIds, placementBaseline);
-    }
-  });
-
   test('sends a real standalone-chat result into the designated canvas through the UI', async ({ page, stage2Evidence }, testInfo) => {
     const chatProjectId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_STANDALONE_CHAT_PROJECT_IDS');
     const targetProjectId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_STANDALONE_TARGET_PROJECT_IDS');
@@ -180,7 +146,7 @@ test.describe('Stage 2 cross-workspace flows', () => {
     }
   });
 
-  test('keeps seeded chat and workflow views usable after deleting only the canvas placement', async ({ page, stage2Evidence }, testInfo) => {
+  test('keeps seeded chat views usable after deleting only the canvas placement', async ({ page, stage2Evidence }, testInfo) => {
     const projectId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_SHARED_REFERENCE_PROJECT_IDS');
     const chatProjectId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_SHARED_CHAT_PROJECT_IDS');
     const assetId = requireStage2ProjectValue(testInfo.project.name, 'E2E_STAGE2_SHARED_ASSET_IDS');
@@ -213,9 +179,6 @@ test.describe('Stage 2 cross-workspace flows', () => {
       expect(missing.status()).toBe(404);
       expect(missingPayload.error).toBe('ASSET_NOT_FOUND');
       await page.goto(`/simple-chat?projectId=${encodeURIComponent(chatProjectId)}`, { waitUntil: 'domcontentloaded' });
-      await expect(await imageByUrl(page, 'img[src]', String(reference.url))).toBeVisible({ timeout: 20_000 });
-      await openCanvasProject(page, projectId);
-      await page.getByTitle('节点模式').first().click();
       await expect(await imageByUrl(page, 'img[src]', String(reference.url))).toBeVisible({ timeout: 20_000 });
     } finally {
       await ensurePlacementRestored(page, stage2Evidence, {

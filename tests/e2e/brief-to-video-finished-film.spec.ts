@@ -55,11 +55,6 @@ test('Brief 到视频本地确定性门禁覆盖三工作区、审批和恢复',
   expect(await briefToVideo.readRunStatus(revised.runId)).toBe('cancelled');
   expect(briefToVideo.videoSubmissions()).toHaveLength(1);
 
-  const workflow = await briefToVideo.runWorkflowThroughUi();
-  expect(workflow.catalogCount).toBe(30);
-  expect(workflow.outputNodeType).toBe('output-video');
-  expect(workflow.videoAssetVersionId).toEqual(expect.any(String));
-
   const simpleChat = await briefToVideo.runSimpleChatThroughUi();
   expect(simpleChat.catalogCount).toBe(16);
   expect(simpleChat.catalogContainsBriefToVideo).toBe(false);
@@ -69,10 +64,8 @@ test('Brief 到视频本地确定性门禁覆盖三工作区、审批和恢复',
     textRunId: textRun.runId,
     startFrameRunId: startRun.runId,
     firstLastFrameRunId: revised.runId,
-    workflowRunId: workflow.runId,
     simpleChatCancelledRunId: simpleChat.cancelledRunId,
     simpleChatRunId: simpleChat.completedRunId,
-    workflowVideoAssetVersionId: workflow.videoAssetVersionId,
     simpleChatVideoAssetVersionId: simpleChat.videoAssetVersionId,
   });
 });

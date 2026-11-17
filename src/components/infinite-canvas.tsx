@@ -51,7 +51,7 @@ import {
   Scissors, Wand2, Expand, Layers,
   Check, MousePointer2, Upload, Sparkles,
   RotateCcw, Minus, GitMerge,
-  Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, Shield, FolderOpen, Contrast, PenTool, Pencil, Bot, Heart, ShoppingBag, Scan, GripVertical, Building2, FileImage, Workflow, LayoutGrid, LayoutDashboard, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play, Pause, Package, Store, Globe, Volume2, Loader2, Film, UserRoundCheck, Menu
+  Settings, Palette, Users, HelpCircle, Box as BoxIcon, Camera, ImagePlus, Shield, FolderOpen, Contrast, PenTool, Pencil, Bot, Heart, ShoppingBag, Scan, GripVertical, Building2, FileImage, LayoutGrid, LayoutDashboard, ChevronsRight, ChevronsLeft, Boxes, MessageCircle, Play, Pause, Package, Store, Globe, Volume2, Loader2, Film, UserRoundCheck, Menu
 } from 'lucide-react';
 import type { CanvasAnnotation, AnnotationRegion, AnnotationExecutionResult } from '@/lib/canvas-annotation';
 import { createAnnotation, hitTestAnnotationTarget, buildAnnotationPrompt, computeAnnotationRegion, BRUSH_COLOR_PALETTE, applyMergedAnnotationExecutionResult } from '@/lib/canvas-annotation';
@@ -646,10 +646,8 @@ interface InfiniteCanvasProps {
   /** Callback to open Logo Generator Skill panel (legacy, now uses internal state) */
   /** Brand project info for Logo Generator panel */
   brandProject?: { id?: string; brandName?: string; description?: string; targetAudience?: string; tone?: string; brandDna?: { mainColors?: string[]; secondaryColors?: string[]; fontStyle?: string } | null } | null;
-  /** Switch to node editor mode */
-  onSwitchToNodeMode?: () => void;
-  /** Switch to workflow hub */
-  onSwitchToWorkflowHub?: () => void;
+  /** Switch to the short-drama workbench */
+  onSwitchToDrama?: () => void;
   /** Switch to dashboard (workspace) */
   onSwitchToDashboard?: () => void;
   /** Send canvas image to chat panel for AI modification */
@@ -852,7 +850,7 @@ const TOOL_MODEL_KINDS: Record<string, TaskModelDescriptor['kind'][]> = {
   'Agent编排': ['chat'], '视频生成': ['video'],
 };
 
-export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, taskModelCatalog = [], taskModelOptions = [], catalogStatus = { loading: false, error: null }, images, onImagesChange, onRenameLayer, selectedImage, onSelectImage, onPreviewImage, onGenerateVariation, onExtractKeywords, onAddImages, captureDisplay3dInsertion, captureVideoToolInsertion, onUploadFiles, uploadAuthority, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, renderOhMyPromptExternally = false, onCloseOhMyPrompt, onInsertPrompt, onInsertVisionPrompt, visionScopeKey, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onCanvasToolActivated, onCaptureCropHistory, onUndo, onRedo, mobileCanUndo, mobileCanRedo, onHistoryTransactionBegin, onHistoryTransactionCommit, onHistoryTransactionRollback, isHistoryTransitionPending = false, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onDeleteImages, canRetryPendingDelete, onUploadEffectReverseSource, captureEffectReverseInsertion, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, canvasGeneratorActorId, initialAnnotations = [], onAnnotationsChange, documentMetadataMode = false, annotationExecutionContext, onRequestTaskPoll }: InfiniteCanvasProps) {
+export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, taskModelCatalog = [], taskModelOptions = [], catalogStatus = { loading: false, error: null }, images, onImagesChange, onRenameLayer, selectedImage, onSelectImage, onPreviewImage, onGenerateVariation, onExtractKeywords, onAddImages, captureDisplay3dInsertion, captureVideoToolInsertion, onUploadFiles, uploadAuthority, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, renderOhMyPromptExternally = false, onCloseOhMyPrompt, onInsertPrompt, onInsertVisionPrompt, visionScopeKey, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onCanvasToolActivated, onCaptureCropHistory, onUndo, onRedo, mobileCanUndo, mobileCanRedo, onHistoryTransactionBegin, onHistoryTransactionCommit, onHistoryTransactionRollback, isHistoryTransitionPending = false, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onDeleteImages, canRetryPendingDelete, onUploadEffectReverseSource, captureEffectReverseInsertion, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToDrama, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, canvasGeneratorActorId, initialAnnotations = [], onAnnotationsChange, documentMetadataMode = false, annotationExecutionContext, onRequestTaskPoll }: InfiniteCanvasProps) {
   const effectiveUploadAuthority = uploadAuthority ?? (projectId ? 'unknown' : 'legacy');
   const isMonochrome = themeStyle === 'monochrome';
   const taskModelCatalogIndex = useMemo(
@@ -13480,23 +13478,14 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
             </button>
             {/* Divider */}
             <div className={ltDividerCls} />
-            {/* Node Mode */}
+            {/* Short-drama workbench */}
             <button
-              onClick={onSwitchToNodeMode}
+              onClick={onSwitchToDrama}
               className={`min-h-[44px] ${ltExpandedBtnCls}`}
-              title="节点模式"
+              title="短剧工作台"
             >
-              <Workflow className={`h-3.5 w-3.5 ${mIcon.workflow}`} />
-              <span>节点模式</span>
-            </button>
-            {/* Workflow Hub */}
-            <button
-              onClick={onSwitchToWorkflowHub}
-              className={`min-h-[44px] ${ltExpandedBtnCls}`}
-              title="工作流中心"
-            >
-              <Boxes className={`h-3.5 w-3.5 ${mIcon.layoutGrid}`} />
-              <span>工作流中心</span>
+              <Film className={`h-3.5 w-3.5 ${mIcon.workflow}`} />
+              <span>短剧工作台</span>
             </button>
             {/* Divider */}
             <div className={ltDividerCls} />
@@ -13558,18 +13547,12 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
             </button>
             <div className={`w-5 my-1 h-px ${isMonochrome ? 'bg-gray-200' : 'bg-white/[0.06]'}`} />
             <button
-              onClick={onSwitchToNodeMode}
+              onClick={onSwitchToDrama}
               className={`w-9 h-9 flex items-center justify-center rounded-full transition-all duration-150 ${isMonochrome ? `bg-gray-50 ${mIcon.workflow} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
-              title="节点模式"
+              title="短剧工作台"
+              aria-label="短剧工作台"
             >
-              <Workflow className={`w-4 h-4 ${mIcon.workflow}`} />
-            </button>
-            <button
-              onClick={onSwitchToWorkflowHub}
-              className={`w-9 h-9 flex items-center justify-center rounded-full transition-all duration-150 ${isMonochrome ? `bg-gray-50 ${mIcon.layoutGrid} hover:bg-gray-100` : 'bg-white/5 text-gold-muted hover:bg-white/10 hover:text-text-bright'}`}
-              title="工作流中心"
-            >
-              <Boxes className="w-4 h-4" />
+              <Film className={`w-4 h-4 ${mIcon.workflow}`} />
             </button>
             <div className={`w-5 my-1 h-px ${isMonochrome ? 'bg-gray-200' : 'bg-white/[0.06]'}`} />
             <button

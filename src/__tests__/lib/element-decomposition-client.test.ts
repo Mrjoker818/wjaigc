@@ -204,7 +204,7 @@ describe('element decomposition client', () => {
     }, { fetcher: fetchMock });
 
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(fetchMock).toHaveBeenCalledWith('/api/workflow/models?type=layer', expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith('/api/models?type=layer', expect.objectContaining({
       method: 'GET',
       cache: 'no-store',
     }));

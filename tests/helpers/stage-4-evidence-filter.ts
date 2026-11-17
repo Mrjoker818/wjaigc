@@ -22,8 +22,7 @@ const SUMMARY_ROUTES = new Set([
   '/api/session', '/api/auth/login', '/api/auth/register',
   '/api/collaboration/presence-ticket', '/api/collaboration/document-project',
   '/api/collaboration/members', '/api/user-data/sync', '/api/models', '/api/skills',
-  '/api/chat', '/api/agent-edit', '/api/workflow/execute', '/api/workflow/models',
-  '/api/workflow/save', '/api/task-events', '/api/poll-task', '/api/save-image',
+  '/api/chat', '/api/agent-edit', '/api/task-events', '/api/poll-task', '/api/save-image',
 ]);
 const SUMMARY_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']);
 const SUMMARY_FAILURES = new Map<string, Stage4BrowserFailure>([
@@ -121,47 +120,6 @@ function isRecoveredIdempotentGetAbort(
   ));
 }
 
-function isRecoveredWorkflowStatusAbort(
-  entry: Stage4RuntimeEvidenceEntry,
-  evidence: Stage4RuntimeEvidenceEntry[],
-): boolean {
-  if (
-    entry.method !== 'POST'
-    || !entry.url
-    || !entry.requestDigest
-    || !/ERR_ABORTED|NS_ERROR_ABORT|NS_BINDING_ABORTED|Load request cancelled/i.test(entry.text ?? '')
-  ) return false;
-  let pathname: string;
-  try {
-    pathname = new URL(entry.url).pathname;
-  } catch {
-    return false;
-  }
-  if (pathname !== '/api/workflow/execute') return false;
-  return evidence.some(candidate => (
-    candidate.method === 'POST'
-    && candidate.url === entry.url
-    && candidate.requestDigest === entry.requestDigest
-    && typeof candidate.status === 'number'
-    && candidate.status >= 200
-    && candidate.status < 300
-  ));
-}
-
-function isAcknowledgedWorkflowSaveAbort(
-  entry: Stage4RuntimeEvidenceEntry,
-  acknowledgedWorkflowSaveAborts?: ReadonlySet<Stage4RuntimeEvidenceEntry>,
-): boolean {
-  if (entry.method !== 'POST' || entry.text !== 'net::ERR_ABORTED' || entry.status !== undefined
-    || !entry.requestDigest || !entry.url || !acknowledgedWorkflowSaveAborts?.has(entry)) return false;
-  try {
-    const url = new URL(entry.url);
-    return url.pathname === '/api/workflow/save' && url.search === '';
-  } catch {
-    return false;
-  }
-}
-
 function isRecoveredProjectSyncConflict(
   entry: Stage4RuntimeEvidenceEntry,
   evidence: Stage4RuntimeEvidenceEntry[],
@@ -217,7 +175,6 @@ export function stage4RuntimeEvidenceFailures(
   consoleEntries: Stage4RuntimeEvidenceEntry[],
   networkEntries: Stage4RuntimeEvidenceEntry[],
   supersededAgentPolls?: ReadonlySet<Stage4RuntimeEvidenceEntry>,
-  acknowledgedWorkflowSaveAborts?: ReadonlySet<Stage4RuntimeEvidenceEntry>,
 ): {
   consoleFailures: Stage4RuntimeEvidenceEntry[];
   networkFailures: Stage4RuntimeEvidenceEntry[];
@@ -234,8 +191,6 @@ export function stage4RuntimeEvidenceFailures(
       || (Boolean(entry.text)
         && !isBenignStage3RequestAbort(entry)
         && !isRecoveredStage3RequestAbort(entry, networkEntries)
-        && !isRecoveredWorkflowStatusAbort(entry, networkEntries)
-        && !isAcknowledgedWorkflowSaveAbort(entry, acknowledgedWorkflowSaveAborts)
         && !isRecoveredIdempotentGetAbort(entry, networkEntries, supersededAgentPolls))
     )),
   };

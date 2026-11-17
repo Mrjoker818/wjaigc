@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { expect, test as base, type Page, type Request, type TestInfo } from '@playwright/test';
 import { Pool } from 'pg';
 
-import type { Workflow } from '../../src/lib/workflow-engine';
 import {
   stage3SourceIdentity,
   stage3SourceState,
@@ -29,7 +28,6 @@ export interface Stage4Evidence {
   console: Stage4EvidenceEntry[];
   network: Stage4EvidenceEntry[];
   confirmSupersededAgentPoll(request: Request): void;
-  confirmAcknowledgedWorkflowSaveAbort(request: Request): void;
 }
 
 interface Stage4FixtureUser {
@@ -112,7 +110,7 @@ async function buildStage4Plan(runId: string) {
       chatProject: Record<string, unknown>;
       nodeCount: number;
       expectedNodeIds: string[];
-      workflow: Workflow;
+      workflow: Record<string, unknown>;
     }>;
   };
 }
@@ -173,16 +171,11 @@ export const test = base.extend<{ stage4Evidence: Stage4Evidence }>({
     const directory = evidenceDirectory(testInfo);
     const failedRequests = new WeakMap<Request, Stage4EvidenceEntry>();
     const supersededAgentPolls = new Set<Stage4EvidenceEntry>();
-    const acknowledgedWorkflowSaveAborts = new Set<Stage4EvidenceEntry>();
     const evidence: Stage4Evidence = {
       directory, console: [], network: [],
       confirmSupersededAgentPoll(request) {
         const failure = failedRequests.get(request);
         if (failure) supersededAgentPolls.add(failure);
-      },
-      confirmAcknowledgedWorkflowSaveAbort(request) {
-        const failure = failedRequests.get(request);
-        if (failure) acknowledgedWorkflowSaveAborts.add(failure);
       },
     };
     const sourceStateAtStart = stage3SourceState();
@@ -295,7 +288,7 @@ export const test = base.extend<{ stage4Evidence: Stage4Evidence }>({
         contentType: 'application/json',
       });
       const runtimeFailures = stage4RuntimeEvidenceFailures(
-        evidence.console, evidence.network, supersededAgentPolls, acknowledgedWorkflowSaveAborts,
+        evidence.console, evidence.network, supersededAgentPolls,
       );
       if (runtimeFailures.consoleFailures.length > 0 || runtimeFailures.networkFailures.length > 0) {
         console.error(`STAGE4_RUNTIME_FAILURES ${JSON.stringify(summarizeStage4RuntimeFailures(runtimeFailures))}`);
@@ -321,7 +314,7 @@ export { expect };
 
 export async function stage4FixtureForProject(
   projectName: string,
-): Promise<Stage4FixtureUser & Stage4SeedTarget & { expectedNodeIds: string[]; workflow: Workflow }> {
+): Promise<Stage4FixtureUser & Stage4SeedTarget & { expectedNodeIds: string[]; workflow: Record<string, unknown> }> {
   const plan = await buildStage4Plan(stage4RunId());
   const user = plan.users.find(candidate => candidate.browserProfile === projectName);
   const workflow = plan.workflows.find(candidate => candidate.browserProfile === projectName);
@@ -737,25 +730,6 @@ export async function seedStage4RuntimeDependencies(input: {
     await pool.end();
   }
   return { sourceVersionId, selectedEntityId, canonicalUrl };
-}
-
-export async function readStage4PersistedWorkflowNodeCount(
-  page: Page,
-  projectId: string,
-): Promise<number> {
-  const response = await page.request.get('/api/user-data/sync?key=projects');
-  const payload = await readJson(response);
-  if (!response.ok() || !Array.isArray(payload.value)) {
-    throw new Error(`BLOCKED: failed to re-read Stage 4 projects (HTTP ${response.status()})`);
-  }
-  const project = payload.value.find(candidate => (
-    candidate
-    && typeof candidate === 'object'
-    && (candidate as Record<string, unknown>).id === projectId
-  )) as Record<string, unknown> | undefined;
-  const metadata = project?.metadata as Record<string, unknown> | undefined;
-  const workflow = metadata?.workflow as Record<string, unknown> | undefined;
-  return Array.isArray(workflow?.nodes) ? workflow.nodes.length : 0;
 }
 
 export async function openStage4CanvasProject(page: Page, projectId: string): Promise<void> {

@@ -31,7 +31,7 @@ function Entry({theme,admin}:{theme:'gold'|'mono';admin:boolean}):React.ReactEle
  return <InfiniteCanvas images={images} selectedImage={selected} isPanelCollapsed isAdmin={admin}
  themeStyle={theme==='mono'?'monochrome':'gold'} initialViewState={{offsetX:0,offsetY:0,zoom:1}} onViewStateChange={view=>{state.view=view;}}
  versionHistoryManager={manager} onImagesChange={setImages} onSelectImage={setSelected} onPreviewImage={action('preview')} onGenerateVariation={action('variation')} onExtractKeywords={action('keywords')} onFusion={action('fusion')} onAddImages={()=>{throw Error('CANVAS_UI_FIXTURE_UNEXPECTED_PUBLISH')}}
- onSwitchToDashboard={action('dashboard')} onToggleVisionPrompt={action('omp')} onToggleSettings={action('settings')} onToggleTheme={action('theme')} onToggleUserManager={action('users')} onToggleAdminSystem={action('admin')} onToggleProjectData={action('projects')} onToggleFavorites={action('favorites')} onTogglePromptTemplate={action('templates')} onToggleHelp={action('external-help')} onSwitchToNodeMode={action('node')} onSwitchToWorkflowHub={action('workflow')}/>;
+ onSwitchToDashboard={action('dashboard')} onToggleVisionPrompt={action('omp')} onToggleSettings={action('settings')} onToggleTheme={action('theme')} onToggleUserManager={action('users')} onToggleAdminSystem={action('admin')} onToggleProjectData={action('projects')} onToggleFavorites={action('favorites')} onTogglePromptTemplate={action('templates')} onToggleHelp={action('external-help')} onSwitchToDrama={action('drama')}/>;
 }
 Object.assign(window,{canvasUi:{state,png,mount(theme:'gold'|'mono',options:{admin?:boolean}){if(state.mounts||state.disposed)throw Error('CANVAS_UI_FIXTURE_REMOUNT');state.mounts++;for(const type of ['pointerdown','pointerup','gotpointercapture','lostpointercapture','click'])document.addEventListener(type,observe,true);document.documentElement.classList.add(theme==='mono'?'theme-monochrome':'theme-gold');root.render(<Entry theme={theme} admin={options.admin===true}/>);},unmount(){if(!state.disposed){state.disposed=true;root.unmount();}taskEventsClient.disconnect();for(const type of ['pointerdown','pointerup','gotpointercapture','lostpointercapture','click'])document.removeEventListener(type,observe,true);}}});
 `;
@@ -255,8 +255,8 @@ for(const theme of ['gold','mono'] as const)for(const admin of [false,true])for(
   // Expanded-case preparation uses the public keyboard entry, not a touch reachability claim.
   await navClearance(s,expanded);const before=await surface(s);
   const callbacks:ReadonlyArray<readonly [string,string]>=expanded?
-   [['工作台','dashboard'],['Oh My Prompt - 提示词管理与图片识词','omp'],['设置','settings'],['UI 主题切换','theme'],['用户管理','users'],['项目数据','projects'],...(admin?[['管理员系统','admin'] as const]:[]),['收藏夹','favorites'],['提示词模板','templates'],['使用说明','external-help'],['节点模式','node'],['工作流中心','workflow']]:
-   [['工作台','dashboard'],['Oh My Prompt','omp'],['用户管理','users'],['项目数据','projects'],['提示词模板','templates'],[theme==='mono'?'切换彩色模式':'切换黑白模式','theme'],['节点模式','node'],['工作流中心','workflow']];
+   [['工作台','dashboard'],['Oh My Prompt - 提示词管理与图片识词','omp'],['设置','settings'],['UI 主题切换','theme'],['用户管理','users'],['项目数据','projects'],...(admin?[['管理员系统','admin'] as const]:[]),['收藏夹','favorites'],['提示词模板','templates'],['使用说明','external-help'],['短剧工作台','drama']]:
+   [['工作台','dashboard'],['Oh My Prompt','omp'],['用户管理','users'],['项目数据','projects'],['提示词模板','templates'],[theme==='mono'?'切换彩色模式':'切换黑白模式','theme'],['短剧工作台','drama']];
   const titles=await nav.getByRole('button').evaluateAll(nodes=>nodes.map(node=>node.getAttribute('title')));
   expect(titles?.sort(),'complete navigation entry collection, not removed to fit').toEqual([...callbacks.map(([title])=>title),...(expanded?['Ctrl+Click 画布图片选择参考融合','收起工具栏']:['展开工具栏'])].sort());
   expect(await nav.getByTitle('管理员系统',{exact:true}).count()).toBe(expanded&&admin?1:0);

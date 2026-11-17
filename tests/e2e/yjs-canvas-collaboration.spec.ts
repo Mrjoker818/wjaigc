@@ -263,25 +263,6 @@ test('owner and invited editor converge without copying the project into the edi
     await expect(firstPage.getByRole('button', { name: '新建项目', exact: true })).toBeVisible();
 
     const snapshot = await readProjects(firstContext);
-    const inputNodeId = `input-${randomUUID()}`;
-    const outputNodeId = `output-${randomUUID()}`;
-    const seededWorkflow = {
-      id: `workflow-${randomUUID()}`,
-      name: '协作项目保留的节点工作流',
-      version: 'v1.0', status: 'idle',
-      // Structure only: no URL/version/placement or completed result is seeded.
-      nodes: [
-        { id: inputNodeId, type: 'input-image', label: 'UI画布输入',
-          x: 80, y: 80, width: 260, height: 200, config: {}, agentRound: 0, breakpoint: false,
-          ports: [{ id: 'out-image', label: '图片', type: 'image', direction: 'out' }] },
-        { id: outputNodeId, type: 'output-image', label: 'UI无付费输出',
-          x: 420, y: 80, width: 260, height: 200, config: {}, agentRound: 0, breakpoint: false,
-          ports: [{ id: 'in-image', label: '图片', type: 'image', direction: 'in' }] },
-      ],
-      connections: [{ id: `connection-${randomUUID()}`, fromNodeId: inputNodeId,
-        fromPortId: 'out-image', toNodeId: outputNodeId, toPortId: 'in-image', type: 'image' }],
-      createdAt: Date.now(), updatedAt: Date.now(),
-    };
     const uiProjectName = `Yjs owner UI ${projectId}`;
     const seededProjects = snapshot.value?.map(project => project.id === projectId
       ? {
@@ -293,7 +274,6 @@ test('owner and invited editor converge without copying the project into the edi
         canvasImages: project.canvasImages?.map((image, index) => ({
           ...image, x: 200 + index * 180, y: 150, width: 100, height: 100,
         })),
-        metadata: { ...project.metadata, workflow: seededWorkflow },
       }
       : project);
     expect(seededProjects).toBeTruthy();
@@ -312,7 +292,6 @@ test('owner and invited editor converge without copying the project into the edi
     const hydrated = await hydrationResponse.json() as ProjectsResponse;
     const ownerProject = hydrated.value?.find(project => project.id === projectId);
     expect(ownerProject?.name).toBe(uiProjectName);
-    expect(ownerProject?.metadata?.workflow).toEqual(seededWorkflow);
     expect(ownerProject?.canvasImages?.map(image => image.id)).toEqual(expect.arrayContaining([
       firstImage.id, secondImage.id,
     ]));
@@ -345,8 +324,6 @@ test('owner and invited editor converge without copying the project into the edi
     expect(savedBody.success).toBe(true);
     expect(Number.isSafeInteger(savedBody.projectRevision)).toBe(true);
     expect(savedBody.projectRevision).toBeGreaterThanOrEqual(hydrated.projectRevision);
-    const savedInput = savedProject.request().postDataJSON() as { value: ProjectsResponse['value'] };
-    expect(savedInput.value?.find(project => project.id === projectId)?.metadata?.workflow).toEqual(seededWorkflow);
     expect(enabled.request().postDataJSON()).toEqual({ projectId, expectedRevision: savedBody.projectRevision });
     expect(enabled.status(), await enabled.text()).toBe(200);
     expect(await enabled.json()).toEqual({ success: true, projectId });
@@ -414,11 +391,6 @@ test('owner and invited editor converge without copying the project into the edi
     const savedStatus = (page: Page) => page.getByRole('status').filter({ hasText: '已保存' });
     await expect(savedStatus(firstPage)).toBeVisible({ timeout: 30_000 });
     await expect(savedStatus(secondPage)).toBeVisible({ timeout: 30_000 });
-    await firstPage.getByTitle('节点模式').first().click();
-    await expect(firstPage.getByRole('toolbar', { name: '工作流工具栏' })).toBeVisible();
-    await expect(firstPage.getByText(seededWorkflow.name, { exact: true })).toBeVisible();
-    await firstPage.getByRole('button', { name: '返回画布', exact: true }).click();
-    await expect(savedStatus(firstPage)).toBeVisible();
     const firstBefore = await readLeft(firstPage, firstImage.id);
     const secondBefore = await readLeft(secondPage, secondImage.id);
 
@@ -922,152 +894,6 @@ test('owner and invited editor converge without copying the project into the edi
     expect(originalFile.status()).toBe(200);
     const originalFileSHA = createHash('sha256').update(await originalFile.body()).digest('hex');
 
-    await firstPage.getByTitle('节点模式').first().click();
-    await expect(firstPage.getByRole('toolbar', { name: '工作流工具栏' })).toBeVisible();
-    const inputCard = firstPage.locator(`[data-node-id="${inputNodeId}"]`);
-    await expect(inputCard).toBeVisible();
-    await inputCard.click();
-    const imageField = firstPage.locator('[data-node-field="imageUrl"]');
-    await imageField.getByRole('button', { name: '从画布选择图片', exact: true }).click();
-    const sourceOption = imageField.getByRole('button', { name: new RegExp(`^${sourceIndex + 1}\\. `) });
-    await expect(sourceOption).toBeVisible();
-    const [inputRead] = await Promise.all([
-      firstPage.waitForResponse(response => response.request().method() === 'POST'
-        && new URL(response.url()).pathname === '/api/assets'),
-      sourceOption.click(),
-    ]);
-    expect(inputRead.request().postDataJSON()).toEqual({ projectId,
-      assetVersionId: source.assetVersionId, placementId: source.placementId });
-    expect(inputRead.request().headers()['x-wujie-expected-actor-id']).toBe(ownerUserId);
-    expect(inputRead.status(), await inputRead.text()).toBe(200);
-    const inputReference = await inputRead.json() as { assetVersionId: string; placementId: string; url: string };
-    expect(inputReference).toMatchObject({ assetVersionId: source.assetVersionId,
-      placementId: source.placementId, url: sourceBefore.file_url });
-    await expect(imageField.getByRole('img', { name: '预览', exact: true })).toBeVisible();
-    const completedPromise = firstPage.waitForResponse(async response => {
-      if (response.request().method() !== 'POST'
-        || new URL(response.url()).pathname !== '/api/workflow/execute'
-        || response.request().postDataJSON()?.action !== 'status') return false;
-      const body = await response.json() as { status?: string };
-      return body.status === 'completed';
-    });
-    const [submitted, completed] = await Promise.all([
-      firstPage.waitForResponse(response => response.request().method() === 'POST'
-        && new URL(response.url()).pathname === '/api/workflow/execute'
-        && response.request().postDataJSON()?.action === 'start'),
-      completedPromise,
-      firstPage.getByRole('button', { name: '执行工作流', exact: true }).click(),
-    ]);
-    expect(submitted.status(), await submitted.text()).toBe(200);
-    const submittedBody = submitted.request().postDataJSON() as {
-      projectId: string; workflowId: string;
-      nodes: Array<{ id: string; type: string; config: Record<string, unknown> }>;
-    };
-    expect(submittedBody.projectId).toBe(projectId);
-    expect(submittedBody.workflowId).toBe(seededWorkflow.id);
-    expect(submittedBody.nodes.map(node => node.type)).toEqual(['input-image', 'output-image']);
-    const submittedInput = submittedBody.nodes.find(node => node.id === inputNodeId)?.config;
-    expect(submittedInput).toMatchObject({
-      source: 'canvas', projectId, assetVersionId: source.assetVersionId,
-      placementId: source.placementId, imageUrl: sourceBefore.file_url,
-    });
-    expect(submittedInput).not.toHaveProperty('assetTransferPending');
-    const { executionId } = await submitted.json() as { executionId: string };
-    expect(executionId).toBeTruthy();
-    expect(completed.request().postDataJSON().executionId).toBe(executionId);
-    expect(completed.status()).toBe(200);
-    const completedBody = await completed.json() as { status: string; results: Record<string, {
-      status: string; output: { assetVersionId: string; placementId: string; imageUrl: string };
-    }> };
-    expect(completedBody.status).toBe('completed');
-    for (const id of [inputNodeId, outputNodeId]) {
-      expect(completedBody.results[id]).toMatchObject({ status: 'success', output: {
-        assetVersionId: source.assetVersionId, placementId: source.placementId, imageUrl: sourceBefore.file_url,
-      } });
-    }
-    const outputCard = firstPage.locator(`[data-node-id="${outputNodeId}"]`);
-    await expect(outputCard.getByRole('button', { name: '发送到智能对话', exact: true })).toBeVisible();
-
-    // Navigation is only the entry: require actual transfer + server-persisted
-    // message + independently read SQL placement and a reload of that message.
-    const transferPromise = firstPage.waitForResponse(response => {
-      if (response.request().method() !== 'POST'
-        || new URL(response.url()).pathname !== '/api/assets/transfer') return false;
-      return response.request().postDataJSON()?.entityType === 'chat-result';
-    });
-    const chatSavePromise = firstPage.waitForResponse(response => {
-      if (response.request().method() !== 'POST'
-        || new URL(response.url()).pathname !== '/api/user-data/sync') return false;
-      const body = response.request().postDataJSON() as { key?: string; value?: Array<{ tasks: Array<{
-        messages: Array<{ imageRefs?: Array<{ assetVersionId?: string; entityId?: string }> }>;
-      }> }> };
-      return body.key === 'chat_simple_projects' && !!body.value?.some(project => project.tasks.some(task => (
-        task.messages.some(message => message.imageRefs?.some(reference => (
-          reference.assetVersionId === source.assetVersionId
-          && reference.entityId === `workflow-return:${executionId}:${outputNodeId}`
-        )))
-      )));
-    });
-    const [transferred, chatSaved] = await Promise.all([
-      transferPromise, chatSavePromise,
-      (async () => {
-        await outputCard.getByRole('button', { name: '发送到智能对话', exact: true }).click();
-        await expect(firstPage).toHaveURL(url => url.pathname === '/simple-chat');
-      })(),
-    ]);
-    expect(transferred.status(), await transferred.text()).toBe(200);
-    const transferInput = transferred.request().postDataJSON() as {
-      sourceVersion: string; targetProject: string; targetWorkspace: string; entityId: string;
-      metadata: { workflowId: string; executionId: string; outputNodeId: string };
-    };
-    expect(transferInput).toMatchObject({ sourceVersion: source.assetVersionId,
-      targetProject: projectId, entityId: `workflow-return:${executionId}:${outputNodeId}`,
-      metadata: { workflowId: seededWorkflow.id, executionId, outputNodeId } });
-    const chatReference = await transferred.json() as {
-      assetVersionId: string; placementId: string; entityId: string; url: string;
-    };
-    expect(chatReference.assetVersionId).toBe(source.assetVersionId);
-    expect(chatReference.placementId).toBeTruthy();
-    expect(chatReference.placementId).not.toBe(source.placementId);
-    expect(chatReference.entityId).toBe(transferInput.entityId);
-    expect(chatReference.url).toBe(sourceBefore.file_url);
-    const chatPlacement = await readPlacementReceipt(projectId!, chatReference.placementId);
-    expect(chatPlacement).toMatchObject({ owner_id: ownerUserId, project_id: projectId,
-      asset_version_id: source.assetVersionId, workspace_kind: 'chat',
-      workspace_id: transferInput.targetWorkspace, entity_type: 'chat-result',
-      entity_id: transferInput.entityId, status: 'active', deleted_at: null,
-      file_url: sourceBefore.file_url, availability: 'ready' });
-    expect(chatSaved.status(), await chatSaved.text()).toBe(200);
-    expect(await chatSaved.json()).toMatchObject({ success: true });
-    const chatProjectId = new URL(firstPage.url()).searchParams.get('projectId');
-    const chatTaskId = new URL(firstPage.url()).searchParams.get('taskId');
-    expect(chatProjectId).toBeTruthy();
-    expect(chatTaskId).toBeTruthy();
-    expect(transferInput.targetWorkspace).toBe(`standalone-chat:${chatProjectId}`);
-    const messageId = `workflow-return:${chatReference.placementId}`;
-    const chatMessage = firstPage.locator(`[data-chat-message-id="${messageId}"]`);
-    await expect(chatMessage).toHaveAttribute('data-chat-asset-placement-ids', chatReference.placementId);
-    await expect(chatMessage.getByText('工作流结果已返回：UI无付费输出', { exact: true })).toBeVisible();
-    const readChat = await firstContext.request.get('/api/user-data/sync?key=chat_simple_projects');
-    expect(readChat.status()).toBe(200);
-    const chatData = await readChat.json() as { value: Array<{ id: string; tasks: Array<{
-      id: string; messages: Array<{ id: string; imageRefs: unknown[] }>;
-    }> }> };
-    const persistedMessage = chatData.value.find(project => project.id === chatProjectId)
-      ?.tasks.find(task => task.id === chatTaskId)?.messages.find(message => message.id === messageId);
-    expect(persistedMessage?.imageRefs).toEqual([expect.objectContaining({
-      assetVersionId: source.assetVersionId, placementId: chatReference.placementId,
-      entityId: transferInput.entityId, url: sourceBefore.file_url,
-    })]);
-    await firstPage.reload({ waitUntil: 'domcontentloaded' });
-    await expect(firstPage).toHaveURL(url => url.pathname === '/simple-chat');
-    await expect(chatMessage).toHaveAttribute('data-chat-asset-placement-ids', chatReference.placementId);
-    const reloadedChatImage = chatMessage.locator('img').first();
-    await expect(reloadedChatImage).toHaveAttribute('src', sourceBefore.file_url as string);
-    await expect(reloadedChatImage).toBeVisible();
-    await expect.poll(() => reloadedChatImage.evaluate(
-      (image: HTMLImageElement) => image.complete && image.naturalWidth > 0 && image.naturalHeight > 0,
-    )).toBe(true);
     expect(await readPlacementReceipt(projectId!, source.placementId!)).toEqual(sourceBefore);
     const retainedFile = await firstContext.request.get(sourceBefore.file_url as string);
     expect(retainedFile.status()).toBe(200);

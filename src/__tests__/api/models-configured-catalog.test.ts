@@ -25,7 +25,6 @@ vi.mock('@/lib/server-auth', () => ({
 }));
 
 import { GET as getModels } from '@/app/api/models/route';
-import { GET as getWorkflowModels } from '@/app/api/workflow/models/route';
 import { resolveTaskModel } from '@/lib/task-core/model-catalog';
 
 interface ProviderRowOptions {
@@ -136,8 +135,8 @@ describe('configured task model catalog APIs', () => {
     expect(mocks.dbGetApiProviders).toHaveBeenCalledTimes(1);
 
     mocks.dbGetApiProviders.mockClear();
-    const layerResponse = await getWorkflowModels(
-      new NextRequest('http://localhost/api/workflow/models?type=layer'),
+    const layerResponse = await getModels(
+      new NextRequest('http://localhost/api/models?type=layer'),
     );
     const layerData = await layerResponse.json();
 
@@ -146,7 +145,6 @@ describe('configured task model catalog APIs', () => {
       expect.objectContaining({
         id: 'stale-layer',
         providerId: 'layer-provider',
-        provider: 'Layer Provider',
         type: 'layer',
       }),
     ]);
@@ -194,8 +192,8 @@ describe('configured task model catalog APIs', () => {
       await getModels(new NextRequest('http://localhost/api/models?type=image'))
     ).json();
     const layerData = await (
-      await getWorkflowModels(
-        new NextRequest('http://localhost/api/workflow/models?type=layer'),
+      await getModels(
+        new NextRequest('http://localhost/api/models?type=layer'),
       )
     ).json();
     const allData = await (

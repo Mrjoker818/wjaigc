@@ -9,7 +9,6 @@ const serverCallers = [
   'src/lib/agent-runtime/agent-edit-execution-service.ts',
   'src/app/api/generate/route.ts',
   'src/app/api/brand-ecommerce/route.ts',
-  'src/app/api/workflow/execute/route.ts',
   'src/app/api/refine-engine/route.ts',
   'src/app/api/scene-studio/generate/route.ts',
   'src/app/api/image/upscale-pro/route.ts',

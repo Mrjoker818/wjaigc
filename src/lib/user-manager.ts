@@ -13,10 +13,9 @@ import {
 import { readProjectSnapshot } from '@/lib/asset-core/project-readers';
 import type { AssetGraphMode } from '@/lib/asset-core/types';
 import { resolveCanvasKernelMode, type CanvasKernelMode } from '@/lib/canvas-kernel/mode';
-import { resolveWorkflowRendererMode, type WorkflowRendererMode } from '@/lib/workflow-renderer/mode';
+
 import { clearCanvasUnloadRecovery } from '@/lib/canvas-autosave-guard';
-import { retainSavedProjectWorkflow } from '@/lib/project-workflow';
-import type { Workflow } from '@/lib/workflow-engine';
+
 
 const STORAGE_KEY = 'unbounded_ai_user_data';
 const CURRENT_USER_KEY = 'unbounded_ai_current_user';
@@ -109,7 +108,6 @@ interface ProjectSyncResponse {
   }>>;
   assetGraphMode?: AssetGraphMode;
   canvasKernelMode?: CanvasKernelMode;
-  workflowRendererMode?: WorkflowRendererMode;
 }
 
 export function hasProjectSyncResponsePatches(response: {
@@ -385,11 +383,6 @@ function projectWithoutImages(project: Project): Omit<Project, 'canvasImages'> {
   return fields as Omit<Project, 'canvasImages'>;
 }
 
-function projectFieldsWithoutWorkflow(fields: Omit<Project, 'canvasImages'>): unknown {
-  const { metadata, updatedAt: _updatedAt, ...rest } = fields;
-  const { workflow: _workflow, ...metadataFields } = metadata ?? {};
-  return { ...rest, metadata: Object.keys(metadataFields).length ? metadataFields : undefined };
-}
 
 function rebaseProjectSnapshots(
   baseProjects: Project[],
@@ -505,29 +498,13 @@ function rebaseProjectSnapshots(
     const remoteFields = projectWithoutImages(remoteProject);
     let fields = remoteFields;
     if (baseFields) {
-      const localWorkflowChanged = !snapshotsEqual(localFields.metadata?.workflow, baseFields.metadata?.workflow);
-      const remoteWorkflowChanged = !snapshotsEqual(remoteFields.metadata?.workflow, baseFields.metadata?.workflow);
-      const workflowChanged = localWorkflowChanged || remoteWorkflowChanged;
-      // A workflow save and a rename can both advance updatedAt without editing the same field.
-      const baseComparable = workflowChanged ? projectFieldsWithoutWorkflow(baseFields) : baseFields;
-      const localComparable = workflowChanged ? projectFieldsWithoutWorkflow(localFields) : localFields;
-      const remoteComparable = workflowChanged ? projectFieldsWithoutWorkflow(remoteFields) : remoteFields;
-      const localChanged = !snapshotsEqual(localComparable, baseComparable);
-      const remoteChanged = !snapshotsEqual(remoteComparable, baseComparable);
-      const workflowConflict = localWorkflowChanged && remoteWorkflowChanged
-        && !snapshotsEqual(localFields.metadata?.workflow, remoteFields.metadata?.workflow);
+      const localChanged = !snapshotsEqual(localFields, baseFields);
+      const remoteChanged = !snapshotsEqual(remoteFields, baseFields);
       if (localChanged && !remoteChanged) {
         fields = localFields;
       }
-      if (workflowConflict || (localChanged && remoteChanged && !snapshotsEqual(localComparable, remoteComparable))) {
+      if (localChanged && remoteChanged && !snapshotsEqual(localFields, remoteFields)) {
         backup('concurrent-project-edit', remoteProject.id, localProject, remoteProject);
-      }
-      if (workflowChanged) {
-        const workflowMetadata = localWorkflowChanged && !remoteWorkflowChanged ? localFields.metadata : remoteFields.metadata;
-        if (!snapshotsEqual(fields.metadata?.workflow, workflowMetadata?.workflow)) {
-          fields = { ...fields, updatedAt: Math.max(localFields.updatedAt, remoteFields.updatedAt),
-            metadata: retainSavedProjectWorkflow(fields.metadata ?? {}, workflowMetadata) };
-        }
       }
     } else if (!snapshotsEqual(localProject, remoteProject)) {
       backup('concurrent-project-add', remoteProject.id, localProject, remoteProject);
@@ -549,7 +526,6 @@ export class UserManager {
   private _serverSyncReady = false; // 在 loadProjectsFromServer 成功前阻止 syncToServer 上传空数据
   private _assetGraphMode: AssetGraphMode = 'legacy';
   private _canvasKernelMode: CanvasKernelMode = 'legacy';
-  private _workflowRendererMode: WorkflowRendererMode = 'legacy';
   private _projectSyncRevision = 0;
   private _projectSyncRequestEpoch = 0;
   private _projectSyncSessionEpoch = 0;
@@ -1019,7 +995,6 @@ export class UserManager {
     this._projectMutationGeneration = 0;
     this._acceptedProjectMutationGeneration = 0;
     this._canvasKernelMode = 'legacy';
-    this._workflowRendererMode = 'legacy';
     this._recentlyDeletedImageIds.clear();
     this._confirmedCanvasRestores = [];
     this._projectHydration = null;
@@ -1521,9 +1496,6 @@ export class UserManager {
     return this._canvasKernelMode;
   }
 
-  getWorkflowRendererMode(): WorkflowRendererMode {
-    return this._workflowRendererMode;
-  }
 
   private applyAssetGraphMappings(
     assetGraphMappings: NonNullable<ProjectSyncResponse['assetGraphMappings']>,
@@ -1899,7 +1871,6 @@ export class UserManager {
         value?: unknown;
         assetGraphMode?: AssetGraphMode;
         canvasKernelMode?: CanvasKernelMode;
-        workflowRendererMode?: WorkflowRendererMode;
         projectRevision?: number;
         deletedCanvasPlacements?: unknown;
         restoredCanvasPlacements?: unknown;
@@ -1923,7 +1894,7 @@ export class UserManager {
         : [];
       if (!restoredCanvasPlacements) return false;
       const nextCanvasKernelMode = resolveCanvasKernelMode(data.canvasKernelMode);
-      this._workflowRendererMode = resolveWorkflowRendererMode(data.workflowRendererMode);
+
       const nextProjectSyncRevision = Number.isSafeInteger(data.projectRevision) && Number(data.projectRevision) >= 0
         ? Number(data.projectRevision)
         : 0;
@@ -2658,12 +2629,6 @@ export class UserManager {
     return !!actorId && (this._lastAuthoritativeProjects.get(actorId)?.some(project => project.id === projectId) ?? false);
   }
 
-  hasAcknowledgedProjectWorkflow(projectId: string, workflow: Workflow): boolean {
-    const actorId = this.currentUserId;
-    if (!actorId) return false;
-    const project = this._lastAuthoritativeProjects.get(actorId)?.find(candidate => candidate.id === projectId);
-    return !!project && snapshotsEqual(project.metadata?.workflow, workflow);
-  }
 
   updateProjectInMemory(projectId: string, updates: Partial<Project>): Project | null {
     const userData = this.getCurrentUserData();

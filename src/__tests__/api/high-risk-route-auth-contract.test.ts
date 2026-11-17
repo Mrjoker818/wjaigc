@@ -6,8 +6,6 @@ const highRiskRouteFiles = [
   'src/app/api/ai-psd/create/route.ts',
   'src/app/api/audio/generate/route.ts',
   'src/app/api/brand-packaging/generate/route.ts',
-  'src/app/api/workflow/ai-build/route.ts',
-  'src/app/api/workflow/execute/route.ts',
   'src/app/api/excel/generate/route.ts',
   'src/app/api/export/bom/route.ts',
   'src/app/api/export/pdf/route.ts',

@@ -665,32 +665,6 @@ input[type="range"]::-moz-range-thumb {
   }
 }
 
-/* 9. NodeEditor 双主题覆盖 - 单色模式 */
-.theme-monochrome .node-editor-root {
-  --ne-accent: #3b82f6;
-  --ne-accent-rgb: 59, 130, 246;
-  --ne-bg-primary: #ffffff;
-  --ne-bg-secondary: #f8fafc;
-  --ne-bg-tertiary: #f1f5f9;
-  --ne-bg-input: #f1f5f9;
-  --ne-bg-hover: #e2e8f0;
-  --ne-text-primary: #0f172a;
-  --ne-text-secondary: #475569;
-  --ne-text-muted: #94a3b8;
-  --ne-border: #e2e8f0;
-  --ne-border-strong: #cbd5e1;
-  --ne-shadow: rgba(0, 0, 0, 0.08);
-  --ne-canvas-bg: #f0f4f8;
-  --ne-node-bg: #ffffff;
-  --ne-node-border: #cbd5e1;
-  --ne-node-selected: #3b82f6;
-  --ne-port-stroke: #94a3b8;
-  --ne-scrollbar-thumb: #cbd5e1;
-  --ne-scrollbar-track: transparent;
-  --ne-option-bg: #ffffff;
-  --ne-option-text: #1e293b;
-}
-
 /* Gold 主题：暗色背景 + 金色强调 - 覆盖 shadcn 变量 */
 .theme-gold {
   --background: #0a0e17;
@@ -716,107 +690,6 @@ input[type="range"]::-moz-range-thumb {
   --chart-3: #22c55e;
   --chart-4: #f59e0b;
   --chart-5: #ef4444;
-}
-
-.theme-gold .node-editor-root,
-.node-editor-root {
-  --ne-accent: #d4af37;
-  --ne-accent-rgb: 212, 175, 55;
-  --ne-bg-primary: #0e1117;
-  --ne-bg-secondary: #141820;
-  --ne-bg-tertiary: #1a1f2e;
-  --ne-bg-input: #0e1117;
-  --ne-bg-hover: #1c2333;
-  --ne-text-primary: #e2e8f0;
-  --ne-text-secondary: #94a3b8;
-  --ne-text-muted: #64748b;
-  --ne-border: rgba(255, 255, 255, 0.08);
-  --ne-border-strong: rgba(255, 255, 255, 0.15);
-  --ne-shadow: rgba(0, 0, 0, 0.4);
-  --ne-canvas-bg: #0a0e17;
-  --ne-node-bg: #1a1f2e;
-  --ne-node-border: rgba(212, 175, 55, 0.2);
-  --ne-node-selected: #d4af37;
-  --ne-port-stroke: #64748b;
-  --ne-scrollbar-thumb: #334155;
-  --ne-scrollbar-track: transparent;
-  --ne-option-bg: #2a2a2a;
-  --ne-option-text: #e5e5e5;
-}
-
-/* 节点编辑器下拉菜单option文字可见性修复 */
-.node-editor-root select option {
-  background: var(--ne-option-bg);
-  color: var(--ne-option-text);
-}
-
-/* 节点编辑器动画 */
-@keyframes ne-edge-flow {
-  0% { stroke-dashoffset: 20; }
-  100% { stroke-dashoffset: 0; }
-}
-@keyframes ne-node-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
-}
-@keyframes ne-port-glow {
-  0%, 100% { r: 4; }
-  50% { r: 5.5; }
-}
-.ne-edge-flowing {
-  stroke-dasharray: 8 4;
-  animation: ne-edge-flow 0.8s linear infinite;
-}
-.ne-node-processing {
-  animation: ne-node-pulse 1.5s ease-in-out infinite;
-}
-.ne-port-animated {
-  animation: ne-port-glow 2s ease-in-out infinite;
-}
-.ne-node-transition {
-  transition: filter 0.2s ease, opacity 0.2s ease;
-}
-
-/* 节点编辑器增强动画 — 与原型对齐 */
-@keyframes ne-node-enter {
-  from { opacity: 0; transform: scale(0.92); }
-  to { opacity: 1; transform: scale(1); }
-}
-@keyframes ne-menu-pop {
-  from { opacity: 0; transform: scale(0.95) translateY(-4px); }
-  to { opacity: 1; transform: scale(1) translateY(0); }
-}
-@keyframes ne-overlay-fade {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-@keyframes ne-panel-slide-up {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-@keyframes ne-progress-bar {
-  from { width: 0%; }
-  to { width: 100%; }
-}
-@keyframes ne-conn-flow-along {
-  0% { stroke-dashoffset: 20; }
-  100% { stroke-dashoffset: 0; }
-}
-.ne-node-enter {
-  animation: ne-node-enter 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both;
-}
-.ne-menu-pop {
-  animation: ne-menu-pop 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-.ne-overlay-fade {
-  animation: ne-overlay-fade 0.2s ease-out both;
-}
-.ne-panel-slide-up {
-  animation: ne-panel-slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-.ne-conn-flowing {
-  stroke-dasharray: 8 4;
-  animation: ne-conn-flow-along 0.8s linear infinite;
 }
 
 /* === 节点卡片 (原型精确还原) === */
@@ -1312,19 +1185,6 @@ input[type="range"]::-moz-range-thumb {
     animation: none !important;
     transition: none !important;
   }
-  /* Keep interactive viewport geometry synchronous when motion is reduced. */
-  [data-workflow-legacy-node-layer],
-  [data-workflow-legacy-edge-layer] > g {
-    transition-property: none !important;
-  }
-  .ne-node-enter,
-  .ne-menu-pop,
-  .ne-overlay-fade,
-  .ne-panel-slide-up,
-  .ne-edge-flowing,
-  .ne-node-processing,
-  .ne-port-animated,
-  .ne-conn-flowing,
   .node-card,
   .status-badge.running .status-dot {
     animation: none !important;
@@ -1841,26 +1701,6 @@ input[type="range"]::-moz-range-thumb {
     inset-inline-start: auto;
     inset-inline-end: 8px;
     transform: none;
-  }
-}
-
-/* Touch lifecycle actions live outside the zoomed document surface. */
-.node-editor-root .workflow-touch-node-action {
-  display: none;
-}
-@media (any-pointer: coarse) {
-  .node-editor-root .workflow-touch-node-action,
-  .node-editor-root .workflow-node-property-close {
-    display: inline-flex;
-  }
-  .node-editor-root .workflow-node-properties-header {
-    min-height: 48px;
-  }
-}
-@media (pointer: coarse) {
-  .node-editor-root .node-card .collapse-toggle,
-  .node-editor-root .node-card .workflow-inline-node-close {
-    display: none;
   }
 }
 

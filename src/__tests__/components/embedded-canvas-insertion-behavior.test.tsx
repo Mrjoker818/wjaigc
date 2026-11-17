@@ -566,45 +566,6 @@ it('reports actual VideoGenerationPanel void adapter rejection once', async () =
   expect(f.errors).toHaveLength(1); expect(f.successes).toEqual([]);
 });
 
-it('does not settle the actual NodeEditor consumer when workspace insertion rejects', async () => {
-  const f = fixture(); f.config.reject = true; const pending: Promise<void>[] = [];
-  const node = ts.createSourceFile('node.tsx', readFileSync(resolve('src/components/node-editor.tsx'), 'utf8'),
-    ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  const onAddImages = actualJsxInsertion('NodeEditor', {
-    handleAddImages: (items: Parameters<Sink>[0], source: string | undefined, meta: Meta): Promise<void> => {
-      const op = f.sink(items, source, meta); pending.push(op); void op.catch(() => undefined); return op;
-    },
-  });
-  let delivery: ts.IfStatement | undefined, settled: ts.ExpressionStatement | undefined, catcher: ts.CatchClause | undefined;
-  const visit = (item: ts.Node): void => {
-    if (ts.isCallExpression(item) && ts.isIdentifier(item.expression) && item.expression.text === 'onAddImages'
-      && item.arguments[0]?.getText(node) === 'insertion.items') {
-      let parent: ts.Node | undefined = item.parent;
-      while (parent && !ts.isIfStatement(parent)) parent = parent.parent;
-      delivery = parent as ts.IfStatement;
-      while (parent && !ts.isTryStatement(parent)) parent = parent.parent;
-      if (parent && ts.isTryStatement(parent)) catcher = parent.catchClause;
-    }
-    if (ts.isExpressionStatement(item) && ts.isBinaryExpression(item.expression)
-      && item.expression.left.getText(node) === 'canvasPersistence.settled') settled = item;
-    ts.forEachChild(item, visit);
-  };
-  visit(node); if (!delivery || !settled || !catcher) throw new Error('Node delivery/catch boundary missing');
-  const retries: unknown[] = [], canvasPersistence = { settled: false };
-  const bindings = { onAddImages, insertion: { items: ['/local.png'] }, meta: {}, canvasPersistence,
-    controller: f.controller, imageRetryEpochRef: { current: 0 }, pollEpoch: 0, activeImageRetry: undefined,
-    pollCount: 1, poll: (): void => {}, timerId: undefined,
-    setTimeout: (op: unknown): number => { retries.push(op); return 1; },
-    setExecStatus: (): void => {}, console: { error: (): void => {} } };
-  const js = ts.transpileModule('const deliver = async () => { try {' + delivery.getText(node)
-    + settled.getText(node) + '} ' + catcher.getText(node) + '};',
-    { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
-  const deliver = new Function(...Object.keys(bindings), js + '; return deliver;')(...Object.values(bindings));
-  await deliver(); await Promise.allSettled(pending);
-  expect(canvasPersistence.settled).toBe(false); expect(retries).toHaveLength(1);
-  expect(f.successes).toEqual([]);
-});
-
 describe('actual stabilization continuation fix1', () => {
   // Break: a guard added without the real helper path must not suppress valid stabilization.
   const settle = async (f: ReturnType<typeof fixture>): Promise<void> => {

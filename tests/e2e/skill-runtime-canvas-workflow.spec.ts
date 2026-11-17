@@ -3,8 +3,6 @@ import type { AddressInfo, Socket } from 'node:net';
 import type { Page } from '@playwright/test';
 import sharp from 'sharp';
 
-import { createWorkflowNode } from '../../src/lib/workflow-engine';
-
 import {
   ensureStage4Session,
   expect,
@@ -130,7 +128,7 @@ async function readAssetReference(
   return payload;
 }
 
-async function readCatalog(page: Page, surface: 'canvas' | 'workflow'): Promise<CatalogSkill[]> {
+async function readCatalog(page: Page, surface: 'canvas'): Promise<CatalogSkill[]> {
   const response = await page.request.get(`/api/skills?surface=${surface}`);
   expect(response.ok(), `${surface} Skill catalog returned HTTP ${response.status()}`).toBe(true);
   const payload = await response.json() as { skills?: CatalogSkill[] };
@@ -138,7 +136,7 @@ async function readCatalog(page: Page, surface: 'canvas' | 'workflow'): Promise<
   return payload.skills ?? [];
 }
 
-test('画布与节点模式使用同一套 28 项基础 Skill 并逐项恢复结果', async ({ page, stage4Evidence }, testInfo) => {
+test('画布使用 28 项基础 Skill 并逐项恢复结果', async ({ page, stage4Evidence }, testInfo) => {
   test.skip(
     !process.env.DATABASE_URL && !process.env.PGDATABASE_URL,
     'BLOCKED: DATABASE_URL or PGDATABASE_URL is required for the isolated Stage 4 Skill fixture',
@@ -147,57 +145,13 @@ test('画布与节点模式使用同一套 28 项基础 Skill 并逐项恢复结
   const fixture = await stage4FixtureForProject(testInfo.project.name);
   const auth = await ensureStage4Session(page, fixture);
   const skillFixture = structuredClone(fixture);
-  const sourceAsset = await seedStage4RuntimeDependencies({
+  await seedStage4RuntimeDependencies({
     auth,
     fixture: skillFixture,
     page,
     providerBaseUrl: `${providerBaseUrl}/v1`,
     imageAspectRatios: fixtureSizes.map(size => size.ratio),
   });
-  const metadata = skillFixture.canvasProject.metadata as Record<string, unknown>;
-  const sourceNode = createWorkflowNode('input-image', 80, 120, '营销来源图');
-  await seedStage4Baseline(page, skillFixture, auth);
-  const sourceTransfer = await page.request.post('/api/assets/transfer', {
-    data: {
-      sourceVersion: sourceAsset.sourceVersionId,
-      targetProject: String(fixture.canvasProject.id),
-      targetWorkspace: skillFixture.workflow.id,
-      entityType: 'workflow-input',
-      entityId: sourceNode.id,
-      idempotencyKey: `skill-runtime:${sourceNode.id}:source`,
-    },
-  });
-  expect(sourceTransfer.ok(), `Workflow source transfer returned HTTP ${sourceTransfer.status()}`).toBe(true);
-  const workflowSource = await sourceTransfer.json() as {
-    assetId: string; assetVersionId: string; placementId: string; url: string;
-  };
-  expect(workflowSource.assetVersionId).toBe(sourceAsset.sourceVersionId);
-  expect(workflowSource.placementId).not.toBe(`stage4-placement-${fixture.browserProfile}`);
-  sourceNode.config = {
-    ...sourceNode.config,
-    projectId: String(fixture.canvasProject.id),
-    assetId: workflowSource.assetId,
-    assetVersionId: workflowSource.assetVersionId,
-    placementId: workflowSource.placementId,
-    imageUrl: workflowSource.url,
-  };
-  const marketingNode = createWorkflowNode('ai-skill', 420, 120);
-  skillFixture.canvasProject.metadata = {
-    ...metadata,
-    workflow: {
-      ...skillFixture.workflow,
-      nodes: [sourceNode, marketingNode],
-      connections: [{
-        id: `stage4-marketing-source-${fixture.browserProfile}`,
-        fromNodeId: sourceNode.id,
-        fromPortId: 'out-image',
-        toNodeId: marketingNode.id,
-        toPortId: 'in-image',
-        type: 'image',
-      }],
-      name: `Skill runtime ${fixture.browserProfile}`,
-    },
-  };
   await seedStage4Baseline(page, skillFixture, auth);
   await page.addInitScript(() => {
     localStorage.setItem('wujie_selected_model', JSON.stringify({
@@ -208,15 +162,11 @@ test('画布与节点模式使用同一套 28 项基础 Skill 并逐项恢复结
   });
   await openStage4CanvasProject(page, String(fixture.canvasProject.id));
 
-  const [canvasSkills, workflowSkills] = await Promise.all([
-    readCatalog(page, 'canvas'),
-    readCatalog(page, 'workflow'),
-  ]);
+  const canvasSkills = await readCatalog(page, 'canvas');
   const identity = (skills: CatalogSkill[]) => skills
     .map(skill => `${skill.id}@${skill.version}`)
     .sort();
   expect(canvasSkills).toHaveLength(28);
-  expect(identity(workflowSkills)).toEqual(identity(canvasSkills));
   expect(canvasSkills.map(skill => skill.id)).toEqual(expect.arrayContaining([
     'preset-ad-ab-variants',
     'preset-retargeting-creative',
@@ -228,7 +178,6 @@ test('画布与节点模式使用同一套 28 项基础 Skill 并逐项恢复结
   ]));
   await writeStage4Metrics(stage4Evidence, testInfo, 'skill-catalog-identity', {
     canvas: identity(canvasSkills),
-    workflow: identity(workflowSkills),
   });
 
   await page.locator('[data-canvas-image-id]').first().click();
@@ -382,92 +331,6 @@ test('画布与节点模式使用同一套 28 项基础 Skill 并逐项恢复结
     '检查批次规则', 'SKU 商品素材 1', 'SKU 商品素材 2', 'SKU 商品素材 3',
   ]);
 
-  const collapsePanel = page.getByRole('button', { name: '收起面板', exact: true });
-  if (await collapsePanel.isVisible().catch(() => false)) await collapsePanel.click();
-  await page.getByTitle('节点模式').first().click();
-  await page.getByLabel('Skill 执行').last().click();
-
-  const skillSelect = page.getByRole('combobox', { name: 'Skill' });
-  if (!await skillSelect.isVisible().catch(() => false)) {
-    await page.getByLabel('Skill 执行').last().click();
-  }
-  await expect(skillSelect).toBeVisible({ timeout: 20_000 });
-  const skillOptions = skillSelect.locator('option');
-  await expect(skillOptions).toHaveCount(workflowSkills.length + 1);
-  expect((await skillOptions.evaluateAll(options => options.map(option => (option as HTMLOptionElement).value))).sort())
-    .toEqual(['', ...workflowSkills.map(skill => skill.id)].sort());
-  await skillSelect.selectOption('preset-pinterest-pins');
-  await expect(skillSelect).toHaveValue('preset-pinterest-pins');
-  await expect(page.getByText('已选择 1 张来源图片', { exact: true }).last()).toBeVisible();
-  await page.getByLabel('内容主题').last().fill('通勤降噪指南');
-  await page.getByLabel('目标受众').last().fill('通勤用户');
-  await page.getByLabel('目标').last().selectOption('收藏');
-  await page.getByLabel('图钉数量').last().selectOption('3');
-  await page.getByRole('combobox', { name: 'orchestrator 模型' }).selectOption(
-    'stage4-chat-provider::stage4-chat-model',
-  );
-  await page.getByRole('combobox', { name: 'image 模型' }).selectOption(
-    'stage4-image-provider::stage4-image-model',
-  );
-  const workflowEstimate = page.waitForResponse(response => (
-    response.request().method() === 'POST'
-    && new URL(response.url()).pathname === '/api/skill-runs/estimate'
-  ), { timeout: 90_000 });
-  const [workflowEstimateResponse] = await Promise.all([
-    workflowEstimate,
-    page.getByRole('button', { name: '执行工作流', exact: true }).click(),
-  ]);
-  expect(workflowEstimateResponse.ok(), `Workflow estimate returned HTTP ${workflowEstimateResponse.status()}`).toBe(true);
-  await expect(page.getByRole('heading', { name: 'Skill 费用预估', exact: true })).toBeVisible({ timeout: 20_000 });
-  const workflowEstimatePayload = await workflowEstimateResponse.json() as { minimum?: number; maximum?: number };
-  expect(workflowEstimatePayload.minimum).toBe(workflowEstimatePayload.maximum);
-  expect(workflowEstimatePayload.maximum).toBeGreaterThan(0);
-  await expect(page.getByText(`${workflowEstimatePayload.maximum} 积分`, { exact: true })).toBeVisible();
-  const [workflowSubmissionResponse] = await Promise.all([
-    page.waitForResponse(response => (
-      response.request().method() === 'POST'
-      && new URL(response.url()).pathname === '/api/workflow/execute'
-      && Boolean(response.request().postData()?.includes('"action":"start"'))
-    ), { timeout: 90_000 }),
-    page.getByRole('button', { name: '确认执行', exact: true }).click(),
-  ]);
-  expect(workflowSubmissionResponse.ok()).toBe(true);
-  const workflowSubmissionPayload = await workflowSubmissionResponse.json() as { executionId?: string };
-  expect(typeof workflowSubmissionPayload.executionId).toBe('string');
-  const workflowRequest = workflowSubmissionResponse.request().postDataJSON() as {
-    nodes?: Array<{
-      id?: string;
-      type?: string;
-      config?: { skillId?: string; version?: number };
-    }>;
-  };
-  const workflowSkillNode = workflowRequest.nodes?.find(node => node.type === 'ai-skill');
-  expect(workflowSkillNode?.config?.skillId).toBe('preset-pinterest-pins');
-  expect(workflowSkillNode?.config?.version).toBe(1);
-  await expect(page.getByText('执行完成', { exact: true })).toBeVisible({ timeout: 90_000 });
-  const workflowStatusResponse = await page.request.post('/api/workflow/execute', {
-    data: { action: 'status', executionId: workflowSubmissionPayload.executionId },
-  });
-  expect(workflowStatusResponse.ok()).toBe(true);
-  const workflowStatus = await workflowStatusResponse.json() as {
-    status?: string;
-    results?: Record<string, { output?: { runId?: string; assetVersionIds?: string[] } }>;
-  };
-  expect(workflowStatus.status).toBe('completed');
-  const workflowOutput = workflowStatus.results?.[workflowSkillNode?.id || '']?.output;
-  expect(typeof workflowOutput?.runId).toBe('string');
-  expect(workflowOutput?.assetVersionIds).toHaveLength(3);
-  const workflowRun = await readSkillRun(page, workflowOutput!.runId!);
-  expect(workflowRun.status).toBe('completed');
-  expect(workflowRun.skillId).toBe('preset-pinterest-pins');
-  expect(workflowRun.skillVersion).toBe(1);
-  expect(workflowRun.assetVersionIds).toHaveLength(3);
-  expect(workflowRun.steps.map(step => step.label)).toEqual([
-    '制定图钉系列方案', '主图钉', '细节图钉', '转化图钉',
-  ]);
-  expect(workflowRun.creditCost).toBe(workflowEstimatePayload.maximum);
-  expect(workflowOutput?.assetVersionIds).toEqual(workflowRun.assetVersionIds);
-  expect(providerImageRequests).toEqual(['16:9', '16:9', '1:1', '1:1', '1:1', '2:3', '2:3', '2:3']);
   await writeStage4Metrics(stage4Evidence, testInfo, 'skill-run-surface-identity', {
     canvas: {
       runId: canvasRun.runId,
@@ -480,12 +343,6 @@ test('画布与节点模式使用同一套 28 项基础 Skill 并逐项恢复结
       skillId: batchRun.skillId,
       skillVersion: batchRun.skillVersion,
       assetVersionIds: batchRun.assetVersionIds,
-    },
-    workflow: {
-      runId: workflowRun.runId,
-      skillId: workflowRun.skillId,
-      skillVersion: workflowRun.skillVersion,
-      assetVersionIds: workflowRun.assetVersionIds,
     },
   });
 });

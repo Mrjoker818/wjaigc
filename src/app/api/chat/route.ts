@@ -46,9 +46,8 @@ interface ChatTaskContext {
   confirmedToolCall?: { name?: string; arguments?: Record<string, unknown> };
 }
 
-// 自带准入的工具：run_skill 经 createSkillRun 校验项目权限并预扣积分，
-// build_workflow 只生成节点草稿不执行，二者不走单任务图像准入。
-const SELF_ADMITTED_TOOLS = new Set(['run_skill', 'build_workflow']);
+// 自带准入的工具：run_skill 经 createSkillRun 校验项目权限并预扣积分，不走单任务图像准入。
+const SELF_ADMITTED_TOOLS = new Set(['run_skill']);
 
 function runtimeToolId(toolName: string): 'generate_image' | 'edit_image' | 'analyze_image' | null {
   if (toolName === 'generate_image' || toolName === 'img2img') return 'generate_image';
@@ -881,7 +880,6 @@ async function handleAgentStream(
           imageUrls: toolResult.imageUrls || [],
           videoUrls: toolResult.videoUrls || [],
           taskIds: toolResult.taskIds || [],
-          ...(toolResult.workflow ? { workflow: toolResult.workflow } : {}),
           iteration: toolIteration,
         })}\n\n`));
         return toolResult;

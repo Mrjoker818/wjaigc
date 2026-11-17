@@ -26,11 +26,6 @@ describe('chat tool guide', () => {
     expect(buildChatToolGuide(['generate_image'])).toBe('');
   });
 
-  it('explains build_workflow only when it is available', () => {
-    expect(buildChatToolGuide(['build_workflow'])).toContain('## 节点工作流（build_workflow）');
-    expect(buildChatToolGuide(['run_skill'])).not.toContain('build_workflow');
-  });
-
   it('injects the guide into the chat system prompt', () => {
     const route = source('src/app/api/chat/route.ts');
     expect(route).toContain('buildChatToolGuide(availableTools.map(tool => tool.function.name))');
@@ -38,9 +33,9 @@ describe('chat tool guide', () => {
 });
 
 describe('chat agent-v2 and confirmed tool calls', () => {
-  it('lets run_skill and build_workflow self-admit under agent-v2', () => {
+  it('lets run_skill self-admit under agent-v2', () => {
     const route = source('src/app/api/chat/route.ts');
-    expect(route).toContain("const SELF_ADMITTED_TOOLS = new Set(['run_skill', 'build_workflow']);");
+    expect(route).toContain("const SELF_ADMITTED_TOOLS = new Set(['run_skill']);");
     expect(route).toContain("input.agentRuntimeMode === 'agent-v2' && SELF_ADMITTED_TOOLS.has(input.toolName)");
   });
 

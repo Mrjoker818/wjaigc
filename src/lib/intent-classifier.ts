@@ -1,6 +1,6 @@
 /**
  * P0-2: 预测性交互系统 - 统一意图分类器
- * 支持画布模式 + 节点模式双模式统一意图识别
+ * 画布模式统一意图识别
  */
 
 // 意图类型定义
@@ -9,7 +9,6 @@ export type IntentCategory =
   | 'operate'       // 操作意图：放大/去背景/擦除/扩展/裁切/图生图
   | 'analyze'       // 分析意图：分析图片/描述图片/识别元素
   | 'brand'         // 品牌意图：品牌设计/风格切换/品牌资产
-  | 'workflow'      // 工作流意图：创建节点/执行节点/修改节点
   | 'chat'          // 纯聊天意图：闲聊/问答/求助
   | 'unknown';      // 无法识别
 
@@ -109,13 +108,6 @@ const BRAND_KEYWORDS: Record<string, string[]> = {
   brand_asset: ['品牌资产', 'brand dna', '品牌dna', '品牌规范', '视觉资产'],
 };
 
-// 工作流意图关键词映射
-const WORKFLOW_KEYWORDS: Record<string, string[]> = {
-  create_node: ['创建节点', '添加节点', '新建节点', 'create node', 'add node'],
-  execute_node: ['执行节点', '运行节点', 'execute', 'run', '执行工作流'],
-  modify_node: ['修改节点', '编辑节点', '调整节点', 'modify', 'edit node'],
-};
-
 // 聊天意图关键词映射
 const CHAT_KEYWORDS: Record<string, string[]> = {
   greeting: ['你好', '您好', 'hello', 'hi', '嗨', '早上好', '下午好'],
@@ -133,8 +125,6 @@ export function classifyIntent(
     hasImages?: boolean;
     selectedImageId?: string | null;
     selectedImageUrl?: string | null;
-    isNodeMode?: boolean;
-    nodeSelectedId?: string | null;
   }
 ): ClassifiedIntent {
   const text = input.toLowerCase().trim();
@@ -160,12 +150,6 @@ export function classifyIntent(
   // 4. 检测品牌意图
   const brandIntent = detectBrandIntent(text);
   if (brandIntent) return brandIntent;
-  
-  // 5. 检测工作流意图（节点模式）
-  if (context.isNodeMode) {
-    const workflowIntent = detectWorkflowIntent(text);
-    if (workflowIntent) return workflowIntent;
-  }
   
   // 6. 检测聊天意图
   const chatIntent = detectChatIntent(text);
@@ -305,25 +289,6 @@ function detectBrandIntent(text: string): ClassifiedIntent | null {
 }
 
 /**
- * 检测工作流意图
- */
-function detectWorkflowIntent(text: string): ClassifiedIntent | null {
-  for (const [action, keywords] of Object.entries(WORKFLOW_KEYWORDS)) {
-    for (const keyword of keywords) {
-      if (text.includes(keyword.toLowerCase())) {
-        return {
-          category: 'workflow',
-          clarity: 'clear',
-          action,
-          params: {},
-        };
-      }
-    }
-  }
-  return null;
-}
-
-/**
  * 检测聊天意图
  */
 function detectChatIntent(text: string): ClassifiedIntent | null {
@@ -451,7 +416,6 @@ export function describeIntent(intent: ClassifiedIntent): string {
     operate: '操作',
     analyze: '分析',
     brand: '品牌',
-    workflow: '工作流',
     chat: '聊天',
     unknown: '未知',
   };

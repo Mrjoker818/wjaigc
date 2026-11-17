@@ -260,13 +260,6 @@ async function projectCompletedTask(task: ProjectableTask): Promise<void> {
   }
   const target = taskProjectionTarget(task);
   try {
-    if (task.type === 'edit') {
-      const { projectWorkflowEditTaskResult } = await import('@/lib/collaboration/workflow-edit-output');
-      const published = await projectWorkflowEditTaskResult(task.userId, task.id);
-      if (published) return;
-      const submission = task.result?.submissionPayload as Record<string, unknown> | undefined;
-      if (submission?.assetWorkspace === 'workflow') throw new Error('WORKFLOW_EDIT_INTENT_MISSING');
-    }
     const targetWorkspaceId = target.workspaceId
       || (target.workspace === 'canvas' ? task.projectId : `${target.workspace}:${task.projectId}`);
     await projectAgentResultToWorkspace({

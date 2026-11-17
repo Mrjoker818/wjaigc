@@ -14,7 +14,6 @@ import {
 import { selectInitialSimpleChatProject } from "@/components/simple-chat/simple-chat-types";
 import { User } from "@/lib/user-types";
 import { fetchSessionPayload } from "@/lib/auth-session";
-import { hasAmbiguousWorkflowChatReturnParameters } from "@/lib/asset-core/workflow-chat-return";
 import { logoutSimpleChatSession } from "@/lib/simple-chat-logout";
 import {
   createSimpleChatSyncCoordinator,
@@ -287,7 +286,6 @@ export default function SimpleChatPage() {
 
   useEffect(() => {
     if (!activeProjectId || !activeTaskId || !activeTask) return;
-    if (hasAmbiguousWorkflowChatReturnParameters(window.location.search)) return;
     const current = new URL(window.location.href);
     current.searchParams.set('projectId', activeProjectId);
     current.searchParams.set('taskId', activeTaskId);

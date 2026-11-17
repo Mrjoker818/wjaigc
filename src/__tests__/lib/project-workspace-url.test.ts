@@ -16,7 +16,10 @@ describe('buildProjectWorkspaceUrl', () => {
 
 describe('workspace handoff URL state', () => {
   it('enters node mode directly for a project handoff URL', () => {
-    expect(getInitialWorkspaceModeFromSearch('?projectId=canvas-1&mode=node')).toBe('node');
+    expect(getInitialWorkspaceModeFromSearch('?projectId=canvas-1&mode=node')).toBe('drama');
+    expect(getInitialWorkspaceModeFromSearch('?projectId=canvas-1&mode=workflow-hub')).toBe('drama');
+    expect(getInitialWorkspaceModeFromSearch('?projectId=canvas-1&mode=drama')).toBe('drama');
+    expect(getInitialWorkspaceModeFromSearch('?mode=drama')).toBe('dashboard');
   });
 
   it('cleans only handoff parameters after a successful save', () => {

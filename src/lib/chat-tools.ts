@@ -14,7 +14,6 @@ import { createSkillRun, dispatchSkillRunExecution, getSkillRun } from './skill-
 import { requiredSkillModelRoles, type SkillDefinition } from './skill-runtime/types';
 import type { FrozenBindings } from './skill-runtime/cost-estimator';
 import type { User } from './user-types';
-import { AI_BUILD_PROMPT, createWorkflowFromAIResult, parseAIBuildResponse } from './workflow-engine';
 
 // 服务器端口，所有服务器间 fetch 调用统一使用 localhost + 此端口
 const SERVER_PORT = process.env.DEPLOY_RUN_PORT || '5000';
@@ -292,23 +291,6 @@ export const CHAT_TOOLS = [
       },
     },
   },
-  {
-    type: 'function' as const,
-    function: {
-      name: 'build_workflow',
-      description: '根据用户的描述在节点模式里创建一个可复用的工作流。当用户要求搭建流程、工作流、自动化流水线，或描述的是多个步骤串联的生产过程时使用。单次的出图、修图、放大不要用这个工具。',
-      parameters: {
-        type: 'object',
-        properties: {
-          description: {
-            type: 'string',
-            description: '用户想要的工作流，用自然语言描述目标和步骤',
-          },
-        },
-        required: ['description'],
-      },
-    },
-  },
 ];
 
 // ============ Tool Execution ============
@@ -372,8 +354,6 @@ export interface ToolCallResult {
   taskIds?: Array<{ taskId: string; model: string; providerId: string; type: 'image' | 'video'; runId?: string }>;
   /** 结果描述，用于回传给 LLM */
   resultText: string;
-  /** build_workflow 产出的工作流，前端写入节点模式并在画布放预览卡 */
-  workflow?: import('./workflow-engine').Workflow;
   /** Server-only continuation for an agent-v2 task admitted without provider execution. */
   admittedExecution?: AdmittedToolExecution;
 }
@@ -485,8 +465,6 @@ export async function executeToolCall(
       return executeExtendCanvas(args, context);
     case 'run_skill':
       return executeRunSkill(args, context);
-    case 'build_workflow':
-      return executeBuildWorkflow(args, context);
     default:
       return { success: false, error: `未知工具: ${toolName}`, resultText: `错误：未知工具 ${toolName}` };
   }
@@ -1209,7 +1187,7 @@ function skillRequestInputKey(skill: SkillDefinition): string | undefined {
 const SKILL_CATALOG_DESCRIPTION_LIMIT = 60;
 
 /**
- * 对话工具的补充说明：技能目录和 build_workflow 用法。
+ * 对话工具的补充说明：技能目录。
  * 只列出能用一段文字需求启动的技能，需要素材输入的技能留给技能面板。
  */
 export function buildChatToolGuide(availableToolNames: readonly string[]): string {
@@ -1230,13 +1208,6 @@ export function buildChatToolGuide(availableToolNames: readonly string[]): strin
         ...lines,
       ].join('\n'));
     }
-  }
-  if (availableToolNames.includes('build_workflow')) {
-    sections.push([
-      '## 节点工作流（build_workflow）',
-      '用户要求搭建、创建或设计一个可重复使用的处理流程（例如“先生成再去背景再放大”）时，调用 build_workflow，description 写清每一步要做什么。',
-      '工作流会写入节点模式，不会立即执行，也不消耗积分。只想要一张成品图时直接调用对应的单一工具。',
-    ].join('\n'));
   }
   return sections.join('\n\n');
 }
@@ -1350,78 +1321,6 @@ async function executeRunSkill(
     success: true,
     taskIds: [runTask],
     resultText: `${skill.name} 仍在运行（状态：${lastStatus}），完成后结果会自动添加到画布。`,
-  };
-}
-
-/** 读出 chat/completions 的回复文本；部分网关忽略 stream:false 仍按 SSE 返回，也一并拼接。 */
-function readChatCompletionText(body: string): string {
-  const trimmed = body.trim();
-  if (!trimmed.startsWith('data:')) {
-    const payload = JSON.parse(trimmed) as { choices?: Array<{ message?: { content?: unknown } }> };
-    const message = payload.choices?.[0]?.message?.content;
-    return typeof message === 'string' ? message : '';
-  }
-  let text = '';
-  for (const line of trimmed.split('\n')) {
-    const data = line.trim().replace(/^data:\s*/, '');
-    if (!line.trim().startsWith('data:') || !data || data === '[DONE]') continue;
-    try {
-      const chunk = JSON.parse(data) as { choices?: Array<{ delta?: { content?: unknown }; message?: { content?: unknown } }> };
-      const piece = chunk.choices?.[0]?.delta?.content ?? chunk.choices?.[0]?.message?.content;
-      if (typeof piece === 'string') text += piece;
-    } catch {
-      // 跳过不完整或非 JSON 的事件行
-    }
-  }
-  return text;
-}
-
-async function executeBuildWorkflow(
-  args: Record<string, unknown>,
-  context: ToolContext,
-): Promise<ToolCallResult> {
-  const description = String(args.description);
-  if (!context.chatModel) {
-    return { success: false, error: '未配置对话模型', resultText: '当前没有可用的对话模型，无法创建工作流。' };
-  }
-  let content = '';
-  try {
-    const response = await fetchWithV1Retry(context.chatBaseUrl, '/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${context.chatApiKey}`,
-      },
-      body: JSON.stringify({
-        model: context.chatModel,
-        temperature: 0.7,
-        stream: false,
-        messages: [
-          { role: 'system', content: AI_BUILD_PROMPT },
-          { role: 'user', content: description },
-        ],
-      }),
-      signal: AbortSignal.timeout(60_000),
-    });
-    if (!response.ok) {
-      return { success: false, error: `工作流生成失败: ${response.status}`, resultText: `创建工作流失败（HTTP ${response.status}）。` };
-    }
-    content = readChatCompletionText(await response.text());
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { success: false, error: message, resultText: `创建工作流出错：${message}` };
-  }
-
-  const parsed = parseAIBuildResponse(content);
-  if (!parsed || parsed.nodes.length < 2) {
-    return { success: false, error: '工作流格式无效', resultText: '没有生成可用的工作流，请把需求描述得更具体一些。' };
-  }
-  const workflow = createWorkflowFromAIResult(parsed, { defaultChatModel: context.chatModel });
-  return {
-    success: true,
-    data: { workflow },
-    workflow,
-    resultText: `已创建工作流「${workflow.name}」，包含 ${workflow.nodes.length} 个节点，已写入节点模式。`,
   };
 }
 

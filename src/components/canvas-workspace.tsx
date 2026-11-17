@@ -104,22 +104,10 @@ import {
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
 import { Image as ImageIcon, MessageSquare, Sparkles, ChevronLeft, ChevronRight, X, Bell, MoreHorizontal, Share2, Settings2 } from 'lucide-react';
-import { type Workflow, type WorkspaceAssetReference } from '@/lib/workflow-engine';
-import type { WorkspaceAssetReference as CoreWorkspaceAssetReference } from '@/lib/asset-core/types';
-import {
-  createSimpleChatImportWorkflow,
-  parseSimpleChatWorkspaceHandoffIntent,
-  type SimpleChatWorkspaceHandoff,
-  type SimpleChatWorkspaceHandoffIntent,
-} from '@/lib/simple-chat-workspace-handoff';
-import {
-  consumeSimpleChatWorkspaceHandoffForProject,
-  createSimpleChatWorkspaceHandoffProjectQueue,
-  createSimpleChatWorkspaceHandoffRunGuard,
-  getSimpleChatWorkspaceHandoffIdentity,
-  toSimpleChatHandoffMessage,
-  type SimpleChatWorkflowTransferRequest,
-} from '@/lib/simple-chat-workspace-handoff-client';
+import type {
+  WorkspaceAssetReference,
+  WorkspaceAssetReference as CoreWorkspaceAssetReference,
+} from '@/lib/asset-core/types';
 import { taskEventsClient } from '@/lib/task-events-client';
 import { waitForTaskPollInterval } from '@/lib/task-polling-wait';
 import type { WorkflowCanvasInsertionItem } from '@/lib/asset-core/workspace-transfer';
@@ -180,7 +168,6 @@ import {
 import { normalizeCanvasViewState } from '@/lib/canvas-view-state';
 import {
   buildProjectWorkspaceUrl,
-  clearSimpleChatWorkspaceHandoffParams,
   getInitialWorkspaceModeFromSearch,
   replaceWorkspaceHistoryState,
   useWorkspaceLocationSearch,
@@ -188,11 +175,6 @@ import {
 import { toStableImageUrl, awaitStableImageUrl } from '@/lib/stable-image-url';
 import { APP_FULL_VERSION_LABEL, APP_NAME } from '@/config/app-meta';
 import { fetchSessionPayload, resolveSessionUser } from '@/lib/auth-session';
-import {
-  mergeWorkflowIntoProjectMetadata,
-  retainSavedProjectWorkflow,
-  workflowFromProjectMetadata,
-} from '@/lib/project-workflow';
 import {
   consumeCanvasPendingMediaRecovery,
   consumePreparedCanvasUnloadSnapshot,
@@ -234,8 +216,6 @@ const ChatPanel = dynamic(() => import('@/components/chat-panel').then(m => m.Ch
 const QuickCreatePanel = dynamic(() => import('@/components/quick-create-panel').then(m => m.QuickCreatePanel), { loading: () => null });
 const VectorDesignPanel = dynamic(() => import('@/components/vector-design/vector-design-panel').then(m => m.VectorDesignPanel), { loading: () => null });
 const PromptEquation = dynamic(() => import('@/components/prompt-equation').then(m => m.PromptEquation), { loading: () => null });
-const NodeEditor = dynamic(() => import('@/components/node-editor'), { loading: () => null });
-const WorkflowHub = dynamic(() => import('@/components/workflow-hub'), { loading: () => null });
 const DashboardView = dynamic(() => import('@/components/dashboard/dashboard-view'), { loading: () => null });
 const ImageEditor = dynamic(() => import('@/components/image-editor').then(m => m.ImageEditor), { loading: () => null });
 const ProjectDataPanel = dynamic(() => import('@/components/project-data-panel').then(m => m.ProjectDataPanel), { loading: () => null });
@@ -317,115 +297,29 @@ function getInitialLoginMode(): 'canvas' | null {
   return params.get('loginMode') === 'canvas' && !params.has('error') ? 'canvas' : null;
 }
 
-type WorkspaceMode = 'canvas' | 'node' | 'workflow-hub' | 'dashboard';
+type WorkspaceMode = 'canvas' | 'drama' | 'dashboard';
 
 function getInitialWorkspaceMode(): WorkspaceMode {
   if (typeof window === 'undefined') return 'dashboard';
   return getInitialWorkspaceModeFromSearch(window.location.search);
 }
 
-async function resolveSimpleChatWorkspaceHandoffFromApi(
-  intent: SimpleChatWorkspaceHandoffIntent,
-  scope?: { expectedActorUserId: string; signal?: AbortSignal; isCurrent: () => boolean },
-): Promise<SimpleChatWorkspaceHandoff> {
-  if (scope && !scope.isCurrent()) throw new Error('HANDOFF_SCOPE_CHANGED');
-  const response = await fetch('/api/simple-chat/workspace-handoff', {
-    method: 'POST',
-    credentials: 'include', cache: 'no-store', signal: scope?.signal,
-    headers: { 'Content-Type': 'application/json', ...(scope ? { 'x-wujie-expected-actor-id': scope.expectedActorUserId } : {}) },
-    body: JSON.stringify(intent),
-  });
-  const payload = await response.json().catch(() => null) as {
-    success?: boolean;
-    code?: string;
-    handoff?: SimpleChatWorkspaceHandoff;
-  } | null;
-  if (scope && !scope.isCurrent()) throw new Error('HANDOFF_SCOPE_CHANGED');
-  if (!response.ok || !payload?.success || !payload.handoff) {
-    const code = payload?.code || `HANDOFF_RESOLVE_FAILED_${response.status}`;
-    throw Object.assign(new Error(code), { code, status: response.status });
-  }
-  return payload.handoff;
-}
+// 节点模式已下线，清掉它留在浏览器里的预设、片段和执行状态。
+const RETIRED_NODE_MODE_STORAGE_KEYS = ['wujie-node-presets', 'wujie-prompt-snippets'];
+const RETIRED_NODE_MODE_STORAGE_PREFIX = 'wujie_workflow_exec_state:v2:';
 
-async function transferSimpleChatImageToWorkflow(
-  request: SimpleChatWorkflowTransferRequest,
-  scope?: { expectedActorUserId: string; signal?: AbortSignal; isCurrent: () => boolean;
-    documentReference?: WorkspaceAssetReference },
-): Promise<WorkspaceAssetReference> {
-  if (scope && !scope.isCurrent()) throw new Error('HANDOFF_SCOPE_CHANGED');
-  const reference = scope?.documentReference;
-  if (reference && (reference.assetVersionId !== request.sourceVersion || !reference.placementId)) {
-    throw new Error('HANDOFF_CANONICAL_REFERENCE_REQUIRED');
+function clearRetiredNodeModeStorage(): void {
+  try {
+    for (const key of RETIRED_NODE_MODE_STORAGE_KEYS) window.localStorage.removeItem(key);
+    const staleKeys: string[] = [];
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (key?.startsWith(RETIRED_NODE_MODE_STORAGE_PREFIX)) staleKeys.push(key);
+    }
+    for (const key of staleKeys) window.localStorage.removeItem(key);
+  } catch {
+    // Storage can be unavailable in private mode; nothing to clean up then.
   }
-  const response = await fetch(reference ? '/api/assets' : '/api/assets/transfer', {
-    method: 'POST',
-    credentials: 'include', cache: 'no-store', signal: scope?.signal,
-    headers: { 'Content-Type': 'application/json', ...(scope ? { 'x-wujie-expected-actor-id': scope.expectedActorUserId } : {}) },
-    body: JSON.stringify(reference ? { projectId: request.targetProject,
-      assetVersionId: reference.assetVersionId, placementId: reference.placementId } : request),
-  });
-  const payload = await response.json().catch(() => null) as (WorkspaceAssetReference & { error?: string }) | null;
-  if (scope && !scope.isCurrent()) throw new Error('HANDOFF_SCOPE_CHANGED');
-  if (!response.ok || !payload?.url) {
-    const code = payload?.error || `ASSET_TRANSFER_FAILED_${response.status}`;
-    throw Object.assign(new Error(code), { code, status: response.status });
-  }
-  if (reference && (payload.assetVersionId !== reference.assetVersionId || payload.placementId !== reference.placementId)) {
-    throw new Error('HANDOFF_CANONICAL_REFERENCE_MISMATCH');
-  }
-  return payload;
-}
-
-async function loadDocumentNodeWorkflow(
-  projectId: string,
-  actorId: string,
-  signal: AbortSignal,
-  isCurrent: () => boolean,
-  ownedProject?: Pick<Project, 'id' | 'userId' | 'metadata'>,
-): Promise<Workflow | null> {
-  if (!isCurrent()) throw new Error('HANDOFF_SCOPE_CHANGED');
-  const response = await fetch(`/api/workflow/save?userId=${encodeURIComponent(actorId)}`, {
-    credentials: 'include', cache: 'no-store', signal,
-    headers: { 'x-wujie-expected-actor-id': actorId },
-  });
-  if (!response.ok) throw new Error('工作流加载失败');
-  const payload = await response.json() as { workflows?: Array<Record<string, unknown>> };
-  if (!isCurrent()) throw new Error('HANDOFF_SCOPE_CHANGED');
-  if (!Array.isArray(payload?.workflows)) throw new Error('工作流加载失败');
-  const standalone = (payload.workflows ?? []).filter(value => value.projectId === projectId)
-    .map(value => workflowFromProjectMetadata({ workflow: value }))
-    .filter((value): value is Workflow => value !== null)
-    .sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null;
-  if (standalone) return standalone;
-  if (ownedProject?.id === projectId && ownedProject.userId === actorId) {
-    return workflowFromProjectMetadata(ownedProject.metadata);
-  }
-  return null;
-}
-
-async function importSimpleChatImageToDocumentWorkflow(
-  request: SimpleChatWorkflowTransferRequest,
-  reference: WorkspaceAssetReference,
-  scope: { expectedActorUserId: string; signal: AbortSignal; isCurrent: () => boolean;
-    refreshMedia: (value: { projectId: string; documentSequence: number; requireDirectorySequence: boolean }) => Promise<Parameters<typeof assertDocumentMediaBatchProjection>[1]> },
-): Promise<WorkspaceAssetReference> {
-  const assertScope = (): void => { if (!scope.isCurrent()) throw new Error('HANDOFF_SCOPE_CHANGED'); };
-  assertScope();
-  if (!reference.assetVersionId || reference.assetVersionId !== request.sourceVersion) {
-    throw new Error('HANDOFF_CANONICAL_REFERENCE_REQUIRED');
-  }
-  const result = await importDocumentMediaBatch({ projectId: request.targetProject,
-    idempotencyKey: request.idempotencyKey, items: [{ sourceVersionId: reference.assetVersionId,
-      ...(reference.placementId ? { placementId: reference.placementId } : {}),
-      command: { action: 'attach', transform: { x: 200, y: 200, width: 512, height: 512, rotation: 0, zIndex: 1 } },
-    }] }, scope.expectedActorUserId, scope.signal, assertScope);
-  assertScope();
-  const images = await scope.refreshMedia({ projectId: request.targetProject,
-    documentSequence: result.documentSequence, requireDirectorySequence: true });
-  assertScope();
-  assertDocumentMediaBatchProjection(result, images);
-  return result.items[0].assetReference;
 }
 
 function normalizeQuickCreateModels(data: QuickCreateModelsResponse): QuickCreateModelCandidate[] {
@@ -1138,8 +1032,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
   const projectLoadGateRef = useRef(createLatestProjectLoadGate());
   const canvasChatProjectLoadRef = useRef<object | null>(null);
   const projectLoadActiveRef = useRef(true);
-  const selectedHubWorkflowScopeRef = useRef('');
-  const pendingHubWorkflowRef = useRef<{ actorId: string; projectId: string } | null>(null);
   useLayoutEffect(() => {
     projectLoadActiveRef.current = true;
     return () => { projectLoadActiveRef.current = false; canvasChatProjectLoadRef.current = null; };
@@ -1181,7 +1073,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
           ? {
               ...storedProject,
               canvasImages: [...(recoveredMedia?.images ?? recoveredCanvasSnapshot.images)],
-              metadata: retainSavedProjectWorkflow(recoveredCanvasSnapshot.metadata, storedProject.metadata),
+              metadata: recoveredCanvasSnapshot.metadata,
               updatedAt: Date.now(),
             }
           : storedProject;
@@ -1221,7 +1113,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
         );
         if (!isCurrentLoad() || !resolvedProject.isCurrent()) return;
         // The previous canvas remains active until the replacement is ready.
-        selectedHubWorkflowScopeRef.current = '';
         historyTransitionEpochRef.current += 1;
         activeHistoryTransitionRef.current = null;
         historyLifecyclePendingRef.current = false;
@@ -1234,7 +1125,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
         quickCreateCompileControllerRef.current = null;
         setQuickCreateCompileState(EMPTY_QUICK_CREATE_COMPILE_STATE);
         setCurrentProject(targetProject);
-        setNodeWorkflow(workflowFromProjectMetadata(targetProject.metadata));
         const restoredViewState = normalizeCanvasViewState(targetProject.metadata?.viewState);
         viewStateRef.current = restoredViewState;
         setViewState(restoredViewState);
@@ -1318,7 +1208,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
   }, []);
   const [shareManageOpen, setShareManageOpen] = useState(false);
   const [createdShareAccess, setCreatedShareAccess] = useState<CanvasShareCreatedAccess>();
-  const [pendingModeSwitch, setPendingModeSwitch] = useState<'node' | 'workflow-hub' | 'dashboard' | null>(null);
+  const [pendingModeSwitch, setPendingModeSwitch] = useState<'drama' | 'dashboard' | null>(null);
   // Start with true so SSR renders the login panel (not a blank spinner).
   // The useEffect below will update currentUser if a valid session exists.
   const [authChecked, setAuthChecked] = useState(true);
@@ -1395,7 +1285,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
   const hasActiveCanvasTasks = images.some(img => shouldPersistProcessingPlaceholder(img) || img.processing?.status === 'processing');
 
   // 安全切换模式：有进行中任务时弹窗确认
-  const safeSwitchMode = useCallback((targetMode: 'node' | 'workflow-hub' | 'dashboard') => {
+  useEffect(() => {
+    clearRetiredNodeModeStorage();
+  }, []);
+
+  const safeSwitchMode = useCallback((targetMode: 'drama' | 'dashboard') => {
     if (hasActiveCanvasTasks) {
       setPendingModeSwitch(targetMode);
     } else {
@@ -1550,7 +1444,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
                   ? {
                       ...storedProject,
                       canvasImages: [...(recoveredMedia?.images ?? recoveredCanvasSnapshot.images)],
-                      metadata: retainSavedProjectWorkflow(recoveredCanvasSnapshot.metadata, storedProject.metadata),
+                      metadata: recoveredCanvasSnapshot.metadata,
                       updatedAt: Date.now(),
                     }
                   : storedProject;
@@ -1584,7 +1478,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
                   hydratedTargetImages,
                 );
                 setCurrentProject(targetProject);
-                setNodeWorkflow(workflowFromProjectMetadata(targetProject.metadata));
                 historyProjectIdRef.current = targetProject.id;
                 if (targetProject.canvasImages && targetProject.canvasImages.length > 0) {
                 setImages(visibleTargetImages.map(img => ({
@@ -2024,10 +1917,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
   }), [nextCanvasPersistenceRevision]);
 
   if (!canvasPersistenceSchedulerRef.current) {
-    const retainWorkspaceWorkflow = (snapshot: CanvasPersistenceSnapshot) => {
-      const project = UserManagerCore.getInstance().getProject(snapshot.projectId);
-      return project ? retainSavedProjectWorkflow(snapshot.metadata, project.metadata) : snapshot.metadata;
-    };
     const prepareCanvasWorkspaceSnapshot = (snapshot: CanvasPersistenceSnapshot, baseRevision = snapshot.baseProjectRevision) => {
       const manager = UserManagerCore.getInstance();
       const project = manager.getProject(snapshot.projectId);
@@ -2036,7 +1925,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
         : [...snapshot.images];
       const normalizedSnapshot: CanvasPersistenceSnapshot = {
         ...snapshot,
-        metadata: retainWorkspaceWorkflow(snapshot),
+        metadata: snapshot.metadata,
         images: serializeCanvasWorkspacePlacements(
           images as unknown as CanvasImage[],
         ),
@@ -2119,7 +2008,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
           : [...snapshot.images];
         const projectUpdates = {
           canvasImages: images,
-          metadata: retainWorkspaceWorkflow(snapshot),
+          metadata: snapshot.metadata,
         };
         if (reason === 'immediate') {
           manager.updateProjectInMemory(snapshot.projectId, projectUpdates);
@@ -7386,13 +7275,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
     });
   }, [getCurrentImageModel, handleGenerate, notifyMissingImageModel]);
 
-  // 智能对话创建的工作流写入节点模式并切过去，用户可以直接运行或调整。
-  const handleApplyChatWorkflow = useCallback((workflow: Workflow) => {
-    setNodeWorkflow(workflow);
-    safeSwitchMode('node');
-    toast.success(`已创建工作流「${workflow.name}」，已切换到节点模式`);
-  }, [safeSwitchMode]);
-
   // 适配 InfiniteCanvas 的简单回调函数
   const handleCanvasGenerateVariation = useCallback((image: CanvasImage) => {
     setExternalReferenceImage({ url: image.url, description: image.prompt || '' });
@@ -7572,11 +7454,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
     }
   }, [currentUser, getLocalFavorites, saveLocalFavorites]);
 
-  // Workflow state for node mode
-  const [nodeWorkflow, setNodeWorkflow] = useState<Workflow | null>(null);
-  const [loadedDocumentWorkflowScope, setLoadedDocumentWorkflowScope] = useState('');
-  const [failedDocumentWorkflowScope, setFailedDocumentWorkflowScope] = useState('');
-  const [documentWorkflowRetry, setDocumentWorkflowRetry] = useState(0);
   const workspaceLocationSearch = useWorkspaceLocationSearch();
   useEffect(() => {
     if (!currentProject?.id || !currentUser?.id || collaborativeCanvas.projectId !== currentProject.id
@@ -7641,416 +7518,16 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
     return () => { cancelled = true; controller.abort(); };
   }, [currentProject?.id, currentUser?.id, collaborativeCanvas.projectId, collaborativeCanvas.authority,
     collaborativeCanvas.refreshMedia, setImages, workspaceLocationSearch]);
-  const handoffBootstrapWorkflow = useMemo(() => {
-    if (nodeWorkflow || !currentProject?.id) return null;
-    const intent = parseSimpleChatWorkspaceHandoffIntent(workspaceLocationSearch);
-    if (!intent || intent.targetProjectId !== currentProject.id) return null;
-    return createSimpleChatImportWorkflow(currentProject.id, Date.now());
-  }, [currentProject?.id, nodeWorkflow, workspaceLocationSearch]);
-  const documentWorkflowScope = `${currentUser?.id ?? ''}:${currentProject?.id ?? ''}`;
-  const nodeEditorWorkflow = collaborativeCanvas.authority === 'document'
-    && loadedDocumentWorkflowScope !== documentWorkflowScope ? null : nodeWorkflow ?? handoffBootstrapWorkflow;
-  const nodeWorkflowRef = useRef(nodeEditorWorkflow);
-  nodeWorkflowRef.current = nodeEditorWorkflow;
-  const [handoffRetryRevision, setHandoffRetryRevision] = useState(0);
-  useEffect(() => {
-    if (selectedHubWorkflowScopeRef.current !== documentWorkflowScope) selectedHubWorkflowScopeRef.current = '';
-    if (!currentUser?.id || !currentProject?.id || collaborativeCanvas.projectId !== currentProject.id
-      || collaborativeCanvas.authority !== 'document') return;
-    const actorId = currentUser.id, projectId = currentProject.id;
-    if (selectedHubWorkflowScopeRef.current === `${actorId}:${projectId}`) return;
-    const controller = new AbortController();
-    const epoch = historyTransitionEpochRef.current;
-    const isCurrent = (): boolean => !controller.signal.aborted && isMountedRef.current
-      && currentUserRef.current?.id === actorId && currentProjectRef.current?.id === projectId
-      && historyTransitionEpochRef.current === epoch;
-    const initialWorkflow = nodeWorkflowRef.current;
-    setFailedDocumentWorkflowScope('');
-    const projectSnapshot = currentProjectRef.current;
-    const ownedProject = projectSnapshot?.id === projectId && projectSnapshot.userId === actorId
-      ? { id: projectId, userId: actorId, metadata: projectSnapshot.metadata } : undefined;
-    void loadDocumentNodeWorkflow(projectId, actorId, controller.signal, isCurrent, ownedProject).then(workflow => {
-      if (!isCurrent() || nodeWorkflowRef.current !== initialWorkflow) return;
-      nodeWorkflowRef.current = workflow;
-      setNodeWorkflow(workflow);
-      setLoadedDocumentWorkflowScope(`${actorId}:${projectId}`);
-    }).catch(error => {
-      if (isCurrent()) {
-        setFailedDocumentWorkflowScope(`${actorId}:${projectId}`);
-        console.error('共享项目个人工作流加载失败:', error);
-      }
-    });
-    return () => controller.abort();
-  }, [currentUser?.id, currentProject?.id, collaborativeCanvas.projectId, collaborativeCanvas.authority, documentWorkflowScope,
-    workspaceLocationSearch, documentWorkflowRetry]);
-
-  const persistNodeWorkflow = useCallback(async (
-    workflow: Workflow,
-    expectedProjectId = currentProjectRef.current?.id,
-    assertSaveScope?: () => void,
-    saveStandalone = false,
-  ): Promise<void> => {
-    if (!expectedProjectId || currentProjectRef.current?.id !== expectedProjectId) {
-      throw new Error('工作流保存已取消：当前项目已发生变化');
-    }
-    if (workflow.projectId && workflow.projectId !== expectedProjectId) {
-      throw new Error('工作流属于其他项目，请从工作流中心打开对应项目');
-    }
-    const actorId = currentUserRef.current?.id;
-    const authority = collaborativeCanvasRef.current;
-    if (!actorId || authority?.projectId !== expectedProjectId || authority.authority === 'unknown') {
-      throw new Error('工作流保存已取消：当前身份或项目权限未确认');
-    }
-    const assertCurrent = (): void => {
-      assertSaveScope?.();
-      if (currentUserRef.current?.id !== actorId || currentProjectRef.current?.id !== expectedProjectId
-        || collaborativeCanvasRef.current?.projectId !== expectedProjectId
-        || collaborativeCanvasRef.current.authority !== authority.authority) {
-        throw new Error('工作流保存已取消：当前身份或项目已发生变化');
-      }
-    };
-    const boundWorkflow = { ...workflow, projectId: expectedProjectId };
-    const writeStandalone = async (): Promise<void> => {
-      const response = await fetch('/api/workflow/save', {
-        method: 'POST', credentials: 'include', cache: 'no-store',
-        headers: { 'Content-Type': 'application/json', 'x-wujie-expected-actor-id': actorId },
-        body: JSON.stringify({ userId: actorId, workflow: boundWorkflow }),
-      });
-      if (!response.ok) throw new Error('工作流保存失败');
-    };
-    assertCurrent();
-    if (authority.authority === 'document') {
-      await writeStandalone();
-      assertCurrent();
-      return;
-    }
-
-    await canvasPersistenceScheduler.flush('immediate');
-    assertCurrent();
-    const manager = UserManagerCore.getInstance();
-    if (saveStandalone) {
-      await writeStandalone();
-      // Finish the acknowledged save in its original project even if another
-      // workflow is now open. A different account may not finish this write.
-      if (!projectLoadActiveRef.current || currentUserRef.current?.id !== actorId || manager.getCurrentUserId() !== actorId) {
-        throw new Error('工作流保存已取消：当前身份已发生变化');
-      }
-    }
-    const latestProject = manager.getProject(expectedProjectId) ?? (saveStandalone ? null : currentProjectRef.current);
-    if (!latestProject) throw new Error('当前项目不存在，无法绑定工作流');
-    const updatedProject = manager.updateProjectInMemory(expectedProjectId, {
-      metadata: mergeWorkflowIntoProjectMetadata(latestProject.metadata, boundWorkflow),
-    });
-    if (!updatedProject) throw new Error('当前项目不存在，无法绑定工作流');
-
-    await manager.flushProjectsToServerWithConflictRecovery();
-    if (!manager.hasAcknowledgedProjectWorkflow(expectedProjectId, boundWorkflow)) {
-      throw new Error('工作流保存未获确认，请从工作流中心核对保存结果');
-    }
-    try { assertCurrent(); }
-    catch (error) {
-      if (saveStandalone) return;
-      throw error;
-    }
-    const savedProject = manager.getProject(expectedProjectId);
-    if (!savedProject) throw new Error('当前项目不存在，无法恢复工作流');
-    currentProjectRef.current = savedProject;
-    setCurrentProject(savedProject);
-  }, [canvasPersistenceScheduler]);
-
-  const handoffRunGuardRef = useRef(createSimpleChatWorkspaceHandoffRunGuard());
-  const handoffProjectQueueRef = useRef(createSimpleChatWorkspaceHandoffProjectQueue());
-  const saveNodeWorkflowForProject = useCallback(async (
-    requestedWorkflow: Workflow, assertBeforePersist?: () => void,
-  ): Promise<void> => {
-    const expectedProjectId = currentProjectRef.current?.id;
-    const expectedActorId = currentUserRef.current?.id;
-    const expectedEpoch = historyTransitionEpochRef.current;
-    const expectedWorkflowId = requestedWorkflow.id;
-    if (!expectedProjectId) throw new Error('当前项目不存在，无法保存工作流');
-    const assertSaveScope = (): void => {
-      if (!projectLoadActiveRef.current || !expectedActorId || currentUserRef.current?.id !== expectedActorId
-        || currentProjectRef.current?.id !== expectedProjectId || historyTransitionEpochRef.current !== expectedEpoch) {
-        throw new Error('工作流保存已取消：当前项目已发生变化');
-      }
-      if (nodeWorkflowRef.current && nodeWorkflowRef.current.id !== expectedWorkflowId) {
-        throw new Error('工作流保存已取消：当前工作流已发生变化');
-      }
-      assertBeforePersist?.();
-    };
-    await handoffProjectQueueRef.current.enqueue(expectedProjectId, async () => {
-      assertSaveScope();
-      const currentWorkflow = nodeWorkflowRef.current ?? requestedWorkflow;
-      if (currentWorkflow.projectId && currentWorkflow.projectId !== expectedProjectId) {
-        throw new Error('工作流属于其他项目，请从工作流中心打开对应项目');
-      }
-      const workflow = {
-        ...currentWorkflow,
-        projectId: expectedProjectId,
-        updatedAt: requestedWorkflow.updatedAt,
-      };
-      await persistNodeWorkflow(workflow, expectedProjectId, assertSaveScope, true);
-    });
-    // Preserve the existing actor-change invalidation; the callback reads live actor refs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser?.id, persistNodeWorkflow]);
-  const prepareWorkflowChatNavigation = useCallback(async (reference: CoreWorkspaceAssetReference): Promise<void> => {
-    const projectId = currentProjectRef.current?.id;
-    const actorId = currentUserRef.current?.id;
-    const authority = collaborativeCanvasRef.current;
-    const epoch = historyTransitionEpochRef.current;
-    const assertCurrent = (requireWritable = true): void => {
-      const current = collaborativeCanvasRef.current;
-      if (!actorId || !projectId || currentUserRef.current?.id !== actorId
-        || currentProjectRef.current?.id !== projectId || historyTransitionEpochRef.current !== epoch
-        || authority?.projectId !== projectId || authority.authority === 'unknown'
-        || current?.projectId !== projectId || current.authority !== authority.authority
-        || (current.authority === 'document' && (!(current.isSessionActive?.() ?? current.isWritable())
-          || (requireWritable && !current.isWritable())))) {
-        throw new Error('HANDOFF_SCOPE_CHANGED');
-      }
-    };
-    assertCurrent(false);
-    const workflow = nodeWorkflowRef.current;
-    if (!workflow) throw new Error('当前工作流不存在');
-    if (authority?.authority === 'document') {
-      if (!reference.assetVersionId || !reference.placementId || !reference.url) {
-        throw new Error('工作流输出尚未在协作文档中确认');
-      }
-      const media = await authority.refreshMedia({ projectId: projectId!,
-        documentSequence: Math.max(0, authority.appliedServerSequence ?? 0), requireDirectorySequence: true });
-      assertCurrent();
-      if (!media.some(image => image.assetId === reference.assetId
-        && image.assetVersionId === reference.assetVersionId && image.placementId === reference.placementId
-        && image.url === reference.url)) throw new Error('工作流输出尚未在协作文档中确认');
-      const response = await fetch('/api/assets', {
-        method: 'POST', credentials: 'include', cache: 'no-store',
-        headers: { 'Content-Type': 'application/json', 'x-wujie-expected-actor-id': actorId! },
-        body: JSON.stringify({ projectId, assetVersionId: reference.assetVersionId, placementId: reference.placementId }),
-      });
-      assertCurrent();
-      if (!response.ok) throw new Error('工作流输出尚未在协作文档中确认');
-      const confirmed = await response.json() as CoreWorkspaceAssetReference;
-      assertCurrent();
-      if (confirmed.assetId !== reference.assetId || confirmed.assetVersionId !== reference.assetVersionId
-        || confirmed.placementId !== reference.placementId || confirmed.url !== reference.url) {
-        throw new Error('工作流输出尚未在协作文档中确认');
-      }
-    }
-    await saveNodeWorkflowForProject(workflow, assertCurrent);
-    assertCurrent();
-  }, [saveNodeWorkflowForProject]);
-  useEffect(() => {
-    if (!currentProject?.id || !currentUser?.id || collaborativeCanvas.projectId !== currentProject.id
-      || collaborativeCanvas.authority === 'unknown') return;
-    if (collaborativeCanvas.authority === 'document'
-      && loadedDocumentWorkflowScope !== documentWorkflowScope) return;
-    const retryRevision = handoffRetryRevision;
-    const intent = parseSimpleChatWorkspaceHandoffIntent(workspaceLocationSearch);
-    const guard = handoffRunGuardRef.current;
-    const expectedProjectId = currentProject.id;
-    const actorId = currentUser.id;
-    const authority = collaborativeCanvasRef.current;
-    const controller = new AbortController();
-    const epoch = historyTransitionEpochRef.current;
-    const isCurrent = (): boolean => !controller.signal.aborted && isMountedRef.current
-      && currentUserRef.current?.id === actorId && currentProjectRef.current?.id === expectedProjectId
-      && historyTransitionEpochRef.current === epoch
-      && collaborativeCanvasRef.current?.refreshMedia === authority?.refreshMedia;
-    const scope = { expectedActorUserId: actorId, signal: controller.signal, isCurrent };
-    let resolvedHandoff: SimpleChatWorkspaceHandoff | undefined;
-
-    void consumeSimpleChatWorkspaceHandoffForProject({
-      intent,
-      currentProjectId: expectedProjectId,
-      currentWorkflow: nodeWorkflowRef.current,
-      getCurrentProjectId: () => isCurrent() ? currentProjectRef.current?.id : undefined,
-      getCurrentIdentity: () => {
-        const currentIntent = parseSimpleChatWorkspaceHandoffIntent(window.location.search);
-        return currentIntent ? getSimpleChatWorkspaceHandoffIdentity(currentIntent) : null;
-      },
-      getCurrentWorkflow: () => nodeWorkflowRef.current,
-      guard,
-      queue: handoffProjectQueueRef.current,
-      resolve: async value => {
-        resolvedHandoff = await resolveSimpleChatWorkspaceHandoffFromApi(value, scope);
-        return resolvedHandoff;
-      },
-      transfer: request => {
-        if (authority?.authority !== 'document') return transferSimpleChatImageToWorkflow(request, scope);
-        const reference = resolvedHandoff?.images.find(image => image.imageIndex === request.metadata.imageIndex
-          && image.assetRef.assetVersionId === request.sourceVersion)?.assetRef;
-        if (!reference) throw new Error('HANDOFF_CANONICAL_REFERENCE_REQUIRED');
-        if (!latestImagesRef.current.some(image => image.assetVersionId === reference.assetVersionId
-          && image.placementId === reference.placementId)) {
-          return importSimpleChatImageToDocumentWorkflow(request, reference, { ...scope, refreshMedia: authority.refreshMedia });
-        }
-        return transferSimpleChatImageToWorkflow(request, { ...scope, documentReference: reference });
-      },
-      persist: workflow => {
-        return persistNodeWorkflow(workflow, expectedProjectId, () => {
-          if (!isCurrent()) throw new Error('HANDOFF_SCOPE_CHANGED');
-        });
-      },
-      applyWorkflow: workflow => {
-        if (!isCurrent()) return;
-        nodeWorkflowRef.current = workflow;
-        setNodeWorkflow(workflow);
-      },
-      cleanUrl: () => {
-        if (!isCurrent()) throw new Error('HANDOFF_SCOPE_CHANGED');
-        replaceWorkspaceHistoryState(window, clearSimpleChatWorkspaceHandoffParams(window.location.href));
-      },
-      now: Date.now,
-    }).then(result => {
-      if (!result || !isCurrent()) return;
-      if (result.warnings.includes('UNMANAGED_IMAGE_SKIPPED')) {
-        toast.warning('部分图片未导入', {
-          description: '未完成素材托管的图片已跳过，其余内容已保存到节点模式。',
-        });
-      } else {
-        toast.success('智能对话内容已导入节点模式');
-      }
-    }).catch(error => {
-      if (!isCurrent()) return;
-      console.error('智能对话内容导入失败:', { error, retryRevision });
-      toast.error(toSimpleChatHandoffMessage(error), {
-        action: {
-          label: '重试',
-          onClick: () => setHandoffRetryRevision(revision => revision + 1),
-        },
-      });
-    });
-    return () => controller.abort();
-  }, [currentProject?.id, currentUser?.id, collaborativeCanvas.projectId, collaborativeCanvas.authority,
-    collaborativeCanvas.refreshMedia, loadedDocumentWorkflowScope, documentWorkflowScope,
-    handoffRetryRevision, persistNodeWorkflow, workspaceLocationSearch]);
-
-  const handleCanvasImageAssetReferenceAdopted = useCallback((
-    imageId: string,
-    reference: WorkspaceAssetReference,
-  ) => {
-    setImages(current => current.map(image => image.id === imageId
-      ? {
-          ...image,
-          assetId: reference.assetId,
-          assetVersionId: reference.assetVersionId,
-          placementId: reference.placementId,
-          url: reference.url || image.url,
-        }
-      : image), { history: 'skip' });
-  }, [setImages]);
-
-  const handleOpenWorkflowFromHub = useCallback(async (workflow: Workflow): Promise<void> => {
-    const actorId = currentUserRef.current?.id;
-    if (!actorId || pendingHubWorkflowRef.current) return;
-    const activeProjectId = currentProjectRef.current?.id;
-    const originalProjects = workflow.projectId ? [] : UserManagerCore.getInstance().getProjects()
-      .filter(project => project.userId === actorId && workflowFromProjectMetadata(project.metadata)?.id === workflow.id);
-    if (originalProjects.length > 1) {
-      toast.error('该旧工作流关联多个项目，请在对应项目中打开节点模式');
-      return;
-    }
-    const projectId = workflow.projectId || originalProjects[0]?.id || activeProjectId;
-    if (!projectId) {
-      toast.error('请从工作台打开一个已保存项目，再使用工作流');
-      return;
-    }
-    const request = { actorId, projectId };
-    pendingHubWorkflowRef.current = request;
-    const ready = activeProjectId === projectId || await loadProjectById(projectId);
-    if (pendingHubWorkflowRef.current !== request || currentUserRef.current?.id !== actorId
-      || !projectLoadActiveRef.current) return;
-    pendingHubWorkflowRef.current = null;
-    if (!ready) {
-      toast.error('无法打开工作流所属项目，请确认该项目仍可访问');
-      return;
-    }
-    const selected = { ...workflow, projectId };
-    const scope = `${actorId}:${projectId}`;
-    selectedHubWorkflowScopeRef.current = scope;
-    nodeWorkflowRef.current = selected;
-    setNodeWorkflow(selected);
-    setLoadedDocumentWorkflowScope(scope);
-    setFailedDocumentWorkflowScope('');
-    setAppMode('node');
-  }, [loadProjectById]);
-
   // CanvasWorkspace is only mounted when authenticated, so no auth gate here.
 
   // Mode switching - early return for non-canvas modes
-  if (appMode === 'node') {
-    if (collaborativeCanvas.projectId !== currentProject?.id || collaborativeCanvas.authority === 'unknown'
-      || (collaborativeCanvas.authority === 'document' && loadedDocumentWorkflowScope !== documentWorkflowScope)) {
-      const projectUnavailable = !currentProject || (collaborativeCanvas.authority === 'unknown'
-        && collaborativeCanvas.status === 'unavailable');
-      const workflowFailed = !projectUnavailable && failedDocumentWorkflowScope === documentWorkflowScope;
-      return (
-        <main className="flex min-h-dvh flex-col items-center justify-center gap-4 p-6 text-center">
-          <p role="status">{projectUnavailable ? '请从工作台打开可访问的已保存项目。'
-            : workflowFailed ? '工作流加载失败。' : '正在加载当前项目工作流…'}</p>
-          <div className="flex flex-wrap justify-center gap-2">
-            <button type="button" className="min-h-11 rounded-md border px-4" onClick={() => setAppMode('canvas')}>返回画布</button>
-            {workflowFailed && <button type="button" className="min-h-11 rounded-md border px-4"
-              onClick={() => setDocumentWorkflowRetry(previous => previous + 1)}>重新加载工作流</button>}
-          </div>
-        </main>
-      );
-    }
-    const currentAnnotationModel = getCurrentImageModel();
-    const preferredAnnotationModelId = currentAnnotationModel.model.includes('::')
-      ? currentAnnotationModel.model
-      : currentAnnotationModel.providerId && currentAnnotationModel.model
-        ? `${currentAnnotationModel.providerId}::${currentAnnotationModel.model}`
-        : currentAnnotationModel.model;
+  if (appMode === 'drama') {
     return (
-      <NodeEditor
-        canvasDocumentMode={collaborativeCanvas.projectId !== currentProject?.id || collaborativeCanvas.authority !== 'legacy'}
-        taskModelCatalog={taskModelCatalog}
-        taskModelOptions={catalogModels}
-        catalogStatus={catalogStatus}
-        workflow={nodeEditorWorkflow}
-        userId={currentUser?.id}
-        projectId={currentProject?.id}
-        onBack={() => setAppMode('canvas')}
-        onWorkflowChange={workflow => {
-          nodeWorkflowRef.current = workflow;
-          setNodeWorkflow(workflow);
-        }}
-        onWorkflowSaveRequest={saveNodeWorkflowForProject}
-        onBeforeWorkflowChatNavigation={prepareWorkflowChatNavigation}
-        onOpenWorkflowHub={() => setAppMode('workflow-hub')}
-        canvasImages={images.map(img => ({
-          id: img.id,
-          url: img.url,
-          name: img.prompt?.slice(0, 30) || '图片',
-          description: img.prompt || '',
-          width: img.width,
-          height: img.height,
-          versionId: img.annotationVersionId || buildAnnotationSourceVersionId(
-            img.id,
-            img.createdAt,
-            img.url,
-          ),
-          assetId: img.assetId,
-          assetVersionId: img.assetVersionId,
-          placementId: img.placementId,
-          projectId: currentProject?.id,
-        }))}
-        onCanvasImageAssetReferenceAdopted={handleCanvasImageAssetReferenceAdopted}
-        themeStyle={themeStyle}
-        preferredAnnotationModelId={preferredAnnotationModelId}
-        rendererMode={UserManagerCore.getInstance().getWorkflowRendererMode()}
-        onAddImages={(urls, meta) => handleAddImages(urls, undefined, meta)}
-      />
+      <main className="flex min-h-dvh flex-col items-center justify-center gap-4 p-6 text-center">
+        <p role="status">短剧工作台即将开放。</p>
+        <button type="button" className="min-h-11 rounded-md border px-4" onClick={() => setAppMode('canvas')}>返回画布</button>
+      </main>
     );
-  }
-  if (appMode === 'workflow-hub') {
-    return <WorkflowHub userId={currentUser?.id} onBack={() => {
-      if (pendingHubWorkflowRef.current) canvasChatProjectLoadRef.current = null;
-      pendingHubWorkflowRef.current = null;
-      setAppMode('canvas');
-    }} onEditWorkflow={handleOpenWorkflowFromHub} themeStyle={themeStyle} />;
   }
 
   if (appMode === 'dashboard') {
@@ -8568,8 +8045,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
           onAnnotationsChange={handleAnnotationsChange}
           annotationExecutionContext={annotationExecutionContext}
           onRequestTaskPoll={requestCanvasTaskPoll}
-          onSwitchToNodeMode={() => safeSwitchMode('node')}
-          onSwitchToWorkflowHub={() => safeSwitchMode('workflow-hub')}
+          onSwitchToDrama={() => safeSwitchMode('drama')}
           onSwitchToDashboard={() => safeSwitchMode('dashboard')}
           initialViewState={viewStateRef.current || undefined}
           isPanelCollapsed={panelCollapsed}
@@ -8883,7 +8359,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
               </div>
             </div>
             <div className={activePanel === 'chat' ? 'flex-1 overflow-hidden' : 'hidden'}>
-              <ChatPanel isVisible={!panelCollapsed && activePanel === 'chat'} canvasAuthority={collaborativeCanvas.authority==='unknown'?'pending':collaborativeCanvas.authority} themeStyle={themeStyle} projectId={currentProject?.id} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} onAddGeneratedImage={handleAddEmbeddedChatImage} onAddGeneratedImages={handleAddEmbeddedChatImages} canvasImages={images} selectedCanvasImage={selectedImage} onResolveCanvasImageForChat={resolveCanvasImageForChat} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage?.scope === canvasChatScopeRef.current.epoch ? chatInitialImage.image : null} chatInitialImageResolved onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} onGenerateImage={handleChatGenerateImage} onApplyWorkflow={handleApplyChatWorkflow} externalPrompt={externalChatPrompt} onExternalPromptConsumed={() => setExternalChatPrompt(undefined)} />
+              <ChatPanel isVisible={!panelCollapsed && activePanel === 'chat'} canvasAuthority={collaborativeCanvas.authority==='unknown'?'pending':collaborativeCanvas.authority} themeStyle={themeStyle} projectId={currentProject?.id} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} onAddGeneratedImage={handleAddEmbeddedChatImage} onAddGeneratedImages={handleAddEmbeddedChatImages} canvasImages={images} selectedCanvasImage={selectedImage} onResolveCanvasImageForChat={resolveCanvasImageForChat} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage?.scope === canvasChatScopeRef.current.epoch ? chatInitialImage.image : null} chatInitialImageResolved onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} onGenerateImage={handleChatGenerateImage} externalPrompt={externalChatPrompt} onExternalPromptConsumed={() => setExternalChatPrompt(undefined)} />
             </div>
 
             {/* 固定在底部的开始生成按钮 */}

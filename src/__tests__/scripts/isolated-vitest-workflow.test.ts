@@ -94,7 +94,7 @@ const shardWorkflows = [
 // command boundary; they are not calculated by the command under test.
 const fixtureShards = [
   [1, 'src/__tests__/scripts/stage-3-evidence-filter.test.ts'],
-  [2, 'src/__tests__/helpers/stage-4-workflow-chat-handoff.test.ts'],
+  [2, 'src/__tests__/lib/api-auth-identity-contract.test.ts'],
   [3, 'src/__tests__/lib/dependency-security-contract.test.ts'],
   [4, 'src/__tests__/helpers/video-plan-bj-post-contract.test.ts'],
   [5, 'src/__tests__/scripts/stage-1-release-gate-contract.test.ts'],

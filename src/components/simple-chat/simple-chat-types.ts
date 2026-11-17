@@ -251,7 +251,7 @@ export function hasManagedAssetIdentity(
   return Boolean(reference?.assetVersionId && reference.placementId);
 }
 
-export function canSendSimpleChatMessageToNodeMode(message: SimpleChatMessage): boolean {
+export function canSendSimpleChatMessageToDrama(message: SimpleChatMessage): boolean {
   return Boolean(
     message.content.trim()
     || message.images?.some((imageUrl, index) => {

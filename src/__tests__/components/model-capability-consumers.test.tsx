@@ -13,7 +13,6 @@ const workspacePath = resolve(process.cwd(), 'src/components/canvas-workspace.ts
 const CAPABILITY_UI_CONSUMERS = [
   'src/components/generation-panel.tsx',
   'src/components/infinite-canvas.tsx',
-  'src/components/node-editor.tsx',
   'src/components/video-generation-panel.tsx',
 ];
 const LEGACY_CAPABILITY_INFERENCE = /getProviderAspectRatios|getQualityLevelOptions|getResolutionTierOptions|getVideoModelInfo/;
@@ -32,7 +31,7 @@ describe('task model catalog consumers', () => {
     expect(source).toContain('export function useTaskModelCatalog');
   });
 
-  it('loads one all-model snapshot in the workspace and injects it into canvas and node modes', () => {
+  it('loads one all-model snapshot in the workspace and injects it into the canvas', () => {
     const source = readFileSync(workspacePath, 'utf8');
     expect(source).toContain("useTaskModelCatalog('all')");
     expect(source).toContain('taskModelCatalog={taskModelCatalog}');

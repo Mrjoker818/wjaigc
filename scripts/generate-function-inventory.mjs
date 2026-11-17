@@ -136,11 +136,6 @@ export function extractQuotedValues(source) {
   return [...source.matchAll(/['"]([^'"]+)['"]/g)].map((match) => match[1]);
 }
 
-function extractNodeTypes(source) {
-  const match = source.match(/export\s+type\s+NodeType\s*=([\s\S]*?);/);
-  return match ? [...new Set(extractQuotedValues(match[1]))].sort() : [];
-}
-
 export function extractAgentTools(source) {
   return [...new Set(
     [...source.matchAll(/registerTool\(\s*\{\s*name:\s*['"]([^'"]+)['"]/g)]
@@ -205,7 +200,6 @@ export async function discoverRepository(root) {
     }
   }
 
-  const workflowSource = await readFile(join(root, 'src/lib/workflow-engine.ts'), 'utf8');
   const agentSource = await readFile(join(root, 'src/lib/agent-engine.ts'), 'utf8');
   const canvasSource = await readFile(join(root, 'src/components/infinite-canvas.tsx'), 'utf8');
   const toolbarPreferenceSource = await readFile(
@@ -217,7 +211,6 @@ export async function discoverRepository(root) {
     pages: pages.sort((a, b) => a.route.localeCompare(b.route)),
     apiRoutes: apiRoutes.sort((a, b) => a.route.localeCompare(b.route)),
     components: componentFiles.map((file) => posixPath(relative(root, file))).sort(),
-    nodeTypes: extractNodeTypes(workflowSource),
     agentTools: extractAgentTools(agentSource),
     toolbarActions: [...new Set([
       ...extractPreferenceItems(toolbarPreferenceSource),
@@ -303,7 +296,6 @@ function renderFunctionInventory({
 - 页面：${discovered.pages.length} 项
 - API 路由：${discovered.apiRoutes.length} 项
 - 组件源码：${discovered.components.length} 项
-- 工作流节点类型：${discovered.nodeTypes.length} 项
 - Agent 工具：${discovered.agentTools.length} 项
 - 图片浮动工具动作：${discovered.toolbarActions.length} 项
 
@@ -330,10 +322,6 @@ ${apiRows}
 ## 源码引用 API 端点
 
 ${discoveredList(discovered.referencedApiRoutes)}
-
-## 工作流节点类型
-
-${discoveredList(discovered.nodeTypes)}
 
 ## Agent 工具
 
@@ -406,7 +394,7 @@ if (invokedFile === fileURLToPath(import.meta.url)) {
     const result = await generateFunctionInventory({ candidatePath });
     console.log(
       `Generated protected inventory for ${result.protectedFeatureCount} features, `
-      + `${result.apiRoutes.length} API routes and ${result.nodeTypes.length} workflow node types.`,
+      + `${result.apiRoutes.length} API routes.`,
     );
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);

@@ -1,9 +1,6 @@
 import { it as test } from 'vitest';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
 import vm from 'node:vm';
-import { createRequire } from 'node:module';
 import { swipeQuoteList, finishQuoteTouchSession, type QuoteTouchCommand, type QuoteTouchList, type QuoteTouchPage, type QuoteTouchPoint, type QuoteTouchTransport } from './quote-touch-input';
 
 interface FixtureOptions { fail?: 'touchStart' | 'touchMove' | 'touchEnd'; inputError?: unknown; failCancel?: boolean; cancelError?: unknown; hit?: boolean }
@@ -70,22 +67,3 @@ test('falsey input and cancel causes keep their original ordered values', async 
 test('falsey input survives successful detach as a non-falsey failure', async (): Promise<void> => {
   await assert.rejects(() => finishQuoteTouchSession({ async detach(): Promise<void> {} }, { threw: true, error: undefined }), (error: unknown): boolean => error instanceof AggregateError && error.errors.length === 1 && error.errors[0] === undefined);
 });
-
-const ts = createRequire(import.meta.url)('typescript') as typeof import('typescript');
-const original = fs.readFileSync(path.resolve('src/__tests__/components/node-skill-quote-mobile-native.test.tsx'), 'utf8');
-const begin = original.indexOf('async function withSession('), end = original.indexOf('function toolbar(', begin);
-assert.ok(begin >= 0 && end > begin);
-const actualWrapper = ts.transpileModule(original.slice(begin, end), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
-interface SessionWrapper { (theme: string, width: number, height: number, options: object, run: () => Promise<void>): Promise<void> }
-for (const value of [undefined, null, false, 0, '']) for (const seam of ['input', 'detach']) {
-  test('actual quote-session wrapper retains ' + seam + ' falsey reason ' + (value === '' ? 'empty-string' : String(value)), async (): Promise<void> => {
-    let disposed = 0, continued = false;
-    const withSession = vm.runInNewContext(actualWrapper + '; withSession', { session: async (): Promise<object> => ({}), dispose: async (): Promise<void> => { disposed++; }, AggregateError }) as SessionWrapper;
-    await assert.rejects(() => withSession('gold', 390, 844, { quoteCount: 12 }, async (): Promise<void> => {
-      if (seam === 'input') { const f = fixture({ fail: 'touchMove', inputError: value }); await swipeQuoteList(f.transport, f.page, f.list, { x: 195, y: 417 }); }
-      else await finishQuoteTouchSession({ async detach(): Promise<void> { throw value; } }, { threw: false, error: undefined });
-      continued = true;
-    }), (error: unknown): boolean => error instanceof AggregateError && error.errors.length === 1 && Object.is(error.errors[0], value));
-    assert.equal(disposed, 1); assert.equal(continued, false);
-  });
-}

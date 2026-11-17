@@ -184,13 +184,11 @@ describe('scoped Skill runtime inventory', () => {
     expect(inventory.skillCatalogs.canvas.slice(0, 29)).not.toContain('preset-brief-to-video-film');
     expect(inventory.skillCatalogs.canvas.slice(0, 29)).toContain('preset-multi-platform-export');
     expect(inventory.skillCatalogs.canvas.at(-1)).toBe('preset-brief-to-video-film');
-    expect(inventory.skillCatalogs.workflow).toEqual(inventory.skillCatalogs.canvas);
     expect(inventory.skillCatalogs.simpleChat).toHaveLength(16);
     expect(intersection(
       inventory.skillCatalogs.canvas,
       inventory.skillCatalogs.simpleChat,
     )).toEqual([]);
-    expect(inventory.nodeTypes).toContain('ai-skill');
   });
 
   it('keeps the optional batch export executable on Simple Chat but hidden from its catalog', () => {
@@ -349,28 +347,6 @@ describe('scoped Skill runtime inventory', () => {
     ]);
   });
 
-  it('isolates the Skill E2E from the 100-node Stage 4 workflow fixture', async () => {
-    const source = await readFile(resolve(
-      process.cwd(),
-      'tests/e2e/skill-runtime-canvas-workflow.spec.ts',
-    ), 'utf8');
-
-    const isolatedFixture = source.indexOf('const skillFixture = structuredClone(fixture);');
-    const minimalWorkflow = source.indexOf('nodes: [sourceNode, marketingNode]');
-    // The first seed creates the project for the source transfer; the last one installs the minimal workflow.
-    const seed = source.lastIndexOf('seedStage4Baseline(page, skillFixture, auth)');
-
-    expect(isolatedFixture).toBeGreaterThan(0);
-    expect(minimalWorkflow).toBeGreaterThan(isolatedFixture);
-    expect(seed).toBeGreaterThan(minimalWorkflow);
-    expect(source).toContain('fromNodeId: sourceNode.id');
-    expect(source).toContain('toNodeId: marketingNode.id');
-    expect(source).not.toContain("from '../../scripts/stage-4-e2e-fixtures.mjs'");
-    expect(source).not.toContain('buildStage4FixturePlan');
-    expect(source).not.toContain('expectedNodeIds');
-    expect(source).not.toContain('nodeCount');
-  });
-
   it('requires exact model and result-version evidence in the cross-surface E2E', async () => {
     const source = await readFile(resolve(
       process.cwd(),
@@ -385,8 +361,5 @@ describe('scoped Skill runtime inventory', () => {
     expect(source).toContain("providerId: 'stage4-chat-provider'");
     expect(source).toContain("modelId: 'stage4-chat-model'");
     expect(source).toContain('canvasRun.skillVersion');
-    expect(source).toContain('workflowRun.skillVersion');
-    expect(source).toContain('workflowOutput?.assetVersionIds');
-    expect(source).toContain('workflowRun.assetVersionIds');
   });
 });

@@ -19,10 +19,6 @@ const canvasSource = readFileSync(
   resolve(process.cwd(), 'src/components/infinite-canvas.tsx'),
   'utf8',
 );
-const nodeWorkspaceSource = readFileSync(
-  resolve(process.cwd(), 'src/features/annotations/node-annotation-workspace.tsx'),
-  'utf8',
-);
 const canvasWorkspaceSource = readFileSync(
   resolve(process.cwd(), 'src/components/canvas-workspace.tsx'),
   'utf8',
@@ -362,11 +358,9 @@ describe('InfiniteCanvas annotation gesture integration', () => {
     );
   });
 
-  it('falls back to region selection after semantic resolution errors in both modes', () => {
+  it('falls back to region selection after semantic resolution errors on the canvas', () => {
     expect(canvasSource).toContain("selectAnnotationV2Tool('region');");
     expect(canvasSource).toContain("baseMessage.includes('框选')");
-    expect(nodeWorkspaceSource).toContain("selectTool('region');");
-    expect(nodeWorkspaceSource).toContain("baseMessage.includes('框选')");
   });
 
 });

@@ -4,7 +4,7 @@ import { useRef, useState } from 'react';
 import { useModalFocus } from './canvas/use-modal-focus';
 import {
   Move, Sparkles, MessageSquare, Keyboard, Lightbulb,
-  BookOpen, X, Info, Wand2, ImagePlus, GitMerge,
+  BookOpen, X, Info, Wand2, ImagePlus,
   Shapes, Settings,
   FileBox, ChevronRight, Check, PenTool, Pencil, Box, Type,
   Bot, Palette, FolderOpen, FileImage, Building2, ShoppingBag, Store,
@@ -17,7 +17,7 @@ import { APP_VERSION_LABEL } from '@/config/app-meta';
 type SectionId = 'canvas' | 'generate' | 'img2img' | 'video' | 'tools'
   | 'svg-trace' | 'lang-edit' | 'agent-edit' | 'refine-engine' | 'human-repair' | 'sticker'
   | 'font-design' | 'logo-pro' | 'brand-factory' | 'brand-ecommerce'
-  | 'node-editor' | 'scene-studio' | 'display3d' | 'ai-psd' | 'chat' | 'project' | 'admin'
+  | 'scene-studio' | 'display3d' | 'ai-psd' | 'chat' | 'project' | 'admin'
   | 'shortcuts' | 'tips' | 'changelog';
 
 interface SectionDef {
@@ -43,7 +43,6 @@ const SECTIONS: SectionDef[] = [
   { id: 'logo-pro', label: 'Logo 生成器 Pro', icon: <PenTool size={14} />, group: '使用说明' },
   { id: 'brand-factory', label: '品牌工厂', icon: <Building2 size={14} />, group: '使用说明' },
   { id: 'brand-ecommerce', label: '品牌电商', icon: <ShoppingBag size={14} />, group: '使用说明' },
-  { id: 'node-editor', label: '工作流节点模式', icon: <GitMerge size={14} />, group: '使用说明' },
   { id: 'scene-studio', label: '3D 构图', icon: <Box size={14} />, group: '使用说明' },
   { id: 'display3d', label: '3D 展陈系统', icon: <Store size={14} />, group: '使用说明' },
   { id: 'ai-psd', label: 'AI PSD 生成器', icon: <FileImage size={14} />, group: '使用说明' },
@@ -97,7 +96,7 @@ function CanvasSection() {
       <FeatureItem><KeyBadge>Ctrl+Z</KeyBadge>：无限步数撤回</FeatureItem>
       <SubTitle>底部浮动工具栏</SubTitle>
       <FeatureItem>选择工具 / 平移工具 / 上传图片 / 缩放控制 / 重置视图</FeatureItem>
-      <FeatureItem>功能按钮：精修 / 语言修图 / Agent / 字境 / Logo / 品牌 / 电商 / PSD / 表情 / 六面体 / ChatCanvas / 节点 / 3D</FeatureItem>
+      <FeatureItem>功能按钮：精修 / 语言修图 / Agent / 字境 / Logo / 品牌 / 电商 / PSD / 表情 / 六面体 / ChatCanvas / 短剧 / 3D</FeatureItem>
       <SubTitle>图片操作工具栏（选中图片后顶部显示）</SubTitle>
       <FeatureItem>放大、移除背景、SVG 描摹、擦除、蒙版、编辑元素</FeatureItem>
       <FeatureItem>扩展画面、图生图、裁切、下载（PNG / SVG / PSD）</FeatureItem>
@@ -327,32 +326,6 @@ function FontDesignSection() {
   );
 }
 
-function NodeEditorSection() {
-  return (
-    <div>
-      <h3 className="text-sm font-bold text-[var(--color-on-surface)] mb-2">工作流节点模式</h3>
-      <p className="text-xs text-[var(--color-on-surface-variant)] mb-3">
-        基于 DAG 拓扑排序的可视化工作流编排系统，支持自然语言建图、连线语义类型、节点间数据传递。
-      </p>
-      <SubTitle>核心功能</SubTitle>
-      <FeatureItem>AI 自然语言建图：输入描述 → 自动生成完整节点图</FeatureItem>
-      <FeatureItem>连线语义类型：prompt / image / reference / mask，端口类型约束</FeatureItem>
-      <FeatureItem>节点间数据传递：上游 output 自动流入下游 input</FeatureItem>
-      <FeatureItem>@图片引用：提示词中输入 @ 插入画布图片</FeatureItem>
-      <FeatureItem>30+ 节点类型：输入、AI 图像、AI 视频、控制、输出五大类</FeatureItem>
-      <SubTitle>增强功能</SubTitle>
-      <FeatureItem>8 种专业预设工作流模板，一键加载</FeatureItem>
-      <FeatureItem>素材库系统：双层（本地 + 服务器）管理，分类筛选</FeatureItem>
-      <FeatureItem>提示词库：CRUD + 标签管理 + 一键填入节点</FeatureItem>
-      <FeatureItem>画布助手：节点感知，自动读取上游上下文</FeatureItem>
-      <FeatureItem>撤销重做：50 步历史栈，<KeyBadge>Ctrl+Z</KeyBadge> / <KeyBadge>Ctrl+Shift+Z</KeyBadge></FeatureItem>
-      <FeatureItem>ComfyUI 工作流导入：支持前端格式和 API 格式</FeatureItem>
-      <SubTitle>入口</SubTitle>
-      <FeatureItem>底部工具栏“节点”按钮</FeatureItem>
-    </div>
-  );
-}
-
 function SceneStudioSection() {
   return (
     <div>
@@ -531,14 +504,6 @@ function ShortcutsSection() {
             <FeatureItem><KeyBadge>Shift+0</KeyBadge> 品牌 IP</FeatureItem>
           </div>
         </div>
-        <div>
-          <div className="text-[11px] font-semibold text-[var(--color-primary)] mb-1">节点模式</div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-            <FeatureItem><KeyBadge>Ctrl+C/V</KeyBadge> 复制粘贴节点</FeatureItem>
-            <FeatureItem><KeyBadge>Ctrl+Z</KeyBadge> 撤销（节点）</FeatureItem>
-            <FeatureItem><KeyBadge>Ctrl+Shift+Z</KeyBadge> 重做（节点）</FeatureItem>
-          </div>
-        </div>
       </div>
     </div>
   );
@@ -555,7 +520,6 @@ function TipsSection() {
       <FeatureItem>移除背景同时输出透明图和蒙版图，蒙版图可手动精修</FeatureItem>
       <FeatureItem>扩展功能自动回退不支持精确编辑的模型（如 Gemini 图像模型），选择支持 /images/edits 的模型</FeatureItem>
       <FeatureItem>精修引擎支持所有管理员配置的图像模型，不同供应商的模型可切换选择</FeatureItem>
-      <FeatureItem>工作流节点模式支持 @图片引用，直接插入画布中的图片</FeatureItem>
       <FeatureItem>3D 构图支持图像模型和 LLM 模型独立选择，生成和布景分别使用不同模型</FeatureItem>
       <FeatureItem>API 协议自动推断：根据 URL 特征匹配协议档案，也支持手动指定</FeatureItem>
       <FeatureItem>任务并发控制：每用户最多 15 个并发任务，超额自动排队等待，不会丢失</FeatureItem>
@@ -793,7 +757,6 @@ const SECTION_CONTENT: Record<SectionId, React.ReactNode> = {
   'logo-pro': <LogoProSection />,
   'brand-factory': <BrandFactorySection />,
   'brand-ecommerce': <BrandEcommerceSection />,
-  'node-editor': <NodeEditorSection />,
   'scene-studio': <SceneStudioSection />,
   'display3d': <Display3DSection />,
   'ai-psd': <AiPsdSection />,

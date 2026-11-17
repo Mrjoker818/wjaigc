@@ -78,7 +78,6 @@
     "@supabase/supabase-js": "2.110.7",
     "@types/rbush": "^4.0.0",
     "@xmldom/xmldom": "0.8.15",
-    "@xyflow/react": "12.11.2",
     "ag-psd": "31.0.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

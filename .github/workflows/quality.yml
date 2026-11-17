@@ -338,9 +338,7 @@ jobs:
       WUJIE_ADMIN_PASSWORD: Stage4-Admin-${{ github.run_id }}!
       WUJIE_DATA_DIR: /tmp/wujie-stage4-data
       WUJIE_AGENT_RUNTIME_MODE: agent-v2
-      WUJIE_WORKFLOW_RENDERER_MODE: react-flow-v2
       E2E_STAGE4_EXPECTED_AGENT_MODE: agent-v2
-      E2E_STAGE4_EXPECTED_WORKFLOW_RENDERER_MODE: react-flow-v2
       PLAYWRIGHT_WORKERS: '1'
     steps:
       - uses: actions/checkout@v4

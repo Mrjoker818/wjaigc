@@ -15,11 +15,12 @@ export interface WorkspaceHistoryWindow extends EventTarget {
   location: BrowserLocationLike;
 }
 
-export type InitialWorkspaceMode = 'canvas' | 'node' | 'workflow-hub' | 'dashboard';
+export type InitialWorkspaceMode = 'canvas' | 'drama' | 'dashboard';
 
 export function getInitialWorkspaceModeFromSearch(search: string): InitialWorkspaceMode {
   const params = new URLSearchParams(search);
-  if (params.has('projectId') && params.get('mode') === 'node') return 'node';
+  const mode = params.get('mode');
+  if (params.has('projectId') && (mode === 'drama' || mode === 'node' || mode === 'workflow-hub')) return 'drama';
   if (params.get('view') === 'dashboard') return 'dashboard';
   if (params.has('projectId')) return 'canvas';
   if (params.get('loginMode') === 'canvas' && !params.has('error')) return 'canvas';

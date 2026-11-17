@@ -3,16 +3,10 @@ import { execFileSync } from 'node:child_process';
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 
 import { expect, test as base, type APIResponse, type Page, type TestInfo } from '@playwright/test';
 import { Pool } from 'pg';
-import {
-  configureWorkflowSkillNodePorts,
-  createEmptyWorkflow,
-  createWorkflowNode,
-  type WorkflowConnection,
-} from '../../src/lib/workflow-engine';
 import { createBriefToVideoSkill } from '../../src/lib/skill-runtime/brief-to-video-preset';
 
 import {
@@ -83,13 +77,6 @@ export interface BriefToVideoFixture {
   cancelFromUi(runId: string): Promise<void>;
   assertNoVideoChildInDatabase(runId: string): Promise<void>;
   videoSubmissions(): ProviderSubmission[];
-  runWorkflowThroughUi(options?: { reopenAfterInterruptedCheckpoint: true }): Promise<{
-    runId: string;
-    executionId: string;
-    catalogCount: number;
-    outputNodeType: 'output-video';
-    videoAssetVersionId: string;
-  }>;
   runSimpleChatThroughUi(): Promise<{
     catalogCount: number;
     catalogContainsBriefToVideo: boolean;
@@ -274,60 +261,8 @@ async function setupFixture(page: Page, testInfo: TestInfo, directory: string): 
   const connectionString = process.env.DATABASE_URL?.trim() || process.env.PGDATABASE_URL?.trim();
   if (!connectionString) throw new Error('BLOCKED: isolated PostgreSQL is required for Brief-to-video E2E');
   const submissions: ProviderSubmission[] = [];
-  const approvalDatabase = basename(testInfo.file) === 'workflow-approval-reopen.spec.ts'
-    ? process.env.WORKFLOW_APPROVAL_QA_DATABASE : undefined;
-  const approvalOrigin = process.env.WORKFLOW_APPROVAL_QA_ORIGIN;
-  if (approvalDatabase && (!/^wujie_stage4_approval_(?:red|green)_[a-z0-9]+$/u.test(approvalDatabase)
-    || new URL(connectionString).hostname !== '127.0.0.1'
-    || new URL(connectionString).pathname !== '/' + approvalDatabase
-    || !/^http:\/\/127\.0\.0\.1:\d{4,5}$/u.test(approvalOrigin ?? '')
-    || testInfo.project.use.baseURL !== approvalOrigin)) {
-    throw new Error('Approval video fixture requires the dedicated loopback database and application');
-  }
-  // The shared scenario intentionally holds its first video for cancellation.
-  // The single approval-reopen scenario needs real, completed media on that first submission.
-  const firstVideo = approvalDatabase ? execFileSync(process.env.WORKFLOW_APPROVAL_FFMPEG || 'ffmpeg', [
-    '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=blue:s=160x96:d=1.4',
-    '-an', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1',
-  ], { timeout: 10_000, maxBuffer: 256 * 1024, windowsHide: true }) : undefined;
-  const provider = await startControlledProvider(submissions, firstVideo);
+  const provider = await startControlledProvider(submissions);
   const fixture = await stage4FixtureForProject(testInfo.project.name);
-  const workflowSkill = configureWorkflowSkillNodePorts(
-    createWorkflowNode('ai-skill', 360, 180, 'Brief 视频 Skill'),
-    createBriefToVideoSkill(true),
-  );
-  workflowSkill.config = {
-    ...workflowSkill.config,
-    skillId: SKILL_ID,
-    version: 1,
-    inputValues: {
-      brief: '节点模式生成通勤防晒最终成片', goal: '产品转化', audience: '都市通勤人群',
-      platform: '抖音', style: '电影感、主体清晰、运动自然', durationSeconds: '5',
-      aspectRatio: '9:16', resolution: '1080p', generateAudio: false,
-    },
-    modelBindings: {
-      orchestrator: { providerId: ORCHESTRATOR_PROVIDER_ID, modelId: ORCHESTRATOR_MODEL_ID },
-      video: { providerId: VIDEO_PROVIDER_ID, modelId: VIDEO_MODEL_ID },
-    },
-  };
-  const workflowOutput = createWorkflowNode('output-video', 760, 180, '最终视频输出');
-  const workflowConnection: WorkflowConnection = {
-    id: `brief-video-output-${testInfo.project.name}`,
-    fromNodeId: workflowSkill.id,
-    fromPortId: 'out-video',
-    toNodeId: workflowOutput.id,
-    toPortId: 'in-video',
-    type: 'video',
-  };
-  fixture.canvasProject.metadata = {
-    ...(fixture.canvasProject.metadata as Record<string, unknown>),
-    workflow: {
-      ...createEmptyWorkflow('Brief 视频 E2E'),
-      id: `brief-video-workflow-${testInfo.project.name}`,
-      nodes: [workflowSkill, workflowOutput],
-      connections: [workflowConnection],
-    },
-  };
   const sourceImageId = `stage4-image-${fixture.browserProfile}`;
   const sourceVersionId = `stage4-version-${fixture.browserProfile}`;
   const endSourceImageId = `stage4-end-image-${fixture.browserProfile}`;
@@ -551,141 +486,6 @@ async function setupFixture(page: Page, testInfo: TestInfo, directory: string): 
     cancelFromUi,
     assertNoVideoChildInDatabase,
     videoSubmissions: () => structuredClone(submissions),
-    async runWorkflowThroughUi(options) {
-      await openCanvas();
-      const collapse = page.getByRole('button', { name: '收起面板', exact: true });
-      if (await collapse.isVisible().catch(() => false)) await collapse.click();
-      await page.getByTitle('节点模式').first().click();
-      await page.getByLabel(workflowSkill.label).click();
-      const workflowCatalog = page.locator('[data-workflow-skill-id]');
-      if (options?.reopenAfterInterruptedCheckpoint) {
-        await expect(page.locator(`[data-workflow-skill-id="${SKILL_ID}"]`)).toHaveCount(1);
-      } else {
-        await expect(workflowCatalog).toHaveCount(30, { timeout: 30_000 });
-      }
-      const catalogCount = await workflowCatalog.count();
-      await expect(page.getByRole('combobox', { name: 'Skill' })).toHaveValue(SKILL_ID);
-      await page.getByRole('combobox', { name: 'video 模型' }).selectOption(
-        `${VIDEO_PROVIDER_ID}::${VIDEO_MODEL_ID}`,
-      );
-      const started = page.waitForResponse(response => (
-        response.request().method() === 'POST'
-        && new URL(response.url()).pathname === '/api/workflow/execute'
-        && Boolean(response.request().postData()?.includes('"action":"start"'))
-      ), { timeout: 30_000 });
-      await page.getByRole('button', { name: '执行工作流', exact: true }).click();
-      const confirmExecution = page.getByRole('button', { name: '确认执行', exact: true });
-      await expect(confirmExecution).toBeVisible({ timeout: 30_000 });
-      await confirmExecution.click();
-      const startResponse = await started;
-      expect(startResponse.ok()).toBe(true);
-      const startPayload = await json(startResponse);
-      const executionId = String(startPayload.executionId || '');
-      await expect(page.getByRole('button', { name: '批准生成' })).toBeVisible({ timeout: 90_000 });
-      const pausedResponse = await page.request.post('/api/workflow/execute', {
-        data: { action: 'status', executionId },
-      });
-      const paused = await json(pausedResponse) as { results?: Record<string, { output?: { runId?: string } }> };
-      const runId = String(paused.results?.[workflowSkill.id]?.output?.runId || '');
-      expect(runId).not.toBe('');
-      await assertNoVideoChildInDatabase(runId);
-      if (options?.reopenAfterInterruptedCheckpoint) {
-        const database = await pool.query<{ name: string }>('SELECT current_database() AS name');
-        if (database.rows.length !== 1
-          || !/^wujie_stage4_approval_(?:red|green)_[a-z0-9]+$/u.test(database.rows[0].name)
-          || database.rows[0].name !== process.env.WORKFLOW_APPROVAL_QA_DATABASE) {
-          throw new Error('Checkpoint interruption requires the dedicated workflow-approval database');
-        }
-        const reopen = async (): Promise<void> => {
-          await page.reload({ waitUntil: 'domcontentloaded' });
-          const node = page.getByLabel(workflowSkill.label, { exact: true });
-          const canvas = page.locator('[data-canvas-viewport][data-project-id]');
-          await expect(node.or(canvas).first()).toBeVisible({ timeout: 30_000 });
-          if (!await node.isVisible()) await page.getByTitle('节点模式').first().click();
-          await expect(node).toBeVisible({ timeout: 30_000 });
-          await node.click();
-        };
-        await reopen();
-        await expect(page.getByRole('button', { name: '批准生成' })).toBeVisible({ timeout: 30_000 });
-        expect(submissions).toHaveLength(0);
-        await pool.query(`CREATE TABLE qa_workflow_approval_interruption (
-          execution_id text PRIMARY KEY, actor_id text NOT NULL, project_id text NOT NULL
-        )`);
-        try {
-          await pool.query('INSERT INTO qa_workflow_approval_interruption VALUES ($1, $2, $3)',
-            [executionId, auth.userId, projectId]);
-          await pool.query(`CREATE FUNCTION qa_reject_workflow_approval_checkpoint() RETURNS trigger
-            LANGUAGE plpgsql AS $$
-            BEGIN
-              IF OLD.type = 'workflow' AND OLD.result->>'workflowStatus' = 'paused'
-                AND NEW.result->>'workflowStatus' = 'running'
-                AND EXISTS (SELECT 1 FROM qa_workflow_approval_interruption
-                  WHERE execution_id = OLD.id AND actor_id = OLD.user_id AND project_id = OLD.project_id)
-              THEN RAISE EXCEPTION 'QA_WORKFLOW_APPROVAL_CHECKPOINT_INTERRUPTED';
-              END IF;
-              RETURN NEW;
-            END;
-            $$`);
-          await pool.query(`CREATE TRIGGER qa_workflow_approval_checkpoint
-            BEFORE UPDATE ON cloud_tasks FOR EACH ROW EXECUTE FUNCTION qa_reject_workflow_approval_checkpoint()`);
-          const approvalResponse = page.waitForResponse(response => (
-            response.request().method() === 'POST'
-            && new URL(response.url()).pathname === '/api/workflow/execute'
-            && response.request().postDataJSON()?.action === 'approve-skill'
-          ), { timeout: 30_000 });
-          await page.getByRole('button', { name: '批准生成' }).click();
-          const firstApproval = await approvalResponse;
-          expect([200, 503]).toContain(firstApproval.status());
-          await expect.poll(() => submissions.length, { timeout: 40_000 }).toBe(1);
-          const stillPaused = await pool.query<{ status: string; run_id: string }>(
-            `SELECT result->>'workflowStatus' AS status, result->'results'->($2::text)->'output'->>'runId' AS run_id
-              FROM cloud_tasks WHERE id=$1 AND user_id=$3 AND project_id=$4`,
-            [executionId, workflowSkill.id, auth.userId, projectId],
-          );
-          expect(stillPaused.rows).toEqual([{ status: 'paused', run_id: runId }]);
-        } finally {
-          await pool.query('DROP TRIGGER IF EXISTS qa_workflow_approval_checkpoint ON cloud_tasks');
-          await pool.query('DROP FUNCTION IF EXISTS qa_reject_workflow_approval_checkpoint()');
-          await pool.query('DROP TABLE qa_workflow_approval_interruption');
-        }
-        await reopen();
-        await expect(page.getByText('执行完成', { exact: true })).toBeVisible({ timeout: 35_000 });
-        expect(submissions).toHaveLength(1);
-      } else {
-        await page.getByRole('button', { name: '批准生成' }).click();
-        await expect(page.getByText('执行完成', { exact: true })).toBeVisible({ timeout: 120_000 });
-      }
-      const completedResponse = await page.request.post('/api/workflow/execute', {
-        data: { action: 'status', executionId },
-      });
-      const completed = await json(completedResponse) as {
-        results?: Record<string, { output?: {
-          structured?: { value?: { videoAssetVersionId?: string } };
-          videoAssetVersionId?: string;
-        } }>;
-      };
-      const skillOutput = completed.results?.[workflowSkill.id]?.output;
-      if (options?.reopenAfterInterruptedCheckpoint) {
-        expect((completed as { status?: string }).status).toBe('completed');
-        expect(skillOutput).toMatchObject({ runId });
-      }
-      const outputVideo = completed.results?.[workflowOutput.id]?.output;
-      const videoAssetVersionId = String(
-        outputVideo?.videoAssetVersionId
-        || outputVideo?.structured?.value?.videoAssetVersionId
-        || skillOutput?.videoAssetVersionId
-        || skillOutput?.structured?.value?.videoAssetVersionId
-        || '',
-      );
-      expect(videoAssetVersionId).not.toBe('');
-      return {
-        runId,
-        executionId,
-        catalogCount,
-        outputNodeType: 'output-video' as const,
-        videoAssetVersionId,
-      };
-    },
     async runSimpleChatThroughUi() {
       await page.goto(`/simple-chat?projectId=${encodeURIComponent(String(fixture.chatProject.id))}`, {
         waitUntil: 'domcontentloaded',

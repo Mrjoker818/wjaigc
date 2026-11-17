@@ -8,7 +8,7 @@ import { resolve } from 'node:path';
 
 import {
   buildSimpleChatMessageSourceTrace,
-  canSendSimpleChatMessageToNodeMode,
+  canSendSimpleChatMessageToDrama,
   type SimpleChatMessage,
   type SimpleChatProject,
   type SimpleChatTask,
@@ -63,13 +63,13 @@ describe('Simple Chat workspace entry', () => {
   });
 
   it('requires an actual image aligned with its managed reference', () => {
-    expect(canSendSimpleChatMessageToNodeMode(message({ content: '  ' }))).toBe(false);
-    expect(canSendSimpleChatMessageToNodeMode(message({ content: '可发送文本' }))).toBe(true);
-    expect(canSendSimpleChatMessageToNodeMode(message({
+    expect(canSendSimpleChatMessageToDrama(message({ content: '  ' }))).toBe(false);
+    expect(canSendSimpleChatMessageToDrama(message({ content: '可发送文本' }))).toBe(true);
+    expect(canSendSimpleChatMessageToDrama(message({
       images: ['/legacy.png'],
       imageRefs: [{ url: '/legacy.png' }],
     }))).toBe(false);
-    expect(canSendSimpleChatMessageToNodeMode(message({
+    expect(canSendSimpleChatMessageToDrama(message({
       images: ['/actual.png'],
       imageRefs: [
         { url: '/orphan.png' },
@@ -80,7 +80,7 @@ describe('Simple Chat workspace entry', () => {
         },
       ],
     }))).toBe(false);
-    expect(canSendSimpleChatMessageToNodeMode(message({
+    expect(canSendSimpleChatMessageToDrama(message({
       images: ['/actual.png'],
       imageRefs: [
         {
@@ -90,7 +90,7 @@ describe('Simple Chat workspace entry', () => {
         },
       ],
     }))).toBe(false);
-    expect(canSendSimpleChatMessageToNodeMode(message({
+    expect(canSendSimpleChatMessageToDrama(message({
       images: ['/managed.png'],
       imageRefs: [{
         url: '/managed.png',
@@ -123,9 +123,9 @@ describe('Simple Chat workspace entry', () => {
       navigate: vi.fn(),
     }));
 
-    const nodeAction = screen.getByRole('button', { name: '发送到节点模式' }) as HTMLButtonElement;
+    const nodeAction = screen.getByRole('button', { name: '发送到短剧工作台' }) as HTMLButtonElement;
     expect(nodeAction.disabled).toBe(true);
-    expect(nodeAction.title).toBe('仅非空文本或已登记图片可发送到节点模式');
+    expect(nodeAction.title).toBe('仅非空文本或已登记图片可发送到短剧工作台');
     const emptyActionRow = nodeAction.closest('[data-testid="simple-chat-empty-workspace-actions"]');
     expect(emptyActionRow).not.toBeNull();
     expect(emptyActionRow?.className).not.toContain('opacity-0');
@@ -133,7 +133,7 @@ describe('Simple Chat workspace entry', () => {
     expect(screen.queryByTitle('添加到画布')).toBeNull();
   });
 
-  it('renders the node action beside Canvas and guides empty or targetless messages', () => {
+  it('renders the drama action beside Canvas and guides empty or targetless messages', () => {
     const onNotice = vi.fn();
     const { rerender } = render(createElement(SimpleChatWorkspaceActions, {
       message: message({
@@ -155,8 +155,8 @@ describe('Simple Chat workspace entry', () => {
 
     const actions = screen.getByTestId('simple-chat-workspace-actions');
     expect(actions.children[0]).toBe(screen.getByTitle('添加到画布'));
-    expect(actions.children[1]).toBe(screen.getByRole('button', { name: '发送到节点模式' }));
-    fireEvent.click(screen.getByRole('button', { name: '发送到节点模式' }));
+    expect(actions.children[1]).toBe(screen.getByRole('button', { name: '发送到短剧工作台' }));
+    fireEvent.click(screen.getByRole('button', { name: '发送到短剧工作台' }));
     expect(onNotice).toHaveBeenCalledWith('请先选择目标画布项目');
 
     rerender(createElement(SimpleChatWorkspaceActions, {
@@ -169,9 +169,9 @@ describe('Simple Chat workspace entry', () => {
       onNotice,
       navigate: vi.fn(),
     }));
-    const emptyAction = screen.getByRole('button', { name: '发送到节点模式' }) as HTMLButtonElement;
+    const emptyAction = screen.getByRole('button', { name: '发送到短剧工作台' }) as HTMLButtonElement;
     expect(emptyAction.disabled).toBe(true);
-    expect(emptyAction.getAttribute('title')).toBe('仅非空文本或已登记图片可发送到节点模式');
+    expect(emptyAction.getAttribute('title')).toBe('仅非空文本或已登记图片可发送到短剧工作台');
   });
 
   it('clicks through the selected target with an identifier-only URL', () => {
@@ -187,13 +187,13 @@ describe('Simple Chat workspace entry', () => {
       navigate,
     }));
 
-    fireEvent.click(screen.getByRole('button', { name: '发送到节点模式' }));
+    fireEvent.click(screen.getByRole('button', { name: '发送到短剧工作台' }));
 
     expect(navigate).toHaveBeenCalledOnce();
     const url = new URL(String(navigate.mock.calls[0]?.[0]), 'https://example.test');
     expect(Object.fromEntries(url.searchParams)).toEqual({
       projectId: 'canvas-selected-only',
-      mode: 'node',
+      mode: 'drama',
       chatProjectId: project.id,
       chatTaskId: task.id,
       chatMessageId: 'message-a',
@@ -237,7 +237,7 @@ describe('Simple Chat workspace entry', () => {
     });
   });
 
-  it('builds node-mode navigation from identifiers only', () => {
+  it('builds drama workbench navigation from identifiers only', () => {
     const url = buildSimpleChatWorkspaceHandoffUrl({
       targetProjectId: 'canvas-project-a',
       chatProjectId: project.id,
@@ -248,7 +248,7 @@ describe('Simple Chat workspace entry', () => {
 
     expect(Object.fromEntries(params)).toEqual({
       projectId: 'canvas-project-a',
-      mode: 'node',
+      mode: 'drama',
       chatProjectId: 'chat-project-a',
       chatTaskId: 'chat-task-a',
       chatMessageId: 'message-a',
@@ -258,7 +258,7 @@ describe('Simple Chat workspace entry', () => {
 
   it('defaults production navigation to same-tab assign without a node bridge side channel', () => {
     expect(chatAreaSource).toContain('buildSimpleChatWorkspaceHandoffUrl');
-    expect(chatAreaSource).toContain('发送到节点模式');
+    expect(chatAreaSource).toContain('发送到短剧工作台');
     expect(chatAreaSource).toMatch(/window\.location\.assign\(/);
     expect(chatAreaSource).not.toContain('wujie_node_bridge');
     expect(chatAreaSource).not.toMatch(/localStorage\.setItem\([^)]*node_bridge/);

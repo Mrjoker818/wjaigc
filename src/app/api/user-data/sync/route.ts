@@ -24,7 +24,6 @@ import {
   inspectManagedImageMetadata,
 } from '@/lib/asset-core/image-result-metadata';
 import { resolveCanvasKernelMode } from '@/lib/canvas-kernel/mode';
-import { resolveDeliveredWorkflowRendererMode } from '@/lib/workflow-renderer/mode';
 import {
   SIMPLE_CHAT_SYNC_MAX_REQUEST_BYTES,
   validateSimpleChatProjects,
@@ -42,7 +41,7 @@ import { readOwnerProjectsWithDocuments } from '@/lib/collaboration/document-pro
 export const dynamic = 'force-dynamic';
 
 // Allowed key prefixes for user data sync (prevent overwriting system data)
-const ALLOWED_KEY_PREFIXES = ['projects', 'favorites', 'brand_', 'font_', 'canvas_', 'workflow_', 'settings_', 'theme_', 'custom_', 'chat_'];
+const ALLOWED_KEY_PREFIXES = ['projects', 'favorites', 'brand_', 'font_', 'canvas_', 'settings_', 'theme_', 'custom_', 'chat_'];
 const SIMPLE_CHAT_PROJECTS_KEY = 'chat_simple_projects';
 
 interface UserDataSyncBody {
@@ -538,8 +537,6 @@ export async function GET(request: NextRequest) {
 
     let assetGraphMode: AssetGraphMode | undefined;
     const canvasKernelMode = resolveCanvasKernelMode(process.env.WUJIE_CANVAS_KERNEL_MODE);
-    // Stage 4 Task 3 only rolls out the read-only shadow. React Flow v2 remains disabled.
-    const workflowRendererMode = resolveDeliveredWorkflowRendererMode(process.env.WUJIE_WORKFLOW_RENDERER_MODE);
     // Read the revision first: a concurrent commit between these reads yields
     // an older revision with newer data, which CAS rejects safely on write.
     const projectAssetMode = key === 'projects' ? resolveAssetGraphMode(process.env.WUJIE_ASSET_GRAPH_MODE) : undefined;
@@ -586,7 +583,6 @@ export async function GET(request: NextRequest) {
       key,
       value,
       canvasKernelMode,
-      workflowRendererMode,
       ...(assetGraphMode ? { assetGraphMode } : {}),
       ...(projectRevision === undefined ? {} : { projectRevision }),
       ...(projectAssetMode === 'shadow' && managedSnapshot ? { deletedCanvasPlacements: managedSnapshot.deletedCanvasPlacements } : {}),

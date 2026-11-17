@@ -565,41 +565,6 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
     const requestEngineStr = typeof requestEngine === 'string' ? requestEngine : '';
     // ★ 安全：已登录用户必须使用 session 中的 userId，忽略客户端传入值（防止伪造）
     const userId = sessionUser?.id || "anonymous";
-    if (sessionUser) {
-      let workflowEdit = await getCloudTaskForUser(taskId, userId);
-      if (workflowEdit?.type === 'edit' && workflowEdit.status === 'processing') {
-        const { settleAcceptedWorkflowEditTask } = await import('@/lib/collaboration/workflow-edit-output');
-        const settlement = await settleAcceptedWorkflowEditTask(userId, taskId);
-        if (settlement !== 'pending') workflowEdit = await getCloudTaskForUser(taskId, userId);
-      }
-      if (workflowEdit?.type === 'edit' && workflowEdit.status === 'completed') {
-        try {
-          const { projectWorkflowEditTaskResult } = await import('@/lib/collaboration/workflow-edit-output');
-          const references = await projectWorkflowEditTaskResult(userId, taskId);
-          if (references) {
-            const imageUrl = references[0]?.url;
-            if (!imageUrl) throw new Error('WORKFLOW_EDIT_OUTPUT_MISSING');
-            return NextResponse.json({ success: true, taskId, status: 'completed',
-              stage: workflowEdit.label || '完成',
-              result: { success: true, image: { url: imageUrl },
-                images: references.map(reference => ({ url: reference.url })),
-                imageUrl, imageUrls: references.map(reference => reference.url), model: workflowEdit.model,
-                providerId: workflowEdit.providerId,
-                assetProjection: { status: 'completed', references,
-                  versionIds: references.map(reference => reference.assetVersionId) } },
-            });
-          }
-          const submission = workflowEdit.result?.submissionPayload as Record<string, unknown> | undefined;
-          if (submission?.assetWorkspace === 'workflow') {
-            return NextResponse.json({ success: true, taskId, status: 'publication-pending',
-              recoveryPending: true, retryAfterMs: 1500 }, { status: 202 });
-          }
-        } catch {
-          return NextResponse.json({ success: true, taskId, status: 'publication-pending',
-            recoveryPending: true, retryAfterMs: 1500 }, { status: 202 });
-        }
-      }
-    }
     if (sessionUser && taskId.startsWith('image-edit-')) {
       const durableTask = await getCloudTaskForUser(taskId, sessionUser.id);
       if (durableTask?.type === 'image-edit'
@@ -902,13 +867,6 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
 
       const completeDurableEditResult = async (result: Record<string, unknown>): Promise<
         'completed' | 'denied' | 'rejected' | 'pending' | 'terminal'> => {
-        const submission = persistedEditTask?.result?.submissionPayload as Record<string, unknown> | undefined;
-        if (submission?.assetWorkspace === 'workflow' && sessionUser) {
-          const { completeWorkflowEditTask } = await import('@/lib/collaboration/workflow-edit-terminal');
-          return completeWorkflowEditTask({ actorId: sessionUser.id, taskId,
-            requestDigest: persistedEditTask?.requestDigest || '',
-            providerId: persistedEditTask?.providerId || '', modelId: persistedEditTask?.model || '', result });
-        }
         return await completeCloudTask(taskId, result) ? 'completed' : 'terminal';
       };
 

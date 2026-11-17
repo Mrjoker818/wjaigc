@@ -31,22 +31,4 @@ describe('image-to-3d workflow security contract', () => {
     expect(route).toContain('providerId: persistedTask.providerId');
     expect(route).toContain('model: persistedTask.model');
   });
-
-  it('uses a stable workflow idempotency key across ambiguous submit retries', () => {
-    const route = readSource('src/app/api/workflow/execute/route.ts');
-
-    expect(route).toContain('const taskIdempotencyKey = `workflow:${sourceEntityId}`');
-    expect(route).toContain("trackedHeaders.set('idempotency-key', taskIdempotencyKey)");
-    expect(route).toContain("trackedHeaders.set('x-idempotency-key', taskIdempotencyKey)");
-    expect(route).not.toContain('`workflow:${executionId}:${node.id}:${attemptCount}`');
-    expect(route).toContain('`${executionId}:${retryNode.id}:attempt:${retryAttempt}`');
-  });
-
-  it('gives 3D provider submission the same long timeout as other generators', () => {
-    const route = readSource('src/app/api/workflow/execute/route.ts');
-
-    expect(route).toMatch(
-      /const isGenerateEndpoint = [^\n]+submitUrl\.includes\('\/api\/image-to-3d'\)/,
-    );
-  });
 });
