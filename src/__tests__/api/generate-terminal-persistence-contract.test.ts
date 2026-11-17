@@ -37,7 +37,8 @@ describe('generate authoritative terminal persistence contract', () => {
     );
 
     const terminalCalls = [
-      ...submitOnlyWorker.matchAll(/recordSubmitOnlyTerminal\(\{/g),
+      // failure branches settle credits through failSubmitOnly, which records the terminal state
+      ...submitOnlyWorker.matchAll(/(?:recordSubmitOnlyTerminal|failSubmitOnly)\(\{/g),
     ];
     expect(terminalCalls.length).toBeGreaterThan(5);
     for (const call of terminalCalls) {

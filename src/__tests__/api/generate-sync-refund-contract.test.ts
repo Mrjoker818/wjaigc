@@ -14,4 +14,12 @@ describe('/api/generate synchronous charge refund', () => {
     expect(source.indexOf('syncChargeHandedOff = true;')).toBeGreaterThan(allFailed);
     expect(source).toMatch(/catch \(apiError: unknown\) \{\s*await refundSyncCharge\?\.\(\);/);
   });
+
+  it('records submitOnly credits as refunded only after the refund succeeds', () => {
+    expect(source).not.toContain("creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable'");
+    const helper = source.slice(source.indexOf('const failSubmitOnly = async ('));
+    expect(helper.indexOf('refundCredits(sessionUser.id, deductedCredits, refundReason, asyncTaskId)'))
+      .toBeLessThan(helper.indexOf('recordSubmitOnlyTerminal({ ...input, creditStatus })'));
+    expect(helper).toContain("if (refund.success) creditStatus = 'refunded';");
+  });
 });

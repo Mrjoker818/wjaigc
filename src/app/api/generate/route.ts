@@ -798,6 +798,23 @@ export async function POST(request: NextRequest) {
           return undefined;
         }
       };
+      // 先退款，再按实际结果记录积分状态。退款未完成时保留 pending，
+      // 任务记录的退款结算（同一 taskId，只会退一次）仍可补退。
+      const failSubmitOnly = async (
+        input: Omit<Parameters<typeof recordImageTaskTerminal>[1], 'creditStatus'>,
+        refundReason: string,
+      ) => {
+        let creditStatus: 'pending' | 'refunded' | 'not-applicable' = 'not-applicable';
+        if (deductedCredits > 0 && sessionUser) {
+          creditStatus = 'pending';
+          try {
+            const refund = await refundCredits(sessionUser.id, deductedCredits, refundReason, asyncTaskId);
+            if (refund.success) creditStatus = 'refunded';
+            else console.error(`[generate] submitOnly refund not completed for ${asyncTaskId}`);
+          } catch (refundErr) { console.error('[generate] Refund failed:', refundErr); }
+        }
+        return await recordSubmitOnlyTerminal({ ...input, creditStatus });
+      };
       // 记录积分成本到任务信息中，用于取消时退款
       if (deductedCredits > 0) {
         updateTaskProgress(asyncTaskId, { creditCost: deductedCredits });
@@ -834,21 +851,10 @@ export async function POST(request: NextRequest) {
           console.log(`[generate] submitOnly bgData keys: ${Object.keys(bgData).join(',')}, success: ${bgData.success}, taskIds: ${bgData.taskIds?.length || 0}`);
 
           if (!bgRes.ok || !bgData.success) {
-            await recordSubmitOnlyTerminal({
+            await failSubmitOnly({
               status: 'failed',
               error: typeof bgData.error === 'string' ? bgData.error : '生成失败',
-              creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable',
-            });
-            // 退款：生成失败时退还已扣除的积分
-            if (deductedCredits > 0 && sessionUser) {
-              try {
-                const { refundCredits } = await import('@/lib/credits');
-                await refundCredits(sessionUser.id, deductedCredits, `图像生成失败退款 (taskId: ${asyncTaskId})`, asyncTaskId);
-                console.log(`[generate] Refunded ${deductedCredits} credits for failed task ${asyncTaskId}`);
-              } catch (refundErr) {
-                console.error('[generate] Refund failed:', refundErr);
-              }
-            }
+            }, `图像生成失败退款 (taskId: ${asyncTaskId})`);
             return;
           }
 
@@ -954,7 +960,7 @@ export async function POST(request: NextRequest) {
               });
               console.log(`[generate] submitOnly mixed mode completed: ${allUrls.length} images for ${asyncTaskId}`);
             } else {
-              await recordSubmitOnlyTerminal({ status: 'failed', error: '生成失败', creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable' });
+              await failSubmitOnly({ status: 'failed', error: '生成失败' }, `图像生成失败退款 (taskId: ${asyncTaskId})`);
             }
             return;
           }
@@ -1004,7 +1010,7 @@ export async function POST(request: NextRequest) {
                 return;
               }
               if (waitedDirect.failed) {
-                await recordSubmitOnlyTerminal({ status: 'failed', error: '生成失败', creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable' });
+                await failSubmitOnly({ status: 'failed', error: '生成失败' }, `图像生成失败退款 (taskId: ${asyncTaskId})`);
                 return;
               }
             }
@@ -1191,54 +1197,20 @@ export async function POST(request: NextRequest) {
             }
 
             if (anyFailed) {
-              await recordSubmitOnlyTerminal({ status: 'failed', error: failedError, creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable' });
-              if (deductedCredits > 0 && sessionUser) {
-                try {
-                  const { refundCredits } = await import('@/lib/credits');
-                  await refundCredits(sessionUser.id, deductedCredits, `图像生成失败退款 (taskId: ${asyncTaskId})`, asyncTaskId);
-                } catch (refundErr) { console.error('[generate] Refund failed:', refundErr); }
-              }
+              await failSubmitOnly({ status: 'failed', error: failedError }, `图像生成失败退款 (taskId: ${asyncTaskId})`);
               return;
             }
 
-            await recordSubmitOnlyTerminal({ status: 'timeout', error: '生成超时', creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable' });
-            if (deductedCredits > 0 && sessionUser) {
-              try {
-                const { refundCredits } = await import('@/lib/credits');
-                await refundCredits(sessionUser.id, deductedCredits, `图像生成超时退款 (taskId: ${asyncTaskId})`, asyncTaskId);
-              } catch (refundErr) { console.error('[generate] Refund failed:', refundErr); }
-            }
+            await failSubmitOnly({ status: 'timeout', error: '生成超时' }, `图像生成超时退款 (taskId: ${asyncTaskId})`);
             return;
           }
 
           // 无图片也无 taskIds — 失败
-          await recordSubmitOnlyTerminal({
-            status: 'failed',
-            error: '未获得生成结果',
-            creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable',
-          });
-          // 退款：无生成结果
-          if (deductedCredits > 0 && sessionUser) {
-            try {
-              const { refundCredits } = await import('@/lib/credits');
-              await refundCredits(sessionUser.id, deductedCredits, `图像生成无结果退款 (taskId: ${asyncTaskId})`, asyncTaskId);
-            } catch (refundErr) { console.error('[generate] Refund failed:', refundErr); }
-          }
+          await failSubmitOnly({ status: 'failed', error: '未获得生成结果' }, `图像生成无结果退款 (taskId: ${asyncTaskId})`);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           console.error(`[generate] submitOnly background error for ${asyncTaskId}:`, msg);
-          await recordSubmitOnlyTerminal({
-            status: 'failed',
-            error: msg,
-            creditStatus: deductedCredits > 0 ? 'refunded' : 'not-applicable',
-          });
-          // 退款：异常失败
-          if (deductedCredits > 0 && sessionUser) {
-            try {
-              const { refundCredits } = await import('@/lib/credits');
-              await refundCredits(sessionUser.id, deductedCredits, `图像生成异常退款 (taskId: ${asyncTaskId})`, asyncTaskId);
-            } catch (refundErr) { console.error('[generate] Refund failed:', refundErr); }
-          }
+          await failSubmitOnly({ status: 'failed', error: msg }, `图像生成异常退款 (taskId: ${asyncTaskId})`);
         }
         });
       }
