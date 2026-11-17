@@ -379,7 +379,14 @@ export async function POST(request: NextRequest) {
             if (!imageModel) {
               failImage('未选择图像模型，请在输入框上方选择一个图像模型后重试');
             } else try {
-              const internalHeaders = await getInternalRequestHeaders(user.id, user.role === 'admin' ? 'admin' : 'user');
+              // /api/generate with submitOnly only records the task; /api/poll-task performs the real
+              // provider submission and only does so for a cookie-authenticated user. Forward the
+              // caller's session cookie so the task is actually submitted (and billed) like canvas calls.
+              const sessionCookie = request.headers.get('cookie');
+              const internalHeaders: Record<string, string> = {
+                ...(await getInternalRequestHeaders(user.id, user.role === 'admin' ? 'admin' : 'user')),
+                ...(sessionCookie ? { cookie: sessionCookie } : {}),
+              };
               // Server-side self-calls go to the local port; the public origin may not be reachable from inside the container.
               const imgRes = await fetch(getInternalApiUrl('/api/generate'), {
                 method: 'POST',

@@ -1592,7 +1592,7 @@ export default function ChatArea({
               </div>
             )}
             {uploadedImages.length > 0 && (
-              <div className="flex gap-2 px-4 pt-3 flex-wrap">
+              <div className="flex gap-3 px-4 pt-3 pb-2 flex-wrap">
                 {uploadedImages.map((att, i) => (
                   <div key={i} className="relative group">
                     <img src={att.url} alt="" className="w-16 h-16 object-cover rounded-lg" />
@@ -1618,11 +1618,13 @@ export default function ChatArea({
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
               placeholder={activeAgent ? `与 ${activeAgent.name} 对话...` : "输入消息，Enter 发送，支持 Ctrl+V 粘贴图片"}
-              rows={1}
-              className="w-full bg-transparent px-4 py-3 pr-28 text-sm resize-none outline-none placeholder:text-muted-foreground/50 min-h-[48px] max-h-[200px]"
+              rows={3}
+              className="block w-full bg-transparent px-4 pt-3 pb-2 text-sm leading-6 resize-none outline-none placeholder:text-muted-foreground/50 min-h-[88px] max-h-[240px] overflow-y-auto"
               style={{ scrollbarWidth: 'thin' }}
             />
-            <div className="absolute right-2 bottom-2 flex items-center gap-1">
+            {/* Toolbar sits in its own row so typed text never runs underneath the icons. */}
+            <div className="flex items-center justify-between gap-2 px-2 pb-2 pt-1 border-t border-border/50">
+              <div className="flex min-w-0 flex-wrap items-center gap-1">
               <button onClick={() => setBrandActive(!brandActive)}
                 className={`p-1.5 rounded-lg transition-colors ${brandActive ? 'bg-amber-500/10 text-amber-500' : 'text-muted-foreground hover:bg-muted'}`}
                 title="品牌DNA注入 - 将品牌规范注入对话上下文">
@@ -1673,8 +1675,10 @@ export default function ChatArea({
                 title="多模型对比 (Ctrl+M)">
                 <GitBranch className="w-4 h-4" />
               </button>
+              </div>
               <button onClick={handleSend} disabled={!input.trim() && uploadedImages.length === 0}
-                className="p-1.5 rounded-lg bg-primary text-primary-foreground disabled:opacity-40 transition-all hover:bg-primary/90">
+                aria-label="发送"
+                className="shrink-0 p-2 rounded-lg bg-primary text-primary-foreground disabled:opacity-40 transition-all hover:bg-primary/90">
                 {isStreaming ? <div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" /> : <ArrowUp className="w-4 h-4" />}
               </button>
             </div>
