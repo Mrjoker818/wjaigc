@@ -1,3 +1,5 @@
+import { findPearVideoSpec, normalizePearResolution, pickPearDuration } from './pear-video-specs';
+
 /**
  * 视频生成 API 通用调用层
  * 支持 7 种协议适配：dashscope / volcengine-ark / minimax / vidu / openai-video / fal-video / ai-link / rest-generic / custom
@@ -53,6 +55,7 @@ export interface VideoGenerateParams {
   referenceImages?: string[];   // 多参考图 (可灵/Seedance/Vidu/Pika)
   aspectRatio?: string;         // 画面比例 (如 "16:9")
   duration?: number;            // 视频时长(秒)
+  resolution?: string;          // 分辨率 (如 "720P"，仅按模型规格透传)
   mode?: 'std' | 'pro';        // 生成模式 (标准/高品质)
   generateAudio?: boolean;      // 是否生成音效
   action?: 'generate' | 'extend' | 'edit'; // 操作类型: 生成/延长/编辑
@@ -1261,25 +1264,47 @@ function buildPearApiVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
   if (params.lastFrameImageUrl) refImages.push(params.lastFrameImageUrl);
   if (params.referenceImages?.length) refImages.push(...params.referenceImages);
 
-  // Determine mode based on inputs
+  const spec = findPearVideoSpec(params.model);
+
+  // Official modes: text2video / image2video / imageend2video / reference2video.
+  // imageend2video is Seedance-only; other models fall back to first-frame image2video.
   let mode = 'text2video';
-  if (refImages.length > 0) {
-    mode = params.lastFrameImageUrl ? 'image2video' : 'image2video';
+  if (params.imageUrl && params.lastFrameImageUrl && (!spec || spec.modes.includes('imageend2video'))) {
+    mode = 'imageend2video';
+  } else if (params.imageUrl) {
+    mode = 'image2video';
+  } else if (refImages.length > 0) {
+    mode = spec && !spec.modes.includes('reference2video') ? 'image2video' : 'reference2video';
+  }
+  if (spec && !spec.modes.includes(mode as typeof spec.modes[number])) {
+    mode = spec.modes[0];
   }
 
+  const images = spec ? refImages.slice(0, Math.max(spec.maxImages, 0)) : refImages;
+
+  // Ratio / resolution / duration are clamped to the documented values so the
+  // upstream never rejects them as unsupported. Unknown models pass through.
+  const aspectRatio = spec
+    ? (params.aspectRatio && spec.aspectRatios.includes(params.aspectRatio) ? params.aspectRatio : spec.aspectRatios[0])
+    : (params.aspectRatio || '16:9');
+  const resolution = spec
+    ? (normalizePearResolution(spec, params.resolution) ?? spec.defaultResolution)
+    : params.resolution;
+  const duration = spec ? pickPearDuration(spec, params.duration) : params.duration;
+
+  // negative_prompt / seed are not in PearAPI's VideoGenerationRequest schema; not sent.
   const body: Record<string, unknown> = {
     model: params.model,
     prompt: params.prompt,
     mode,
-    ...(params.aspectRatio ? { aspect_ratio: params.aspectRatio } : { aspect_ratio: '16:9' }),
-    ...(params.duration ? { duration: params.duration } : {}),
-    ...(params.negativePrompt ? { negative_prompt: params.negativePrompt } : {}),
-    ...(params.seed !== undefined ? { seed: params.seed } : {}),
+    aspect_ratio: aspectRatio,
+    ...(resolution ? { resolution } : {}),
+    ...(duration !== undefined ? { duration } : {}),
   };
 
   // PearAPI recommends reference_contents array: [{type, media_url, name}]
-  if (refImages.length > 0) {
-    body.reference_contents = refImages.map((url, idx) => ({
+  if (images.length > 0) {
+    body.reference_contents = images.map((url, idx) => ({
       type: 'image',
       media_url: url,
       name: idx === 0 ? 'first_frame' : `ref_${idx + 1}`,

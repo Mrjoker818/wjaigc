@@ -3186,6 +3186,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
           mode: 'image2video-first',
           aspectRatio: params.aspectRatio,
           duration: scene.duration || params.duration,
+          resolution: params.resolution,
           quality: params.quality,
           generateAudio: params.generateAudio,
           providerId: params.providerId,

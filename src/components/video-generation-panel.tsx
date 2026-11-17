@@ -24,6 +24,7 @@ import type {
 } from '@/lib/video-director/continuity';
 import type { DirectorStyle, VideoReferenceBinding } from '@/lib/video-director/prompt-compiler';
 import { selectInitialModel } from '@/lib/model-defaults';
+import { findPearVideoSpec, isPearVideoProvider, pearSpecToPanelFeatures } from '@/lib/pear-video-specs';
 
 // === 生成历史 ===
 interface VideoHistoryEntry {
@@ -670,9 +671,11 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
           const data = await res.json();
           const vModels: Array<{ id: string; name: string; providerId: string; providerName: string; isDefault?: boolean }> = [];
           const providerMap = new Map<string, string>();
+          const pearProviderIds = new Set<string>();
           if (data.providers && Array.isArray(data.providers)) {
             for (const p of data.providers) {
               providerMap.set(p.id, p.name || p.displayName || '');
+              if (isPearVideoProvider(p)) pearProviderIds.add(p.id);
             }
           }
           if (data.models && Array.isArray(data.models)) {
@@ -691,6 +694,20 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
             const modelId = sm.id.includes('::') ? sm.id.split('::').pop()! : sm.id;
             const providerId = sm.providerId || (sm.id.includes('::') ? sm.id.split('::')[0] : '');
             const registry = VIDEO_MODEL_REGISTRY[modelId as keyof typeof VIDEO_MODEL_REGISTRY];
+            // PearAPI 模型按官方模型清单取比例/分辨率/时长，其余供应商保持原注册表
+            const pearSpec = pearProviderIds.has(providerId) ? findPearVideoSpec(modelId) : null;
+            if (pearSpec) {
+              return {
+                id: providerId ? `${providerId}::${modelId}` : modelId,
+                modelId,
+                name: sm.name || pearSpec.name,
+                providerId,
+                providerName: sm.providerName,
+                isDefault: Boolean(sm.isDefault),
+                region: 'global' as const,
+                features: pearSpecToPanelFeatures(pearSpec),
+              };
+            }
             return {
               id: providerId ? `${providerId}::${modelId}` : modelId,
               modelId,
@@ -753,6 +770,7 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
     if (currentFeatures) {
       if (!availableRatios.includes(aspectRatio)) setAspectRatio(availableRatios[0]);
       if (!availableDurations.includes(duration)) setDuration(availableDurations[0]);
+      if (resolution && !availableResolutions.includes(resolution)) setResolution('');
       if (!currentFeatures.firstLastFrame && showLastFrame) setShowLastFrame(false);
       if (!currentFeatures.videoExtend && mode === 'video-extend') setMode('text2video');
       if (!currentFeatures.audio && generateAudio) setGenerateAudio(false);

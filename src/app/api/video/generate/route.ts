@@ -22,8 +22,10 @@ import {
   getVideoModelInfo,
   ratioToSize,
   validateVideoDuration,
+  getPlatformVideoDurations,
   type VideoGenerateParams,
 } from '@/lib/video-api';
+import { findPearVideoSpec, isPearVideoProvider } from '@/lib/pear-video-specs';
 import { buildDirectorPrompt, type VideoDirectorMode } from '@/lib/video-director';
 import { getSessionUser } from '@/lib/server-auth';
 import { getInternalRequestHeaders } from '@/lib/api-auth';
@@ -75,6 +77,7 @@ export async function POST(request: NextRequest) {
       referenceImages,
       aspectRatio = '16:9',
       duration = 5,
+      resolution,
       mode = 'std',
       generateAudio = false,
       negativePrompt,
@@ -111,16 +114,6 @@ export async function POST(request: NextRequest) {
     if (parsedDuration > runtimeSettings.maxVideoDuration) {
       return NextResponse.json({ error: `Video duration exceeds the ${runtimeSettings.maxVideoDuration}s platform limit` }, { status: 400 });
     }
-    const durationValidation = validateVideoDuration(pureModel, parsedDuration);
-    if (!durationValidation.valid) {
-      const allowed = durationValidation.allowedDurations;
-      return NextResponse.json({
-        error: allowed.length > 0
-          ? `模型 ${pureModel} 仅支持单段 ${allowed.join('/')} 秒视频`
-          : '视频时长必须是大于 0 的整数秒',
-        allowedDurations: allowed,
-      }, { status: 400 });
-    }
 
     // 仅确认用户身份。积分在持久化任务创建后以数据库原子语句扣除，
     // 防止任务未落库或并发请求时产生不可追溯的重复扣费。
@@ -146,6 +139,33 @@ export async function POST(request: NextRequest) {
         { error: '未找到可用的视频 API 提供商，请先在管理员后台添加视频模型 API' },
         { status: 404 },
       );
+    }
+
+    // 时长校验：PearAPI 按官方模型清单校验，其余供应商沿用通用注册表
+    const pearSpec = isPearVideoProvider(provider) ? findPearVideoSpec(pureModel) : null;
+    if (pearSpec) {
+      const pearAllowed = getPlatformVideoDurations(pearSpec.durations);
+      const autoDuration = pearSpec.durations.includes(0);
+      if (!autoDuration && !pearAllowed.includes(parsedDuration)) {
+        return NextResponse.json({
+          error: `模型 ${pureModel} 仅支持单段 ${pearAllowed.join('/')} 秒视频`,
+          allowedDurations: pearAllowed,
+        }, { status: 400 });
+      }
+      if (pearSpec.requiresImage && !imageUrl && !(Array.isArray(referenceImages) && referenceImages.length > 0)) {
+        return NextResponse.json({ error: `模型 ${pureModel} 仅支持图生视频，请先上传首帧图片` }, { status: 400 });
+      }
+    } else {
+      const durationValidation = validateVideoDuration(pureModel, parsedDuration);
+      if (!durationValidation.valid) {
+        const allowed = durationValidation.allowedDurations;
+        return NextResponse.json({
+          error: allowed.length > 0
+            ? `模型 ${pureModel} 仅支持单段 ${allowed.join('/')} 秒视频`
+            : '视频时长必须是大于 0 的整数秒',
+          allowedDurations: allowed,
+        }, { status: 400 });
+      }
     }
 
     const apiKey = provider.apiKey;
@@ -303,6 +323,7 @@ export async function POST(request: NextRequest) {
       referenceImages: resolvedRefs.filter(Boolean) as string[],
       aspectRatio,
       duration,
+      resolution: typeof resolution === 'string' && resolution.trim() ? resolution.trim() : undefined,
       mode,
       generateAudio,
       negativePrompt: finalNegativePrompt,
