@@ -116,7 +116,7 @@ async function session(theme: Theme = 'gold', width: number = 390, height: numbe
     await context.route('**/*', async route => {
       const operation = (async (): Promise<void> => {
         const request = route.request(), url = new URL(request.url()), headers = request.headers();
-        const keyPath=url.pathname+url.search,isUpload=request.method()==='POST'&&keyPath==='/api/save-image',isActivity=request.method()==='POST'&&keyPath==='/api/activity',isPlanPost=request.method()==='POST'&&['/api/video/director/prompt','/api/video/director/shot-plan','/api/video/tools'].includes(keyPath);
+        const keyPath=url.pathname+url.search,isUpload=request.method()==='POST'&&keyPath==='/api/save-image',isActivity=request.method()==='POST'&&keyPath==='/api/activity',isPlanPost=request.method()==='POST'&&['/api/video/director/prompt','/api/video/director/shot-plan','/api/drama/render','/api/poll-task'].includes(keyPath);
         if (url.origin !== ORIGIN || url.username || url.password || (!isUpload&&!isActivity&&!isPlanPost&&(request.method() !== 'GET' || request.postData() !== null))
           || headers.authorization || headers.cookie || headers['x-api-key'] || headers['api-key'] || headers['idempotency-key']) throw Error('CANVAS_UI_FIXTURE_HTTP_BOUNDARY');
         const key = url.pathname + url.search, count = (s.counts.get(key) ?? 0) + 1; s.counts.set(key, count);
@@ -137,10 +137,10 @@ async function session(theme: Theme = 'gold', width: number = 390, height: numbe
         if(isActivity||isPlanPost){
           const bytes=request.postDataBuffer(),meta=validateBJPost({url:request.url(),method:request.method(),headers,body:bytes?Uint8Array.from(bytes):null,count,prior:s.postTrace});
           if(isActivity){console.log('BJ_ACTIVITY',JSON.stringify(meta));await route.fulfill({json:{success:true}});return;}
-          s.postTrace.push({...meta,status:200});console.log('BJ_POST',JSON.stringify(meta));
+          if(meta.path!=='/api/poll-task')s.postTrace.push({...meta,status:meta.path==='/api/drama/render'?202:200});console.log('BJ_POST',JSON.stringify(meta));
           if(meta.path==='/api/video/director/prompt'){await route.fulfill({json:{success:true,compiled:{prompt:'BJ导演：海边骑行，镜头跟随。',negativePrompt:'BJ不要水印',contract:{endState:'BJ远景'},compiledBy:'rule-director'},mode:'text2video',rawText:'BJ synthetic director output'}});return;}
           if(meta.path==='/api/video/director/shot-plan'){await route.fulfill({json:{success:true,shots:[{id:'A',index:0,title:'BJ-A',purpose:'起步',shotSize:'中景',cameraMotion:'static',actionBeat:'骑行',lighting:'日光',audioCues:'',prompt:'BJ-A海岸起步',duration:5,aspectRatio:'16:9',continuityNotes:[],characterIds:[],sceneId:'',propIds:[]},{id:'B',index:1,title:'BJ-B',purpose:'远景',shotSize:'远景',cameraMotion:'static',actionBeat:'远行',lighting:'日光',audioCues:'',prompt:'BJ-B海岸远景',duration:5,aspectRatio:'16:9',continuityNotes:[],characterIds:[],sceneId:'',propIds:[]}],characters:[],scenes:[],props:[],totalDuration:10,usedModel:'BJ synthetic plan'}});return;}
-          if(meta.path==='/api/video/tools'){await route.fulfill({json:{success:true,videoUrl:ORIGIN+'/bj-video/story.mp4',thumbnailUrl:ORIGIN+'/bj-thumb/story.png'}});return;}
+          if(meta.path==='/api/drama/render'){await route.fulfill({status:202,json:{success:true,taskId:'drama_render_bj',creditCost:0}});return;}if(meta.path==='/api/poll-task'){await route.fulfill({json:{success:true,status:'completed',progress:100,result:{videoUrl:ORIGIN+'/bj-video/story.mp4',videoThumbnailUrl:ORIGIN+'/bj-thumb/story.png',durationSec:10}}});return;}
           throw Error('BJ_NO_SERVICE_HANDLER');
         }
         if(key==='/bj-thumb/A.png'||key==='/bj-thumb/B.png'){await route.fulfill({contentType:'image/png',body:key.includes('/A.')?s.png:s.bluePng});return;}
@@ -195,7 +195,7 @@ async function dispose(s: Session, expectedRefusal?: 'http' | 'websocket', clean
   // Cleanup/lifecycle/allowlist failures can never share the expected-refusal
   // prefix. A boundary selftest must not succeed merely because close failed.
   const invalid=(code:string):never=>{if(failures.length)throw new AggregateError([Error(code),...failures],'CANVAS_UI_FIXTURE_VALIDATION_AND_CLEANUP');throw Error(code);};
-  const allowed=['/','/api/session','/api/auth/me','/api/task-events','/api/upscayl','/api/models?type=upscaler','/api/models?type=removebg','/api/models?type=3d','/api/models?type=image','/api/models?type=chat','/api/models?type=video','/api/video/director/prompt','/api/video/director/shot-plan','/api/video/tools','/bj-thumb/A.png','/bj-thumb/B.png','/api/save-image','/api/activity','/bi-image/front.png','/bi-image/side.png','/bg-image/slow.png','/bg-image/bad.png','/logo.png','/api/tasks/recover?projectId=canvas-ui-project',...HELP_FILES.map(file=>'/api/help-image?file='+file)];
+  const allowed=['/','/api/session','/api/auth/me','/api/task-events','/api/upscayl','/api/models?type=upscaler','/api/models?type=removebg','/api/models?type=3d','/api/models?type=image','/api/models?type=chat','/api/models?type=video','/api/video/director/prompt','/api/video/director/shot-plan','/api/drama/render','/api/poll-task','/bj-thumb/A.png','/bj-thumb/B.png','/api/save-image','/api/activity','/bi-image/front.png','/bi-image/side.png','/bg-image/slow.png','/bg-image/bad.png','/logo.png','/api/tasks/recover?projectId=canvas-ui-project',...HELP_FILES.map(file=>'/api/help-image?file='+file)];
   const keys=[...s.counts.keys()];
   if(s.options.requireMissing || s.counts.get('/')!==1 || keys.some(k=>!allowed.includes(k)&&!(expectedRefusal==='http'&&k==='/unexpected'))){
     console.log('CANVAS_UI_FIXTURE_REQUEST_DIAGNOSTIC',JSON.stringify({counts:[...s.counts],errors:s.errors}));
@@ -241,13 +241,13 @@ async function plan(s:Session):Promise<void>{
  const planning=p.getByRole('button',{name:'AI 分镜',exact:true});await audit(s,planning,'plan');await click(s,planning);await card(s,'A').waitFor();await card(s,'B').waitFor();await nativeRequestsFinished(s);
  for(const id of ['A','B'] as const){await audit(s,card(s,id).locator('textarea'),'shot-prompt');}
  const clear=stories(s).getByRole('button',{name:'清空',exact:true});await audit(s,clear,'clear');
- for(const name of ['尾帧接力','链式连贯','全局参考图'])await audit(s,stories(s).getByRole('button',{name,exact:true}),'toggle');
+ for(const name of ['尾帧接力','全局参考图'])await audit(s,stories(s).getByRole('button',{name,exact:true}),'toggle');
  expect(s.counts.get('/api/video/director/prompt')).toBe(1);expect(s.counts.get('/api/video/director/shot-plan')).toBe(1);expect(s.counts.get('/api/activity')).toBe(2);
 }
 for(const e of MATRIX){
- it('BJ '+e.theme+' '+e.width+'x'+e.height+' planned footer submits the visible shots',async()=>{await check(e,async s=>{
-  await plan(s);const primary=panel(s).getByRole('button',{name:'生成 2 个镜头视频',exact:true});await audit(s,primary,'footer');expect(await primary.isEnabled()).toBe(true);await click(s,primary);
-  const state=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);console.log('BJ_FOOTER',JSON.stringify({errors:state.uploadErrors,generations:state.generations}));expect.soft(state.uploadErrors).toEqual([]);expect(state.generations).toHaveLength(1);const value=state.generations[0];expect(value.mode).toBe('multi-shot');expect(value.model).toBe('kling-v3-video-generation');expect(value.providerId).toBe('bg-offline');expect(value.multiShotScenes?.map(v=>({id:v.id,prompt:v.prompt,duration:v.duration}))).toEqual([{id:'A',prompt:'BJ-A海岸起步',duration:5},{id:'B',prompt:'BJ-B海岸远景',duration:5}]);
+ it('BJ '+e.theme+' '+e.width+'x'+e.height+' planned footer starts the per-shot run with the first visible shot',async()=>{await check(e,async s=>{
+  await plan(s);const primary=panel(s).getByRole('button',{name:'生成 2 个镜头视频',exact:true});await audit(s,primary,'footer');expect(await primary.isEnabled()).toBe(true);await click(s,primary);await s.page.waitForFunction(()=>(window as unknown as FixtureWindow).canvasUi.state.generations.length===1);
+  const state=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);console.log('BJ_FOOTER',JSON.stringify({errors:state.uploadErrors,generations:state.generations}));expect.soft(state.uploadErrors).toEqual([]);expect(state.generations).toHaveLength(1);const value=state.generations[0];expect(value.shotId).toBe('A');expect(value.mode).toBe('text2video');expect(value.model).toBe('kling-v3-video-generation');expect(value.providerId).toBe('bg-offline');expect(value.multiShotScenes).toBeUndefined();
  });},25000);
  it('BJ '+e.theme+' '+e.width+'x'+e.height+' visible reordered shots define composition order',async()=>{await check(e,async s=>{
   await plan(s);await click(s,stories(s).getByRole('button',{name:'尾帧接力',exact:true}));
@@ -259,7 +259,7 @@ for(const e of MATRIX){
   for(const id of ['A','B'] as const)for(const title of ['上移','下移','删除'])await audit(s,card(s,id).getByTitle(title,{exact:true}),'shot-action');
   await click(s,card(s,'A').getByTitle('下移',{exact:true}));const order=await stories(s).locator('textarea').evaluateAll(els=>els.map(el=>(el as HTMLTextAreaElement).value));expect(order).toEqual(['BJ-B海岸远景','BJ-A海岸起步']);
   const compose=stories(s).getByRole('button',{name:'合成故事视频',exact:true});await audit(s,compose,'compose');expect(await compose.isEnabled()).toBe(true);await click(s,compose);await nativeRequestsFinished(s);await s.page.waitForFunction(()=>(window as unknown as FixtureWindow).canvasUi.state.compositions.length===1);
-  const request=s.postTrace.find(v=>v.path==='/api/video/tools');console.log('BJ_CONCAT',JSON.stringify({visibleOrder:order,request:request?.body}));expect(request?.body).toEqual({action:'concat-videos',videoUrls:[ORIGIN+'/bj-video/B.mp4',ORIGIN+'/bj-video/A.mp4']});expect(s.counts.get('/api/activity')).toBe(3);
-  const state=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);expect(state.uploadErrors).toEqual([]);expect(state.compositions).toEqual([{videoUrl:ORIGIN+'/bj-video/story.mp4',thumbnailUrl:ORIGIN+'/bj-thumb/story.png',duration:10}]);
+  const request=s.postTrace.find(v=>v.path==='/api/drama/render');console.log('BJ_CONCAT',JSON.stringify({visibleOrder:order,request:request?.body}));expect(request?.body).toEqual({videoUrls:[ORIGIN+'/bj-video/B.mp4',ORIGIN+'/bj-video/A.mp4'],transition:'cut'});expect(s.counts.get('/api/activity')).toBe(3);
+  const state=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);expect(state.uploadErrors).toEqual([]);expect(state.compositions).toEqual([{videoUrl:ORIGIN+'/bj-video/story.mp4',thumbnailUrl:ORIGIN+'/bj-thumb/story.png',duration:10,aspectRatio:'16:9'}]);
  });},25000);
 }

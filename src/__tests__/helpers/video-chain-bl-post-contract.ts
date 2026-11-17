@@ -7,7 +7,7 @@ function exact(body:Record<string,unknown>,expected:Record<string,unknown>):bool
 }
 export function validateBLPost(input:BLPostInput):BLPostReceipt {
  const origin='https://canvas-shell-mobile.invalid',url=new URL(input.url);
- const oldPaths=['/api/video/director/prompt','/api/video/director/shot-plan','/api/video/tools'];
+ const oldPaths=['/api/video/director/prompt','/api/video/director/shot-plan','/api/drama/render','/api/poll-task'];
  if(oldPaths.includes(url.pathname))return validateBJPost(input);
  const paths=[...oldPaths,'/api/video/extract-frame','/api/save-image','/api/video/director/diagnose'];
  if(input.method!=='POST'||url.origin!==origin||url.username||url.password||url.search||url.hash
@@ -22,6 +22,8 @@ export function validateBLPost(input:BLPostInput):BLPostReceipt {
  try{parsed=JSON.parse(new TextDecoder().decode(input.body));}catch{throw Error('BL_POST_JSON');}
  if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))throw Error('BL_POST_OBJECT');
  const body=parsed as Record<string,unknown>,pathname=url.pathname;
+ // The background render answers 202 Accepted; every other audited call answers 200.
+ const okStatus=body.path==='/api/drama/render'?202:200;
  if(pathname==='/api/video/extract-frame'){
   if(!exact(body,{videoUrl:origin+'/bj-video/A.mp4',frame:'last'}))throw Error('BL_POST_EXTRACT');
  }else if(pathname==='/api/save-image'){
@@ -37,8 +39,8 @@ export function validateBLPost(input:BLPostInput):BLPostReceipt {
   const audited=input.audited??[],duration=body.durationMs;
   if(input.count!==audited.length+1||typeof body.path!=='string'||!paths.includes(body.path)
    ||typeof duration!=='number'||!Number.isInteger(duration)||duration<0||duration>25000
-   ||!exact(body,{action:'post_api_request',method:'POST',path:body.path,status:200,durationMs:duration}))throw Error('BL_POST_ACTIVITY');
-  const matching=(entry:{path:string;status:number}):boolean=>entry.path===body.path&&entry.status===200;
+   ||!exact(body,{action:'post_api_request',method:'POST',path:body.path,status:okStatus,durationMs:duration}))throw Error('BL_POST_ACTIVITY');
+  const matching=(entry:{path:string;status:number}):boolean=>entry.path===body.path&&entry.status===okStatus;
   // AuditClient sends receipts without waiting for them: acknowledge only an
   // actual unconsumed response, without inventing an arrival-order guarantee.
   if(input.prior.filter(matching).length<=audited.filter(matching).length)throw Error('BL_POST_ACTIVITY_UNMATCHED');

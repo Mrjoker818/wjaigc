@@ -24,6 +24,11 @@ import type {
 } from '@/lib/video-director/continuity';
 import type { DirectorStyle, VideoReferenceBinding } from '@/lib/video-director/prompt-compiler';
 import { DIRECTOR_STYLE_LIST } from '@/lib/video-director/director-styles';
+import { asDramaShot, buildDramaDraftFromCanvas } from '@/lib/drama/canvas-bridge';
+import type { DramaTransition } from '@/lib/drama/render';
+import { renderShotVideos } from '@/lib/drama/render-client';
+import { chooseFirstFrame, chooseReferenceImages, type ShotModelCapability } from '@/lib/drama/shot-runner';
+import type { DramaLocation, DramaProjectV1 } from '@/lib/drama/types';
 import { selectInitialModel } from '@/lib/model-defaults';
 import { useTaskModelCatalog } from '@/hooks/use-task-model-catalog';
 import { taskModelKey } from '@/lib/task-core/model-capability-contract';
@@ -200,9 +205,6 @@ export interface VideoGenerateParams extends Omit<VideoApiGenerateParams, 'mode'
   motionStrength?: number;
   seed?: number;
   negativePrompt?: string;
-  multiShotScenes?: Array<{ id: string; prompt: string; duration: number; cameraControl?: CameraControlParams }>;
-  chainContinuity?: boolean;
-  useGlobalReferences?: boolean;
   // 多镜头/导演参数
   shotId?: string;
   shotIndex?: number;
@@ -224,7 +226,9 @@ interface VideoGenerationPanelProps {
   /** 画布添加图片（用于把制片资产加入画布） */
   onAddImages?: (imageUrls: string[]) => void;
   /** 故事视频合成完成回调 */
-  onStoryVideoComposed?: (result: { videoUrl: string; thumbnailUrl?: string; duration?: number }) => void;
+  onStoryVideoComposed?: (result: { videoUrl: string; thumbnailUrl?: string; duration?: number; aspectRatio?: string }) => void;
+  /** 把当前分镜、角色、场景作为剧本草稿交给短剧工作台 */
+  onSendToDrama?: (draft: DramaProjectV1) => Promise<void>;
   themeStyle?: 'gold' | 'monochrome';
   /** 当前画布选中的图片URL，自动用作图生视频首帧 */
   selectedImageUrl?: string | null;
@@ -340,6 +344,7 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
   onAddImages,
   onError,
   onStoryVideoComposed,
+  onSendToDrama,
   themeStyle = 'gold',
   selectedImageUrl,
   selectedVideoUrl,
@@ -515,9 +520,10 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
     { id: '1', prompt: '', duration: 5 },
   ]);
   const [showMultiShotPanel, setShowMultiShotPanel] = useState(false);
-  const [chainContinuity, setChainContinuity] = useState(true); // 链式连贯：前段尾帧→后段首帧
   const [useGlobalReferences, setUseGlobalReferences] = useState(true);
   const [tailFrameRelay, setTailFrameRelay] = useState(true); // 尾帧接力开关（默认开启）
+  const [storyTransition, setStoryTransition] = useState<DramaTransition>('cut');
+  const [isSendingToDrama, setIsSendingToDrama] = useState(false);
   const [autoDiagnoseOnFail, setAutoDiagnoseOnFail] = useState(true); // 失败自动诊断
   const [videoHistory, setVideoHistory] = useState<VideoHistoryEntry[]>(loadVideoHistory);
   const [showHistory, setShowHistory] = useState(false);
@@ -731,6 +737,12 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
   const availableQualities = (currentDescriptor?.qualityOptions ?? [])
     .filter((q): q is 'std' | 'pro' => q === 'std' || q === 'pro');
   const supportedOperations = currentDescriptor?.supportedOperations ?? [];
+  // A descriptor without an operation list keeps the old behaviour and accepts a first frame.
+  const shotCapability: ShotModelCapability = {
+    imageToVideo: !currentDescriptor?.supportedOperations
+      || supportedOperations.includes('image-to-video') || supportedOperations.includes('first-last-frame'),
+    maxReferenceImages: currentDescriptor?.supportsReferenceImages === false ? 0 : (currentDescriptor?.maxReferenceImages ?? 4),
+  };
 
   // 首尾帧开关（图生视频模式内可展开尾帧）
   const [showLastFrame, setShowLastFrame] = useState(false);
@@ -1076,59 +1088,62 @@ Rules:
     setShotPlans(prev => prev.map(s => s.id === shotId ? { ...s, status: 'generating' as const, error: undefined } : s));
     try {
       const shotIdx = plansAtStart.findIndex(s => s.id === shotId);
-      // 场景图优先作为首帧（AI 制片流水线预先为该镜头生成的氛围图），仅当用户没手动设置首帧时生效
-      let sceneFrameUrl: string | undefined;
-      const matchedScene = productionScenes.find(s => {
-        if (s.shotId === shotId) return true;
-        const forIds = s.forShotIds;
-        if (Array.isArray(forIds) && (forIds.includes(shotId) || (shotIdx >= 0 && forIds.includes(shotIdx)))) return true;
-        return false;
-      });
-      if (matchedScene?.imageUrl && !firstFrameUrl) {
-        sceneFrameUrl = matchedScene.imageUrl;
-      } else {
-        // 兼容：从 typedReferences 里找标记为 'scene' 的参考图
-        const sceneRefs = typedReferences.filter(r => r.type === 'scene').map(r => r.url);
-        if (sceneRefs.length > 0 && !firstFrameUrl) {
-          sceneFrameUrl = sceneRefs[shotIdx] || sceneRefs[0];
-        }
-      }
-      // 查找上一个已完成镜头：优先使用服务端 ffmpeg 抽取的尾帧，其次用缩略图
-      let firstFrameForThis: string | undefined = firstFrameUrl || sceneFrameUrl || undefined;
-      if (shotIdx > 0 && tailFrameRelay && !firstFrameUrl && !sceneFrameUrl) {
-        const prev = plansAtStart[shotIdx - 1];
-        if (prev?.videoUrl) {
-          // 调用后端抽帧 API（ffmpeg 抽最后一帧，比前端 video 元素更稳定）
-          try {
-            const resp = await fetch('/api/video/extract-frame', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ videoUrl: prev.videoUrl, frame: 'last' }),
-            });
-            const data = await resp.json();
-            if (resp.ok && data.imageUrl) {
-              // 持久化到本地存储，避免远端临时 URL 过期
-              try {
-                const persist = await fetch('/api/save-image', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ imageUrl: data.imageUrl, mediaType: 'image' }),
-                });
-                const persistData = await persist.json();
-                firstFrameForThis = (persist.ok && persistData.url) ? persistData.url : data.imageUrl;
-              } catch {
-                firstFrameForThis = data.imageUrl;
-              }
-            } else if (prev.thumbnailUrl) {
-              firstFrameForThis = prev.thumbnailUrl;
+      const prev = shotIdx > 0 ? plansAtStart[shotIdx - 1] : undefined;
+      // 与短剧引擎相同的首帧顺序：镜头自己的首帧（面板首帧属于第 1 个镜头）→ 场景图 → 开启尾帧接力时用上一镜头尾帧
+      const legacyScene = productionScenes.find(s => s.shotId === shotId
+        || (Array.isArray(s.forShotIds) && (s.forShotIds.includes(shotId) || (shotIdx >= 0 && s.forShotIds.includes(shotIdx)))));
+      const sceneRefs = typedReferences.filter(r => r.type === 'scene').map(r => r.url);
+      const sceneWithImage = [productionScenes.find(s => s.id === shot.sceneId), legacyScene].find(s => s?.imageUrl);
+      const location: DramaLocation | undefined = sceneWithImage
+        ?? (sceneRefs.length > 0 ? { id: 'scene-reference', name: '场景参考', imageUrl: sceneRefs[shotIdx] || sceneRefs[0] } : undefined);
+      const dramaShot = {
+        ...asDramaShot(shot),
+        firstFrameUrl: shot.firstFrameUrl || (shotIdx === 0 ? firstFrameUrl || undefined : undefined),
+        firstFrameFromPrev: tailFrameRelay && shot.firstFrameFromPrev !== false,
+      };
+      const choice = chooseFirstFrame(dramaShot, prev ? asDramaShot(prev) : undefined, location, shotCapability);
+      let firstFrameForThis: string | undefined = choice.url;
+      if (choice.source === 'previous-shot' && choice.previousVideoUrl) {
+        // 调用后端抽帧 API（ffmpeg 抽最后一帧，比前端 video 元素更稳定）
+        try {
+          const resp = await fetch('/api/video/extract-frame', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ videoUrl: choice.previousVideoUrl, frame: 'last' }),
+          });
+          const data = await resp.json();
+          if (resp.ok && data.imageUrl) {
+            // 持久化到本地存储，避免远端临时 URL 过期
+            try {
+              const persist = await fetch('/api/save-image', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ imageUrl: data.imageUrl, mediaType: 'image' }),
+              });
+              const persistData = await persist.json();
+              firstFrameForThis = (persist.ok && persistData.url) ? persistData.url : data.imageUrl;
+            } catch {
+              firstFrameForThis = data.imageUrl;
             }
-          } catch {
-            if (prev.thumbnailUrl) firstFrameForThis = prev.thumbnailUrl;
+          } else {
+            firstFrameForThis = prev?.thumbnailUrl;
           }
-        } else if (prev?.thumbnailUrl) {
-          firstFrameForThis = prev.thumbnailUrl;
+        } catch {
+          firstFrameForThis = prev?.thumbnailUrl;
         }
       }
+      // 参考图：本镜头出场角色的定妆图优先（每人一张后再补第二张），全局参考图其次，总数按模型上限截断
+      const castIds = shot.characterIds?.length ? shot.characterIds : productionCharacters.map(c => c.id);
+      const castRefs = chooseReferenceImages({ ...dramaShot, characterIds: castIds }, productionCharacters, shotCapability,
+        firstFrameForThis ? [firstFrameForThis] : []);
+      const globalCharacterRefs = useGlobalReferences
+        ? typedReferences.filter(r => r.type === 'character-front' || r.type === 'character-side').map(r => r.url) : [];
+      const globalOtherRefs = useGlobalReferences
+        ? typedReferences.filter(r => !r.type.startsWith('character-') && r.type !== 'first-frame' && r.type !== 'last-frame' && r.type !== 'scene').map(r => r.url)
+        : [];
+      const shotCharacterRefs = [...castRefs, ...globalCharacterRefs.filter(url => !castRefs.includes(url))]
+        .slice(0, shotCapability.maxReferenceImages);
+      const shotOtherRefs = globalOtherRefs.slice(0, Math.max(0, shotCapability.maxReferenceImages - shotCharacterRefs.length));
       const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
       const providerId = currentModel?.providerId || (model.includes('::') ? model.split('::')[0] : undefined);
       // 把 shot.cameraMove 文本规范化为 cameraControl.type 枚举
@@ -1146,9 +1161,8 @@ Rules:
         ? { type: normalizeCameraType(shot.cameraMove), intensity: motionStrength }
         : (cameraControl || undefined);
       // 连续性提示：用上一镜头结果构造续接 prompt，帮助模型衔接动作与场景
-      const prevShot = shotIdx > 0 ? plansAtStart[shotIdx - 1] : undefined;
-      const shotPrompt = prevShot && prevShot.status === 'completed' && prevShot.videoUrl
-        ? buildContinuationPrompt(prevShot, shot.directedPrompt || shot.prompt)
+      const shotPrompt = prev && prev.status === 'completed' && prev.videoUrl
+        ? buildContinuationPrompt(prev, shot.directedPrompt || shot.prompt)
         : (shot.directedPrompt || shot.prompt);
 
       setShotPlans(prev => prev.map(s => s.id === shotId ? { ...s, status: 'generating' as const, error: undefined, progress: 0 } : s));
@@ -1171,14 +1185,8 @@ Rules:
           resolution,
           cameraControl: camControl as CameraControlParams | undefined,
           motionBrush: motionBrush || undefined,
-          characterReferences: [
-            ...productionCharacters.flatMap(c => [c.imageUrlFront || c.frontUrl, c.imageUrlSide || c.sideUrl].filter(Boolean) as string[]),
-            ...typedReferences.filter(r => r.type === 'character-front' || r.type === 'character-side').map(r => r.url),
-          ],
-          referenceImages: [
-            ...(productionScenes.map(s => s.imageUrl).filter(Boolean) as string[]),
-            ...typedReferences.filter(r => !r.type.startsWith('character-') && r.type !== 'first-frame' && r.type !== 'last-frame' && r.type !== 'scene').map(r => r.url),
-          ],
+          characterReferences: shotCharacterRefs,
+          referenceImages: shotOtherRefs,
           motionStrength: camControl ? motionStrength : undefined,
           seed,
           negativePrompt: negativePrompt.trim() || undefined,
@@ -1569,14 +1577,9 @@ Rules:
   }, [productionCharacters, productionScenes, productionProps, prompt, duration, aspectRatio, directorStyle, handleGenerateProductionAssets, onError]);
 
   const handleGenerateAllShots = async () => {
-    if (!model || shotPlans.length === 0) return;
+    if (!model || shotPlansRef.current.length === 0) return;
     setIsGeneratingAllShots(true);
     try {
-      const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
-      const providerId = currentModel?.providerId || (model.includes('::') ? model.split('::')[0] : undefined);
-      const _charRefs = typedReferences.filter(r => r.type.startsWith('character-')).map(r => r.url);
-      const _otherRefs = typedReferences.filter(r => !r.type.startsWith('character-') && r.type !== 'first-frame' && r.type !== 'last-frame').map(r => r.url);
-
       // 自动生成角色/场景资产（若尚未生成）
       if (autoInjectAssets && (productionCharacters.length > 0 || productionScenes.length > 0)) {
         const hasAllCharFront = productionCharacters.every(c => !!(c.imageUrlFront || c.frontUrl));
@@ -1587,8 +1590,7 @@ Rules:
       }
       // 前端串行链式执行：逐个镜头生成，每完成一个自动抽尾帧作为下一镜头首帧
       // 这种方式比后端链式更灵活，支持进度实时展示与单镜头失败重试
-      for (let i = 0; i < shotPlans.length; i++) {
-        const shot = shotPlans[i];
+      for (const shot of [...shotPlansRef.current]) {
         await handleGenerateSingleShot(shot.id);
         // 若用户已中断或该镜头失败则终止链
         const latest = shotPlansRef.current.find(s => s.id === shot.id);
@@ -1602,7 +1604,7 @@ Rules:
     }
   };
 
-  // 故事视频合成 - 调用 /api/video/tools concat-videos
+  // 故事视频合成 - 后台渲染任务（保留每段音轨，可选转场），通过 /api/poll-task 查询进度
   const handleComposeStoryVideo = useCallback(async () => {
     const completedShots = shotPlansRef.current
       .filter((shot) => shot.status === 'completed' && Boolean(shot.videoUrl));
@@ -1619,29 +1621,35 @@ Rules:
 
     setIsComposingStory(true);
     try {
-      const response = await fetch('/api/video/tools', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'concat-videos',
-          videoUrls: completedShots.map((shot) => shot.videoUrl),
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok || !data.success || !data.videoUrl) {
-        throw new Error(data.error || '故事视频合成失败');
-      }
+      const result = await renderShotVideos(completedShots.map((shot) => shot.videoUrl!), storyTransition);
       onStoryVideoComposed?.({
-        videoUrl: data.videoUrl,
-        thumbnailUrl: data.thumbnailUrl,
-        duration: completedShots.reduce((sum, shot) => sum + (shot.duration || 0), 0),
+        videoUrl: result.videoUrl,
+        thumbnailUrl: result.thumbnailUrl,
+        duration: result.durationSec ?? completedShots.reduce((sum, shot) => sum + (shot.duration || 0), 0),
+        aspectRatio,
       });
     } catch (error) {
       onError?.(error instanceof Error ? error.message : '故事视频合成失败');
     } finally {
       setIsComposingStory(false);
     }
-  }, [onError, onStoryVideoComposed]);
+  }, [onError, onStoryVideoComposed, storyTransition, aspectRatio]);
+
+  // 发送到短剧工作台：当前分镜、角色、场景、道具转成一集剧本草稿
+  const handleSendToDrama = async () => {
+    if (!onSendToDrama || isSendingToDrama || shotPlansRef.current.length === 0) return;
+    setIsSendingToDrama(true);
+    try {
+      await onSendToDrama(buildDramaDraftFromCanvas({
+        idea: prompt, style: directorStyle, aspectRatio, shots: shotPlansRef.current,
+        characters: productionCharacters, scenes: productionScenes, props: productionProps,
+      }));
+    } catch (error) {
+      onError?.(error instanceof Error ? error.message : '发送到短剧工作台失败，请稍后重试');
+    } finally {
+      setIsSendingToDrama(false);
+    }
+  };
 
   // 中英翻译 - 调用 optimize-prompt API 的 translate 模式
   const handleTranslatePrompt = useCallback(async () => {
@@ -1686,7 +1694,6 @@ Rules:
 
 
   const handleGenerate = useCallback(async () => {
-    const plannedShots = shotPlansRef.current;
     if (!prompt.trim() && mode === 'text2video') {
       onError?.('请输入视频描述');
       return;
@@ -1701,10 +1708,6 @@ Rules:
     }
     if (mode === 'video-extend' && !videoUrl) {
       onError?.('请提供源视频URL');
-      return;
-    }
-    if (mode === 'multi-shot' && (plannedShots.length > 0 ? plannedShots : multiShotScenes).every(s => !s.prompt.trim())) {
-      onError?.('请至少输入一个镜头的描述');
       return;
     }
     if (!model) {
@@ -1736,12 +1739,7 @@ Rules:
     const pureModelId = model.includes('::') ? model.split('::').pop()! : model;
     const providerId = currentModel?.providerId || (model.includes('::') ? model.split('::')[0] : undefined);
 
-    // 多镜头叙事模式：使用结构化 ShotPlans（优先）或旧的 multiShotScenes 兼容
-    const finalPrompt = mode === 'multi-shot'
-      ? (plannedShots.length > 0
-        ? plannedShots.map((s, i) => `[镜头${i + 1}｜${s.shotSize}｜${s.cameraMove}] ${s.prompt}`).join('\n')
-        : multiShotScenes.filter(s => s.prompt.trim()).map((s, i) => `[镜头${i + 1}] ${s.prompt}`).join('\n'))
-      : prompt.trim();
+    const finalPrompt = prompt.trim();
 
     // 批量生成：为每个副本生成不同的随机种子
     const batchSeeds = Array.from({ length: batchCount }, (_, i) =>
@@ -1773,12 +1771,6 @@ Rules:
         motionStrength: cameraControl ? motionStrength : undefined,
         seed: currentSeed,
         negativePrompt: negativePrompt.trim() || undefined,
-        // 多镜头参数
-        multiShotScenes: mode === 'multi-shot'
-          ? (plannedShots.length > 0 ? plannedShots : multiShotScenes.filter(s => s.prompt.trim()))
-          : undefined,
-        chainContinuity: mode === 'multi-shot' ? chainContinuity : undefined,
-        useGlobalReferences: mode === 'multi-shot' && useGlobalReferences ? true : undefined,
         // 导演增强
         useDirector: useDirector,
         directorStyle: directorStyle,
@@ -1824,7 +1816,25 @@ Rules:
       setIsExtending(false);
       // setIsGenerating 已在成功路径延迟调用
     }
-  }, [prompt, mode, model, aspectRatio, duration, quality, generateAudio, firstFrameUrl, lastFrameUrl, referenceImages, resolution, videoUrl, extendDuration, cameraControl, motionBrush, characterReferences, motionStrength, seed, negativePrompt, multiShotScenes, chainContinuity, useGlobalReferences, batchCount, showLastFrame, onVideoGenerate, onError]);
+  }, [prompt, mode, model, aspectRatio, duration, quality, generateAudio, firstFrameUrl, lastFrameUrl, referenceImages, resolution, videoUrl, extendDuration, cameraControl, motionBrush, characterReferences, motionStrength, seed, negativePrompt, batchCount, showLastFrame, onVideoGenerate, onError, directorStyle, useDirector, currentModel?.providerId]);
+
+  // 多镜头底部按钮：手写镜头先转成分镜卡片，再与「生成全部镜头」走同一条逐镜头流程
+  const handleGenerateMultiShot = async () => {
+    if (!model) { onError?.('请选择视频模型'); return; }
+    let plans = shotPlansRef.current.filter(s => s.prompt.trim());
+    if (plans.length === 0) {
+      plans = multiShotScenes.filter(s => s.prompt.trim()).map((scene, index): VideoShotPlan => ({
+        id: `shot-${scene.id}`, index, title: `镜头 ${index + 1}`, purpose: '', prompt: scene.prompt.trim(),
+        shotSize: '', cameraMove: '', cameraMotion: '', actionBeat: '', lighting: '', audioCues: '',
+        references: [], continuityNotes: [], duration: scene.duration, aspectRatio,
+        firstFrameFromPrev: index > 0, status: 'planned', diagnosis: null, retakeCount: 0, motion: null,
+      }));
+    }
+    if (plans.length === 0) { onError?.('请至少输入一个镜头的描述'); return; }
+    shotPlansRef.current = plans;
+    setShotPlans(plans);
+    await handleGenerateAllShots();
+  };
 
   const modelCapabilityUnavailable = modelCatalogLoading
     || Boolean(modelCatalogError)
@@ -2748,7 +2758,6 @@ Rules:
                   >清空</button>
                   <div className="flex w-full flex-wrap items-center gap-2 md:w-auto md:ml-auto md:gap-3 [&_button]:min-h-11 [&_button]:px-2 [&_button]:text-xs md:[&_button]:min-h-0 md:[&_button]:px-0 md:[&_button]:text-[10px] [&_button>span]:whitespace-nowrap">
                     <ToggleBtn active={tailFrameRelay} onClick={() => setTailFrameRelay(!tailFrameRelay)} accent={accentColor} sub={subTextColor} mono={isMonochrome}>尾帧接力</ToggleBtn>
-                    <ToggleBtn active={chainContinuity} onClick={() => setChainContinuity(!chainContinuity)} accent={accentColor} sub={subTextColor} mono={isMonochrome}>链式连贯</ToggleBtn>
                     <ToggleBtn active={useGlobalReferences} onClick={() => setUseGlobalReferences(!useGlobalReferences)} accent={accentColor} sub={subTextColor} mono={isMonochrome}>全局参考图</ToggleBtn>
                   </div>
                 </div>
@@ -3154,7 +3163,7 @@ Rules:
                             style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}` }}
                           />
                         </div>
-                        {chainContinuity && idx < multiShotScenes.length - 1 && (
+                        {tailFrameRelay && idx < multiShotScenes.length - 1 && (
                           <div className="flex justify-center py-0.5"><FastForward className="w-3 h-3" style={{ color: accentColor }} /></div>
                         )}
                       </div>
@@ -3171,6 +3180,23 @@ Rules:
                     >
                       {isGeneratingAllShots ? (<><Loader2 className="w-3.5 h-3.5 animate-spin" />连续生成中（尾帧→首帧串联）...</>) : (<><Film className="w-3.5 h-3.5" />生成全部镜头（自动串联尾帧→首帧）</>)}
                     </button>
+                    <div role="group" aria-label="镜头之间的转场" className="mt-1.5 flex items-center gap-1.5">
+                      <span className="text-[10px] shrink-0" style={{ color: subTextColor }}>转场</span>
+                      {([['cut', '硬切'], ['fade', '淡入淡出'], ['flash', '闪白']] as const).map(([value, label]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => setStoryTransition(value)}
+                          aria-pressed={storyTransition === value}
+                          className="flex-1 min-h-11 md:min-h-0 py-1 rounded-md text-[11px] cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                          style={{
+                            background: storyTransition === value ? `${accentColor}22` : inputBg,
+                            color: storyTransition === value ? accentColor : subTextColor,
+                            border: `1px solid ${storyTransition === value ? `${accentColor}66` : borderColor}`,
+                          }}
+                        >{label}</button>
+                      ))}
+                    </div>
                     <button
                       onClick={handleComposeStoryVideo}
                       disabled={isComposingStory || isGeneratingAllShots || shotPlans.some((shot) => shot.status !== 'completed' || !shot.videoUrl)}
@@ -3179,6 +3205,17 @@ Rules:
                     >
                       {isComposingStory ? (<><Loader2 className="w-3.5 h-3.5 animate-spin" />合成故事视频中...</>) : (<><Clapperboard className="w-3.5 h-3.5" />合成故事视频</>)}
                     </button>
+                    {onSendToDrama && (
+                      <button
+                        type="button"
+                        onClick={handleSendToDrama}
+                        disabled={isSendingToDrama || isGeneratingAllShots}
+                        className="w-full min-h-11 md:min-h-0 mt-1.5 py-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        style={{ background: inputBg, color: textColor, border: `1px solid ${borderColor}` }}
+                      >
+                        {isSendingToDrama ? (<><Loader2 className="w-3.5 h-3.5 animate-spin" />正在保存剧本草稿...</>) : (<><ChevronRight className="w-3.5 h-3.5" />发送到短剧工作台</>)}
+                      </button>
+                    )}
                     <button
                       onClick={() => {
                         const newShot: VideoShotPlan = {
@@ -3197,7 +3234,7 @@ Rules:
                           continuityNotes: [],
                           duration: duration as number,
                           aspectRatio: aspectRatio as string,
-                          firstFrameFromPrev: chainContinuity && shotPlans.length > 0,
+                          firstFrameFromPrev: shotPlans.length > 0,
                           firstFrameUrl: undefined,
                           lastFrameUrl: undefined,
                           status: 'planned',
@@ -3332,7 +3369,7 @@ Rules:
         {/* 底部固定操作栏（独立于滚动区，避免被挤压折叠） */}
         <div className="shrink-0 pt-3 px-4 pb-4 border-t" style={{ borderColor: isGold ? 'rgba(212,175,55,0.18)' : (isMonochrome ? '#e5e7eb' : 'rgba(255,255,255,0.08)'), background: isMonochrome ? '#ffffff' : 'rgba(0,0,0,0.2)' }}>
           <button
-            onClick={handleGenerate}
+            onClick={mode === 'multi-shot' ? handleGenerateMultiShot : handleGenerate}
             disabled={isPrimaryDisabled}
             className="w-full py-3 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             style={{

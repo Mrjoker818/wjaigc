@@ -43,64 +43,39 @@ function fixture() {
 const params = { prompt: 'scene', model: 'video-model', aspectRatio: '16:9', duration: 5, quality: 'std' };
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 describe('actual video canvas entry', () => {
-  it('settles the chain promise without late toast/counter or recursive polling when its scope expires', async () => {
-    vi.useFakeTimers();
-    const f = fixture(), entered = contractDeferred<void>(), response = contractDeferred<Response>();
-    let settled = false;
-    vi.stubGlobal('fetch', async (url: string) => {
-      if (url === '/api/poll-task') { entered.release(); return response.promise; }
-      return Response.json({ taskId: 'video-task' });
-    });
-    const pending = f.callback({ ...params, mode: 'multi-shot', chainContinuity: true,
-      multiShotScenes: [{ id: 'one', prompt: 'one', duration: 5 }, { id: 'two', prompt: 'two', duration: 5 }] });
-    void pending.then(() => { settled = true; });
-    await entered.promise;
-    f.project.current = { id: 'project-b' };
-    response.release(Response.json({ status: 'processing' }));
-    for (let i = 0; i < 30; i++) await Promise.resolve();
-    expect(settled).toBe(true);
-    expect(f.errors).toEqual([]);
-    expect(f.success).toEqual([]);
-    expect(f.counts).toHaveBeenCalledTimes(1);
-  });
-  it('chains through a real controlled frame upload and canonical task receipts, not save-image', async () => {
+  it('adopts a panel-extracted first frame through a controlled upload before submitting, not save-image', async () => {
     vi.stubGlobal('crypto', webcrypto);
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: () => 'blob:controlled-decode' });
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: () => {} });
     const f = fixture();
-    let task = 0;
     const frame = { id: 'frame', assetId: 'frame-asset', assetVersionId: 'frame-version', placementId: 'frame-placement',
       url: '/managed-frame.png', mediaType: 'image', width: 32, height: 24, originalWidth: 32, originalHeight: 24 };
-    f.authority.refreshMedia.mockResolvedValue([frame, ...[1, 2].map(index => ({ id: `result-${index}`, assetId: `asset-${index}`,
-      assetVersionId: `version-${index}`, placementId: `placement-${index}`, mediaType: 'video', videoUrl: `/result-${index}.mp4`,
-      url: `/result-${index}.mp4`, width: 512, height: 288, originalWidth: 1920, originalHeight: 1080 }))]);
+    f.authority.refreshMedia.mockResolvedValue([frame, { id: 'result-1', assetId: 'asset-1', assetVersionId: 'version-1',
+      placementId: 'placement-1', mediaType: 'video', videoUrl: '/result-1.mp4', url: '/result-1.mp4',
+      width: 512, height: 288, originalWidth: 1920, originalHeight: 1080 }]);
     vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
       const body = typeof init?.body === 'string' ? JSON.parse(init.body) : {};
       f.requests.push({ url, body, headers: new Headers(init?.headers) });
-      if (url === '/api/video/extract-frame') return Response.json({ imageUrl: '/frame.png' });
       if (url === '/frame.png') return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
       if (url === '/api/collaboration/document-assets/upload') return Response.json({ success: true,
         placementId: frame.placementId, assetVersionId: frame.assetVersionId, documentSequence: 9,
         assetReference: { ...frame, entityId: frame.id, kind: 'image' } });
-      if (body.action === 'publish-canvas-task') {
-        const index = Number(String(body.taskId).slice(-1));
-        return Response.json({ success: true, projectId: 'project-a', taskId: body.taskId, documentSequence: index,
-          placementId: `placement-${index}`, assetVersionId: `version-${index}`,
-          assetReference: { entityId: `result-${index}`, assetId: `asset-${index}`, assetVersionId: `version-${index}`,
-            placementId: `placement-${index}`, kind: 'video', url: `/result-${index}.mp4` } });
-      }
-      if (url === '/api/poll-task') return Response.json({ status: 'completed', videoUrl: `/raw-${task}.mp4` });
-      return Response.json({ taskId: `video-task-${++task}` });
+      if (body.action === 'publish-canvas-task') return Response.json({ success: true, projectId: 'project-a', taskId: body.taskId,
+        documentSequence: 10, placementId: 'placement-1', assetVersionId: 'version-1',
+        assetReference: { entityId: 'result-1', assetId: 'asset-1', assetVersionId: 'version-1',
+          placementId: 'placement-1', kind: 'video', url: '/result-1.mp4' } });
+      if (url === '/api/poll-task') return Response.json({ status: 'completed', videoUrl: '/raw-1.mp4' });
+      return Response.json({ taskId: 'video-task-1' });
     });
-    await f.callback({ ...params, mode: 'multi-shot', chainContinuity: true,
-      multiShotScenes: [{ id: 'one', prompt: 'one', duration: 5 }, { id: 'two', prompt: 'two', duration: 5 }] });
+    await f.callback({ ...params, mode: 'image2video-first', firstFrameUrl: '/frame.png' });
+    await vi.waitFor(() => expect(f.authority.recordMediaHistory).toHaveBeenCalledTimes(1), { timeout: 250 });
     expect(f.requests.filter(request => request.url === '/api/collaboration/document-assets/upload')).toHaveLength(1);
-    expect(f.requests.filter(request => request.body.action === 'publish-canvas-task')).toHaveLength(2);
     const submits = f.requests.filter(request => request.url === '/api/video/generate' && !request.body.action);
-    expect(submits[1]?.body.imageUrl).toBe(frame.url);
-    expect(submits[1]?.body.assetParentVersionIds).toEqual([frame.assetVersionId]);
+    expect(submits).toHaveLength(1);
+    expect(submits[0].body.imageUrl).toBe(frame.url);
+    expect(submits[0].body.assetParentVersionIds).toEqual([frame.assetVersionId]);
+    expect(submits[0].body.multiShotScenes).toBeUndefined();
     expect(f.requests.some(request => request.url === '/api/save-image')).toBe(false);
-    expect(f.authority.recordMediaHistory).toHaveBeenCalledTimes(2);
   });
   it.each(['text2video', 'video-extend'])('%s confirms canonical task import, directory and history without legacy persistence', async mode => {
     const f = fixture();
@@ -123,10 +98,9 @@ describe('actual video canvas entry', () => {
     expect(f.requests.some(request => request.url === '/api/save-image')).toBe(false);
     expect(f.writes).toEqual([]);
   });
-  it.each(['text2video', 'video-extend', 'multi-shot'])('binds %s to the actual document project before submission', async mode => {
+  it.each(['text2video', 'video-extend'])('binds %s to the actual document project before submission', async mode => {
     const f = fixture();
-    await f.callback({ ...params, mode, videoUrl: '/source.mp4', chainContinuity: mode === 'multi-shot',
-      multiShotScenes: [{ id: 'one', prompt: 'one', duration: 5 }, { id: 'two', prompt: 'two', duration: 5 }] });
+    await f.callback({ ...params, mode, videoUrl: '/source.mp4' });
     expect(f.requests[0]?.body.projectId).toBe('project-a');
     expect(f.requests[0]?.body.assetWorkspace).toBe('canvas');
     expect(f.requests[0]?.headers.get('idempotency-key')).toMatch(/^canvas-video:/);

@@ -1025,5 +1025,7 @@
   "src/lib/video-director/continuity.ts",
   "src/lib/video-director/director-styles.ts",
   "src/lib/video-director/prompt-compiler.ts",
-  "src/lib/video-media-io.ts"
+  "src/lib/video-media-io.ts",
+  "src/lib/drama/canvas-bridge.ts",
+  "src/lib/drama/render-client.ts"
 ]

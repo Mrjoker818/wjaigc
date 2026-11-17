@@ -40,6 +40,7 @@ import {
   type RecoverableLegacyTask,
 } from '@/lib/legacy-task-recovery';
 import type { CanvasImage, ImageGroup, AnnotationExecutionContext } from '@/components/infinite-canvas';
+import type { DramaProjectV1 } from '@/lib/drama/types';
 import { readAnnotationCanonicalReference } from '@/features/annotations/annotation-task-client';
 import { PresenceIndicator } from '@/components/collaboration/presence-indicator';
 import { createLatestProjectLoadGate } from '@/lib/collaboration/project-load-gate';
@@ -1209,6 +1210,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
   const [shareManageOpen, setShareManageOpen] = useState(false);
   const [createdShareAccess, setCreatedShareAccess] = useState<CanvasShareCreatedAccess>();
   const [pendingModeSwitch, setPendingModeSwitch] = useState<'drama' | 'dashboard' | null>(null);
+  /** Drama project the workbench opens next; set by「发送到短剧工作台」. */
+  const [activeDramaId, setActiveDramaId] = useState<string | null>(null);
   // Start with true so SSR renders the login panel (not a blank spinner).
   // The useEffect below will update currentUser if a valid session exists.
   const [authChecked, setAuthChecked] = useState(true);
@@ -4794,6 +4797,49 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
     return { assertCurrent, insert };
   }, [captureCanvasInsertionScope, handleAddImages, handleDocumentCanvasFiles, isDocumentHistoryRecoveryPending, setImages]);
 
+  // 多镜头成片放到画布当前视口中央，协作画布走受控导入
+  const handleStoryVideoComposed = useCallback(async (result: { videoUrl: string; thumbnailUrl?: string; duration?: number; aspectRatio?: string }) => {
+    try {
+      const insertion = captureVideoToolInsertion();
+      const [ratioW, ratioH] = (result.aspectRatio || '16:9').split(':').map(Number);
+      const ratio = (ratioW || 16) / (ratioH || 9);
+      const width = ratio >= 1 ? 400 : Math.round(400 * ratio);
+      const height = ratio >= 1 ? Math.round(400 / ratio) : 400;
+      const canvasEl = document.querySelector('[data-canvas-viewport]') as HTMLElement | null;
+      const match = (canvasEl?.querySelector('[style*="transform"]') as HTMLElement | null)?.style.transform
+        ?.match(/translate\(([^,]+)px,\s*([^)]+)px\)\s*scale\(([^)]+)\)/);
+      const [offsetX, offsetY, zoom] = match ? [parseFloat(match[1]), parseFloat(match[2]), parseFloat(match[3])] : [0, 0, 1];
+      const centerX = ((canvasEl?.clientWidth ?? 1200) / 2 - offsetX) / zoom;
+      const centerY = ((canvasEl?.clientHeight ?? 800) / 2 - offsetY) / zoom;
+      const video = {
+        id: crypto.randomUUID(), x: centerX - width / 2, y: centerY - height / 2, width, height,
+        originalWidth: width * 2, originalHeight: height * 2, createdAt: Date.now(), mediaType: 'video' as const,
+        videoDuration: result.duration, prompt: '多镜头故事视频', aspectRatio: result.aspectRatio,
+        ...buildCompletedVideoCanvasMedia({ videoUrl: result.videoUrl, thumbnailUrl: result.thumbnailUrl }),
+      } as CanvasImage & { videoUrl: string };
+      if (await insertion.insert({ format: 'video/mp4', video }) !== 1) throw new Error('故事视频尚未确认添加到画布');
+      toast.success('故事视频已添加到画布');
+    } catch (error) {
+      toast.error('故事视频添加失败', { description: error instanceof Error ? error.message : '请稍后重试' });
+    }
+  }, [captureVideoToolInsertion]);
+
+  // 视频面板的分镜保存为剧本草稿，再切到短剧工作台打开
+  const handleSendToDrama = useCallback(async (draft: DramaProjectV1): Promise<void> => {
+    const response = await fetch('/api/drama/projects', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ doc: draft, ...(currentProjectRef.current?.id ? { projectId: currentProjectRef.current.id } : {}) }),
+    });
+    const data = await response.json().catch(() => ({})) as { project?: { id?: unknown }; error?: unknown };
+    if (!response.ok || typeof data.project?.id !== 'string') {
+      throw new Error(typeof data.error === 'string' && data.error ? data.error : '剧本草稿保存失败，请稍后重试');
+    }
+    setActiveDramaId(data.project.id);
+    setShowVideoPanel(false);
+    toast.success('剧本草稿已保存', { description: '正在打开短剧工作台' });
+    safeSwitchMode('drama');
+  }, [safeSwitchMode]);
+
   const documentMediaTransferIntentsRef = useRef(new Map<string, {
     isCurrent: () => boolean; request: Promise<DocumentMediaBatchRequest>;
   }>());
@@ -5619,9 +5665,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
     motionStrength?: number;
     seed?: number;
     negativePrompt?: string;
-    multiShotScenes?: Array<{ id: string; prompt: string; duration: number; cameraControl?: { type: string; angle?: number; speed?: number } }>;
-    chainContinuity?: boolean;
-    useGlobalReferences?: boolean;
     // 导演增强
     useDirector?: boolean;
     directorStyle?: string;
@@ -5766,347 +5809,45 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
       )));
     };
 
-    // ★ 链式多片段生成：当 chainContinuity=true 且有多个场景时，顺序生成每个片段
-    if (params.chainContinuity && params.multiShotScenes && params.multiShotScenes.length > 1) {
-      console.log(`[handleVideoGenerate] Chain mode: ${params.multiShotScenes.length} scenes`);
-      setActiveGenerationCount(prev => prev + 1);
-
-      // 辅助：从视频URL提取最后一帧（优先使用后端 ffmpeg 抽帧 API，降级用前端 video 元素）
-      const extractLastFrame = async (videoUrl: string): Promise<string | null> => {
-        // 1) 优先后端 ffmpeg（稳定、无跨域、画质好）
-        try {
-          const resp = await videoFetch('/api/video/extract-frame', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ videoUrl, frame: 'last' }),
-          });
-          if (resp.ok) {
-            const data = await resp.json();
-            if (data.imageUrl) return data.imageUrl;
-          }
-        } catch (e) {
-          console.warn('[extractLastFrame] backend ffmpeg failed:', e);
-        }
-        // 2) 降级：前端 video 元素 canvas 截帧
-        try {
-          const video = document.createElement('video');
-          video.crossOrigin = 'anonymous';
-          video.muted = true;
-          video.preload = 'auto';
-          video.src = videoUrl;
-          await new Promise<void>((resolve, reject) => {
-            video.onloadeddata = () => resolve();
-            video.onerror = () => reject(new Error('Video load failed'));
-            setTimeout(() => reject(new Error('Video load timeout')), 15000);
-          });
-          video.currentTime = Math.max(0, video.duration - 0.1);
-          await new Promise<void>((resolve, reject) => {
-            video.onseeked = () => resolve();
-            setTimeout(() => reject(new Error('Seek timeout')), 5000);
-          });
-          const canvas = document.createElement('canvas');
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) return null;
-          ctx.drawImage(video, 0, 0);
-          return canvas.toDataURL('image/jpeg', 0.92);
-        } catch (e) {
-          console.warn('[extractLastFrame] frontend fallback failed:', e);
-          return null;
-        }
-      };
-
-      // 辅助：保存 data URL 到服务器并获取本地路径
-      const saveFrameToServer = async (dataUrl: string): Promise<string | null> => {
-        try {
-          const resp = await videoFetch('/api/save-image', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ imageData: dataUrl }),
-          });
-          if (resp.ok) {
-            const data = await resp.json();
-            return data.url || null;
-          }
-        } catch (e) {
-          console.warn('[saveFrameToServer] Failed:', e);
-        }
-        return null;
-      };
-
-      // 顺序生成每个场景
-      const chainResults: Array<{ sceneIndex: number; videoUrl: string }> = [];
-      let prevVideoUrl: string | null = null;
-
-      for (let i = 0; i < params.multiShotScenes.length; i++) {
-        const scene = params.multiShotScenes[i];
-        const isFirstScene = i === 0;
-        const sceneLabel = `场景 ${i + 1}/${params.multiShotScenes.length}`;
-
-        // 链式首帧：非第一个场景使用上一个场景视频的最后一帧
-        let chainFirstFrame: string | undefined;
-        if (!isFirstScene && prevVideoUrl) {
-          const lastFrame = await extractLastFrame(prevVideoUrl);
+    // A first frame the panel extracted from the previous shot is not on the canvas yet. In document
+    // mode every source needs an authoritative version, so adopt it as a managed canvas image first.
+    // Returns the URL to submit: the managed copy's URL, or the input when no adoption is needed.
+    const adoptDocumentFrame = async (url: string): Promise<string> => {
+      if (!documentMode || !authority || !actorId || !projectId) return url;
+      if (latestImagesRef.current.some(image => (image.url === url || image.videoUrl === url) && image.assetVersionId && image.placementId)) return url;
+      const frameResponse = await videoFetch(url);
+      if (!frameResponse.ok) throw new Error('首帧图片读取失败');
+      const mime = frameResponse.headers.get('content-type')?.split(';')[0];
+      if (!mime || !mime.startsWith('image/')) throw new Error('首帧不是图像');
+      const bytes = await frameResponse.arrayBuffer(); assertVideoWritable();
+      const file = new File([bytes], 'video-first-frame.png', { type: mime });
+      const previewUrl = URL.createObjectURL(file);
+      let dimensions: { width: number; height: number };
+      try { dimensions = await loadCanvasImageSize(previewUrl); }
+      finally { URL.revokeObjectURL(previewUrl); }
+      assertVideoWritable();
+      const display = getCanvasImageDisplaySize(dimensions.width, dimensions.height);
+      let confirmed: CanvasImage | undefined;
+      await commitDocumentCanvasFile({ file, expectedActorId: actorId, projectId,
+        isCurrentProject: isCurrentVideoScope,
+        isWritableProject: () => isCurrentVideoScope() && !!collaborativeCanvasRef.current?.isWritable(),
+        transform: { x: 0, y: 0, width: display.width, height: display.height, rotation: 0,
+          zIndex: Math.max(0, ...latestImagesRef.current.map(image => image.zIndex ?? 0)) + 1 },
+        refreshMedia: async (documentSequence, receipt): Promise<void> => {
           assertVideoScope();
-          if (lastFrame) {
-            if (documentMode && authority && actorId && projectId) {
-              const frameResponse = await videoFetch(lastFrame);
-              if (!frameResponse.ok) throw new Error('链式尾帧读取失败');
-              const mime = frameResponse.headers.get('content-type')?.split(';')[0];
-              if (!mime || !mime.startsWith('image/')) throw new Error('链式尾帧不是图像');
-              const bytes = await frameResponse.arrayBuffer(); assertVideoWritable();
-              const file = new File([bytes], `video-chain-frame-${i}.png`, { type: mime });
-              const previewUrl = URL.createObjectURL(file);
-              let dimensions: { width: number; height: number };
-              try { dimensions = await loadCanvasImageSize(previewUrl); }
-              finally { URL.revokeObjectURL(previewUrl); }
-              assertVideoWritable();
-              const display = getCanvasImageDisplaySize(dimensions.width, dimensions.height);
-              let confirmed: CanvasImage | undefined;
-              await commitDocumentCanvasFile({ file, expectedActorId: actorId, projectId,
-                isCurrentProject: isCurrentVideoScope,
-                isWritableProject: () => isCurrentVideoScope() && !!collaborativeCanvasRef.current?.isWritable(),
-                transform: { x: 0, y: 0, width: display.width, height: display.height, rotation: 0,
-                  zIndex: Math.max(0, ...latestImagesRef.current.map(image => image.zIndex ?? 0)) + 1 },
-                refreshMedia: async (documentSequence, receipt): Promise<void> => {
-                  assertVideoScope();
-                  const media = await authority.refreshMedia({ projectId, documentSequence, requireDirectorySequence: true });
-                  assertVideoScope();
-                  confirmed = media.find(image => image.id === receipt.assetReference.entityId
-                    && image.assetId === receipt.assetReference.assetId && image.placementId === receipt.placementId
-                    && image.assetVersionId === receipt.assetVersionId && image.url === receipt.assetReference.url
-                    && receipt.assetReference.kind === 'image');
-                  if (!confirmed) throw new Error('链式尾帧权威读回不完整');
-                } });
-              assertVideoWritable();
-              if (!confirmed) throw new Error('链式尾帧未受控采纳');
-              managedVideoFrames.set(confirmed.url, confirmed);
-              chainFirstFrame = confirmed.url;
-            } else {
-              const savedUrl = await saveFrameToServer(lastFrame);
-              chainFirstFrame = savedUrl || lastFrame;
-            }
-          } else if (documentMode) {
-            throw new Error('链式尾帧未生成，不能降级为无来源任务');
-          }
-        }
-
-        // 构建场景请求
-        const sceneRequest: Record<string, unknown> = {
-          prompt: scene.prompt,
-          model: params.model,
-          imageUrl: chainFirstFrame || (isFirstScene ? (params.firstFrameUrl || params.imageUrl) : undefined),
-          lastFrameImageUrl: undefined,
-          referenceImages: params.useGlobalReferences ? params.referenceImages : undefined,
-          characterReferences: params.useGlobalReferences ? params.characterReferences : undefined,
-          mode: 'image2video-first',
-          aspectRatio: params.aspectRatio,
-          duration: scene.duration || params.duration,
-          quality: params.quality,
-          generateAudio: params.generateAudio,
-          providerId: params.providerId,
-          cameraControl: scene.cameraControl,
-          motionStrength: params.motionStrength,
-          seed: params.seed,
-          negativePrompt: params.negativePrompt,
-          useDirector: params.useDirector,
-          directorStyle: params.directorStyle,
-        };
-
-        // 创建占位符
-        const aspectRatio = params.aspectRatio || '16:9';
-        const [arW, arH] = aspectRatio.split(':').map(Number);
-        const arRatio = (arW || 16) / (arH || 9);
-        const phWidth = arRatio >= 1 ? 400 : Math.round(400 * arRatio);
-        const phHeight = arRatio >= 1 ? Math.round(400 / arRatio) : 400;
-        const phId = `vid-chain-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}`;
-
-        const canvasEl = document.querySelector('[data-canvas-viewport]') as HTMLElement | null;
-        const viewportWidth = canvasEl ? canvasEl.clientWidth : 1200;
-        const viewportHeight = canvasEl ? canvasEl.clientHeight : 800;
-        let viewOffsetX = 0, viewOffsetY = 0, currentZoom = 1;
-        const transformLayer = canvasEl?.querySelector('[style*="transform"]') as HTMLElement | null;
-        if (transformLayer) {
-          const match = transformLayer.style.transform?.match(/translate\(([^,]+)px,\s*([^)]+)px\)\s*scale\(([^)]+)\)/);
-          if (match) { viewOffsetX = parseFloat(match[1]); viewOffsetY = parseFloat(match[2]); currentZoom = parseFloat(match[3]); }
-        }
-        const offsetX = i * (phWidth + 60);
-        const canvasCenterX = (viewportWidth / 2 - viewOffsetX) / currentZoom + offsetX;
-        const canvasCenterY = (viewportHeight / 2 - viewOffsetY) / currentZoom;
-
-        setVideoImages(prev => [...prev, {
-          id: phId,
-          url: '',
-          x: canvasCenterX - phWidth / 2,
-          y: canvasCenterY - phHeight / 2,
-          width: phWidth, height: phHeight,
-          originalWidth: phWidth * 2, originalHeight: phHeight * 2,
-          isProcessingPlaceholder: true,
-          processing: {
-            label: `${sceneLabel} · 视频生成中`,
-            status: 'submitting',
-            progress: 5,
-            startTime: Date.now(),
-            retryPayload: createVideoRetryPayload({
-              ...params,
-              prompt: scene.prompt,
-              imageUrl: chainFirstFrame || (isFirstScene ? (params.firstFrameUrl || params.imageUrl) : undefined),
-              firstFrameUrl: undefined,
-              lastFrameUrl: undefined,
-              referenceImages: params.useGlobalReferences ? params.referenceImages : undefined,
-              characterReferences: params.useGlobalReferences ? params.characterReferences : undefined,
-              mode: 'image2video-first',
-              duration: scene.duration || params.duration,
-              cameraControl: scene.cameraControl,
-              multiShotScenes: undefined,
-              chainContinuity: false,
-            }),
-          },
-          aspectRatio: params.aspectRatio,
-          model: params.model,
-          prompt: scene.prompt,
-          createdAt: Date.now(),
-          mediaType: 'video' as const,
-        }]);
-
-        try {
-          // 提交场景请求
-          const submitResp = await videoFetch('/api/video/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'idempotency-key': `canvas-video:${phId}`,
-              ...(documentMode ? { 'x-wujie-expected-actor-id': actorId! } : {}) },
-            body: JSON.stringify(bindVideoRequest(sceneRequest)),
-          });
-          const submitData = await submitResp.json();
-          if (!submitResp.ok || submitData.error) {
-            throw new Error(submitData.error || '场景提交失败');
-          }
-
-          const taskId = submitData.taskId;
-          setVideoImages(prev => prev.map(img =>
-            img.id === phId ? {
-              ...img,
-              processing: { ...img.processing, status: 'processing' as const, progress: 10, taskId },
-            } as CanvasImage : img
-          ));
-
-          // 轮询场景结果
-          const sceneResult = await new Promise<{ videoUrl: string | null; error: string | null }>((resolve) => {
-            const maxPollTime = 25 * 60 * 1000;
-            const startTime = Date.now();
-            let attempts = 0;
-
-            const poll = async () => {
-              if (!isCurrentVideoScope()) { resolve({ videoUrl: null, error: '视频生成作用域已失效' }); return; }
-              if (attempts > 500 || Date.now() - startTime > maxPollTime) {
-                resolve({ videoUrl: null, error: '超时' });
-                return;
-              }
-              const interval = attempts < 3 ? 1000 : attempts < 8 ? 1500 : attempts < 20 ? 2000 : 3000;
-              if (attempts > 0) await new Promise(r => setTimeout(r, interval));
-
-              try {
-                const pollResp = await videoFetch('/api/poll-task', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ taskId, model: params.model, providerId: params.providerId }),
-                });
-                const pollData = await pollResp.json();
-                if (!isCurrentVideoScope()) { resolve({ videoUrl: null, error: '视频生成作用域已失效' }); return; }
-
-                if (pollData.status === 'completed') {
-                  const videoUrl = pollData.videoUrl || pollData.result?.videoUrl;
-                  resolve({ videoUrl: videoUrl || null, error: videoUrl ? null : '未获取到视频地址' });
-                } else if (pollData.status === 'failed') {
-                  resolve({ videoUrl: null, error: pollData.error || '生成失败' });
-                } else {
-                  const progress = pollData.progress || 0;
-                  setVideoImages(prev => prev.map(img =>
-                    img.id === phId ? {
-                      ...img,
-                      processing: { ...img.processing, progress: Math.max(10, progress), status: 'processing' as const, label: `${sceneLabel} · ${pollData.label || '生成中'}` },
-                    } as CanvasImage : img
-                  ));
-                  attempts++;
-                  poll();
-                }
-              } catch {
-                if (!isCurrentVideoScope()) { resolve({ videoUrl: null, error: '视频生成作用域已失效' }); return; }
-                attempts++;
-                poll();
-              }
-            };
-            poll();
-          });
-          if (!isCurrentVideoScope()) return;
-
-          if (sceneResult.videoUrl) {
-            if (documentMode) {
-              const canonical = await confirmDocumentVideo(taskId); assertVideoWritable();
-              chainResults.push({ sceneIndex: i, videoUrl: canonical.videoUrl! });
-              prevVideoUrl = canonical.videoUrl!;
-              try { UserManagerCore.getInstance().recordUsage('video'); } catch {}
-              continue;
-            }
-            // 持久化视频
-            let persistedUrl = sceneResult.videoUrl;
-            try {
-              const persistResp = await videoFetch('/api/save-image', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ imageUrl: sceneResult.videoUrl, isVideo: true }),
-              });
-              if (persistResp.ok) {
-                const persistData = await persistResp.json();
-                if (persistData.url) persistedUrl = persistData.url;
-              }
-            } catch { /* 持久化失败用原URL */ }
-            if (!isCurrentVideoScope()) return;
-
-            chainResults.push({ sceneIndex: i, videoUrl: persistedUrl });
-            prevVideoUrl = persistedUrl;
-
-            // 更新占位符为完成状态
-            setVideoImages(prev => prev.map(img =>
-              img.id === phId ? {
-                ...img,
-                ...buildCompletedVideoCanvasMedia({ videoUrl: persistedUrl }),
-                mediaType: 'video' as const,
-                originalWidth: 1920,
-                originalHeight: 1080,
-                isProcessingPlaceholder: false,
-                processing: undefined,
-                prompt: scene.prompt,
-                modelName: params.model,
-                apiProvider: params.providerId || undefined,
-              } as CanvasImage : img
-            ));
-
-            try { UserManagerCore.getInstance().recordUsage('video'); } catch {}
-          } else {
-            // 场景失败，移除占位符
-            markVideoPlaceholderFailed(phId, sceneResult.error, `${sceneLabel} 视频生成失败`);
-            toast.error(`${sceneLabel}生成失败`, { description: sceneResult.error || '未知错误', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
-            // 链式生成：一个场景失败后停止后续场景
-            break;
-          }
-        } catch (err: unknown) {
-          if (!isCurrentVideoScope()) return;
-          const errorMsg = err instanceof Error ? err.message : '场景生成失败';
-          markVideoPlaceholderFailed(phId, errorMsg, `${sceneLabel} 视频生成失败`);
-          toast.error(`${sceneLabel}生成失败`, { description: errorMsg, className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
-          break;
-        }
-      }
-
-      if (!isCurrentVideoScope()) return;
-      setActiveGenerationCount(prev => Math.max(0, prev - 1));
-      if (chainResults.length > 0 && isCurrentVideoScope()) {
-        toast.success(`链式生成完成`, { description: `成功生成 ${chainResults.length}/${params.multiShotScenes.length} 个场景`, className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
-      }
-      return; // 链式模式不走常规单视频生成逻辑
-    }
+          const media = await authority.refreshMedia({ projectId, documentSequence, requireDirectorySequence: true });
+          assertVideoScope();
+          confirmed = media.find(image => image.id === receipt.assetReference.entityId
+            && image.assetId === receipt.assetReference.assetId && image.placementId === receipt.placementId
+            && image.assetVersionId === receipt.assetVersionId && image.url === receipt.assetReference.url
+            && receipt.assetReference.kind === 'image');
+          if (!confirmed) throw new Error('首帧权威读回不完整');
+        } });
+      assertVideoWritable();
+      if (!confirmed) throw new Error('首帧未受控采纳');
+      managedVideoFrames.set(confirmed.url, confirmed);
+      return confirmed.url;
+    };
 
     setActiveGenerationCount(prev => prev + 1);
 
@@ -6188,9 +5929,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
         motionStrength: params.motionStrength,
         seed: params.seed,
         negativePrompt: params.compiledNegative || params.negativePrompt,
-        multiShotScenes: params.multiShotScenes,
-        chainContinuity: params.chainContinuity,
-        useGlobalReferences: params.useGlobalReferences,
         useDirector: params.useDirector,
         directorMode: params.directorStyle || params.directorMode,
         directorIntent: params.directorIntent,
@@ -6198,11 +5936,15 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
         _vgenReqId: phId,
       };
 
+      const firstFrameSource = params.firstFrameUrl || params.imageUrl;
+      const submitBody = !isExtend && firstFrameSource
+        ? { ...requestBody, imageUrl: await adoptDocumentFrame(firstFrameSource) }
+        : requestBody;
       const res = await videoFetch(apiEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'idempotency-key': `canvas-video:${phId}`,
           ...(documentMode ? { 'x-wujie-expected-actor-id': actorId! } : {}) },
-        body: JSON.stringify(bindVideoRequest(requestBody)),
+        body: JSON.stringify(bindVideoRequest(submitBody)),
       });
       const data = await res.json();
       if (!res.ok || data.error) {
@@ -7524,7 +7266,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
   if (appMode === 'drama') {
     return (
       <main className="flex min-h-dvh flex-col items-center justify-center gap-4 p-6 text-center">
-        <p role="status">短剧工作台即将开放。</p>
+        <p role="status">{activeDramaId ? '剧本草稿已保存，短剧工作台即将开放。' : '短剧工作台即将开放。'}</p>
         <button type="button" className="min-h-11 rounded-md border px-4" onClick={() => setAppMode('canvas')}>返回画布</button>
       </main>
     );
@@ -8421,6 +8163,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
             return {};
           }}
           onAddImages={handleAddImagesFromUi}
+          onStoryVideoComposed={result => { void handleStoryVideoComposed(result); }}
+          onSendToDrama={handleSendToDrama}
           onClose={() => setShowVideoPanel(false)}
           externalPrompt={externalVideoPrompt}
           externalPromptMode={externalVideoMode}

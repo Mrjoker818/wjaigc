@@ -9,9 +9,10 @@ import { promisify } from 'util';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { isSafeVideoSource } from '@/lib/api-validator';
 import { getServerDataRoot } from '@/lib/server-data-root';
-import { buildRenderPlan, buildSrt, effectiveTransitionSec, timelineStarts, type DramaTransition } from '@/lib/drama/render';
+import { buildRenderPlan, buildSrt, DRAMA_TRANSITIONS, effectiveTransitionSec, timelineStarts, type DramaTransition } from '@/lib/drama/render';
 import { getDramaProject } from '@/lib/drama/store';
 import { collectEpisodeTimeline, dialogueCues } from '@/lib/drama/timeline';
+import { MAX_SHOTS_PER_EPISODE } from '@/lib/drama/types';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { downloadToBuffer, probeRenderClip } from '@/lib/video-media-io';
 
@@ -109,18 +110,29 @@ async function renderEpisode(job: RenderJob): Promise<void> {
   }
 }
 
-/** POST /api/drama/render { dramaId, episodeId } → { taskId }; poll progress with /api/poll-task. */
-export async function POST(request: NextRequest) {
-  const auth = await requireApiAuthOrReject(request);
-  if (auth instanceof NextResponse) return auth;
-  const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+type RenderSettings = Omit<RenderJob, 'taskId' | 'userId'>;
+
+/** The canvas video panel renders its finished shots in order, without a saved drama project. */
+function settingsFromUrls(body: Record<string, unknown>): RenderSettings | NextResponse {
+  const urls = body.videoUrls as unknown[];
+  if (urls.length < 2 || urls.length > MAX_SHOTS_PER_EPISODE) {
+    return NextResponse.json({ error: `请选择 2 至 ${MAX_SHOTS_PER_EPISODE} 个镜头视频` }, { status: 400 });
+  }
+  if (urls.some(url => typeof url !== 'string' || !allowedSource(url))) {
+    return NextResponse.json({ error: '镜头视频地址无效，请重新生成对应镜头' }, { status: 400 });
+  }
+  const transition = DRAMA_TRANSITIONS.find(value => value === body.transition) ?? 'cut';
+  return { clips: (urls as string[]).map(videoUrl => ({ videoUrl })), transition, transitionSec: 0.5, subtitles: false };
+}
+
+async function settingsFromProject(userId: string, body: Record<string, unknown> | null): Promise<RenderSettings | NextResponse> {
   const dramaId = typeof body?.dramaId === 'string' ? body.dramaId : '';
   const episodeId = typeof body?.episodeId === 'string' ? body.episodeId : '';
   if (!dramaId || !episodeId) return NextResponse.json({ error: '缺少剧本或分集参数' }, { status: 400 });
 
   let record;
   try {
-    record = await getDramaProject(auth.userId, dramaId);
+    record = await getDramaProject(userId, dramaId);
   } catch (error) {
     console.error({ code: 'DRAMA_RENDER_READ_FAILED', error });
     return NextResponse.json({ error: '剧本项目读取失败，请稍后重试' }, { status: 500 });
@@ -141,6 +153,24 @@ export async function POST(request: NextRequest) {
   if (timeline.clips.some(clip => !allowedSource(clip.videoUrl))) {
     return NextResponse.json({ error: '镜头视频地址无效，请重新生成对应镜头' }, { status: 400 });
   }
+  return {
+    clips: timeline.clips,
+    transition: doc.timeline.transition, transitionSec: doc.timeline.transitionSec, subtitles: doc.timeline.subtitles,
+  };
+}
+
+/**
+ * POST /api/drama/render → 202 { taskId }; poll progress with /api/poll-task.
+ * Body is either { dramaId, episodeId } for a saved project, or { videoUrls, transition? } from the canvas panel.
+ */
+export async function POST(request: NextRequest) {
+  const auth = await requireApiAuthOrReject(request);
+  if (auth instanceof NextResponse) return auth;
+  const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+  const settings = body && Array.isArray(body.videoUrls)
+    ? settingsFromUrls(body)
+    : await settingsFromProject(auth.userId, body);
+  if (settings instanceof NextResponse) return settings;
   const running = activeRenders.get(auth.userId);
   if (running) {
     return NextResponse.json({ error: '已有一个成片在渲染，请等它完成后再开始新的渲染', taskId: running }, { status: 409 });
@@ -150,9 +180,6 @@ export async function POST(request: NextRequest) {
   activeRenders.set(auth.userId, taskId);
   registerTask(taskId, 'drama-render', '成片渲染 · 排队中', auth.userId);
   updateTaskProgress(taskId, { status: 'processing', progress: 2, creditCost: 0 });
-  after(() => renderEpisode({
-    taskId, userId: auth.userId, clips: timeline.clips,
-    transition: doc.timeline.transition, transitionSec: doc.timeline.transitionSec, subtitles: doc.timeline.subtitles,
-  }));
+  after(() => renderEpisode({ taskId, userId: auth.userId, ...settings }));
   return NextResponse.json({ success: true, taskId, creditCost: 0 }, { status: 202 });
 }
