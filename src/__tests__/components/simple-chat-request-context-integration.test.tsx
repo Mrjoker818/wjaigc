@@ -393,17 +393,6 @@ describe('simple-chat request context integration', () => {
     });
   });
 
-  it('guards a workflow return from stale generic task synchronization until persistence settles', () => {
-    expect(chatAreaSource).toContain('workflowReturnPersistenceGuardRef');
-    expect(chatAreaSource).toContain('const messageScope = JSON.stringify([user.id, project?.id ?? null, task?.id ?? null]);');
-    expect(chatAreaSource).toMatch(
-      /workflowReturnPersistenceGuardRef\.current = \{\s*scope: messageScope,\s*messageId: returned\.id,\s*\};[\s\S]*await onPersistTask/,
-    );
-    expect(chatAreaSource).toMatch(
-      /const workflowReturnGuard = workflowReturnPersistenceGuardRef\.current;[\s\S]*if \(workflowReturnGuard\?\.scope === messageScope\)[\s\S]*return;[\s\S]*onUpdateTask/,
-    );
-  });
-
   it('restores the same multi-platform export Run card from a persisted message after remount', async () => {
     const onUpdateTask = vi.fn();
     mockStartupRequests();

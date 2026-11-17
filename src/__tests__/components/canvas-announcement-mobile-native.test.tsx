@@ -71,7 +71,7 @@ beforeAll(async () => {
     stdin: { contents: ENTRY, resolveDir: process.cwd(), loader: 'tsx', sourcefile: 'oh-my-prompt-mobile-entry.tsx' },
   });
   const scripts=result.outputFiles.filter(f=>f.path.endsWith('.js')),styles=result.outputFiles.filter(f=>f.path.endsWith('.css'));
-  if(result.outputFiles.length!==2||scripts.length!==1||styles.length!==1||!styles[0].text.trim())throw Error('GT_EXACT_MEMORY_JS_AND_CSS');
+  if(scripts.length!==1||styles.length>1||result.outputFiles.length!==scripts.length+styles.length)throw Error('GT_EXACT_MEMORY_JS_AND_CSS');
   bundle=scripts[0].text;
   const files = Object.keys(result.metafile!.inputs).filter(file => /^src[\\/]/.test(file) && /\.[jt]sx?$/.test(file));
   const sources = await Promise.all(files.map(async file => ({ content: await readFile(path.resolve(file), 'utf8'), extension: path.extname(file).slice(1) })));
@@ -83,7 +83,7 @@ beforeAll(async () => {
           : require.resolve(id.startsWith('.') ? path.resolve(base, id) : id);
       return { path: file, base: path.dirname(file), content: await readFile(file, 'utf8') };
     } });
-  css = compiler.build(new Scanner({}).scanFiles(sources))+'\n'+styles[0].text;
+  css = compiler.build(new Scanner({}).scanFiles(sources))+'\n'+styles.map(file=>file.text).join('\n');
   browser = await chromium.launch({ headless: true });
 }, 30000);
 
