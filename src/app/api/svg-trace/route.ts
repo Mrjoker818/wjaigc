@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import { execFile } from 'child_process';
 import { unlink, mkdir, readFile } from 'fs/promises';
@@ -2033,6 +2034,8 @@ export async function POST(req: NextRequest) {
 
   const startTime = Date.now();
   let deductedCredits = 0;
+  // 每个请求最多退一次款；同一编号的重复退款会被退款记录拒绝
+  const refundReference = `refund-svg-trace-${randomUUID()}`;
   let sessionUser: import('@/lib/user-types').User | null = null;
   let selectedMode = '';
   try {
@@ -2841,7 +2844,7 @@ export async function POST(req: NextRequest) {
     // 退款：SVG描摹失败时退还积分
     if (deductedCredits > 0 && sessionUser) {
       try {
-        await refundCredits(sessionUser.id, deductedCredits, `SVG描摹失败退款: ${(error instanceof Error ? error.message : 'Unknown').substring(0, 100)}`);
+        await refundCredits(sessionUser.id, deductedCredits, `SVG描摹失败退款: ${(error instanceof Error ? error.message : 'Unknown').substring(0, 100)}`, refundReference);
       } catch (refundErr) { console.error('[svg-trace] Refund failed:', refundErr); }
     }
     return NextResponse.json({

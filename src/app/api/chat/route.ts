@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'node:crypto';
 import { appendUserJsonl } from '@/lib/server-user-storage';
 import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
@@ -254,6 +255,8 @@ function wrapStreamWithTokenBilling(body: ReadableStream<Uint8Array>, hooks: Tok
 export async function POST(request: NextRequest) {
   const opTimer = startTimer();
   let deductedCredits = 0;
+  // 每个请求最多退一次款；同一编号的重复退款会被退款记录拒绝
+  const refundReference = `refund-chat-${randomUUID()}`;
   let sessionUser: import('@/lib/user-types').User | null = null;
   try {
     const authResult = await requireApiAuthOrReject(request);
@@ -777,7 +780,7 @@ export async function POST(request: NextRequest) {
     // 退款：聊天请求完全失败时退还积分
     if (deductedCredits > 0 && sessionUser) {
       try {
-        await refundCredits(sessionUser.id, deductedCredits, `聊天请求失败退款`);
+        await refundCredits(sessionUser.id, deductedCredits, `聊天请求失败退款`, refundReference);
       } catch (refundErr) { console.error('[chat] Refund failed:', refundErr); }
     }
     return NextResponse.json(

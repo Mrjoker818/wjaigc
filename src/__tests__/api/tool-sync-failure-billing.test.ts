@@ -29,7 +29,8 @@ function noCharge(): void {
 function refundedOnce(): void {
   expect(mocks.charge).toHaveBeenCalledTimes(1);
   expect(mocks.refund).toHaveBeenCalledTimes(1);
-  expect(mocks.refund).toHaveBeenCalledWith('billing-test-user', 8, expect.any(String));
+  expect(mocks.refund).toHaveBeenCalledWith('billing-test-user', 8, expect.any(String),
+    expect.stringMatching(/^refund-optimize-prompt-/));
 }
 
 beforeEach(() => {

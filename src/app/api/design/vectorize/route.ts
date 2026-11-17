@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'node:crypto';
 import { findProviderForFeature, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { getServerDataRoot } from '@/lib/server-data-root';
@@ -752,6 +753,8 @@ function sanitizeSvgForAI(svg: string): string {
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
   let deductedCredits = 0;
+  // 每个请求最多退一次款；同一编号的重复退款会被退款记录拒绝
+  const refundReference = `refund-vectorize-${randomUUID()}`;
   let sessionUser: import('@/lib/user-types').User | null = null;
   let selectedMode = '';
   const engineUsed = '';
@@ -956,7 +959,7 @@ export async function POST(req: NextRequest) {
     // 退款：矢量化失败时退还积分
     if (deductedCredits > 0 && sessionUser) {
       try {
-        await refundCredits(sessionUser.id, deductedCredits, `矢量化失败退款: ${(error instanceof Error ? error.message : 'Unknown').substring(0, 100)}`);
+        await refundCredits(sessionUser.id, deductedCredits, `矢量化失败退款: ${(error instanceof Error ? error.message : 'Unknown').substring(0, 100)}`, refundReference);
       } catch (refundErr) { console.error('[vectorize] Refund failed:', refundErr); }
     }
     return NextResponse.json({ success: false, error: error instanceof Error ? error.message : 'vectorize failed' }, { status: 500 });

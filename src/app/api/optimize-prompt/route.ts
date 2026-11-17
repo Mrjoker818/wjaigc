@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'node:crypto';
 import { findProviderForModel, getApiProviders } from '@/lib/server-api-config';
 import { appendUserJsonl } from '@/lib/server-user-storage';
 import { getSessionUser } from '@/lib/server-auth';
@@ -44,13 +45,15 @@ function normalizeChatBaseUrl(baseUrl: string): string {
 
 export async function POST(request: NextRequest) {
   let deductedCredits = 0;
+  // 每个请求最多退一次款；同一编号的重复退款会被退款记录拒绝
+  const refundReference = `refund-optimize-prompt-${randomUUID()}`;
   let sessionUser: import('@/lib/user-types').User | null = null;
   async function refundFailure(reason: string): Promise<void> {
     if (deductedCredits <= 0 || !sessionUser) return;
     const amount = deductedCredits;
     deductedCredits = 0;
     try {
-      const refund = await refundCredits(sessionUser.id, amount, `提示词优化失败退款: ${reason.substring(0, 100)}`);
+      const refund = await refundCredits(sessionUser.id, amount, `提示词优化失败退款: ${reason.substring(0, 100)}`, refundReference);
       if (!refund.success) console.error('[optimize-prompt] Refund failed:', { userId: sessionUser.id, amount });
     } catch (refundErr) { console.error('[optimize-prompt] Refund failed:', refundErr); }
   }

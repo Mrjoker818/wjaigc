@@ -398,6 +398,8 @@ export async function POST(request: NextRequest) {
     }, { status: 400 });
   }
   let deductedCredits = 0;
+  // 每个请求最多退一次款；同一编号的重复退款会被退款记录拒绝
+  const refundReference = `refund-edit-${randomUUID()}`;
   let usesAtomicBilling = false;
   let sessionUser: import('@/lib/user-types').User | null = null;
   let annotationTaskId = '';
@@ -2244,7 +2246,7 @@ Make the editInstruction specific, detailed, and optimized for AI image editing.
       }
     } else if (!usesAtomicBilling && deductedCredits > 0 && sessionUser) {
       try {
-        await refundCredits(sessionUser.id, deductedCredits, `语言修图任务创建失败退款: ${message.substring(0, 100)}`);
+        await refundCredits(sessionUser.id, deductedCredits, `语言修图任务创建失败退款: ${message.substring(0, 100)}`, refundReference);
       } catch (refundErr) { console.error('[edit] Refund failed:', refundErr); }
     }
     if (error instanceof AnnotationIdempotencyConflictError) {

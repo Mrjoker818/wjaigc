@@ -601,6 +601,8 @@ export async function POST(request: NextRequest) {
   const requestId = getRequestId(request);
   const requestedTaskCoreMode = resolveTaskCoreMode(process.env.WUJIE_TASK_CORE_MODE);
   let deductedCredits = 0;
+  // 每个请求最多退一次款；同一编号的重复退款会被退款记录拒绝
+  const refundReference = `refund-image-edit-${randomUUID()}`;
   let usesAtomicBilling = false;
   let atomicBillingTaskId: string | null = null;
   let atomicSettlementAttempted = false;
@@ -1912,7 +1914,7 @@ export async function POST(request: NextRequest) {
         } else if (!usesAtomicBilling && sessionUser && deductedCredits > 0) {
           const refundableCost = deductedCredits;
           deductedCredits = 0;
-          const refund = await refundCredits(sessionUser.id, refundableCost, `302.AI 超分失败退款: ${message.slice(0, 100)}`);
+          const refund = await refundCredits(sessionUser.id, refundableCost, `302.AI 超分失败退款: ${message.slice(0, 100)}`, refundReference);
           if (!refund.success) throw new Error('302.AI 超分退款未完成，任务需要人工对账');
           refunded = true;
         }
@@ -1961,7 +1963,7 @@ export async function POST(request: NextRequest) {
           } else if (sessionUser && deductedCredits > 0) {
             const refundableCost = deductedCredits;
             deductedCredits = 0;
-            const refund = await refundCredits(sessionUser.id, refundableCost, `文档来源复验失败退款: ${sourceDenial.message}`);
+            const refund = await refundCredits(sessionUser.id, refundableCost, `文档来源复验失败退款: ${sourceDenial.message}`, refundReference);
             if (!refund.success) throw new Error('文档来源复验退款未完成，任务需要人工对账');
           }
           return NextResponse.json({ success: false, code: sourceDenial.code, error: sourceDenial.message },
@@ -3986,7 +3988,7 @@ export async function POST(request: NextRequest) {
       }
     } else if (!usesAtomicBilling && deductedCredits > 0 && sessionUser) {
       try {
-        await refundCredits(sessionUser.id, deductedCredits, `图像编辑异常退款: ${errMsg.substring(0, 100)}`);
+        await refundCredits(sessionUser.id, deductedCredits, `图像编辑异常退款: ${errMsg.substring(0, 100)}`, refundReference);
       } catch (refundErr) { console.error('[image-edit] Refund failed:', refundErr); }
     }
     return NextResponse.json({ success: false, error: errMsg }, { status: 500 });

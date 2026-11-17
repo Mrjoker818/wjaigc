@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'node:crypto';
 import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
@@ -207,6 +208,8 @@ async function imageUrlToBase64(imageUrl: string): Promise<string> {
 
 export async function POST(request: NextRequest) {
   let deductedCredits = 0;
+  // 每个请求最多退一次款；同一编号的重复退款会被退款记录拒绝
+  const refundReference = `refund-vision-prompt-${randomUUID()}`;
   let sessionUser: import('@/lib/user-types').User | null = null;
   const refundDeduction = async (reason: string): Promise<void> => {
     if (deductedCredits <= 0 || !sessionUser) return;
@@ -216,7 +219,7 @@ export async function POST(request: NextRequest) {
     // result or let the outer catch pay the same deduction a second time.
     deductedCredits = 0;
     try {
-      const result = await refundCredits(userId, credits, `图片识词失败退款: ${reason.substring(0, 100)}`);
+      const result = await refundCredits(userId, credits, `图片识词失败退款: ${reason.substring(0, 100)}`, refundReference);
       if (!result.success) console.warn({ code: 'VISION_PROMPT_REFUND_FAILED', userId, credits });
     } catch (error) {
       console.warn({ code: 'VISION_PROMPT_REFUND_FAILED', userId, credits });

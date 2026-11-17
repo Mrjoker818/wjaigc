@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getRequestUser } from '@/lib/api-auth';
 import type { User } from '@/lib/user-types';
@@ -1095,6 +1095,8 @@ export async function POST(request: NextRequest) {
   const requestId = getRequestId(request);
   const taskCoreMode = resolveTaskCoreMode(process.env.WUJIE_TASK_CORE_MODE);
   let deductedCredits = 0;
+  // 每个请求最多退一次款；同一编号的重复退款会被退款记录拒绝
+  const refundReference = `refund-image-to-3d-${randomUUID()}`;
   let localTaskId: string | null = null;
   let usesAtomicBilling = false;
   let sessionUser: User | null = null;
@@ -1439,7 +1441,7 @@ export async function POST(request: NextRequest) {
       }
     } else if (!usesAtomicBilling && deductedCredits > 0 && sessionUser) {
       try {
-        await refundCredits(sessionUser.id, deductedCredits, `3D模型生成失败退款: ${(error instanceof Error ? error.message : 'Unknown').substring(0, 100)}`);
+        await refundCredits(sessionUser.id, deductedCredits, `3D模型生成失败退款: ${(error instanceof Error ? error.message : 'Unknown').substring(0, 100)}`, refundReference);
       } catch (refundErr) { console.error('[image-to-3d] Refund failed:', refundErr); }
     }
     if (error instanceof InsufficientCreditsError || error instanceof IdempotencyConflictError) {

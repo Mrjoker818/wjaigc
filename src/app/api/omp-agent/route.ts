@@ -9,6 +9,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'node:crypto';
 import { findProviderForFeature, findProviderForModel, findProviderById } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { parseAgentGenerateResult, parseEcommerceGenerateResult, type AgentTemplateCategory, type EcommerceConfig } from '@/lib/omp-agent-parsers';
@@ -232,6 +233,8 @@ function parseSSETextToJSON(text: string): Record<string, unknown> {
 
 export async function POST(request: NextRequest) {
   let deductedCredits = 0;
+  // 每个请求最多退一次款；同一编号的重复退款会被退款记录拒绝
+  const refundReference = `refund-omp-agent-${randomUUID()}`;
   let sessionUser: import('@/lib/user-types').User | null = null;
   try {
     // 鉴权：要求 Web 登录态 或 桌面端 Token 二选一（P0 修复：防止未授权盗刷）
@@ -412,7 +415,7 @@ export async function POST(request: NextRequest) {
     // 退款：Agent生成失败时退还积分
     if (deductedCredits > 0 && sessionUser) {
       try {
-        await refundCredits(sessionUser.id, deductedCredits, `Agent生成失败退款: ${(error instanceof Error ? error.message : 'Unknown').substring(0, 100)}`);
+        await refundCredits(sessionUser.id, deductedCredits, `Agent生成失败退款: ${(error instanceof Error ? error.message : 'Unknown').substring(0, 100)}`, refundReference);
       } catch (refundErr) { console.error('[omp-agent] Refund failed:', refundErr); }
     }
     return NextResponse.json(
