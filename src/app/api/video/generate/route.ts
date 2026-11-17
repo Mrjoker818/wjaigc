@@ -23,9 +23,10 @@ import {
   ratioToSize,
   validateVideoDuration,
   getPlatformVideoDurations,
+  PLATFORM_VIDEO_MAX_DURATION_SECONDS,
   type VideoGenerateParams,
 } from '@/lib/video-api';
-import { findPearVideoSpec, isPearVideoProvider } from '@/lib/pear-video-specs';
+import { findPearVideoSpec, getPearMaxDuration, isPearVideoProvider } from '@/lib/pear-video-specs';
 import { buildDirectorPrompt, type VideoDirectorMode } from '@/lib/video-director';
 import { getSessionUser } from '@/lib/server-auth';
 import { getInternalRequestHeaders } from '@/lib/api-auth';
@@ -75,6 +76,7 @@ export async function POST(request: NextRequest) {
       imageUrl,
       lastFrameImageUrl,
       referenceImages,
+      referenceAudios,
       aspectRatio = '16:9',
       duration = 5,
       resolution,
@@ -111,9 +113,7 @@ export async function POST(request: NextRequest) {
     }
     const effectiveProviderId = providerId || extractedProviderId || '';
     const parsedDuration = Number(duration);
-    if (parsedDuration > runtimeSettings.maxVideoDuration) {
-      return NextResponse.json({ error: `Video duration exceeds the ${runtimeSettings.maxVideoDuration}s platform limit` }, { status: 400 });
-    }
+    // 平台时长上限在识别供应商规格后再校验（PearAPI Seedance 2.5 官方支持 30 秒）
 
     // 仅确认用户身份。积分在持久化任务创建后以数据库原子语句扣除，
     // 防止任务未落库或并发请求时产生不可追溯的重复扣费。
@@ -143,8 +143,20 @@ export async function POST(request: NextRequest) {
 
     // 时长校验：PearAPI 按官方模型清单校验，其余供应商沿用通用注册表
     const pearSpec = isPearVideoProvider(provider) ? findPearVideoSpec(pureModel) : null;
+    // 管理员保持默认上限（15 秒）时，允许官方规格更长的模型使用其上限；
+    // 管理员主动调低上限时，所有模型都按管理员设置限制。
+    const modelCeiling = getPearMaxDuration(pearSpec, PLATFORM_VIDEO_MAX_DURATION_SECONDS);
+    const effectiveDurationLimit = runtimeSettings.maxVideoDuration >= PLATFORM_VIDEO_MAX_DURATION_SECONDS
+      ? Math.max(runtimeSettings.maxVideoDuration, modelCeiling)
+      : runtimeSettings.maxVideoDuration;
+    if (parsedDuration > effectiveDurationLimit) {
+      return NextResponse.json({ error: `Video duration exceeds the ${effectiveDurationLimit}s platform limit` }, { status: 400 });
+    }
     if (pearSpec) {
-      const pearAllowed = getPlatformVideoDurations(pearSpec.durations);
+      const pearAllowed = getPlatformVideoDurations(
+        pearSpec.durations,
+        getPearMaxDuration(pearSpec, PLATFORM_VIDEO_MAX_DURATION_SECONDS),
+      );
       const autoDuration = pearSpec.durations.includes(0);
       if (!autoDuration && !pearAllowed.includes(parsedDuration)) {
         return NextResponse.json({
@@ -154,6 +166,17 @@ export async function POST(request: NextRequest) {
       }
       if (pearSpec.requiresImage && !imageUrl && !(Array.isArray(referenceImages) && referenceImages.length > 0)) {
         return NextResponse.json({ error: `模型 ${pureModel} 仅支持图生视频，请先上传首帧图片` }, { status: 400 });
+      }
+      const audioCount = Array.isArray(referenceAudios) ? referenceAudios.filter((a: unknown) => typeof a === 'string' && a.trim()).length : 0;
+      if (pearSpec.requiresAudio && audioCount === 0) {
+        return NextResponse.json({ error: `模型 ${pureModel} 需要同时提供人物图片和一段音频` }, { status: 400 });
+      }
+      if (audioCount > pearSpec.maxAudios) {
+        return NextResponse.json({
+          error: pearSpec.maxAudios > 0
+            ? `模型 ${pureModel} 最多支持 ${pearSpec.maxAudios} 段参考音频`
+            : `模型 ${pureModel} 不支持参考音频`,
+        }, { status: 400 });
       }
     } else {
       const durationValidation = validateVideoDuration(pureModel, parsedDuration);
@@ -251,6 +274,24 @@ export async function POST(request: NextRequest) {
       return imgUrl;
     };
 
+    // 音频素材：PearAPI 要求公网 HTTP(S) 地址，不支持 base64；相对路径补全为公网域名
+    const resolveAudioUrl = (audioUrl: unknown): string | undefined => {
+      if (typeof audioUrl !== 'string' || !audioUrl.trim()) return undefined;
+      const trimmed = audioUrl.trim();
+      if (/^https?:\/\//i.test(trimmed)) return trimmed;
+      if (trimmed.startsWith('/') && domainBase) {
+        const base = domainBase.startsWith('http') ? domainBase : `https://${domainBase}`;
+        return `${base}${trimmed}`;
+      }
+      return undefined;
+    };
+    const resolvedAudios = (Array.isArray(referenceAudios) ? referenceAudios : [])
+      .map(resolveAudioUrl)
+      .filter((url): url is string => Boolean(url));
+    if (pearSpec?.requiresAudio && resolvedAudios.length === 0) {
+      return NextResponse.json({ error: '音频需要是公网可访问的地址，请重新上传音频' }, { status: 400 });
+    }
+
     const [resolvedImageUrl, resolvedLastFrameUrl, ...resolvedRefs] = await Promise.all([
       resolveImageUrl(imageUrl),
       resolveImageUrl(lastFrameImageUrl),
@@ -321,6 +362,7 @@ export async function POST(request: NextRequest) {
       imageUrl: resolvedImageUrl,
       lastFrameImageUrl: resolvedLastFrameUrl,
       referenceImages: resolvedRefs.filter(Boolean) as string[],
+      ...(resolvedAudios.length > 0 ? { referenceAudios: resolvedAudios } : {}),
       aspectRatio,
       duration,
       resolution: typeof resolution === 'string' && resolution.trim() ? resolution.trim() : undefined,

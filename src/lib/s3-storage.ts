@@ -83,6 +83,35 @@ export async function uploadImageToS3(
 }
 
 /**
+ * Upload a non-image media buffer (e.g. audio) to S3 under `{folder}/`.
+ * @returns S3 key if successful, null if failed
+ */
+export async function uploadMediaToS3(
+  buffer: Buffer,
+  fileName: string,
+  contentType: string,
+  folder: string = 'media',
+): Promise<string | null> {
+  const storage = getStorage();
+  if (!storage) return null;
+
+  try {
+    const safeFolder = folder.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const key = await storage.uploadFile({
+      fileContent: buffer,
+      fileName: `${safeFolder}/${safeName}`,
+      contentType,
+    });
+    console.log(`[s3-storage] Uploaded media: ${key} (${(buffer.length / 1024).toFixed(0)}KB)`);
+    return key;
+  } catch (e) {
+    console.error('[s3-storage] Media upload failed:', e);
+    return null;
+  }
+}
+
+/**
  * Upload image from URL to S3
  * @returns S3 key if successful, null if failed
  */

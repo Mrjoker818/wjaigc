@@ -7,10 +7,10 @@ import {
   ChevronDown, ChevronUp, Loader2, Sparkles, Volume2, VolumeX,
   Upload, X, AlertCircle, Info, FastForward, Users, Plus, Paintbrush, Film, Palette, Images,
   History, RotateCcw, Languages, GripVertical, Minus, Maximize2, ChevronRight, CheckCircle2,
-  Clapperboard, SlidersHorizontal, Mountain, ImageIcon, User, RefreshCw, Package
+  Clapperboard, SlidersHorizontal, Mountain, ImageIcon, User, RefreshCw, Package, Music
 } from 'lucide-react';
 import MotionBrushCanvas, { type MotionBrushResult, type MotionBrushCanvasHandle } from './motion-brush-canvas';
-import { clampVideoDurationToAllowed, getPlatformVideoDurations, inferVideoModelFeatures, VIDEO_MODEL_REGISTRY, type MotionBrushParams, type CameraControlParams, type VideoGenerateParams as VideoApiGenerateParams } from '@/lib/video-api';
+import { clampVideoDurationToAllowed, getPlatformVideoDurations, PLATFORM_VIDEO_MAX_DURATION_SECONDS, inferVideoModelFeatures, VIDEO_MODEL_REGISTRY, type MotionBrushParams, type CameraControlParams, type VideoGenerateParams as VideoApiGenerateParams } from '@/lib/video-api';
 import {
   buildContinuationPrompt,
   parseShotPlanCharacters,
@@ -114,6 +114,12 @@ export interface VideoModelInfo {
     characterConsistency: boolean;
     multiShot: boolean;
     maxDuration: number;
+    /** Per-model single-clip ceiling override (PearAPI Seedance 2.5 = 30s). */
+    maxDurationSeconds?: number;
+    /** Max reference audio tracks the model accepts (0/undefined = no audio slot). */
+    maxAudios?: number;
+    /** Model needs an audio track (lip-sync digital human). */
+    requiresAudio?: boolean;
     durations: number[];
     aspectRatios: string[];
     resolutions: string[];
@@ -356,6 +362,10 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
   const [generateAudio, setGenerateAudio] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [resolution, setResolution] = useState('');
+  // 参考音频 / 对口型音频（公网地址，由 /api/upload-audio 返回）
+  const [referenceAudios, setReferenceAudios] = useState<Array<{ url: string; name: string }>>([]);
+  const [audioUploading, setAudioUploading] = useState(false);
+  const audioInputRef = useRef<HTMLInputElement>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string>('');
   const [extendDuration, setExtendDuration] = useState(5);
@@ -740,9 +750,44 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
 
   // 动态可选比例
   const availableRatios = currentFeatures?.aspectRatios || ['1:1', '4:3', '16:9', '9:16'];
-  const platformDurations = getPlatformVideoDurations(currentFeatures?.durations || [5, 10]);
+  const durationCeiling = currentFeatures?.maxDurationSeconds && currentFeatures.maxDurationSeconds > PLATFORM_VIDEO_MAX_DURATION_SECONDS
+    ? currentFeatures.maxDurationSeconds
+    : PLATFORM_VIDEO_MAX_DURATION_SECONDS;
+  const platformDurations = getPlatformVideoDurations(currentFeatures?.durations || [5, 10], durationCeiling);
   const availableDurations = platformDurations.length > 0 ? platformDurations : [5, 10];
   const availableResolutions = currentFeatures?.resolutions || ['720p', '1080p'];
+
+  // 参考音频上限（PearAPI 规格；其他供应商为 0，不显示音频槽位）
+  const maxAudios = currentFeatures?.maxAudios ?? 0;
+  const requiresAudio = Boolean(currentFeatures?.requiresAudio);
+
+  const handleAudioFiles = useCallback(async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const remaining = Math.max(maxAudios - referenceAudios.length, 0);
+    const picked = Array.from(files).slice(0, remaining);
+    if (picked.length === 0) {
+      onError?.(`当前模型最多支持 ${maxAudios} 段参考音频`);
+      return;
+    }
+    setAudioUploading(true);
+    try {
+      for (const file of picked) {
+        const form = new FormData();
+        form.append('file', file);
+        const resp = await fetch('/api/upload-audio', { method: 'POST', body: form });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data?.success || typeof data.url !== 'string') {
+          throw new Error(data?.error || '音频上传失败');
+        }
+        setReferenceAudios(prev => [...prev, { url: data.url as string, name: file.name }].slice(0, maxAudios));
+      }
+    } catch (err) {
+      onError?.(err instanceof Error ? err.message : '音频上传失败');
+    } finally {
+      setAudioUploading(false);
+      if (audioInputRef.current) audioInputRef.current.value = '';
+    }
+  }, [maxAudios, referenceAudios.length, onError]);
 
   // 首尾帧开关（图生视频模式内可展开尾帧）
   const [showLastFrame, setShowLastFrame] = useState(false);
@@ -774,6 +819,8 @@ const VideoGenerationPanel = forwardRef<VideoGenerationPanelHandle, VideoGenerat
       if (!currentFeatures.firstLastFrame && showLastFrame) setShowLastFrame(false);
       if (!currentFeatures.videoExtend && mode === 'video-extend') setMode('text2video');
       if (!currentFeatures.audio && generateAudio) setGenerateAudio(false);
+      const audioLimit = currentFeatures.maxAudios ?? 0;
+      setReferenceAudios(prev => (prev.length > audioLimit ? prev.slice(0, audioLimit) : prev));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model]);
@@ -1685,6 +1732,14 @@ Rules:
       onError?.('请选择视频模型');
       return;
     }
+    if (requiresAudio && referenceAudios.length === 0) {
+      onError?.('当前模型需要同时提供人物图片和一段音频，请先上传音频');
+      return;
+    }
+    if (audioUploading) {
+      onError?.('音频仍在上传，请稍候');
+      return;
+    }
 
     setIsGenerating(true);
     if (mode === 'video-extend') setIsExtending(true);
@@ -1737,6 +1792,7 @@ Rules:
         firstFrameUrl: (mode === 'image2video-first') ? firstFrameUrl : undefined,
         lastFrameUrl: (mode === 'image2video-first' && showLastFrame) ? lastFrameUrl : undefined,
         referenceImages: referenceImages.length > 0 ? referenceImages : undefined,
+        referenceAudios: maxAudios > 0 && referenceAudios.length > 0 ? referenceAudios.map(a => a.url) : undefined,
         resolution,
         videoUrl: (mode === 'video-extend') ? videoUrl : undefined,
         extendDuration: (mode === 'video-extend') ? extendDuration : undefined,
@@ -1798,7 +1854,7 @@ Rules:
       setIsExtending(false);
       // setIsGenerating 已在成功路径延迟调用
     }
-  }, [prompt, mode, model, aspectRatio, duration, quality, generateAudio, firstFrameUrl, lastFrameUrl, referenceImages, resolution, videoUrl, extendDuration, cameraControl, motionBrush, characterReferences, motionStrength, seed, negativePrompt, multiShotScenes, chainContinuity, useGlobalReferences, batchCount, showLastFrame, onVideoGenerate, onError]);
+  }, [prompt, mode, model, aspectRatio, duration, quality, generateAudio, firstFrameUrl, lastFrameUrl, referenceImages, referenceAudios, maxAudios, requiresAudio, audioUploading, resolution, videoUrl, extendDuration, cameraControl, motionBrush, characterReferences, motionStrength, seed, negativePrompt, multiShotScenes, chainContinuity, useGlobalReferences, batchCount, showLastFrame, onVideoGenerate, onError]);
 
   const isPrimaryDisabled = mode === 'multi-shot'
     ? (isGeneratingAllShots || (shotPlans.length === 0 && multiShotScenes.every(s => !s.prompt.trim())))
@@ -1812,7 +1868,7 @@ Rules:
   const reuseHistoryEntry = useCallback((entry: VideoHistoryEntry) => {
     setPrompt(entry.prompt);
     setAspectRatio(entry.aspectRatio);
-    setDuration(clampVideoDurationToAllowed(entry.duration, availableDurations));
+    setDuration(clampVideoDurationToAllowed(entry.duration, availableDurations, durationCeiling));
     if (entry.firstFrameUrl) {
       setFirstFrame(entry.firstFrameUrl);
     }
@@ -2351,6 +2407,56 @@ Rules:
                       <p className="text-[10px]" style={{ color: subTextColor }}>添加参考图可帮助AI更好理解画面风格和场景</p>
                     )}
                   </div>
+                )}
+              </div>
+            )}
+
+            {/* 参考音频 / 对口型音频（仅模型规格支持音频时显示） */}
+            {maxAudios > 0 && (mode === 'text2video' || mode === 'image2video-first') && (
+              <div className="p-3 rounded-lg space-y-2" style={{ background: isMonochrome ? '#f9fafb' : 'rgba(255,255,255,0.02)', border: `1px solid ${borderColor}` }}>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold flex items-center gap-1" style={{ color: subTextColor }}>
+                    <Music className="w-3.5 h-3.5" />{requiresAudio ? '对口型音频（必填）' : '参考音频'}
+                    <span className="font-normal">{referenceAudios.length}/{maxAudios}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => audioInputRef.current?.click()}
+                    disabled={audioUploading || referenceAudios.length >= maxAudios}
+                    className="text-[10px] px-2 py-0.5 rounded transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    style={{ color: accentColor, background: isGold ? 'rgba(212,175,55,0.1)' : 'rgba(59,130,246,0.1)' }}
+                  >
+                    {audioUploading ? '上传中...' : '+ 添加'}
+                  </button>
+                  <input
+                    ref={audioInputRef}
+                    type="file"
+                    accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.webm,.flac"
+                    multiple={maxAudios > 1}
+                    className="hidden"
+                    onChange={e => { void handleAudioFiles(e.target.files); }}
+                  />
+                </div>
+                {referenceAudios.length > 0 ? (
+                  <div className="space-y-1.5">
+                    {referenceAudios.map((audio, idx) => (
+                      <div key={`${audio.url}-${idx}`} className="flex items-center gap-2 rounded-lg p-1.5 group" style={{ background: inputBg }}>
+                        <Music className="w-4 h-4 shrink-0" style={{ color: accentColor }} />
+                        <span className="text-[11px] truncate flex-1" style={{ color: textColor }}>{audio.name}</span>
+                        <audio src={audio.url} controls preload="none" className="h-6 max-w-[140px]" />
+                        <button
+                          type="button"
+                          onClick={() => setReferenceAudios(prev => prev.filter((_, i) => i !== idx))}
+                          className="opacity-0 group-hover:opacity-100 text-red-400 w-6 h-6 rounded flex items-center justify-center cursor-pointer"
+                          aria-label="移除音频"
+                        >×</button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[10px]" style={{ color: subTextColor }}>
+                    {requiresAudio ? '数字人需要一张人物图片和一段音频，时长按音频自动生成' : '可上传音频作为节奏、配音或口型参考'}
+                  </p>
                 )}
               </div>
             )}

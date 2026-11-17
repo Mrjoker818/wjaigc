@@ -3048,6 +3048,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
     firstFrameUrl?: string;
     lastFrameUrl?: string;
     referenceImages?: string[];
+    referenceAudios?: string[];
     resolution?: string;
     // 新增高级参数
     cameraControl?: { type: string; angle?: number; speed?: number };
@@ -3445,6 +3446,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut }: CanvasWorkspacePro
         imageUrl: params.firstFrameUrl || params.imageUrl,
         lastFrameImageUrl: params.lastFrameUrl,
         referenceImages: params.referenceImages,
+        referenceAudios: params.referenceAudios,
         mode: params.mode,
         aspectRatio: params.aspectRatio,
         duration: params.duration,

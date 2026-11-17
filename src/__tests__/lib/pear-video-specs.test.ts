@@ -1,12 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
   findPearVideoSpec,
+  getPearMaxDuration,
+  inferVideoResolutionTier,
   isPearVideoProvider,
   normalizePearResolution,
   pearSpecToPanelFeatures,
   pickPearDuration,
 } from '@/lib/pear-video-specs';
-import { buildVideoSubmitRequest, type VideoGenerateParams } from '@/lib/video-api';
+import {
+  buildVideoSubmitRequest,
+  getPlatformVideoDurations,
+  PLATFORM_VIDEO_MAX_DURATION_SECONDS,
+  type VideoGenerateParams,
+} from '@/lib/video-api';
 
 function pearBody(params: Partial<VideoGenerateParams> & { model: string }): Record<string, unknown> {
   const req = buildVideoSubmitRequest('pearapi-video', {
@@ -97,5 +104,51 @@ describe('PearAPI video submit body', () => {
     expect((body.reference_contents as unknown[]).length).toBe(1);
     expect(body.negative_prompt).toBeUndefined();
     expect(body.seed).toBeUndefined();
+  });
+
+  it('allows Seedance 2.5 up to 30s while other models keep the 15s platform cap', () => {
+    const sd25 = findPearVideoSpec('doubao-seedance-2-5-260628')!;
+    expect(getPearMaxDuration(sd25, PLATFORM_VIDEO_MAX_DURATION_SECONDS)).toBe(30);
+    expect(getPlatformVideoDurations(sd25.durations, getPearMaxDuration(sd25, PLATFORM_VIDEO_MAX_DURATION_SECONDS))).toContain(30);
+    expect(pearBody({ model: 'doubao-seedance-2-5-260628', duration: 30 }).duration).toBe(30);
+
+    const sd20 = findPearVideoSpec('doubao-seedance-2-0-260128')!;
+    expect(getPearMaxDuration(sd20, PLATFORM_VIDEO_MAX_DURATION_SECONDS)).toBe(15);
+    expect(getPlatformVideoDurations([5, 10, 30])).toEqual([5, 10]);
+  });
+
+  it('sends reference audio in reference_contents and caps it at the model limit', () => {
+    const body = pearBody({
+      model: 'doubao-seedance-2-0-260128',
+      referenceAudios: ['https://x/1.mp3', 'https://x/2.mp3', 'https://x/3.mp3', 'https://x/4.mp3'],
+    });
+    const contents = body.reference_contents as Array<{ type: string; media_url: string }>;
+    expect(contents.filter(c => c.type === 'audio')).toHaveLength(3);
+  });
+
+  it('drops non-public audio and keeps lip-sync models on image2video', () => {
+    const body = pearBody({
+      model: 'ltx-digitalhuman',
+      imageUrl: 'https://x/face.png',
+      referenceAudios: ['data:audio/mp3;base64,AAAA', 'https://x/voice.mp3'],
+    });
+    const contents = body.reference_contents as Array<{ type: string; media_url: string }>;
+    expect(contents.filter(c => c.type === 'audio').map(c => c.media_url)).toEqual(['https://x/voice.mp3']);
+    expect(body.mode).toBe('image2video');
+    expect(body.duration).toBe(0);
+  });
+
+  it('exposes audio limits to the panel', () => {
+    const ltx = pearSpecToPanelFeatures(findPearVideoSpec('ltx-digitalhuman')!);
+    expect(ltx.maxAudios).toBe(1);
+    expect(ltx.requiresAudio).toBe(true);
+    expect(pearSpecToPanelFeatures(findPearVideoSpec('veo-3.1')!).maxAudios).toBe(0);
+  });
+
+  it('infers a resolution tier from the source video size for video edit', () => {
+    expect(inferVideoResolutionTier(1280, 720)).toBe('720P');
+    expect(inferVideoResolutionTier(1080, 1920)).toBe('1080P');
+    expect(inferVideoResolutionTier(854, 480)).toBe('480P');
+    expect(inferVideoResolutionTier(undefined, 720)).toBeUndefined();
   });
 });

@@ -3,6 +3,7 @@ import NextImage from 'next/image';
 import { toast } from 'sonner';
 import { } from '@/lib/canvas-mode-handlers';
 import { findClosestStandardRatio, STANDARD_RATIOS, type StandardRatio } from '@/lib/canvas-utils';
+import { inferVideoResolutionTier } from '@/lib/pear-video-specs';
 import { fitCanvasContent, normalizeCanvasViewState } from '@/lib/canvas-view-state';
 import { buildFailedProcessingFrame, extractImageEditErrorMessage } from '@/lib/image-processing-state';
 import {
@@ -15703,6 +15704,9 @@ export function InfiniteCanvas({ images, onImagesChange, selectedImage, onSelect
                     providerId: params.providerId || undefined,
                     imageUrl: params.thumbnailUrl || videoEditTarget.url,
                     mode: 'image2video',
+                    // 沿用原视频的分辨率档位和比例；后端按模型规格收敛到支持的值
+                    resolution: inferVideoResolutionTier(videoEditTarget.originalWidth, videoEditTarget.originalHeight),
+                    ...(videoEditTarget.aspectRatio ? { aspectRatio: videoEditTarget.aspectRatio } : {}),
                   }),
                 });
                 const data = await res.json();

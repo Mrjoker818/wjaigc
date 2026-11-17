@@ -24,10 +24,21 @@ export interface PearVideoModelSpec {
   requiresImage?: boolean;
   /** Model needs an audio track (lip-sync digital human). */
   requiresAudio?: boolean;
+  /**
+   * Per-model single-clip ceiling that overrides PLATFORM_VIDEO_MAX_DURATION_SECONDS (15s).
+   * Only set for models whose official range goes beyond the platform default.
+   */
+  maxDurationSeconds?: number;
+}
+
+/** Single-clip ceiling for a PearAPI model; falls back to the platform default. */
+export function getPearMaxDuration(spec: PearVideoModelSpec | null | undefined, platformDefault: number): number {
+  return spec?.maxDurationSeconds && spec.maxDurationSeconds > platformDefault ? spec.maxDurationSeconds : platformDefault;
 }
 
 const RANGE_4_15 = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 const RANGE_5_15 = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+const RANGE_4_30 = Array.from({ length: 27 }, (_, i) => i + 4);
 const RATIOS_5 = ['16:9', '9:16', '1:1', '4:3', '3:4'];
 const RATIOS_6 = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'];
 const SEEDANCE_2_MODES: PearVideoMode[] = ['text2video', 'image2video', 'imageend2video', 'reference2video', 'video2video'];
@@ -36,8 +47,9 @@ export const PEAR_VIDEO_MODEL_SPECS: PearVideoModelSpec[] = [
   { id: 'doubao-seedance-2-0-260128', name: 'Seedance 2.0', resolutions: ['480P', '720P'], defaultResolution: '720P', aspectRatios: RATIOS_5, durations: RANGE_4_15, modes: SEEDANCE_2_MODES, maxImages: 9, maxVideos: 3, maxAudios: 3 },
   { id: 'doubao-seedance-2-0-fast-260128', name: 'Seedance 2.0 Fast', resolutions: ['480P', '720P'], defaultResolution: '720P', aspectRatios: RATIOS_5, durations: RANGE_4_15, modes: SEEDANCE_2_MODES, maxImages: 9, maxVideos: 3, maxAudios: 3 },
   { id: 'doubao-seedance-2-0-mini-260615', name: 'Seedance 2.0 Mini', resolutions: ['720P'], defaultResolution: '720P', aspectRatios: RATIOS_5, durations: RANGE_4_15, modes: SEEDANCE_2_MODES, maxImages: 10, maxVideos: 10, maxAudios: 10 },
-  // Official range is 4–30s; the platform caps single clips at 15s (PLATFORM_VIDEO_MAX_DURATION_SECONDS).
-  { id: 'doubao-seedance-2-5-260628', name: 'Seedance 2.5', resolutions: ['480P', '720P', '1080P'], defaultResolution: '720P', aspectRatios: RATIOS_5, durations: [...RANGE_4_15, 20, 25, 30], modes: ['text2video', 'image2video', 'imageend2video', 'reference2video'], maxImages: 9, maxVideos: 0, maxAudios: 0 },
+  // PearAPI console (model detail page): 4–30s, up to 30 images / 10 videos / 10 audios,
+  // modes text/image/reference/video-edit. 1080P is only offered on the discounted channel.
+  { id: 'doubao-seedance-2-5-260628', name: 'Seedance 2.5', resolutions: ['480P', '720P', '1080P'], defaultResolution: '720P', aspectRatios: RATIOS_5, durations: RANGE_4_30, modes: [...SEEDANCE_2_MODES], maxImages: 30, maxVideos: 10, maxAudios: 10, maxDurationSeconds: 30 },
   { id: 'gemini-omni', name: 'Gemini Omni', resolutions: ['720P'], defaultResolution: '720P', aspectRatios: ['16:9', '9:16'], durations: [10], modes: ['text2video', 'image2video', 'reference2video', 'video2video'], maxImages: 5, maxVideos: 1, maxAudios: 0 },
   { id: 'grok-imagine-video-1.5', name: 'Grok Imagine Video 1.5', resolutions: ['720P'], defaultResolution: '720P', aspectRatios: ['16:9', '9:16'], durations: [6, 8, 10, 12, 15], modes: ['text2video', 'image2video'], maxImages: 1, maxVideos: 0, maxAudios: 0 },
   { id: 'hailuo-2.3', name: '海螺 2.3', resolutions: ['768P'], defaultResolution: '768P', aspectRatios: RATIOS_5, durations: [6, 10], modes: ['image2video'], maxImages: 1, maxVideos: 0, maxAudios: 0, requiresImage: true },
@@ -79,6 +91,20 @@ export function normalizePearResolution(spec: PearVideoModelSpec, resolution: st
   return spec.resolutions.find(r => r.toUpperCase() === upper) ?? null;
 }
 
+/**
+ * Map a source video's pixel size to a resolution tier (by its short side).
+ * Returns undefined when the size is unknown, so the model default is used.
+ */
+export function inferVideoResolutionTier(width?: number, height?: number): string | undefined {
+  if (!width || !height || width <= 0 || height <= 0) return undefined;
+  const shortSide = Math.min(width, height);
+  if (shortSide >= 1440) return '2K';
+  if (shortSide >= 1000) return '1080P';
+  if (shortSide >= 760) return '768P';
+  if (shortSide >= 600) return '720P';
+  return '480P';
+}
+
 /** Panel-facing capability flags derived from the official spec. */
 export function pearSpecToPanelFeatures(spec: PearVideoModelSpec) {
   return {
@@ -93,6 +119,10 @@ export function pearSpecToPanelFeatures(spec: PearVideoModelSpec) {
     characterConsistency: spec.modes.includes('reference2video'),
     multiShot: false,
     maxDuration: Math.max(...spec.durations),
+    /** Single-clip ceiling override; undefined means the platform default (15s). */
+    maxDurationSeconds: spec.maxDurationSeconds,
+    maxAudios: spec.maxAudios,
+    requiresAudio: Boolean(spec.requiresAudio),
     durations: spec.durations.filter(d => d > 0),
     aspectRatios: [...spec.aspectRatios],
     resolutions: [...spec.resolutions],

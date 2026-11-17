@@ -53,6 +53,7 @@ export interface VideoGenerateParams {
   imageUrl?: string;             // 首帧图片 URL (图生视频)
   lastFrameImageUrl?: string;   // 尾帧图片 URL (首尾帧模式)
   referenceImages?: string[];   // 多参考图 (可灵/Seedance/Vidu/Pika)
+  referenceAudios?: string[];   // 参考音频 / 对口型音频（公网 HTTP(S) 地址，仅 PearAPI 等支持的协议使用）
   aspectRatio?: string;         // 画面比例 (如 "16:9")
   duration?: number;            // 视频时长(秒)
   resolution?: string;          // 分辨率 (如 "720P"，仅按模型规格透传)
@@ -1281,6 +1282,13 @@ function buildPearApiVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
   }
 
   const images = spec ? refImages.slice(0, Math.max(spec.maxImages, 0)) : refImages;
+  const rawAudios = (params.referenceAudios || []).filter(url => /^https?:\/\//i.test(url));
+  const audios = spec ? rawAudios.slice(0, Math.max(spec.maxAudios, 0)) : rawAudios;
+  // Image + audio on a reference-capable model means reference2video (unless it is a lip-sync model,
+  // whose only documented mode is image2video).
+  if (audios.length > 0 && spec && !spec.requiresAudio && spec.modes.includes('reference2video') && mode === 'image2video' && !params.lastFrameImageUrl) {
+    mode = 'reference2video';
+  }
 
   // Ratio / resolution / duration are clamped to the documented values so the
   // upstream never rejects them as unsupported. Unknown models pass through.
@@ -1303,12 +1311,19 @@ function buildPearApiVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
   };
 
   // PearAPI recommends reference_contents array: [{type, media_url, name}]
-  if (images.length > 0) {
-    body.reference_contents = images.map((url, idx) => ({
-      type: 'image',
-      media_url: url,
-      name: idx === 0 ? 'first_frame' : `ref_${idx + 1}`,
-    }));
+  if (images.length > 0 || audios.length > 0) {
+    body.reference_contents = [
+      ...images.map((url, idx) => ({
+        type: 'image',
+        media_url: url,
+        name: idx === 0 ? 'first_frame' : `ref_${idx + 1}`,
+      })),
+      ...audios.map((url, idx) => ({
+        type: 'audio',
+        media_url: url,
+        name: `audio_${idx + 1}`,
+      })),
+    ];
   }
 
   return {
@@ -2007,16 +2022,27 @@ export function getVideoPixelSize(aspectRatio: string, resolution: string = '108
 
 export const PLATFORM_VIDEO_MAX_DURATION_SECONDS = 15;
 
-export function getPlatformVideoDurations(durations: number[]): number[] {
+/**
+ * Filters durations to the single-clip ceiling. `maxSeconds` defaults to the platform
+ * limit (15s); only callers holding a per-model spec (e.g. PearAPI Seedance 2.5) raise it.
+ */
+export function getPlatformVideoDurations(
+  durations: number[],
+  maxSeconds: number = PLATFORM_VIDEO_MAX_DURATION_SECONDS,
+): number[] {
   return Array.from(new Set(durations))
-    .filter((duration) => Number.isInteger(duration) && duration > 0 && duration <= PLATFORM_VIDEO_MAX_DURATION_SECONDS)
+    .filter((duration) => Number.isInteger(duration) && duration > 0 && duration <= maxSeconds)
     .sort((left, right) => left - right);
 }
 
-export function clampVideoDurationToAllowed(duration: number, allowedDurations: number[]): number {
-  const allowed = getPlatformVideoDurations(allowedDurations);
+export function clampVideoDurationToAllowed(
+  duration: number,
+  allowedDurations: number[],
+  maxSeconds: number = PLATFORM_VIDEO_MAX_DURATION_SECONDS,
+): number {
+  const allowed = getPlatformVideoDurations(allowedDurations, maxSeconds);
 
-  if (allowed.length === 0) return Math.min(Math.max(Math.round(duration) || 5, 1), PLATFORM_VIDEO_MAX_DURATION_SECONDS);
+  if (allowed.length === 0) return Math.min(Math.max(Math.round(duration) || 5, 1), maxSeconds);
 
   return allowed.reduce((nearest, candidate) => {
     return Math.abs(candidate - duration) < Math.abs(nearest - duration) ? candidate : nearest;
