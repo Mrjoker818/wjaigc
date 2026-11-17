@@ -844,6 +844,14 @@ function CanvasScaledMenuSelect({
   );
 }
 
+// 各工具需要的模型类型，任一类型有可用模型即视为已配置。
+// 图转3D工厂可接本地模型，面板内自带未配置提示，因此不在此列。
+const TOOL_MODEL_KINDS: Record<string, TaskModelDescriptor['kind'][]> = {
+  '放大': ['upscale', 'image'], '横竖重组': ['image'], '多角度': ['image', 'edit'], '扩展': ['image', 'edit'],
+  '全景生成': ['image'], '精修引擎': ['image', 'edit'], '人物精修大师': ['image'], '语言修图': ['image', 'edit'],
+  'Agent编排': ['chat'], '视频生成': ['video'],
+};
+
 export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, taskModelCatalog = [], taskModelOptions = [], catalogStatus = { loading: false, error: null }, images, onImagesChange, onRenameLayer, selectedImage, onSelectImage, onPreviewImage, onGenerateVariation, onExtractKeywords, onAddImages, captureDisplay3dInsertion, captureVideoToolInsertion, onUploadFiles, uploadAuthority, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, renderOhMyPromptExternally = false, onCloseOhMyPrompt, onInsertPrompt, onInsertVisionPrompt, visionScopeKey, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onCanvasToolActivated, onCaptureCropHistory, onUndo, onRedo, mobileCanUndo, mobileCanRedo, onHistoryTransactionBegin, onHistoryTransactionCommit, onHistoryTransactionRollback, isHistoryTransitionPending = false, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onDeleteImages, canRetryPendingDelete, onUploadEffectReverseSource, captureEffectReverseInsertion, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToNodeMode, onSwitchToWorkflowHub, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, canvasGeneratorActorId, initialAnnotations = [], onAnnotationsChange, documentMetadataMode = false, annotationExecutionContext, onRequestTaskPoll }: InfiniteCanvasProps) {
   const effectiveUploadAuthority = uploadAuthority ?? (projectId ? 'unknown' : 'legacy');
   const isMonochrome = themeStyle === 'monochrome';
@@ -11958,6 +11966,19 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     setCropHeight(img.originalHeight || Math.round(img.height));
   }, [activateCanvasToolSession, getActiveImageData]);
 
+  // 依赖云端模型的工具：模型目录已加载且没有对应类型的可用模型时隐藏。
+  // 目录加载中、失败或为空时不隐藏，避免把未知状态当成未配置。
+  const toolCatalogKnown = !catalogStatus.loading && !catalogStatus.error && taskModelCatalog.length > 0;
+  const configuredModelKinds = useMemo(
+    () => new Set(taskModelCatalog.map(descriptor => descriptor.kind)),
+    [taskModelCatalog],
+  );
+  const isToolConfigured = useCallback((label: string): boolean => {
+    const kinds = TOOL_MODEL_KINDS[label];
+    if (!kinds || !toolCatalogKnown) return true;
+    return kinds.some(kind => configuredModelKinds.has(kind));
+  }, [configuredModelKinds, toolCatalogKnown]);
+
   // 对话里的 [CANVAS_ACTION]：先选中目标图片，选中生效后再打开对应工具，参数和费用仍由用户在工具里确认。
   const [pendingChatCanvasAction, setPendingChatCanvasAction] = useState<ChatCanvasActionRequest | null>(null);
   useEffect(() => {
@@ -11980,6 +12001,13 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     if (!pendingChatCanvasAction || selectedImageData?.id !== pendingChatCanvasAction.imageId) return;
     const target = selectedImageData;
     setPendingChatCanvasAction(null);
+    const requiredTool = pendingChatCanvasAction.type === 'upscale' ? '放大'
+      : pendingChatCanvasAction.type === 'extend' ? '扩展'
+        : pendingChatCanvasAction.type === 'img2img' ? '语言修图' : '';
+    if (requiredTool && !isToolConfigured(requiredTool)) {
+      toast.error(`「${requiredTool}」暂无可用模型，请联系管理员在后台配置后再试`);
+      return;
+    }
     switch (pendingChatCanvasAction.type) {
       case 'upscale': handleOpenUpscale(); break;
       case 'extend': handleOpenExpand(); break;
@@ -11987,7 +12015,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       case 'color_adjust': handleOpenColorAdjust(); break;
       case 'img2img': onEditImage?.(target); break;
     }
-  }, [pendingChatCanvasAction, selectedImageData, handleOpenUpscale, handleOpenExpand, handleOpenCrop, handleOpenColorAdjust, onEditImage]);
+  }, [pendingChatCanvasAction, selectedImageData, handleOpenUpscale, handleOpenExpand, handleOpenCrop, handleOpenColorAdjust, onEditImage, isToolConfigured]);
 
   // 8. DOWNLOAD - popup with PNG/SVG/PSD
   const handleOpenDownload = useCallback((targetImage?: CanvasImage) => {
@@ -12671,7 +12699,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   const availableTools = getAvailableToolsByMediaType(selectedMediaType);
 
   const orderedImageActions = fullOrder
-    .filter(label => !toolbarHiddenItems.has(label) && availableTools.includes(label))
+    .filter(label => !toolbarHiddenItems.has(label) && availableTools.includes(label) && isToolConfigured(label))
     .map(label => imageActions.find(a => a.label === label))
     .filter((a): a is typeof imageActions[number] => a !== undefined);
   const selectedSketchTrace = selectedIds.size === 1
@@ -19890,7 +19918,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           </button>
 
           {/* Language Edit */}
-          <button
+          {isToolConfigured('语言修图') && (<button
             aria-label="语言修图"
             onClick={() => { onEditImage?.(null); }}
             className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
@@ -19898,10 +19926,10 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           >
             <Pencil className={`h-4 w-4 ${mIcon.pencil}`} />
             <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">修图</span>
-          </button>
+          </button>)}
 
           {/* Agent Edit */}
-          <button
+          {isToolConfigured('Agent编排') && (<button
             aria-label="Agent编排"
             onClick={() => { if (!activateCanvasToolSession('agent', 'bottom-toolbar', [])) return; setAgentEditImage(null); setShowAgentEditor(true); }}
             className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
@@ -19909,10 +19937,10 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           >
             <Bot className={`h-4 w-4 ${mIcon.bot}`} />
             <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">Agent</span>
-          </button>
+          </button>)}
 
           {/* Video Generation - Floating Panel */}
-          <button
+          {isToolConfigured('视频生成') && (<button
             aria-label="视频生成"
             onClick={() => {
               onOpenVideoPanel?.();
@@ -19925,7 +19953,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           >
             <Film className="h-4 w-4" />
             <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">视频生成</span>
-          </button>
+          </button>)}
 
           </section>
 
@@ -19946,7 +19974,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           </button>
 
           {/* Refine Engine */}
-          <button
+          {isToolConfigured('精修引擎') && (<button
             aria-label="精修引擎"
             onClick={() => { if (!activateCanvasToolSession('product-refine', 'bottom-toolbar', [])) return; setRefineEngineImageUrl(''); setShowRefineEngine(true); }}
             className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' : 'text-gold-muted hover:text-text-bright hover:bg-white/10'}`}
@@ -19954,9 +19982,9 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           >
             <Scan className={`h-4 w-4 ${mIcon.scan}`} />
             <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">精修引擎</span>
-          </button>
+          </button>)}
 
-          <button
+          {isToolConfigured('人物精修大师') && (<button
             aria-label="人物精修大师"
             onClick={() => { const image = selectedImageData || selectedImage; if (!activateCanvasToolSession('human-refine', 'bottom-toolbar', image ? [image.id] : [])) return; setHumanRepairImageUrl(image?.url || ''); setShowHumanRepair(true); }}
             className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-emerald-600 hover:text-emerald-500 hover:bg-emerald-50' : 'text-emerald-300 hover:text-emerald-200 hover:bg-emerald-400/10'}`}
@@ -19964,7 +19992,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           >
             <UserRoundCheck className="h-4 w-4" />
             <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">人物精修</span>
-          </button>
+          </button>)}
 
           {/* Font Design */}
           <button
