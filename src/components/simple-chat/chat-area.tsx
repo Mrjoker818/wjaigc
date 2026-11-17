@@ -232,6 +232,8 @@ export default function ChatArea({
       setMessages((task.messages || []).filter(Boolean));
       setSelectedModel(task.model);
       setSelectedProviderId(task.providerId);
+      setSelectedImageModel(task.imageModel || '');
+      setSelectedImageProviderId(task.imageProviderId || '');
       setReasoningEffort(task.reasoningEffort || 'medium');
       setResponseSpeed(task.responseSpeed || 'balanced');
       setAppliedChatControls(task.appliedChatControls);
@@ -327,6 +329,26 @@ export default function ChatArea({
   }, []);
 
   useEffect(() => { fetchImageModels(); }, []);
+
+  // Saved tasks can reference models an admin has since removed. Fall back to the first
+  // currently offered model instead of sending a stale ID the relay will reject.
+  useEffect(() => {
+    if (chatModels.length === 0) return;
+    const offered = chatModels.some(m => m.modelId === selectedModel && (!selectedProviderId || m.providerId === selectedProviderId));
+    if (!offered) {
+      setSelectedModel(chatModels[0].modelId);
+      setSelectedProviderId(chatModels[0].providerId);
+    }
+  }, [chatModels, selectedModel, selectedProviderId]);
+
+  useEffect(() => {
+    if (imageModels.length === 0) return;
+    const offered = imageModels.some(m => m.modelId === selectedImageModel && (!selectedImageProviderId || m.providerId === selectedImageProviderId));
+    if (!offered) {
+      setSelectedImageModel(imageModels[0].modelId);
+      setSelectedImageProviderId(imageModels[0].providerId);
+    }
+  }, [imageModels, selectedImageModel, selectedImageProviderId]);
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
   // 加载用户记忆
@@ -694,7 +716,11 @@ export default function ChatArea({
         }),
       });
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => null) as { error?: unknown } | null;
+        const reason = typeof errBody?.error === 'string' && errBody.error ? errBody.error : `HTTP ${res.status}`;
+        throw new Error(reason);
+      }
 
       const reader = res.body?.getReader();
       if (!reader) throw new Error('No response body');
@@ -775,9 +801,11 @@ export default function ChatArea({
                   const updated = [...prev];
                   const last = updated[updated.length - 1];
                   if (last?.role === 'assistant') {
+                    // Keep any text the model already streamed; the status line goes underneath it.
+                    const statusLine = `*${parsed.label || '正在处理图片任务...'}*`;
                     updated[updated.length - 1] = {
                       ...last,
-                      content: `*${parsed.label || '正在处理图片任务...'}*`,
+                      content: fullContent ? `${fullContent}\n\n${statusLine}` : statusLine,
                     };
                   }
                   return updated;
@@ -825,12 +853,13 @@ export default function ChatArea({
           }
         }
       }
-    } catch {
+    } catch (error: unknown) {
+      const reason = error instanceof Error && error.message ? error.message : '未知错误';
       setMessages(prev => {
         const updated = [...prev];
         const last = updated[updated.length - 1];
         if (last?.role === 'assistant') {
-          updated[updated.length - 1] = { ...last, content: '抱歉，请求失败，请重试。' };
+          updated[updated.length - 1] = { ...last, content: `请求失败：${reason}\n\n建议：尝试切换模型或稍后重试。` };
         }
         return updated;
       });

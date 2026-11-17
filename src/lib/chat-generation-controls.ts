@@ -53,20 +53,39 @@ function parseBoolean(value: string | undefined): boolean | undefined {
   return undefined;
 }
 
+const OPENAI_REASONING_MODEL = /^(o1|o3|o4)(-|$)|gpt-([5-9]|\d{2,})(\.|-|$)/;
+
 function inferReasoningMode(model: string): ReasoningControlMode {
   const id = model.toLowerCase();
-  if (/^(o1|o3|o4)(-|$)|gpt-5|gpt-5\./.test(id)) return 'reasoning_effort';
+  if (OPENAI_REASONING_MODEL.test(id)) return 'reasoning_effort';
   if (/gemini/.test(id)) return 'thinking_budget';
   if (/doubao-seed|seed-2|kimi-k2\.5|kimi-k2-5/.test(id)) return 'thinking';
   if (/deepseek-r1|deepseek-reasoner|qwq|qwen.*thinking/.test(id)) return 'native';
   return 'none';
 }
 
-function getReasoningMode(model: string, provider: ApiProvider): ReasoningControlMode {
+export function isPearChatProvider(provider?: Pick<ApiProvider, 'baseUrl' | 'name'>): boolean {
+  if (!provider) return false;
+  return /pearapi/i.test(provider.baseUrl || '') || /^pear\b/i.test(provider.name || '');
+}
+
+/**
+ * PearAPI's /v1/chat/completions is OpenAI compatible and documents no vendor thinking fields.
+ * Only the standard `reasoning_effort` is sent, and only for model families that accept it
+ * (GPT reasoning models and Gemini, which the relay maps to its native thinking config).
+ */
+function inferPearReasoningMode(model: string): ReasoningControlMode {
+  const id = model.toLowerCase();
+  if (OPENAI_REASONING_MODEL.test(id) || /gemini/.test(id)) return 'reasoning_effort';
+  return 'none';
+}
+
+function getReasoningMode(model: string, provider: Pick<ApiProvider, 'advancedParams' | 'baseUrl' | 'name'>): ReasoningControlMode {
   const configured = provider.advancedParams?.reasoningControl;
   if (configured === 'reasoning_effort' || configured === 'thinking_budget' || configured === 'thinking' || configured === 'native' || configured === 'none') {
     return configured;
   }
+  if (isPearChatProvider(provider)) return inferPearReasoningMode(model);
   return inferReasoningMode(model);
 }
 
@@ -89,9 +108,9 @@ function outputTokenLimit(speed: ResponseSpeed): number {
   return speed === 'fast' ? 2048 : speed === 'quality' ? 8192 : 4096;
 }
 
-export function getChatControlSupport(model: string, provider?: Pick<ApiProvider, 'advancedParams'>): ChatControlSupport {
-  const safeProvider = provider || { advancedParams: undefined };
-  const reasoningMode = getReasoningMode(model, safeProvider as ApiProvider);
+export function getChatControlSupport(model: string, provider?: Partial<Pick<ApiProvider, 'advancedParams' | 'baseUrl' | 'name'>>): ChatControlSupport {
+  const safeProvider = { advancedParams: provider?.advancedParams, baseUrl: provider?.baseUrl || '', name: provider?.name || '' };
+  const reasoningMode = getReasoningMode(model, safeProvider);
   return {
     reasoningMode,
     supportsReasoning: reasoningMode !== 'none',

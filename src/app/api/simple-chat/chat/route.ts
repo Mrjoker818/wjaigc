@@ -3,10 +3,11 @@ import { findProviderForModel } from '@/lib/server-api-config';
 import type { ApiKind } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { SearchClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
-import { fetchWithV1Retry, API_TIMEOUTS } from '@/lib/api-helpers';
+import { fetchWithV1Retry, API_TIMEOUTS, getInternalApiUrl } from '@/lib/api-helpers';
 import { resolveChatControls } from '@/lib/chat-generation-controls';
 import { getInternalRequestHeaders } from '@/lib/api-auth';
 import { buildWorkModeInstructions, buildWorkPlan, normalizeWorkMode } from '@/lib/chatgpt-work-mode';
+import { IMAGE_ASPECT_RATIOS, describeUpstreamChatError, resolveToolAspectRatio } from '@/lib/simple-chat-upstream';
 
 const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手。你可以：
 1. 回答用户的各种问题
@@ -58,12 +59,14 @@ export async function POST(request: NextRequest) {
     workMode?: 'chat' | 'work';
   };
   const messages = body.messages || [];
-  const model = body.model || 'deepseek-v4-flash';
+  // No hard-coded fallback: a stale default model is rejected by the relay with an opaque error.
+  const model = (body.model || '').trim();
   const providerId = body.providerId || '';
   const webSearch = body.webSearch || false;
   const knowledgeItems = body.knowledgeItems || [];
-  const imageModel = body.imageModel || model;
-  const imageProviderId = body.imageProviderId || providerId;
+  // The image model must be chosen explicitly; a chat model cannot generate images.
+  const imageModel = body.imageModel || '';
+  const imageProviderId = body.imageProviderId || '';
   const memories = body.memories || [];
   const deepAnalysis = body.deepAnalysis || false;
   const workMode = normalizeWorkMode(body.workMode);
@@ -81,6 +84,10 @@ export async function POST(request: NextRequest) {
     (productTypes.length > 0 && !productTypes.includes('chat'))
   )) {
     return Response.json({ error: 'You are not authorized to use intelligent chat' }, { status: 403 });
+  }
+
+  if (!model) {
+    return Response.json({ error: '请先在输入框上方选择一个对话模型' }, { status: 400 });
   }
 
   // 查找提供商
@@ -252,10 +259,10 @@ export async function POST(request: NextRequest) {
                     type: 'string',
                     description: 'A detailed description of the image to generate',
                   },
-                  size: {
+                  aspect_ratio: {
                     type: 'string',
-                    enum: ['1024x1024', '1792x1024', '1024x1792'],
-                    description: 'Image size, default 1024x1024',
+                    enum: [...IMAGE_ASPECT_RATIOS],
+                    description: 'Aspect ratio of the image, default 1:1',
                   },
                 },
                 required: ['prompt'],
@@ -288,7 +295,8 @@ export async function POST(request: NextRequest) {
 
         if (!fetchRes.ok) {
           const errText = await fetchRes.text().catch(() => '');
-          send({ type: 'error', error: `API 错误 ${fetchRes.status}: ${errText.slice(0, 200)}` });
+          console.warn(`[simple-chat] upstream chat failed: model=${model}, provider=${provider.name}, status=${fetchRes.status}, body=${errText.slice(0, 200)}`);
+          send({ type: 'error', error: describeUpstreamChatError(fetchRes.status, errText, model) });
           controller.close();
           return;
         }
@@ -351,11 +359,15 @@ export async function POST(request: NextRequest) {
           if (tc.name === 'generate_image') {
             send({ type: 'tool_status', tool: 'generating_image', status: 'generating', label: '正在生成图片...' });
 
-            let args: { prompt?: string; size?: string } = {};
+            let args: { prompt?: string; size?: string; aspect_ratio?: string } = {};
             try { args = JSON.parse(tc.arguments); } catch { /* ignore */ }
 
             const imgPrompt = args.prompt || fullContent.slice(0, 500);
-            const imgSize = args.size || '1024x1024';
+            const imgAspectRatio = resolveToolAspectRatio(args);
+            const failImage = (reason: string) => {
+              console.warn(`[simple-chat] image generation failed: model=${imageModel || '(none)'}, reason=${reason.slice(0, 200)}`);
+              send({ type: 'tool_status', tool: 'generating_image', status: 'failed', label: `图片生成失败：${reason}` });
+            };
 
             // 图生图：用户上传了参考图且意图是"基于图片生成/调整"时，传入参考图
             const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
@@ -364,56 +376,72 @@ export async function POST(request: NextRequest) {
             const i2iIntent = /(这张图|这张|此图|图片|参考|改成|调整|换成|基于|类似风格|同款|根据这)/.test(userText);
             const referenceImage = userImages.length > 0 && i2iIntent ? userImages[0] : undefined;
 
-            try {
+            if (!imageModel) {
+              failImage('未选择图像模型，请在输入框上方选择一个图像模型后重试');
+            } else try {
               const internalHeaders = await getInternalRequestHeaders(user.id, user.role === 'admin' ? 'admin' : 'user');
-              const imgRes = await fetch(`${request.nextUrl.origin}/api/generate`, {
+              // Server-side self-calls go to the local port; the public origin may not be reachable from inside the container.
+              const imgRes = await fetch(getInternalApiUrl('/api/generate'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', ...internalHeaders },
                 body: JSON.stringify({
                   prompt: imgPrompt,
                   model: imageModel,
                   providerId: imageProviderId,
-                  size: imgSize,
-                  count: 1,
+                  aspectRatio: imgAspectRatio,
+                  outputCount: 1,
                   submitOnly: true,
-                  ...(referenceImage ? { imageUrl: referenceImage, strength: i2iStrength } : {}),
+                  projectId: body.projectId,
+                  ...(referenceImage ? { referenceImages: [referenceImage], referenceMode: 'reference', strength: i2iStrength } : {}),
                 }),
+                signal: AbortSignal.timeout(60000),
               });
-              const imgData = await imgRes.json() as { success?: boolean; taskIds?: string[]; imageUrls?: string[]; directImageUrls?: string[] };
-
-              // 直接返回图片的情况（同步提供商）
+              const imgData = await imgRes.json().catch(() => ({})) as {
+                success?: boolean; error?: string; taskIds?: string[]; taskId?: string; imageUrls?: string[]; directImageUrls?: string[];
+              };
               const directUrls = imgData.directImageUrls || imgData.imageUrls;
-              if (imgData.success && directUrls?.length && !imgData.taskIds?.length) {
+              const taskIds = imgData.taskIds || (imgData.taskId ? [imgData.taskId] : []);
+
+              if (!imgRes.ok || !imgData.success) {
+                failImage(imgData.error || `图像接口返回 ${imgRes.status}`);
+              } else if (directUrls?.length && taskIds.length === 0) {
                 send({ type: 'image', imageUrl: directUrls[0], prompt: imgPrompt });
-              } else if (imgData.success && imgData.taskIds?.length) {
-                const taskId = imgData.taskIds[0];
+              } else if (taskIds.length > 0) {
+                const taskId = taskIds[0];
                 send({ type: 'tool_status', tool: 'generating_image', status: 'polling', label: '图片生成中...', taskId });
 
-                // 轮询直到完成
-                let attempts = 0;
-                while (attempts < 100) {
-                  await new Promise(r => setTimeout(r, 3000));
-                  const pollRes = await fetch(`${request.nextUrl.origin}/api/poll-task`, {
+                let settled = false;
+                for (let attempt = 0; attempt < 200; attempt += 1) {
+                  await new Promise(r => setTimeout(r, attempt === 0 ? 500 : 2000));
+                  const pollRes = await fetch(getInternalApiUrl('/api/poll-task'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...internalHeaders },
                     body: JSON.stringify({ taskId, model: imageModel, providerId: imageProviderId }),
-                  });
-                  const pollData = await pollRes.json() as { status?: string; imageUrl?: string; progress?: number };
-
-                  if (pollData.status === 'completed' && pollData.imageUrl) {
-                    send({ type: 'image', imageUrl: pollData.imageUrl, prompt: imgPrompt });
+                    signal: AbortSignal.timeout(30000),
+                  }).catch(() => null);
+                  if (!pollRes) continue;
+                  const pollData = await pollRes.json().catch(() => ({})) as {
+                    status?: string; imageUrl?: string; imageUrls?: string[]; progress?: number; error?: string;
+                  };
+                  const resultUrl = pollData.imageUrl || pollData.imageUrls?.[0];
+                  if (pollData.status === 'completed' && resultUrl) {
+                    send({ type: 'image', imageUrl: resultUrl, prompt: imgPrompt });
+                    settled = true;
                     break;
                   }
-                  if (pollData.status === 'failed') {
-                    send({ type: 'tool_status', tool: 'generating_image', status: 'failed', label: '图片生成失败' });
+                  if (pollData.status === 'failed' || pollData.status === 'cancelled') {
+                    failImage(pollData.error || '上游返回失败');
+                    settled = true;
                     break;
                   }
-                  send({ type: 'tool_status', tool: 'generating_image', status: 'polling', label: `图片生成中... ${pollData.progress || ''}`, taskId, progress: pollData.progress });
-                  attempts++;
+                  send({ type: 'tool_status', tool: 'generating_image', status: 'polling', label: `图片生成中...${pollData.progress ? ` ${pollData.progress}%` : ''}`, taskId, progress: pollData.progress });
                 }
+                if (!settled) failImage('等待超时，图片可能仍在生成，请稍后在历史中查看');
+              } else {
+                failImage('图像接口未返回图片或任务编号');
               }
             } catch (e: unknown) {
-              send({ type: 'tool_status', tool: 'generating_image', status: 'failed', label: `图片生成失败: ${errorMessage(e, '未知错误')}` });
+              failImage(errorMessage(e, '未知错误'));
             }
           }
         }
