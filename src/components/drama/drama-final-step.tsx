@@ -1,6 +1,10 @@
 'use client';
 
-import { Download, Film, ImageDown, Loader2, Mic } from 'lucide-react';
+import { useState } from 'react';
+import { Download, FileArchive, FileSpreadsheet, Film, ImageDown, Loader2, Mic, Subtitles } from 'lucide-react';
+import { toast } from 'sonner';
+import { episodeSrt, shotListCsv } from '@/lib/drama/export';
+import { buildEpisodePackage, downloadBlob, downloadText, exportFileName } from '@/lib/drama/export-client';
 import { DRAMA_TRANSITIONS as TRANSITIONS, type DramaTransition } from '@/lib/drama/render';
 import { buildTimeline } from '@/lib/drama/timeline';
 import { currentVoiceover, shotsNeedingVoiceover } from '@/lib/drama/voiceover';
@@ -91,6 +95,54 @@ export function DramaFinalStep() {
           </div>
         </section>
       ) : null}
+
+      <ExportPanel />
     </div>
+  );
+}
+
+/** Subtitles, shot list and a ZIP of everything made for this episode, for editing outside the workbench. */
+function ExportPanel() {
+  const { doc, episode } = useDrama();
+  const [packing, setPacking] = useState<{ done: number; total: number } | null>(null);
+  if (!episode) return null;
+  const srt = episodeSrt(doc, episode.id);
+
+  const pack = async () => {
+    setPacking({ done: 0, total: 0 });
+    try {
+      const result = await buildEpisodePackage(doc, episode.id, { onProgress: (done, total) => setPacking({ done, total }) });
+      downloadBlob(result.blob, result.fileName);
+      if (result.missing.length) toast.error(`制作包已下载，${result.missing.length} 个文件没下载成功`, { description: '压缩包里的「缺失文件.txt」列出了它们。' });
+      else toast.success('制作包已下载');
+    } catch (error) {
+      toast.error('制作包打包失败', { description: error instanceof Error && error.message ? error.message : '请稍后重试' });
+    } finally {
+      setPacking(null);
+    }
+  };
+
+  return (
+    <section className="drama-panel flex flex-col gap-3 p-4" aria-labelledby="drama-export">
+      <h2 id="drama-export" className="text-sm font-semibold">导出</h2>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className="drama-btn" disabled={!srt}
+          onClick={() => downloadText(srt, exportFileName(doc, episode.id, '字幕.srt'), 'application/x-subrip;charset=utf-8')}>
+          <Subtitles className="h-4 w-4" />字幕 SRT
+        </button>
+        <button type="button" className="drama-btn"
+          onClick={() => downloadText(shotListCsv(doc, episode.id), exportFileName(doc, episode.id, '镜头表.csv'), 'text/csv;charset=utf-8')}>
+          <FileSpreadsheet className="h-4 w-4" />镜头表 CSV
+        </button>
+        <button type="button" className="drama-btn" disabled={packing !== null} onClick={() => void pack()}>
+          {packing ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <FileArchive className="h-4 w-4" />}
+          {packing ? `正在打包 ${packing.done}/${packing.total || '…'}` : '制作包 ZIP'}
+        </button>
+      </div>
+      <p className="drama-label">
+        {srt ? '字幕按计划时长排时间，渲染后的成片可能差零点几秒。' : '镜头里还没有台词，暂时没有字幕可导出。'}
+        制作包含剧本、镜头表、字幕、成片、每镜视频和关键帧、配音、定妆图。
+      </p>
+    </section>
   );
 }
