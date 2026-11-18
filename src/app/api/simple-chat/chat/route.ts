@@ -478,6 +478,10 @@ export async function POST(request: NextRequest) {
                   ...(fitted.resolution ? { resolution: fitted.resolution } : {}),
                   outputCount: 1,
                   submitOnly: true,
+                  // Use exactly the model the user picked. If it fails, surface the error instead of
+                  // silently switching to another model — that mismatch left the provider panel showing
+                  // "已退回" while the chat kept polling a different model as if still generating.
+                  disableModelFallback: true,
                   projectId: body.projectId,
                   ...(referenceImage ? {
                     referenceImages: [referenceImage],

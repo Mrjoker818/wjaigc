@@ -806,12 +806,17 @@ export default function ChatArea({
                 }
               } else if (parsed.type === 'tool_status') {
                 setSearchStatus(null);
+                const isFailed = parsed.status === 'failed';
                 setMessages(prev => {
                   const updated = [...prev];
                   const last = updated[updated.length - 1];
                   if (last?.role === 'assistant') {
-                    // Keep any text the model already streamed; the status line goes underneath it.
-                    const statusLine = `*${parsed.label || '正在处理图片任务...'}*`;
+                    // On failure, surface the reason and stop — do not leave a "生成中" line behind.
+                    // Otherwise show the transient status line underneath the streamed text.
+                    const label = parsed.label || (isFailed ? '图片生成失败' : '正在处理图片任务...');
+                    const statusLine = isFailed
+                      ? `❌ ${label}\n\n建议：尝试切换模型或稍后重试。`
+                      : `*${label}*`;
                     updated[updated.length - 1] = {
                       ...last,
                       content: fullContent ? `${fullContent}\n\n${statusLine}` : statusLine,
@@ -825,9 +830,11 @@ export default function ChatArea({
                   const updated = [...prev];
                   const last = updated[updated.length - 1];
                   if (last?.role === 'assistant') {
+                    // Drop any transient "图片生成中..." status line baked into content by the last
+                    // tool_status event — rebuild from the model's actual streamed text instead.
                     updated[updated.length - 1] = {
                       ...last,
-                      content: last.content || '图片已生成',
+                      content: fullContent || '图片已生成',
                       images: [...(last.images || []), parsed.imageUrl],
                     };
                   }

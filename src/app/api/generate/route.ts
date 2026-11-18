@@ -44,6 +44,24 @@ import {
 export const maxDuration = 1800; // 30分钟 - 支持apimart等慢速API出图260s+
 export const dynamic = 'force-dynamic';
 
+/**
+ * 部分中转站返回相对路径图片（如 /v1/images/proxy/xxx），浏览器会按本站域名请求导致图片裂开。
+ * 这里按供应商 baseUrl 补全为绝对地址；已是 data:/http(s) 的 URL 原样返回。
+ */
+function absolutizeProviderUrl(url: string, providerBaseUrl: string): string {
+  if (typeof url !== 'string' || url.length === 0) return url;
+  const trimmed = url.trim();
+  if (/^(https?:|data:|blob:)/i.test(trimmed)) return trimmed;
+  if (!providerBaseUrl) return trimmed;
+  try {
+    // baseUrl 可能带 /v1 等路径后缀，取其 origin 作为相对路径的根
+    const origin = new URL(providerBaseUrl).origin;
+    return new URL(trimmed, origin.endsWith('/') ? origin : `${origin}/`).toString();
+  } catch {
+    return trimmed;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 动态模型配置 - 不再硬编码任何特定提供商的模型信息
 // ---------------------------------------------------------------------------
