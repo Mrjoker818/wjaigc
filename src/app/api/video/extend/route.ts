@@ -52,6 +52,7 @@ import { resolveTaskModelForUser } from '@/lib/task-core/model-catalog';
 import { validateTaskModelSelection } from '@/lib/task-core/model-capability-resolution';
 import { resolveProviderForTask } from '@/lib/task-core/exact-provider-routing';
 import { ModelCapabilityError } from '@/lib/task-core/model-capability-contract';
+import { toProviderMediaUrl } from '@/lib/provider-media-url';
 
 export const maxDuration = 300; // 5 min timeout
 
@@ -247,25 +248,8 @@ export async function POST(request: NextRequest) {
     // 3. 获取模型特征信息
     const modelInfo = getVideoModelInfo(pureModel);
 
-    // 3.5 解析视频 URL（转换为第三方 API 可访问的格式）
-    const rawDomain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
-    const domainBase = rawDomain.replace(/\/+$/, '');
-
-    let resolvedVideoUrl = videoUrl;
-    if (videoUrl.startsWith('/')) {
-      if (domainBase) {
-        const base = domainBase.startsWith('http') ? domainBase : `https://${domainBase}`;
-        resolvedVideoUrl = `${base}${videoUrl}`;
-      } else {
-        try {
-          const proto = process.env.NODE_ENV === 'production' ? 'https' : 'http';
-          const port = process.env.DEPLOY_RUN_PORT || 5000;
-          const resp = await fetch(`${proto}://localhost:${port}${videoUrl}`, { signal: AbortSignal.timeout(10000) });
-          const buf = Buffer.from(await resp.arrayBuffer());
-          resolvedVideoUrl = `data:video/mp4;base64,${buf.toString('base64')}`;
-        } catch { /* fallback to original */ }
-      }
-    }
+    // 3.5 解析视频 URL（转换为第三方 API 可访问的格式：S3 预签名 / 签名公网链接 / 公网域名 / base64）
+    const resolvedVideoUrl = await toProviderMediaUrl(videoUrl, { maxInlineBytes: 100 * 1024 * 1024 }) ?? videoUrl;
 
     // 4. 构建请求参数（接入导演级提示词：本地规则增强，不依赖额外 LLM 调用）
     const safePrompt = rawPrompt && rawPrompt.trim() ? rawPrompt : '请延续视频内容和画面，保持角色和场景一致';

@@ -55,8 +55,7 @@ import {
 import type { User } from '@/lib/user-types';
 import type { VideoReferenceBinding } from '@/lib/video-director/prompt-compiler';
 import { getRuntimeSettings } from '@/lib/runtime-settings';
-import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
-import { detectImageMimeType } from '@/lib/safe-image-input';
+import { canPublishProviderMedia, toProviderMediaUrl } from '@/lib/provider-media-url';
 import {
   createTaskEntryAudit,
   executeTaskEntryMigration,
@@ -115,16 +114,6 @@ async function waitForSkillVideoAcceptance(
   throw Object.assign(new Error('Skill video acceptance was not confirmed in time'), {
     code: 'SKILL_ACCEPTANCE_TIMEOUT',
   });
-}
-
-/** A loopback domain is reachable only from this host, so providers cannot download from it. */
-function isLoopbackDomain(domain: string): boolean {
-  try {
-    const { hostname } = new URL(domain.startsWith('http') ? domain : `https://${domain}`);
-    return hostname === 'localhost' || hostname === '0.0.0.0' || hostname === '[::1]' || /^127\./.test(hostname);
-  } catch {
-    return false;
-  }
 }
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -438,64 +427,28 @@ export async function POST(request: NextRequest) {
     // 3. 获取模型特征信息
     const modelInfo = getVideoModelInfo(pureModel);
 
-    // 3.5 解析图片 URL（转换为第三方 API 可访问的格式）
-    const rawDomain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
-    const configuredDomain = rawDomain.replace(/\/+$/, '');
-    const domainBase = configuredDomain && !isLoopbackDomain(configuredDomain) ? configuredDomain : '';
-
+    // 3.5 解析图片 URL（转换为第三方 API 可访问的格式：S3 预签名 / 签名公网链接 / 公网域名 / base64）
     const resolveImageUrl = async (imgUrl: string | undefined | null): Promise<string | undefined> => {
       if (!imgUrl || typeof imgUrl !== 'string' || !imgUrl.trim()) return undefined;
-
-      // 1. 相对路径 → 公网 URL 或 base64
-      if (imgUrl.startsWith('/')) {
-        if (domainBase) {
-          const base = domainBase.startsWith('http') ? domainBase : `https://${domainBase}`;
-          return `${base}${imgUrl}`;
-        }
-        // 无公网域名时，直接读取本地文件转为 base64
+      // 视频 API 大多不接受 base64：能发布成公网地址时先存盘再发布
+      if (imgUrl.startsWith('data:') && await canPublishProviderMedia()) {
         try {
-          const buf = await fetchImageBuffer(imgUrl, { maxBytes: 20 * 1024 * 1024 });
-          const mimeType = detectImageMimeType(buf);
-          if (!mimeType) return undefined;
-          return `data:${mimeType};base64,${buf.toString('base64')}`;
-        } catch {
-          return undefined;
-        }
-      }
-
-      // 2. data: URL — 直接传递（视频 API 通常不支持，但保留原值）
-      if (imgUrl.startsWith('data:')) {
-        // 视频 API 大多不支持 base64，尝试先 save-image 再转公网 URL
-        if (domainBase) {
-          try {
-            const saveResp = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/save-image`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', ...(await getInternalRequestHeaders('system-save-image', 'admin')) },
-              body: JSON.stringify({ imageData: imgUrl }),
-            });
-            if (saveResp.ok) {
-              const saveData = await saveResp.json();
-              if (saveData.url) {
-                const base = domainBase.startsWith('http') ? domainBase : `https://${domainBase}`;
-                return `${base}${saveData.url}`;
-              }
+          const saveResp = await fetch(`http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}/api/save-image`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(await getInternalRequestHeaders('system-save-image', 'admin')) },
+            body: JSON.stringify({ imageData: imgUrl }),
+          });
+          if (saveResp.ok) {
+            const saveData = await saveResp.json() as { url?: unknown };
+            if (typeof saveData.url === 'string') {
+              const published = await toProviderMediaUrl(saveData.url);
+              if (published) return published;
             }
-          } catch { /* save-image failed */ }
-        }
-        return imgUrl; // 兜底：直接传 base64
+          }
+        } catch { /* save-image failed; fall back to the data URL */ }
+        return imgUrl;
       }
-
-      // 3. 外部 URL 直接传递
-      if (imgUrl.startsWith('http')) return imgUrl;
-
-      // 4. 兜底 — 补全为公网 URL
-      if (domainBase) {
-        const base = domainBase.startsWith('http') ? domainBase : `https://${domainBase}`;
-        const path = imgUrl.startsWith('/') ? imgUrl : `/${imgUrl}`;
-        return `${base}${path}`;
-      }
-
-      return imgUrl;
+      return toProviderMediaUrl(imgUrl);
     };
 
     const [resolvedImageUrl, resolvedLastFrameUrl, ...resolvedRefs] = await Promise.all([

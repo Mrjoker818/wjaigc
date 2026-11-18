@@ -72,6 +72,7 @@ import {
 } from '@/lib/task-core/model-capability-contract';
 import { trustedGatewayContext } from '@/lib/media-gateway/internal-client';
 import { submitRestoredGenerationRetry } from '@/lib/task-core/restored-generation-retry';
+import { publicProjectDomain } from '@/lib/provider-media-url';
 
 class OrdinaryReferenceTooLargeError extends Error {}
 
@@ -479,9 +480,8 @@ export async function POST(request: NextRequest) {
           throw error;
         }
       }
-      // 确保域名不重复包含协议：COZE_PROJECT_DOMAIN_DEFAULT 可能已含 https://
-      const rawDomain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
-      const domainBase = rawDomain.replace(/\/+$/, ''); // 去掉尾部斜杠
+      // 公网域名（含协议）；回环地址供应商访问不到，按未配置处理，本地参考图走下方的 base64 快照
+      const domainBase = publicProjectDomain();
 
       const resolveImage = async (rawImg: unknown): Promise<string | null> => {
         const img = typeof rawImg === 'string' ? rawImg : (rawImg as { url?: string })?.url || String(rawImg);
