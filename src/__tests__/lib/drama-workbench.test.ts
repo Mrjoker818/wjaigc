@@ -202,6 +202,16 @@ describe('reference prompts', () => {
     expect(keyframeReferences(propShot, withProp, 4)).toEqual(['/cast/lin.png', '/loc/plate.png', '/prop/t.png']);
   });
 
+  it('draws a closing frame that starts from the opening frame', () => {
+    const doc = docWithShots();
+    const s = shot('k', { prompt: '推门', actionBeat: '坐下', firstFrameUrl: '/f/open.png', characterIds: ['lin'] });
+    const prompt = keyframePrompt(s, doc, 'last');
+    expect(prompt).toContain('closing frame');
+    expect(prompt).toContain('ends after: 坐下');
+    expect(keyframeReferences(s, doc, 4, 'last')[0]).toBe('/f/open.png');
+    expect(keyframeReferences(s, doc, 4)).not.toContain('/f/open.png');
+  });
+
   it('draws a prop sheet from its description', () => {
     const prompt = propImagePrompt({ id: 'ticket', name: '彩票', description: '泛黄的旧彩票', material: '纸' }, 'cinematic');
     expect(prompt).toContain('prop design reference sheet');

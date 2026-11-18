@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ImagePlus, Loader2, RotateCcw, Stethoscope, X } from 'lucide-react';
-import { chooseFirstFrame, shotReferenceImages } from '@/lib/drama/shot-runner';
+import { chooseFirstFrame, chooseLastFrame, shotReferenceImages } from '@/lib/drama/shot-runner';
 import { applyRetakeSuggestion, estimateShots } from '@/lib/drama/workbench-client';
 import { findShot, fitDuration, orderedPrevious, updateShot } from '@/lib/drama/workbench-state';
 import { diagnoseFailure, listFailureTypes, type VideoFailureType } from '@/lib/video-director/retake-diagnosis';
@@ -52,9 +52,12 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
   const location = doc.locations.find(item => item.id === shot.sceneId);
   const firstFrame = model ? chooseFirstFrame(shot, previous, location, model.capability) : { source: 'none' as const };
   // The previous shot's frame is extracted only at submit time; its video URL stands in so the count matches.
+  const firstFrameStandIn = firstFrame.url ?? ('previousVideoUrl' in firstFrame ? firstFrame.previousVideoUrl : undefined);
+  const lastFrame = model ? chooseLastFrame(shot, model.capability, firstFrameStandIn) : undefined;
   const references = model
-    ? shotReferenceImages(shot, doc.cast, model.capability, firstFrame.url ?? ('previousVideoUrl' in firstFrame ? firstFrame.previousVideoUrl : undefined), doc.props)
+    ? shotReferenceImages(shot, doc.cast, model.capability, [firstFrameStandIn, lastFrame], doc.props)
     : [];
+  const ratio = (shot.aspectRatio || doc.aspectRatio).replace(':', ' / ');
   const diagnosis = failure ? diagnoseFailure(failure) : null;
   const running = runningShotIds.has(shot.id);
   const set = (patch: Parameters<typeof updateShot>[2]) => update(current => updateShot(current, shot.id, patch));
@@ -147,36 +150,23 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
 
       <section className="flex flex-col gap-2" aria-labelledby="drama-keyframe">
         <h3 id="drama-keyframe" className="text-sm font-semibold">关键帧</h3>
-        <div className="relative overflow-hidden rounded-md bg-[var(--drama-ink)]" style={{ aspectRatio: (shot.aspectRatio || doc.aspectRatio).replace(':', ' / ') }}>
-          {shot.firstFrameUrl
-            // eslint-disable-next-line @next/next/no-img-element
-            ? <img src={shot.firstFrameUrl} alt="这一镜的关键帧" className="h-full w-full object-contain" />
-            : <span className="absolute inset-0 flex items-center justify-center p-3 text-center text-xs text-[var(--drama-muted)]">还没有关键帧</span>}
-          {keyframeShotIds.has(shot.id) ? (
-            <span className="absolute inset-0 flex items-center justify-center bg-black/55" role="status">
-              <Loader2 className="h-5 w-5 animate-spin motion-reduce:animate-none" /><span className="sr-only">正在画关键帧</span>
-            </span>
-          ) : null}
-        </div>
-        <div className="flex gap-2">
-          <button type="button" className="drama-btn flex-1 text-xs" disabled={keyframeShotIds.has(shot.id)}
-            onClick={() => void generateKeyframes([shot.id])}>
-            <ImagePlus className="h-3.5 w-3.5" />{shot.firstFrameUrl ? '重画关键帧' : '画关键帧'}
-          </button>
-          {shot.firstFrameUrl ? (
-            <button type="button" className="drama-btn text-xs" disabled={keyframeShotIds.has(shot.id)} onClick={() => set({ firstFrameUrl: undefined })}>
-              清除
-            </button>
-          ) : null}
+        <div className="grid grid-cols-2 gap-2">
+          <FrameTile label="首帧" alt="这一镜的关键帧" url={shot.firstFrameUrl} ratio={ratio}
+            busy={keyframeShotIds.has(shot.id)} onDraw={() => void generateKeyframes([shot.id])} onClear={() => set({ firstFrameUrl: undefined })} />
+          <FrameTile label="尾帧" alt="这一镜的尾帧" url={shot.lastFrameUrl} ratio={ratio}
+            busy={keyframeShotIds.has(`${shot.id}:last`)} onDraw={() => void generateKeyframes([shot.id], 'last')} onClear={() => set({ lastFrameUrl: undefined })} />
         </div>
         <p className="drama-label">
           {imageModel ? `用 ${imageModel.name} 画，按图像模型价格扣费。` : '按后台默认图像模型价格扣费。'}
-          {model && !model.capability.imageToVideo ? '当前视频模型不接受首帧图片，关键帧不会用上。' : '有关键帧时，视频从这张图开始。'}
+          {model && !model.capability.imageToVideo ? '当前视频模型不接受首帧图片，关键帧不会用上。' : '有首帧时，视频从这张图开始。'}
+          {shot.lastFrameUrl && model?.capability.imageToVideo && !model.capability.firstLastFrame ? '当前视频模型不支持首尾帧，尾帧不会用上。' : ''}
+          {!shot.lastFrameUrl && model?.capability.firstLastFrame ? '再画一张尾帧，视频会停在那张图上，动作更可控。' : ''}
         </p>
       </section>
 
       <section className="drama-panel flex flex-col gap-2 p-3" aria-label="下一次生成会用的素材">
         <p className="text-xs">{FIRST_FRAME_TEXT[firstFrame.source]}</p>
+        {lastFrame ? <p className="text-xs">尾帧：这一镜的尾帧（首尾帧模式）</p> : null}
         <p className="text-xs text-[var(--drama-muted)]">
           角色和道具参考图 {references.length} 张{model ? `（模型最多接受 ${model.capability.maxReferenceImages} 张）` : ''}
         </p>
@@ -211,6 +201,37 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
       <button type="button" className="drama-btn drama-btn--primary" disabled={running || batchRunning || !model} onClick={() => void generateShots([shot.id])}>
         <RotateCcw className="h-4 w-4" />{shot.takes.length ? '按当前设置重拍' : '生成这个镜头'}
       </button>
+    </div>
+  );
+}
+
+function FrameTile({ label, alt, url, ratio, busy, onDraw, onClear }: {
+  label: string; alt: string; url?: string; ratio: string; busy: boolean; onDraw: () => void; onClear: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="relative overflow-hidden rounded-md bg-[var(--drama-ink)]" style={{ aspectRatio: ratio }}>
+        {url
+          // eslint-disable-next-line @next/next/no-img-element
+          ? <img src={url} alt={alt} className="h-full w-full object-contain" />
+          : <span className="absolute inset-0 flex items-center justify-center p-2 text-center text-xs text-[var(--drama-muted)]">还没有{label}</span>}
+        <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 font-mono text-[11px]">{label}</span>
+        {busy ? (
+          <span className="absolute inset-0 flex items-center justify-center bg-black/55" role="status">
+            <Loader2 className="h-5 w-5 animate-spin motion-reduce:animate-none" /><span className="sr-only">正在画{label}</span>
+          </span>
+        ) : null}
+      </div>
+      <div className="flex gap-1">
+        <button type="button" className="drama-btn flex-1 px-2 text-xs" disabled={busy} onClick={onDraw}>
+          <ImagePlus className="h-3.5 w-3.5" />{url ? `重画${label}` : `画${label}`}
+        </button>
+        {url ? (
+          <button type="button" className="drama-btn px-2 text-xs" disabled={busy} aria-label={`清除${label}`} onClick={onClear}>
+            <X className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }

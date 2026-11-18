@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { keyframePrompt, keyframeReferences, locationImageRatio } from '@/lib/drama/reference-prompts';
+import { keyframePrompt, keyframeReferences, locationImageRatio, type KeyframeKind } from '@/lib/drama/reference-prompts';
 import { waitForRender } from '@/lib/drama/render-client';
 import { chooseReferenceImages, isRetryableTake, orderedShots, runShot } from '@/lib/drama/shot-runner';
 import type { DramaProjectRecord, DramaProjectV1, DramaShot } from '@/lib/drama/types';
@@ -297,11 +297,13 @@ export function useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onOpenCr
     setKeyframeShotIds(new Set(keyframeRef.current));
   }, []);
 
-  const generateKeyframes = useCallback(async (shotIds: string[]) => {
+  const generateKeyframes = useCallback(async (shotIds: string[], kind: KeyframeKind = 'first') => {
     const life = lifeRef.current;
-    const queue = shotIds.filter(id => !keyframeRef.current.has(id));
+    const busyKey = (shotId: string) => (kind === 'last' ? `${shotId}:last` : shotId);
+    const queue = shotIds.filter(id => !keyframeRef.current.has(busyKey(id)));
     if (!life || queue.length === 0) return;
-    queue.forEach(id => markKeyframe(id, true));
+    queue.forEach(id => markKeyframe(busyKey(id), true));
+    const noun = kind === 'last' ? '尾帧' : '关键帧';
     const total = queue.length;
     let completed = 0;
     let lastError: string | undefined;
@@ -313,22 +315,22 @@ export function useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onOpenCr
         const found = findShot(current, shotId);
         if (!found) return;
         const url = await generateReferenceImage(
-          keyframePrompt(found.shot, current),
+          keyframePrompt(found.shot, current, kind),
           locationImageRatio(found.shot.aspectRatio || current.aspectRatio),
           {
             ...(imageModel ? { model: imageModel.key, providerId: imageModel.providerId } : {}),
-            referenceImages: keyframeReferences(found.shot, current, imageModel?.maxReferenceImages ?? 0),
+            referenceImages: keyframeReferences(found.shot, current, imageModel?.maxReferenceImages ?? 0, kind),
           },
         );
         const saved = await persistImage(url);
         if (life.signal.aborted) return;
-        update(latest => updateShot(latest, shotId, { firstFrameUrl: saved }));
+        update(latest => updateShot(latest, shotId, kind === 'last' ? { lastFrameUrl: saved } : { firstFrameUrl: saved }));
         completed += 1;
       } catch (error) {
-        lastError = errorText(error, '关键帧生成失败');
+        lastError = errorText(error, `${noun}生成失败`);
         if (/积分不足|余额不足/u.test(lastError)) outOfCredits = true;
       } finally {
-        markKeyframe(shotId, false);
+        markKeyframe(busyKey(shotId), false);
       }
     };
     const workers = Array.from({ length: Math.min(KEYFRAME_CONCURRENCY, queue.length) }, async () => {
@@ -338,9 +340,9 @@ export function useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onOpenCr
     if (life.signal.aborted) return;
     if (outOfCredits && lastError) { creditsToast(lastError); return; }
     const failed = total - completed;
-    if (failed === 0) toast.success(total > 1 ? `${completed} 张关键帧已生成` : '关键帧已生成');
-    else if (completed) toast.error(`${completed} 张关键帧已生成，${failed} 张失败`, { description: lastError });
-    else toast.error('关键帧生成失败', { description: lastError });
+    if (failed === 0) toast.success(total > 1 ? `${completed} 张${noun}已生成` : `${noun}已生成`);
+    else if (completed) toast.error(`${completed} 张${noun}已生成，${failed} 张失败`, { description: lastError });
+    else toast.error(`${noun}生成失败`, { description: lastError });
     void flushSave();
   }, [creditsToast, flushSave, imageModel, markKeyframe, update]);
 

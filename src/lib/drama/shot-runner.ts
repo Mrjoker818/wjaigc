@@ -6,6 +6,8 @@ export interface ShotModelCapability {
   imageToVideo: boolean;
   /** Upper bound of reference images the model accepts; 0 means none. */
   maxReferenceImages: number;
+  /** Model accepts a last frame together with the first frame. */
+  firstLastFrame?: boolean;
 }
 
 export type FirstFrameSource = 'user' | 'location' | 'previous-shot' | 'none';
@@ -42,6 +44,15 @@ export function chooseFirstFrame(
   const previousVideo = previous ? activeTake(previous)?.videoUrl : undefined;
   if (previousVideo && shot.firstFrameFromPrev !== false) return { source: 'previous-shot', previousVideoUrl: previousVideo };
   return { source: 'none' };
+}
+
+/**
+ * The frame the shot should end on. Only sent with a first frame, and only to models that take both;
+ * other models would reject the whole request.
+ */
+export function chooseLastFrame(shot: DramaShot, capability: ShotModelCapability, firstFrameUrl: string | undefined): string | undefined {
+  if (!capability.imageToVideo || !capability.firstLastFrame || !firstFrameUrl) return undefined;
+  return shot.lastFrameUrl || undefined;
 }
 
 /**
@@ -87,31 +98,37 @@ export interface ShotRequestContext {
   capability: ShotModelCapability;
   /** Resolved first-frame URL (after any last-frame extraction). */
   firstFrameUrl?: string;
+  /** Frame the shot ends on, already filtered by `chooseLastFrame`. */
+  lastFrameUrl?: string;
   projectId?: string;
   generateAudio?: boolean;
   quality?: string;
   resolution?: string;
 }
 
-/** The generate route counts the first frame against the same image limit as the references. */
+/** The generate route counts the first and last frames against the same image limit as the references. */
 export function shotReferenceImages(
-  shot: DramaShot, cast: DramaCastMember[], capability: ShotModelCapability, firstFrameUrl?: string, props: DramaProp[] = [],
+  shot: DramaShot, cast: DramaCastMember[], capability: ShotModelCapability, frames: Array<string | undefined> = [], props: DramaProp[] = [],
 ): string[] {
-  if (!firstFrameUrl) return chooseReferenceImages(shot, cast, capability, [], props);
-  return chooseReferenceImages(shot, cast, { ...capability, maxReferenceImages: capability.maxReferenceImages - 1 }, [firstFrameUrl], props);
+  const used = frames.filter((url): url is string => Boolean(url));
+  return chooseReferenceImages(shot, cast, { ...capability, maxReferenceImages: capability.maxReferenceImages - used.length }, used, props);
 }
 
 /** Body for POST /api/video/generate. Billing, refunds and provider routing stay in that route. */
 export function buildShotGenerateRequest(context: ShotRequestContext): Record<string, unknown> {
   const { doc, shot, capability } = context;
-  const characterReferences = shotReferenceImages(shot, doc.cast, capability, context.firstFrameUrl, doc.props);
+  const characterReferences = shotReferenceImages(shot, doc.cast, capability, [context.firstFrameUrl, context.lastFrameUrl], doc.props);
   const prompt = [shot.directedPrompt || shot.prompt, shot.dialogue ? `台词：「${shot.dialogue}」` : '']
     .filter(Boolean).join('\n');
   return {
     prompt,
     model: context.modelId,
     ...(context.providerId ? { providerId: context.providerId } : {}),
-    ...(context.firstFrameUrl ? { imageUrl: context.firstFrameUrl, mode: 'image2video-first' } : { mode: 'text2video' }),
+    ...(context.firstFrameUrl
+      ? context.lastFrameUrl
+        ? { imageUrl: context.firstFrameUrl, lastFrameImageUrl: context.lastFrameUrl, mode: 'image2video-firstlast' }
+        : { imageUrl: context.firstFrameUrl, mode: 'image2video-first' }
+      : { mode: 'text2video' }),
     ...(characterReferences.length ? { characterReferences } : {}),
     aspectRatio: shot.aspectRatio || doc.aspectRatio,
     duration: shot.durationSec,
@@ -127,7 +144,7 @@ export function buildShotGenerateRequest(context: ShotRequestContext): Record<st
 
 export type ShotFetch = (input: string, init?: RequestInit) => Promise<Response>;
 
-export interface RunShotOptions extends Omit<ShotRequestContext, 'firstFrameUrl'> {
+export interface RunShotOptions extends Omit<ShotRequestContext, 'firstFrameUrl' | 'lastFrameUrl'> {
   fetch?: ShotFetch;
   signal?: AbortSignal;
   /** Called whenever the take changes so the UI can save progress. */
@@ -189,7 +206,8 @@ export async function runShot(options: RunShotOptions): Promise<DramaTake> {
       ? await extractLastFrame(choice.previousVideoUrl, fetcher, options.signal)
       : choice.url;
     emit({});
-    const body = buildShotGenerateRequest({ ...options, firstFrameUrl });
+    const lastFrameUrl = chooseLastFrame(options.shot, options.capability, firstFrameUrl);
+    const body = buildShotGenerateRequest({ ...options, firstFrameUrl, lastFrameUrl });
     const submit = await fetcher('/api/video/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'idempotency-key': `drama:${options.shot.id}:${take.id}` },

@@ -34,6 +34,8 @@ export function shotCapabilityFromDescriptor(descriptor: TaskModelDescriptor | u
   return {
     imageToVideo: !operations || operations.includes('image-to-video') || operations.includes('first-last-frame'),
     maxReferenceImages: acceptsReferences ? (descriptor?.maxReferenceImages ?? 4) : 0,
+    // Pear video rejects any last frame, whatever the descriptor says.
+    firstLastFrame: Boolean(operations?.includes('first-last-frame')) && descriptor?.protocol !== 'pearapi-video',
   };
 }
 

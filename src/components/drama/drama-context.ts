@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext } from 'react';
+import type { KeyframeKind } from '@/lib/drama/reference-prompts';
 import type { CreditEstimate } from '@/lib/drama/workbench-client';
 import type { DramaEpisode, DramaProjectV1, DramaShot } from '@/lib/drama/types';
 import type { DramaImageModelOption, DramaModelOption } from './drama-models';
@@ -46,10 +47,13 @@ export interface DramaWorkbenchApi {
   /** Image model that draws keyframes; undefined lets the server pick its default. */
   imageModel: DramaImageModelOption | undefined;
   setImageModelKey: (key: string) => void;
-  /** Shots whose keyframe is being drawn. */
+  /** Shots whose keyframe is being drawn; a closing frame is listed as `${shotId}:last`. */
   keyframeShotIds: ReadonlySet<string>;
-  /** Draws the opening frame of each shot with the image model; the video then starts from it. */
-  generateKeyframes: (shotIds: string[]) => Promise<void>;
+  /**
+   * Draws the opening frame of each shot with the image model; the video then starts from it.
+   * With `kind: 'last'` it draws the closing frame, which models with first/last-frame support end on.
+   */
+  generateKeyframes: (shotIds: string[], kind?: KeyframeKind) => Promise<void>;
   /** Credits for drawing keyframes of the shots that have none yet. */
   keyframeEstimate: CreditEstimate | null;
   /** Label of the planner or image job that is running, shown in the top bar. */

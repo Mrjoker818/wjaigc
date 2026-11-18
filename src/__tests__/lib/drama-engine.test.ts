@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildDramaShotMessages, DramaPlannerError, parseDramaScriptResponse, parseDramaShotResponse } from '@/lib/drama/planner';
 import { DramaDocumentError, parseDramaProject } from '@/lib/drama/schema';
-import { buildShotGenerateRequest, chooseFirstFrame, chooseReferenceImages, isRetryableTake, runShot, shotReferenceImages } from '@/lib/drama/shot-runner';
+import { buildShotGenerateRequest, chooseFirstFrame, chooseLastFrame, chooseReferenceImages, isRetryableTake, runShot, shotReferenceImages } from '@/lib/drama/shot-runner';
 import { shotCapabilityFromDescriptor } from '@/components/drama/drama-models';
 import type { TaskModelDescriptor } from '@/lib/task-core/model-capability-contract';
 import { collectEpisodeTimeline, dialogueCues } from '@/lib/drama/timeline';
@@ -144,23 +144,27 @@ describe('shot runner choices', () => {
     const s = shot({ id: 's', characterIds: ['a'], propIds: ['bare', 'ticket', 'ghost'] });
     expect(chooseReferenceImages(s, cast, { imageToVideo: true, maxReferenceImages: 3 }, [], props)).toEqual(['/a-front', '/t-locked', '/a-side']);
     expect(chooseReferenceImages(s, cast, { imageToVideo: true, maxReferenceImages: 2 }, [], props)).toEqual(['/a-front', '/t-locked']);
-    expect(shotReferenceImages(s, cast, { imageToVideo: true, maxReferenceImages: 2 }, '/f.png', props)).toEqual(['/a-front']);
+    expect(shotReferenceImages(s, cast, { imageToVideo: true, maxReferenceImages: 2 }, ['/f.png'], props)).toEqual(['/a-front']);
   });
 
   it('counts the first frame against the model image limit', () => {
     const cast = [{ id: 'a', name: 'A', appearance: '', imageUrlFront: '/a-front' }, { id: 'b', name: 'B', appearance: '', imageUrlFront: '/b-front' }];
     const s = shot({ id: 's', characterIds: ['a', 'b'] });
-    expect(shotReferenceImages(s, cast, { imageToVideo: true, maxReferenceImages: 2 }, '/f.png')).toEqual(['/a-front']);
-    expect(shotReferenceImages(s, cast, { imageToVideo: true, maxReferenceImages: 1 }, '/f.png')).toEqual([]);
+    expect(shotReferenceImages(s, cast, { imageToVideo: true, maxReferenceImages: 2 }, ['/f.png'])).toEqual(['/a-front']);
+    expect(shotReferenceImages(s, cast, { imageToVideo: true, maxReferenceImages: 1 }, ['/f.png'])).toEqual([]);
+    expect(shotReferenceImages(s, cast, { imageToVideo: true, maxReferenceImages: 3 }, ['/f.png', '/l.png', undefined])).toEqual(['/a-front']);
     expect(shotReferenceImages(s, cast, { imageToVideo: true, maxReferenceImages: 2 })).toEqual(['/a-front', '/b-front']);
   });
 
   it('sends references only to models whose descriptor accepts them', () => {
     const base = { supportsReferenceImages: true, maxReferenceImages: 3, protocol: 'openai-video', supportedOperations: ['image-to-video'] } as unknown as TaskModelDescriptor;
-    expect(shotCapabilityFromDescriptor(base)).toEqual({ imageToVideo: true, maxReferenceImages: 3 });
+    expect(shotCapabilityFromDescriptor(base)).toEqual({ imageToVideo: true, maxReferenceImages: 3, firstLastFrame: false });
+    const firstLast = { ...base, supportedOperations: ['image-to-video', 'first-last-frame'] } as unknown as TaskModelDescriptor;
+    expect(shotCapabilityFromDescriptor(firstLast).firstLastFrame).toBe(true);
+    expect(shotCapabilityFromDescriptor({ ...firstLast, protocol: 'pearapi-video' }).firstLastFrame).toBe(false);
     expect(shotCapabilityFromDescriptor({ ...base, protocol: 'pearapi-video' }).maxReferenceImages).toBe(0);
     expect(shotCapabilityFromDescriptor({ ...base, supportsReferenceImages: false }).maxReferenceImages).toBe(0);
-    expect(shotCapabilityFromDescriptor(undefined)).toEqual({ imageToVideo: true, maxReferenceImages: 0 });
+    expect(shotCapabilityFromDescriptor(undefined)).toEqual({ imageToVideo: true, maxReferenceImages: 0, firstLastFrame: false });
   });
 
   it('builds a generate request with the style, dialogue and duration', () => {
@@ -172,6 +176,20 @@ describe('shot runner choices', () => {
     expect(body).toMatchObject({ model: 'm', providerId: 'p', imageUrl: '/f.png', mode: 'image2video-first', duration: 6,
       directorMode: 'music-video', generateAudio: true, shotId: 's1' });
     expect(String(body.prompt)).toContain('台词：「你好」');
+  });
+
+  it('sends a last frame only with a first frame and only to models that take both', () => {
+    const both = { imageToVideo: true, maxReferenceImages: 3, firstLastFrame: true };
+    const s = shot({ id: 's1', lastFrameUrl: '/l.png', characterIds: [] });
+    expect(chooseLastFrame(s, both, '/f.png')).toBe('/l.png');
+    expect(chooseLastFrame(s, both, undefined)).toBeUndefined();
+    expect(chooseLastFrame(s, { ...both, firstLastFrame: false }, '/f.png')).toBeUndefined();
+    expect(chooseLastFrame(shot({ id: 's2' }), both, '/f.png')).toBeUndefined();
+    const body = buildShotGenerateRequest({ doc: plannedDoc(), shot: s, modelId: 'm', capability: both, firstFrameUrl: '/f.png', lastFrameUrl: '/l.png' });
+    expect(body).toMatchObject({ imageUrl: '/f.png', lastFrameImageUrl: '/l.png', mode: 'image2video-firstlast' });
+    const single = buildShotGenerateRequest({ doc: plannedDoc(), shot: s, modelId: 'm', capability: both, firstFrameUrl: '/f.png' });
+    expect(single).toMatchObject({ mode: 'image2video-first' });
+    expect(single).not.toHaveProperty('lastFrameImageUrl');
   });
 });
 

@@ -65,13 +65,19 @@ function shotCast(shot: DramaShot, doc: DramaProjectV1): DramaCastMember[] {
     .filter((member): member is DramaCastMember => Boolean(member));
 }
 
-/** The opening frame of one shot, drawn as a still that the video model then animates. */
-export function keyframePrompt(shot: DramaShot, doc: DramaProjectV1): string {
+export type KeyframeKind = 'first' | 'last';
+
+/**
+ * The opening (or closing) frame of one shot, drawn as a still that the video model then animates.
+ * The closing frame shows where the action ends, so the model moves between two fixed pictures.
+ */
+export function keyframePrompt(shot: DramaShot, doc: DramaProjectV1, kind: KeyframeKind = 'first'): string {
   const location = doc.locations.find(item => item.id === shot.sceneId);
   const cast = shotCast(shot, doc).map(member => clean([member.name, member.appearance, member.costume ? `wearing ${member.costume}` : undefined]));
   return clean([
-    'cinematic film still, opening frame of the shot',
-    shot.firstFramePrompt || shot.directedPrompt || shot.prompt,
+    kind === 'first' ? 'cinematic film still, opening frame of the shot' : 'cinematic film still, closing frame of the shot, the action has finished',
+    kind === 'first' ? shot.firstFramePrompt || shot.directedPrompt || shot.prompt : shot.lastFramePrompt || shot.directedPrompt || shot.prompt,
+    kind === 'last' && shot.actionBeat ? `ends after: ${shot.actionBeat}` : undefined,
     shot.shotSize, shot.cameraMove || shot.cameraMotion, shot.lighting,
     location ? clean([location.name, location.description, location.timeOfDay, location.lighting]) : undefined,
     ...cast,
@@ -83,13 +89,15 @@ export function keyframePrompt(shot: DramaShot, doc: DramaProjectV1): string {
 
 /**
  * References for a keyframe: one locked image per character in the shot, then the location plate,
- * then the shot's props, capped at what the image model accepts.
+ * then the shot's props, capped at what the image model accepts. A closing frame puts the opening
+ * frame first so both ends of the shot match.
  */
-export function keyframeReferences(shot: DramaShot, doc: DramaProjectV1, limit: number): string[] {
+export function keyframeReferences(shot: DramaShot, doc: DramaProjectV1, limit: number, kind: KeyframeKind = 'first'): string[] {
   const max = Math.max(0, Math.floor(limit));
   if (max === 0) return [];
   const location = doc.locations.find(item => item.id === shot.sceneId);
   const urls = [
+    kind === 'last' ? shot.firstFrameUrl : undefined,
     ...shotCast(shot, doc).map(member => member.lockedImageUrl || member.imageUrlFront || member.frontUrl),
     location?.lockedImageUrl || location?.imageUrl,
     ...shotProps(shot, doc.props).map(prop => prop.lockedImageUrl || prop.imageUrl),
