@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildDramaShotMessages, DramaPlannerError, parseDramaScriptResponse, parseDramaShotResponse } from '@/lib/drama/planner';
 import { DramaDocumentError, parseDramaProject } from '@/lib/drama/schema';
-import { buildShotGenerateRequest, chooseFirstFrame, chooseReferenceImages, runShot, shotReferenceImages } from '@/lib/drama/shot-runner';
+import { buildShotGenerateRequest, chooseFirstFrame, chooseReferenceImages, isRetryableTake, runShot, shotReferenceImages } from '@/lib/drama/shot-runner';
 import { shotCapabilityFromDescriptor } from '@/components/drama/drama-models';
 import type { TaskModelDescriptor } from '@/lib/task-core/model-capability-contract';
 import { collectEpisodeTimeline, dialogueCues } from '@/lib/drama/timeline';
@@ -185,6 +185,24 @@ describe('runShot', () => {
     });
     expect(take).toMatchObject({ status: 'failed', error: '积分不足，请先充值' });
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the server retryable flag and never retries credit or capability failures', async () => {
+    const responses = [json({ taskId: 'task-1' }), json({ status: 'failed', error: '供应商繁忙', retryable: true })];
+    const take = await runShot({
+      doc: plannedDoc(), shot: shot({ id: 'b' }), modelId: 'm', capability: { imageToVideo: false, maxReferenceImages: 0 },
+      fetch: async () => responses.shift()!, sleep: async () => undefined,
+    });
+    expect(take).toMatchObject({ status: 'failed', retryable: true });
+    expect(isRetryableTake(take)).toBe(true);
+    const credit = await runShot({
+      doc: plannedDoc(), shot: shot({ id: 'b' }), modelId: 'm', capability: { imageToVideo: false, maxReferenceImages: 0 },
+      fetch: async () => json({ error: '积分不足或积分服务暂不可用，未向视频供应商提交请求', retryable: true }, 402), sleep: async () => undefined,
+    });
+    expect(credit.retryable).toBe(true);
+    expect(isRetryableTake(credit)).toBe(false);
+    expect(isRetryableTake({ id: 't', status: 'failed', error: '模型不支持参考图', retryable: true, createdAt: 1 })).toBe(false);
+    expect(isRetryableTake({ id: 't', status: 'failed', error: '超时', createdAt: 1 })).toBe(false);
   });
 });
 

@@ -146,6 +146,17 @@ function errorText(data: Record<string, unknown>, fallback: string): string {
   return typeof data.error === 'string' && data.error ? data.error : fallback;
 }
 
+/** Failures another submission cannot fix: the balance, or a model that does not accept these inputs. */
+const PERMANENT_FAILURE = /积分不足|余额不足|充值|不支持|不接受|capability|CAPABILITY|unsupported/u;
+
+/**
+ * A failed take may be submitted again only when the server marked it retryable and the reason is not
+ * one a retry would hit again. Timeouts and dropped connections stay manual: the first task may still run.
+ */
+export function isRetryableTake(take: DramaTake): boolean {
+  return take.status === 'failed' && take.retryable === true && !PERMANENT_FAILURE.test(take.error ?? '');
+}
+
 /** Extracts the last frame of the previous shot through the server-side ffmpeg route. */
 export async function extractLastFrame(videoUrl: string, fetcher: ShotFetch, signal?: AbortSignal): Promise<string> {
   const response = await fetcher('/api/video/extract-frame', {
@@ -181,7 +192,7 @@ export async function runShot(options: RunShotOptions): Promise<DramaTake> {
     });
     const submitted = await readJson(submit);
     if (!submit.ok || typeof submitted.taskId !== 'string') {
-      emit({ status: 'failed', error: errorText(submitted, '镜头提交失败') });
+      emit({ status: 'failed', error: errorText(submitted, '镜头提交失败'), ...(submitted.retryable === true ? { retryable: true } : {}) });
       return { ...take };
     }
     emit({ taskId: submitted.taskId, status: 'generating', ...(typeof submitted.creditCost === 'number' ? { credits: submitted.creditCost } : {}) });
@@ -212,7 +223,7 @@ export async function runShot(options: RunShotOptions): Promise<DramaTake> {
         return { ...take };
       }
       if (['failed', 'cancelled', 'timeout'].includes(String(data.status))) {
-        emit({ status: 'failed', error: errorText(data, '镜头生成失败') });
+        emit({ status: 'failed', error: errorText(data, '镜头生成失败'), ...(data.retryable === true ? { retryable: true } : {}) });
         return { ...take };
       }
     }

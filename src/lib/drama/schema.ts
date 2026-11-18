@@ -18,6 +18,7 @@ const take = z.looseObject({
   status: z.enum(['submitted', 'generating', 'completed', 'failed']),
   credits: z.number().nonnegative().optional(),
   error: text(2000).optional(),
+  retryable: z.boolean().optional(),
   createdAt: z.number(),
 });
 

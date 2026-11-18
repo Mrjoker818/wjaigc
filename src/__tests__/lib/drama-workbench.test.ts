@@ -8,7 +8,7 @@ import {
   applyRetakeSuggestion, DramaSaveConflictError, estimateShots, generateReferenceImage, pollShotTake, saveDramaProject,
 } from '@/lib/drama/workbench-client';
 import {
-  addShot, blankEpisodeDoc, findShot, fitDuration, formatTimecode, moveShot, orderedPrevious, pendingShots,
+  addShot, blankEpisodeDoc, failedShots, findShot, fitDuration, formatTimecode, moveShot, orderedPrevious, pendingShots,
   removeCastMember, removeShot, selectTake, setSceneShots, updateShot, upsertTake,
 } from '@/lib/drama/workbench-state';
 
@@ -65,6 +65,11 @@ describe('workbench document edits', () => {
     // A failed take cannot be selected.
     expect(selectTake(doc, 's1', 't2')).toBe(doc);
     expect(pendingShots(doc.episodes[0]).map(s => s.id)).toEqual(['s2', 's3']);
+    // Only shots whose newest take failed and that have nothing usable count as failed.
+    doc = upsertTake(doc, 's2', { id: 't4', status: 'failed', error: 'x', createdAt: 4 });
+    expect(failedShots(doc.episodes[0]).map(s => s.id)).toEqual(['s2']);
+    doc = upsertTake(doc, 's2', { id: 't5', status: 'generating', createdAt: 5 });
+    expect(failedShots(doc.episodes[0])).toEqual([]);
   });
 
   it('removes a cast member from scenes and shots', () => {
@@ -137,6 +142,8 @@ describe('workbench client', () => {
     const fetcher = vi.fn(async () => json({ status: 'completed', videoUrl: '/v/a.mp4' }));
     expect(await pollShotTake(take, 'p::m', 'p', { fetch: fetcher, sleep: async () => undefined }))
       .toMatchObject({ status: 'completed', videoUrl: '/v/a.mp4' });
+    expect(await pollShotTake(take, 'p::m', 'p', { fetch: async () => json({ status: 'failed', error: 'busy', retryable: true }), sleep: async () => undefined }))
+      .toMatchObject({ status: 'failed', retryable: true });
     expect(JSON.parse(String((fetcher.mock.calls[0] as unknown[])[1] && ((fetcher.mock.calls[0] as unknown as [string, RequestInit])[1].body))))
       .toEqual({ taskId: 'task-1', model: 'p::m', providerId: 'p' });
     expect(await pollShotTake({ ...take, taskId: undefined }, undefined, undefined, { fetch: fetcher }))

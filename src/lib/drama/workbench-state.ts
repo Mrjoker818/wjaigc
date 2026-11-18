@@ -167,6 +167,11 @@ export function pendingShots(episode: DramaEpisode | undefined): DramaShot[] {
   return episode ? episode.scenes.flatMap(scene => scene.shots).filter(shot => !activeTake(shot)) : [];
 }
 
+/** Shots whose newest take failed and that have no usable take to fall back on. */
+export function failedShots(episode: DramaEpisode | undefined): DramaShot[] {
+  return pendingShots(episode).filter(shot => shot.takes.at(-1)?.status === 'failed');
+}
+
 /** The shot right before `shotId` in timeline order, across scene boundaries. */
 export function orderedPrevious(doc: DramaProjectV1, episodeId: string, shotId: string): DramaShot | undefined {
   const shots = doc.episodes.find(item => item.id === episodeId)?.scenes.flatMap(scene => scene.shots) ?? [];

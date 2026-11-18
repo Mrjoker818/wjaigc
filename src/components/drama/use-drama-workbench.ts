@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { keyframePrompt, keyframeReferences, locationImageRatio } from '@/lib/drama/reference-prompts';
 import { waitForRender } from '@/lib/drama/render-client';
-import { chooseReferenceImages, orderedShots, runShot } from '@/lib/drama/shot-runner';
+import { chooseReferenceImages, isRetryableTake, orderedShots, runShot } from '@/lib/drama/shot-runner';
 import type { DramaProjectRecord, DramaProjectV1, DramaShot } from '@/lib/drama/types';
 import {
   DramaSaveConflictError, estimateShots, generateReferenceImage, persistImage, pollShotTake, saveDramaProject, startEpisodeRender,
@@ -19,6 +19,8 @@ const MODEL_STORAGE_KEY = 'wujie-drama-video-model';
 const IMAGE_MODEL_STORAGE_KEY = 'wujie-drama-image-model';
 /** Keyframes are drawn a few at a time so one slow image does not hold the rest. */
 const KEYFRAME_CONCURRENCY = 3;
+/** A failed take the server marked safe to resubmit gets one more attempt after this pause. */
+const AUTO_RETRY_DELAY_MS = 5000;
 
 export interface UseDramaWorkbenchOptions {
   record: DramaProjectRecord;
@@ -35,6 +37,11 @@ function readStored(key: string): string {
 
 const readStoredModel = () => readStored(MODEL_STORAGE_KEY);
 const readStoredImageModel = () => readStored(IMAGE_MODEL_STORAGE_KEY);
+
+const pause = (ms: number, signal: AbortSignal) => new Promise<void>(resolve => {
+  const timer = window.setTimeout(resolve, ms);
+  signal.addEventListener('abort', () => { window.clearTimeout(timer); resolve(); }, { once: true });
+});
 
 export function useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onOpenCredits }: UseDramaWorkbenchOptions): DramaWorkbenchApi {
   const [doc, setDoc] = useState<DramaProjectV1>(record.doc);
@@ -183,21 +190,29 @@ export function useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onOpenCr
         if (durationSec !== found.shot.durationSec) {
           update(current => updateShot(current, shotId, { durationSec }));
         }
-        const current = docRef.current;
-        const shot = findShot(current, shotId)?.shot ?? found.shot;
-        const previous = orderedShots(current, found.episode.id).find(item => item.shot.id === shotId)?.previous;
         markRunning(shotId, true);
-        let persistedTask = false;
         try {
-          const take = await runShot({
-            doc: current, shot, previous, modelId: model.key, providerId: model.providerId,
-            capability: model.capability, generateAudio: generateAudio || undefined, signal,
-            onTake: next => {
-              update(latest => upsertTake(latest, shotId, { ...next, modelId: model.key, providerId: model.providerId }));
-              // The task id is what lets a reopened page find this take again, so store it right away.
-              if (next.taskId && !persistedTask) { persistedTask = true; void flushSave(); }
-            },
-          });
+          const attempt = () => {
+            const current = docRef.current;
+            const shot = findShot(current, shotId)?.shot ?? found.shot;
+            const previous = orderedShots(current, found.episode.id).find(item => item.shot.id === shotId)?.previous;
+            let persistedTask = false;
+            return runShot({
+              doc: current, shot, previous, modelId: model.key, providerId: model.providerId,
+              capability: model.capability, generateAudio: generateAudio || undefined, signal,
+              onTake: next => {
+                update(latest => upsertTake(latest, shotId, { ...next, modelId: model.key, providerId: model.providerId }));
+                // The task id is what lets a reopened page find this take again, so store it right away.
+                if (next.taskId && !persistedTask) { persistedTask = true; void flushSave(); }
+              },
+            });
+          };
+          let take = await attempt();
+          if (isRetryableTake(take) && !signal.aborted) {
+            // A new take has a new id, so the generate route sees a new idempotency key and submits again.
+            await pause(AUTO_RETRY_DELAY_MS, signal);
+            if (!signal.aborted) take = await attempt();
+          }
           if (take.status === 'completed') completed += 1;
           else {
             failed += 1;

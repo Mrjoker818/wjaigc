@@ -2,7 +2,7 @@
 
 import { ImagePlus, Loader2, Play, RotateCcw, Square, X } from 'lucide-react';
 import { activeTake } from '@/lib/drama/types';
-import { pendingShots, selectTake, updateShot } from '@/lib/drama/workbench-state';
+import { failedShots, pendingShots, selectTake, updateShot } from '@/lib/drama/workbench-state';
 import { useDrama } from './drama-context';
 import { DramaSlate } from './drama-slate';
 
@@ -15,6 +15,7 @@ export function DramaShotsStep() {
   } = useDrama();
   if (!episode) return <p className="drama-label">先在剧本步骤写好分集。</p>;
   const waiting = pendingShots(episode);
+  const failed = failedShots(episode);
   const allShots = episode.scenes.flatMap(scene => scene.shots);
   const withoutKeyframe = allShots.filter(shot => !shot.firstFrameUrl);
   const drawingKeyframes = keyframeShotIds.size > 0;
@@ -41,10 +42,18 @@ export function DramaShotsStep() {
           {batchRunning ? (
             <button type="button" className="drama-btn" onClick={stopGeneration}><Square className="h-4 w-4" />停止</button>
           ) : (
+            <>
+            {failed.length ? (
+              <button type="button" className="drama-btn" disabled={!defaultModel}
+                onClick={() => void generateShots(failed.map(shot => shot.id))}>
+                <RotateCcw className="h-4 w-4" />重试失败的 {failed.length} 个镜头
+              </button>
+            ) : null}
             <button type="button" className="drama-btn drama-btn--primary" disabled={waiting.length === 0 || !defaultModel}
               onClick={() => void generateShots(waiting.map(shot => shot.id))}>
               <Play className="h-4 w-4" />{waiting.length ? `按顺序生成 ${waiting.length} 个待拍镜头` : '所有镜头都已有可用视频'}
             </button>
+            </>
           )}
         </div>
       </div>

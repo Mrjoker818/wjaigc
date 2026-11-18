@@ -249,7 +249,7 @@ export async function pollShotTake(
       return { ...take, status: 'completed', videoUrl, ...(thumbnailUrl ? { thumbnailUrl } : {}) };
     }
     if (['failed', 'cancelled', 'timeout'].includes(String(data.status))) {
-      return { ...take, status: 'failed', error: firstText(data.error) ?? '镜头生成失败' };
+      return { ...take, status: 'failed', error: firstText(data.error) ?? '镜头生成失败', ...(data.retryable === true ? { retryable: true } : {}) };
     }
   }
   if (options.signal?.aborted) return take;

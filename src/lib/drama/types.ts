@@ -17,6 +17,8 @@ export interface DramaTake {
   status: DramaTakeStatus;
   credits?: number;
   error?: string;
+  /** The server said this failure is safe to submit again (the charge was refunded or never made). */
+  retryable?: boolean;
   createdAt: number;
   /** Model the take was submitted to, so a reopened page can keep polling the right provider. */
   modelId?: string;
