@@ -1,0 +1,80 @@
+'use client';
+
+import { Download, Film, ImageDown, Loader2 } from 'lucide-react';
+import { DRAMA_TRANSITIONS as TRANSITIONS, type DramaTransition } from '@/lib/drama/render';
+import { buildTimeline } from '@/lib/drama/timeline';
+import { pendingShots } from '@/lib/drama/workbench-state';
+import { useDrama } from './drama-context';
+
+const TRANSITION_LABEL: Record<DramaTransition, string> = { cut: '硬切', fade: '淡入淡出', flash: '闪白' };
+
+/** Step 5: transition and subtitle choices, then the rendered film. Rendering itself runs in the background and costs no credits. */
+export function DramaFinalStep() {
+  const { doc, episode, update, render, renderEpisode, onPlaceOnCanvas } = useDrama();
+  if (!episode) return <p className="drama-label">先在剧本步骤写好分集。</p>;
+  const missing = pendingShots(episode).length;
+  const blocks = buildTimeline(doc, episode.id);
+  const totalSec = blocks.at(-1)?.endSec ?? 0;
+  const last = doc.timeline.lastRender;
+  const ready = last?.status === 'completed' && last.videoUrl && last.episodeId === episode.id;
+
+  return (
+    <div className="mx-auto flex max-w-4xl flex-col gap-6">
+      <section className="drama-panel flex flex-col gap-4 p-4" aria-labelledby="drama-render-options">
+        <h2 id="drama-render-options" className="text-sm font-semibold">成片设置</h2>
+        <fieldset className="flex flex-col gap-1.5">
+          <legend className="drama-label mb-1.5">镜头之间的转场</legend>
+          <div className="flex gap-2">
+            {TRANSITIONS.map(value => (
+              <button key={value} type="button" className="drama-btn" aria-pressed={doc.timeline.transition === value}
+                onClick={() => update(current => ({ ...current, timeline: { ...current.timeline, transition: value } }))}>{TRANSITION_LABEL[value]}</button>
+            ))}
+          </div>
+        </fieldset>
+        {doc.timeline.transition !== 'cut' ? (
+          <label className="flex items-center gap-2 text-sm">
+            <span className="drama-label">转场时长</span>
+            <input className="drama-input w-20 font-mono" type="number" min={0.2} max={2} step={0.1} value={doc.timeline.transitionSec}
+              onChange={event => update(current => ({ ...current, timeline: { ...current.timeline, transitionSec: Math.max(0.2, Math.min(2, Number(event.target.value) || 0.5)) } }))} />
+            <span className="drama-label">秒</span>
+          </label>
+        ) : null}
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={doc.timeline.subtitles}
+            onChange={event => update(current => ({ ...current, timeline: { ...current.timeline, subtitles: event.target.checked } }))} />
+          把台词烧成字幕
+        </label>
+        {doc.timeline.subtitles ? (
+          <div className="drama-paper flex min-h-16 items-end justify-center rounded-md px-6 pb-3 text-center font-serif text-sm leading-snug">
+            {blocks.find(block => block.subtitle)?.subtitle ?? '（镜头里还没有台词）'}
+          </div>
+        ) : null}
+        <div className="flex flex-wrap items-center gap-3">
+          <button type="button" className="drama-btn drama-btn--primary" disabled={missing > 0 || render.status === 'rendering'} onClick={() => void renderEpisode()}>
+            {render.status === 'rendering' ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <Film className="h-4 w-4" />}
+            {render.status === 'rendering' ? `正在渲染 ${render.progress}%` : ready ? '重新渲染成片' : '渲染成片'}
+          </button>
+          <span className="drama-label font-mono">约 {Math.round(totalSec)} 秒 · 渲染不扣积分，只在本机拼接</span>
+        </div>
+        {missing ? <p className="text-sm text-[var(--drama-red)]">还有 {missing} 个镜头没有可用的视频，先在镜头步骤里生成。</p> : null}
+        {render.status === 'failed' ? <p role="alert" className="text-sm text-[var(--drama-red)]">{render.error ?? '成片渲染失败'}</p> : null}
+      </section>
+
+      {ready && last.videoUrl ? (
+        <section className="drama-panel flex flex-col gap-3 p-4" aria-labelledby="drama-film">
+          <h2 id="drama-film" className="text-sm font-semibold">成片</h2>
+          <video src={last.videoUrl} poster={last.thumbnailUrl} controls className="w-full rounded-md bg-[var(--drama-ink)]" style={{ aspectRatio: doc.aspectRatio.replace(':', ' / ') }} />
+          <div className="flex flex-wrap gap-2">
+            <a className="drama-btn" href={last.videoUrl} download><Download className="h-4 w-4" />下载成片</a>
+            {onPlaceOnCanvas ? (
+              <button type="button" className="drama-btn" onClick={() => onPlaceOnCanvas({
+                videoUrl: last.videoUrl!, ...(last.thumbnailUrl ? { thumbnailUrl: last.thumbnailUrl } : {}),
+                ...(last.durationSec ? { duration: last.durationSec } : {}), aspectRatio: doc.aspectRatio,
+              })}><ImageDown className="h-4 w-4" />放回画布</button>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+    </div>
+  );
+}

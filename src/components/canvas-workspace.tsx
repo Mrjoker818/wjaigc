@@ -218,6 +218,7 @@ const QuickCreatePanel = dynamic(() => import('@/components/quick-create-panel')
 const VectorDesignPanel = dynamic(() => import('@/components/vector-design/vector-design-panel').then(m => m.VectorDesignPanel), { loading: () => null });
 const PromptEquation = dynamic(() => import('@/components/prompt-equation').then(m => m.PromptEquation), { loading: () => null });
 const DashboardView = dynamic(() => import('@/components/dashboard/dashboard-view'), { loading: () => null });
+const DramaWorkbench = dynamic(() => import('@/components/drama/drama-workbench'), { loading: () => null });
 const ImageEditor = dynamic(() => import('@/components/image-editor').then(m => m.ImageEditor), { loading: () => null });
 const ProjectDataPanel = dynamic(() => import('@/components/project-data-panel').then(m => m.ProjectDataPanel), { loading: () => null });
 const HelpGuide = dynamic(() => import('@/components/help-guide').then(m => m.HelpGuide), { loading: () => null });
@@ -1212,6 +1213,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
   const [pendingModeSwitch, setPendingModeSwitch] = useState<'drama' | 'dashboard' | null>(null);
   /** Drama project the workbench opens next; set by「发送到短剧工作台」. */
   const [activeDramaId, setActiveDramaId] = useState<string | null>(null);
+  /** Film the workbench asked to place on the canvas; inserted once the canvas is shown again. */
+  const [pendingCanvasFilm, setPendingCanvasFilm] = useState<{ videoUrl: string; thumbnailUrl?: string; duration?: number; aspectRatio?: string } | null>(null);
   // Start with true so SSR renders the login panel (not a blank spinner).
   // The useEffect below will update currentUser if a valid session exists.
   const [authChecked, setAuthChecked] = useState(true);
@@ -4840,6 +4843,15 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
     safeSwitchMode('drama');
   }, [safeSwitchMode]);
 
+  useEffect(() => {
+    if (appMode !== 'canvas' || !pendingCanvasFilm) return;
+    const film = pendingCanvasFilm;
+    setPendingCanvasFilm(null);
+    // Wait one frame so the canvas viewport is mounted and the film lands in its centre.
+    const frame = window.requestAnimationFrame(() => { void handleStoryVideoComposed(film); });
+    return () => window.cancelAnimationFrame(frame);
+  }, [appMode, pendingCanvasFilm, handleStoryVideoComposed]);
+
   const documentMediaTransferIntentsRef = useRef(new Map<string, {
     isCurrent: () => boolean; request: Promise<DocumentMediaBatchRequest>;
   }>());
@@ -7265,10 +7277,13 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
   // Mode switching - early return for non-canvas modes
   if (appMode === 'drama') {
     return (
-      <main className="flex min-h-dvh flex-col items-center justify-center gap-4 p-6 text-center">
-        <p role="status">{activeDramaId ? '剧本草稿已保存，短剧工作台即将开放。' : '短剧工作台即将开放。'}</p>
-        <button type="button" className="min-h-11 rounded-md border px-4" onClick={() => setAppMode('canvas')}>返回画布</button>
-      </main>
+      <DramaWorkbench
+        dramaId={activeDramaId}
+        projectId={currentProject?.id}
+        onDramaIdChange={setActiveDramaId}
+        onExit={() => setAppMode('canvas')}
+        onPlaceOnCanvas={film => { setPendingCanvasFilm(film); setAppMode('canvas'); }}
+      />
     );
   }
 

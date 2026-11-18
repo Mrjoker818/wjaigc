@@ -1,0 +1,168 @@
+'use client';
+
+import { useState } from 'react';
+import { ImagePlus, Loader2, Lock, LockOpen, Plus, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
+import { CAST_IMAGE_SIZE, castImagePrompt, locationImagePrompt, locationImageSize } from '@/lib/drama/reference-prompts';
+import type { DramaCastMember, DramaLocation } from '@/lib/drama/types';
+import { generateReferenceImage, persistImage } from '@/lib/drama/workbench-client';
+import {
+  nextBibleId, removeCastMember, removeLocation, updateCastMember, updateLocation,
+} from '@/lib/drama/workbench-state';
+import { useDrama } from './drama-context';
+
+type CastView = 'front' | 'side';
+
+/** Step 2: cast and location cards. The locked image is the reference every shot uses. */
+export function DramaBibleStep() {
+  const { doc, update, setStep } = useDrama();
+  const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set());
+  const mark = (key: string, on: boolean) => setPending(previous => {
+    const next = new Set(previous);
+    if (on) next.add(key); else next.delete(key);
+    return next;
+  });
+
+  // Image jobs run in parallel; each card shows its own spinner.
+  const makeImage = async (key: string, prompt: string, size: string, apply: (url: string) => void) => {
+    mark(key, true);
+    try {
+      apply(await persistImage(await generateReferenceImage(prompt, size)));
+    } catch (error) {
+      toast.error('设定图生成失败', { description: error instanceof Error ? error.message : '请稍后重试' });
+    } finally {
+      mark(key, false);
+    }
+  };
+
+  const castImage = (member: DramaCastMember, view: CastView) => makeImage(`${member.id}:${view}`,
+    castImagePrompt(member, view, doc.style), CAST_IMAGE_SIZE,
+    url => update(current => updateCastMember(current, member.id, view === 'front' ? { imageUrlFront: url } : { imageUrlSide: url })));
+  const locationImage = (location: DramaLocation) => makeImage(`${location.id}:plate`,
+    locationImagePrompt(location, doc.style), locationImageSize(doc.aspectRatio),
+    url => update(current => updateLocation(current, location.id, { imageUrl: url })));
+
+  return (
+    <div className="mx-auto flex max-w-6xl flex-col gap-8">
+      <p className="drama-label">每张定妆图按图像模型价格扣费。锁定一张后，所有出场镜头都用它做角色参考或首帧。</p>
+
+      <section aria-labelledby="drama-cast" className="flex flex-col gap-3">
+        <div className="flex items-center gap-3">
+          <h2 id="drama-cast" className="text-sm font-semibold">角色（{doc.cast.length}）</h2>
+          <button type="button" className="drama-btn" onClick={() => update(current => ({
+            ...current, cast: [...current.cast, { id: nextBibleId(current, 'char'), name: `角色${current.cast.length + 1}`, appearance: '' }],
+          }))}><Plus className="h-4 w-4" />加角色</button>
+        </div>
+        {doc.cast.length === 0 ? <p className="drama-label">还没有角色。生成剧本时会自动建好主要角色，也可以手动添加。</p> : null}
+        <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {doc.cast.map(member => (
+            <li key={member.id} className="drama-panel flex flex-col gap-3 p-3">
+              <div className="flex items-center gap-2">
+                <input className="drama-input font-serif font-bold" aria-label="角色名" maxLength={200} value={member.name}
+                  onChange={event => update(current => updateCastMember(current, member.id, { name: event.target.value }))} />
+                <button type="button" className="drama-btn drama-btn--quiet" aria-label={`删除角色 ${member.name}`}
+                  onClick={() => { if (window.confirm(`删除角色「${member.name}」？镜头里对它的引用也会去掉。`)) update(current => removeCastMember(current, member.id)); }}>
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+              <textarea className="drama-input min-h-20 resize-y" aria-label={`${member.name} 外貌`} maxLength={4000} value={member.appearance}
+                placeholder="外貌、年龄感、气质，例如：二十五岁，短发，眼神倔强"
+                onChange={event => update(current => updateCastMember(current, member.id, { appearance: event.target.value }))} />
+              <input className="drama-input" aria-label={`${member.name} 服装`} maxLength={1000} value={member.costume ?? ''} placeholder="服装"
+                onChange={event => update(current => updateCastMember(current, member.id, { costume: event.target.value }))} />
+              <div className="grid grid-cols-2 gap-2">
+                {(['front', 'side'] as const).map(view => (
+                  <ReferenceTile
+                    key={view} label={view === 'front' ? '正面' : '侧面'} ratio="2 / 3"
+                    url={view === 'front' ? member.imageUrlFront : member.imageUrlSide}
+                    locked={Boolean(member.lockedImageUrl) && member.lockedImageUrl === (view === 'front' ? member.imageUrlFront : member.imageUrlSide)}
+                    busy={pending.has(`${member.id}:${view}`)}
+                    disabled={!member.appearance.trim() && !member.name.trim()}
+                    onGenerate={() => void castImage(member, view)}
+                    onToggleLock={url => update(current => updateCastMember(current, member.id, { lockedImageUrl: member.lockedImageUrl === url ? undefined : url }))}
+                  />
+                ))}
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section aria-labelledby="drama-locations" className="flex flex-col gap-3">
+        <div className="flex items-center gap-3">
+          <h2 id="drama-locations" className="text-sm font-semibold">场景（{doc.locations.length}）</h2>
+          <button type="button" className="drama-btn" onClick={() => update(current => ({
+            ...current, locations: [...current.locations, { id: nextBibleId(current, 'loc'), name: `场景${current.locations.length + 1}` }],
+          }))}><Plus className="h-4 w-4" />加场景</button>
+        </div>
+        <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {doc.locations.map(location => (
+            <li key={location.id} className="drama-panel flex flex-col gap-3 p-3">
+              <div className="flex items-center gap-2">
+                <input className="drama-input font-serif font-bold" aria-label="场景名" maxLength={200} value={location.name}
+                  onChange={event => update(current => updateLocation(current, location.id, { name: event.target.value }))} />
+                <button type="button" className="drama-btn drama-btn--quiet" aria-label={`删除场景 ${location.name}`}
+                  onClick={() => { if (window.confirm(`删除场景「${location.name}」？`)) update(current => removeLocation(current, location.id)); }}>
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+              <textarea className="drama-input min-h-16 resize-y" aria-label={`${location.name} 描述`} maxLength={4000} value={location.description ?? ''}
+                placeholder="环境、时间、光线，例如：深夜便利店，冷白灯管，窗外下雨"
+                onChange={event => update(current => updateLocation(current, location.id, { description: event.target.value }))} />
+              <ReferenceTile
+                label="场景图" ratio={doc.aspectRatio.replace(':', ' / ')} url={location.imageUrl}
+                locked={Boolean(location.lockedImageUrl) && location.lockedImageUrl === location.imageUrl}
+                busy={pending.has(`${location.id}:plate`)} disabled={!location.name.trim()}
+                onGenerate={() => void locationImage(location)}
+                onToggleLock={url => update(current => updateLocation(current, location.id, { lockedImageUrl: location.lockedImageUrl === url ? undefined : url }))}
+              />
+              <p className="drama-label">有场景图时，这个场景里每场的第一个镜头会用它做首帧。</p>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <div>
+        <button type="button" className="drama-btn drama-btn--primary" onClick={() => setStep('board')}>下一步：拆分镜</button>
+      </div>
+    </div>
+  );
+}
+
+function ReferenceTile({ label, ratio, url, locked, busy, disabled, onGenerate, onToggleLock }: {
+  label: string;
+  ratio: string;
+  url?: string;
+  locked: boolean;
+  busy: boolean;
+  disabled: boolean;
+  onGenerate: () => void;
+  onToggleLock: (url: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="relative overflow-hidden rounded-md bg-[var(--drama-ink)]" style={{ aspectRatio: ratio }}>
+        {url
+          // eslint-disable-next-line @next/next/no-img-element
+          ? <img src={url} alt={`${label}定妆图`} className="h-full w-full object-cover" />
+          : <span className="absolute inset-0 flex items-center justify-center text-xs text-[var(--drama-muted)]">{label}</span>}
+        {busy ? (
+          <span className="absolute inset-0 flex items-center justify-center bg-black/50" role="status">
+            <Loader2 className="h-5 w-5 animate-spin motion-reduce:animate-none" /><span className="sr-only">正在生成{label}</span>
+          </span>
+        ) : null}
+        {locked ? <span className="absolute left-1 top-1 rounded bg-[var(--drama-green)] px-1.5 py-0.5 text-[11px] text-[var(--drama-ink)]">已锁定</span> : null}
+      </div>
+      <div className="flex gap-1">
+        <button type="button" className="drama-btn flex-1 px-2 text-xs" disabled={busy || disabled} onClick={onGenerate}>
+          <ImagePlus className="h-3.5 w-3.5" />{url ? '重新生成' : `生成${label}`}
+        </button>
+        {url ? (
+          <button type="button" className="drama-btn px-2" aria-pressed={locked} aria-label={locked ? `取消锁定${label}` : `锁定${label}`} onClick={() => onToggleLock(url)}>
+            {locked ? <Lock className="h-3.5 w-3.5" /> : <LockOpen className="h-3.5 w-3.5" />}
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}

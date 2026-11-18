@@ -26,6 +26,42 @@ export function collectEpisodeTimeline(doc: DramaProjectV1, episodeId: string): 
   return { clips, missingShotIds };
 }
 
+export interface TimelineBlock {
+  shotId: string;
+  sceneNumber: number;
+  shotNumber: number;
+  startSec: number;
+  endSec: number;
+  durationSec: number;
+  hasTake: boolean;
+  thumbnailUrl?: string;
+  subtitle?: string;
+}
+
+/**
+ * Planned layout of an episode for the timeline bar, using each shot's planned length.
+ * The server measures the real clip lengths when it renders, so the final film can differ by a fraction of a second.
+ */
+export function buildTimeline(doc: DramaProjectV1, episodeId: string): TimelineBlock[] {
+  const episode = doc.episodes.find(item => item.id === episodeId);
+  if (!episode) return [];
+  const shots = episode.scenes.flatMap((scene, sceneIndex) => scene.shots.map(shot => ({ shot, sceneNumber: sceneIndex + 1 })));
+  const overlap = doc.timeline.transition === 'cut' || shots.length < 2 ? 0
+    : Math.max(0, Math.min(doc.timeline.transitionSec, Math.min(...shots.map(item => item.shot.durationSec)) / 2, 2));
+  let cursor = 0;
+  return shots.map(({ shot, sceneNumber }, i) => {
+    const take = activeTake(shot);
+    const startSec = cursor;
+    cursor += shot.durationSec - (i < shots.length - 1 ? overlap : 0);
+    return {
+      shotId: shot.id, sceneNumber, shotNumber: i + 1, startSec, endSec: startSec + shot.durationSec, durationSec: shot.durationSec,
+      hasTake: Boolean(take?.videoUrl),
+      ...(take?.thumbnailUrl ? { thumbnailUrl: take.thumbnailUrl } : {}),
+      ...(doc.timeline.subtitles && shot.dialogue?.trim() ? { subtitle: shot.dialogue.trim() } : {}),
+    };
+  });
+}
+
 /** One cue per clip with dialogue, shown for the part of the clip that does not overlap a transition. */
 export function dialogueCues(
   clips: Array<Pick<TimelineClip, 'dialogue'>>, clipStarts: number[], durations: number[], transitionSec: number,

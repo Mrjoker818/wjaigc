@@ -18,6 +18,9 @@ export interface DramaTake {
   credits?: number;
   error?: string;
   createdAt: number;
+  /** Model the take was submitted to, so a reopened page can keep polling the right provider. */
+  modelId?: string;
+  providerId?: string;
 }
 
 export interface DramaShot extends VideoShotPlan {
@@ -67,7 +70,16 @@ export interface DramaTimeline {
   transition: DramaTransition;
   transitionSec: number;
   subtitles: boolean;
-  lastRender?: { taskId: string; videoUrl?: string; status: 'processing' | 'completed' | 'failed'; error?: string; createdAt: number };
+  lastRender?: {
+    taskId: string;
+    episodeId?: string;
+    videoUrl?: string;
+    thumbnailUrl?: string;
+    durationSec?: number;
+    status: 'processing' | 'completed' | 'failed';
+    error?: string;
+    createdAt: number;
+  };
 }
 
 export interface DramaProjectV1 {
