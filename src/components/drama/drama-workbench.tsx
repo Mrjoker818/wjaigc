@@ -122,7 +122,7 @@ function DramaStart({ projectId, onDramaIdChange, onExit, chatHandoff, onChatHan
         <button type="button" className="drama-btn drama-btn--quiet" onClick={onExit}><ArrowLeft className="h-4 w-4" />返回画布</button>
         <span className="flex items-center gap-2 text-sm text-[var(--drama-muted)]"><Clapperboard className="h-4 w-4" />短剧工作台</span>
       </header>
-      <main className="mx-auto flex max-w-3xl flex-col gap-10 px-4 py-10 sm:py-16">
+      <div role="main" className="mx-auto flex max-w-3xl flex-col gap-10 px-4 py-10 sm:py-16">
         {busy === '从对话写剧本' ? (
           <p role="status" className="drama-panel flex items-center gap-2 px-4 py-3 text-sm">
             <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />正在把对话内容写成分场剧本，约需 1 分钟
@@ -148,7 +148,7 @@ function DramaStart({ projectId, onDramaIdChange, onExit, chatHandoff, onChatHan
                   </ul>
                 )}
         </section>
-      </main>
+      </div>
     </div>
   );
 }

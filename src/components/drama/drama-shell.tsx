@@ -83,13 +83,13 @@ export function DramaShell({ record, projectId, onExit, onCloseProject, onPlaceO
               </button>
             ))}
           </nav>
-          <main className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4">
+          <div role="main" className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4">
             {step === 'script' ? <DramaScriptStep />
               : step === 'bible' ? <DramaBibleStep />
                 : step === 'board' ? <DramaBoardStep />
                   : step === 'shots' ? <DramaShotsStep />
                     : <DramaFinalStep />}
-          </main>
+          </div>
           <DramaInspector />
         </div>
         <DramaTimeline />

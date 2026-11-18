@@ -1789,6 +1789,12 @@ input[type="range"]::-moz-range-thumb {
 .drama-root .drama-btn[aria-pressed="true"] { border-color: var(--drama-gold); color: var(--drama-gold); }
 @media (max-width: 1023px) {
   .drama-root .drama-btn, .drama-root .drama-input { min-height: 44px; }
+  /* A touch-target floor must not flatten a field that deliberately asks for more height. */
+  .drama-root .drama-input.min-h-14 { min-height: 56px; }
+  .drama-root .drama-input.min-h-16 { min-height: 64px; }
+  .drama-root .drama-input.min-h-20 { min-height: 80px; }
+  .drama-root .drama-input.min-h-28 { min-height: 112px; }
+  .drama-root .drama-input.min-h-80 { min-height: 320px; }
 }
 .drama-slate {
   display: flex; align-items: stretch; height: 28px; overflow: hidden; background: var(--drama-ink);
