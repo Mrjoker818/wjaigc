@@ -26,9 +26,11 @@ export function DramaTaskPanel() {
   if (tasks.length === 0) return null;
   return (
     <div ref={root} className="relative">
+      {/* A status role inside the button would hide its text from the button's accessible name, so the live region sits beside it. */}
+      <span role="status" className="sr-only">{tasks.length} 个任务进行中</span>
       <button type="button" className="drama-btn" aria-expanded={open} aria-controls="drama-task-list" onClick={() => setOpen(value => !value)}>
         <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-        <span role="status" aria-live="polite" className="font-mono text-xs">{tasks.length} 个任务进行中</span>
+        <span className="font-mono text-xs">{tasks.length} 个任务进行中</span>
       </button>
       {open ? (
         <div id="drama-task-list" className="drama-panel absolute right-0 top-full z-50 mt-1 w-72 max-w-[calc(100vw-1.5rem)] p-2 shadow-2xl">
