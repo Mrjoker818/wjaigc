@@ -311,15 +311,16 @@ describe('provider video admission', () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it('fails admission if the requested image cannot be resolved', async () => {
-    fetcher.mockResolvedValueOnce(new Response('missing', { status: 404 }));
+  it.each(['', 'http://127.0.0.1:15179'])('fails admission if the requested image cannot be resolved (domain %j)', async domain => {
+    vi.stubEnv('COZE_PROJECT_DOMAIN_DEFAULT', domain);
     const response = await generateVideo(request({ imageUrl: '/uploads/missing.png' }));
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ code: 'MODEL_CAPABILITY_MISMATCH', retryable: false });
     expect(calculateConfiguredCreditCost).not.toHaveBeenCalled();
     expect(mocks.recordVideoTaskSubmitted).not.toHaveBeenCalled();
     expect(after).not.toHaveBeenCalled();
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    // Local media is read from storage, never through an HTTP round trip to this host.
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it.each([

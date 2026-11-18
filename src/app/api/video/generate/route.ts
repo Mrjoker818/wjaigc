@@ -55,6 +55,8 @@ import {
 import type { User } from '@/lib/user-types';
 import type { VideoReferenceBinding } from '@/lib/video-director/prompt-compiler';
 import { getRuntimeSettings } from '@/lib/runtime-settings';
+import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
+import { detectImageMimeType } from '@/lib/safe-image-input';
 import {
   createTaskEntryAudit,
   executeTaskEntryMigration,
@@ -113,6 +115,16 @@ async function waitForSkillVideoAcceptance(
   throw Object.assign(new Error('Skill video acceptance was not confirmed in time'), {
     code: 'SKILL_ACCEPTANCE_TIMEOUT',
   });
+}
+
+/** A loopback domain is reachable only from this host, so providers cannot download from it. */
+function isLoopbackDomain(domain: string): boolean {
+  try {
+    const { hostname } = new URL(domain.startsWith('http') ? domain : `https://${domain}`);
+    return hostname === 'localhost' || hostname === '0.0.0.0' || hostname === '[::1]' || /^127\./.test(hostname);
+  } catch {
+    return false;
+  }
 }
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -428,7 +440,8 @@ export async function POST(request: NextRequest) {
 
     // 3.5 解析图片 URL（转换为第三方 API 可访问的格式）
     const rawDomain = process.env.COZE_PROJECT_DOMAIN_DEFAULT || '';
-    const domainBase = rawDomain.replace(/\/+$/, '');
+    const configuredDomain = rawDomain.replace(/\/+$/, '');
+    const domainBase = configuredDomain && !isLoopbackDomain(configuredDomain) ? configuredDomain : '';
 
     const resolveImageUrl = async (imgUrl: string | undefined | null): Promise<string | undefined> => {
       if (!imgUrl || typeof imgUrl !== 'string' || !imgUrl.trim()) return undefined;
@@ -439,14 +452,12 @@ export async function POST(request: NextRequest) {
           const base = domainBase.startsWith('http') ? domainBase : `https://${domainBase}`;
           return `${base}${imgUrl}`;
         }
-        // 无公网域名时，fetch 转为 base64
+        // 无公网域名时，直接读取本地文件转为 base64
         try {
-          const proto = process.env.NODE_ENV === 'production' ? 'https' : 'http';
-          const port = process.env.DEPLOY_RUN_PORT || 5000;
-          const resp = await fetch(`${proto}://localhost:${port}${imgUrl}`, { signal: AbortSignal.timeout(10000) });
-          if (pearMaterials && !resp.ok) return undefined;
-          const buf = Buffer.from(await resp.arrayBuffer());
-          return `data:image/png;base64,${buf.toString('base64')}`;
+          const buf = await fetchImageBuffer(imgUrl, { maxBytes: 20 * 1024 * 1024 });
+          const mimeType = detectImageMimeType(buf);
+          if (!mimeType) return undefined;
+          return `data:${mimeType};base64,${buf.toString('base64')}`;
         } catch {
           return undefined;
         }
