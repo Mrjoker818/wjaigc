@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 
 import { fetchImageBuffer } from '@/lib/fetch-image-buffer';
 import { getSafeMediaTypeFromResponse } from '@/lib/media-validation';
-import { downloadPublicImage, type DownloadPublicImageOptions } from '@/lib/safe-image-download';
+import { downloadPublicImage, SafeImageDownloadError, type DownloadPublicImageOptions } from '@/lib/safe-image-download';
 import { assertSafePixelDimensions, withSafeSharp } from '@/lib/safe-image-input';
 import { isServerDataRootDurable, saveImageFile } from '@/lib/server-data-root';
 import { uploadImageToS3Abortable } from '@/lib/s3-storage';
@@ -95,6 +95,31 @@ const GATEWAY_VIDEO_MIME_TYPES = [
 ] as const;
 
 const MAX_VIDEO_JSON_BYTES = 1024 * 1024;
+const VIDEO_DOWNLOAD_ATTEMPTS = 3;
+const TRANSIENT_DOWNLOAD_ERRORS = new Set([
+  'Remote image download was interrupted',
+  'Remote image download timed out',
+  'Remote image download failed',
+]);
+
+/** CDN downloads of large videos sometimes drop mid-stream; retry those, never policy rejections. */
+async function downloadWithRetry(
+  download: Download,
+  url: string,
+  options: DownloadPublicImageOptions,
+  signal: AbortSignal,
+): Promise<{ buffer: Buffer; mimeType: string }> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await download(url, options);
+    } catch (error) {
+      const transient = error instanceof SafeImageDownloadError && TRANSIENT_DOWNLOAD_ERRORS.has(error.message);
+      if (!transient || signal.aborted || attempt >= VIDEO_DOWNLOAD_ATTEMPTS) throw error;
+      console.warn(`[media-gateway] Video download attempt ${attempt} failed, retrying: ${error.message}`);
+      await new Promise(resolve => setTimeout(resolve, 1_000 * attempt));
+    }
+  }
+}
 
 function extractVideoUrlFromJson(buffer: Buffer): string {
   let parsed: unknown;
@@ -143,7 +168,7 @@ export async function downloadSafeVideoArtifact(
   ];
   try {
     let resolvedSourceUrl = input.sourceUrl;
-    let downloaded = await download(resolvedSourceUrl, {
+    let downloaded = await downloadWithRetry(download, resolvedSourceUrl, {
       maxBytes: MAX_VIDEO_BYTES,
       timeoutMs: 120_000,
       allowedMimeTypes,
@@ -153,15 +178,15 @@ export async function downloadSafeVideoArtifact(
         ? { 'application/json': MAX_VIDEO_JSON_BYTES }
         : undefined,
       signal: deadlineController.signal,
-    });
+    }, deadlineController.signal);
     if (downloaded.mimeType === 'application/json') {
       resolvedSourceUrl = extractVideoUrlFromJson(downloaded.buffer);
-      downloaded = await download(resolvedSourceUrl, {
+      downloaded = await downloadWithRetry(download, resolvedSourceUrl, {
         maxBytes: MAX_VIDEO_BYTES,
         timeoutMs: 120_000,
         allowedMimeTypes: [...GATEWAY_VIDEO_MIME_TYPES],
         signal: deadlineController.signal,
-      });
+      }, deadlineController.signal);
     }
     const mediaType = getSafeMediaTypeFromResponse(downloaded.mimeType, downloaded.buffer, true);
     if (

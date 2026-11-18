@@ -10,6 +10,7 @@ import {
   persistGatewayVideoArtifact,
   stabilizeGatewayImageResult,
 } from '@/lib/media-gateway/artifact-persistence';
+import { SafeImageDownloadError } from '@/lib/safe-image-download';
 
 describe('media gateway artifact persistence', () => {
   const validPng = () => sharp({
@@ -111,6 +112,26 @@ describe('media gateway artifact persistence', () => {
     });
     expect(download.mock.calls[1]?.[1]).not.toHaveProperty('authorizationHeader');
     expect(download.mock.calls[0]?.[1]?.signal).toBe(download.mock.calls[1]?.[1]?.signal);
+  });
+
+  it('retries a video download the CDN dropped mid-stream', async () => {
+    const video = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftypisom'), Buffer.alloc(32)]);
+    const download = vi.fn()
+      .mockRejectedValueOnce(new SafeImageDownloadError('Remote image download was interrupted'))
+      .mockResolvedValueOnce({ buffer: video, mimeType: 'video/mp4' });
+
+    await expect(downloadSafeVideoArtifact({ sourceUrl: 'https://cdn.example/video.mp4', download }))
+      .resolves.toMatchObject({ buffer: video, mediaType: { mimeType: 'video/mp4' } });
+    expect(download).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry a video download the safety policy rejected', async () => {
+    const download = vi.fn()
+      .mockRejectedValue(new SafeImageDownloadError('The image host resolves to a private or reserved address'));
+
+    await expect(downloadSafeVideoArtifact({ sourceUrl: 'https://cdn.example/video.mp4', download }))
+      .rejects.toThrow('private or reserved');
+    expect(download).toHaveBeenCalledTimes(1);
   });
 
   it('removes the local direct video when durable persistence fails', async () => {
