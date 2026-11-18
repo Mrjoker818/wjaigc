@@ -13,7 +13,7 @@ import {
   EyeOff,
   Sparkles,
   Film,
-  Workflow,
+  Clapperboard,
   Shapes,
   MessageSquareMore,
   Eraser,
@@ -260,11 +260,11 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
 
             <div className="flex items-start gap-3 p-4 rounded-lg bg-muted/50 border border-border/20 hover:border-primary/30 transition-colors group">
               <div className="w-9 h-9 rounded-md bg-accent flex items-center justify-center shrink-0 group-hover:shadow-[0_0_20px_rgba(212,175,55,0.15)] transition-shadow">
-                <Workflow className="w-[18px] h-[18px] text-primary" />
+                <Clapperboard className="w-[18px] h-[18px] text-primary" />
               </div>
               <div className="min-w-0">
-                <h3 className="text-[13px] font-semibold text-foreground mb-0.5">工作流 & Agent</h3>
-                <p className="text-[11px] text-muted-foreground leading-snug">可视化节点编排、AI自然语言建图、Agent智能多轮编辑、30+节点类型</p>
+                <h3 className="text-[13px] font-semibold text-foreground mb-0.5">短剧工作台</h3>
+                <p className="text-[11px] text-muted-foreground leading-snug">一句话写出分场剧本，定妆、分镜、逐镜头生成与重拍，带转场和字幕渲染成片</p>
               </div>
             </div>
           </div>
@@ -313,7 +313,7 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
                       <div className="flex-1 min-w-0">
                         <h3 className="text-lg font-semibold text-foreground mb-1">无限画布</h3>
                         <p className="text-xs text-muted-foreground leading-relaxed">
-                          AI 图像生成 · 视频导演 · 3D模型 · 工作流编排 · 无限画布创作
+                          AI 图像生成 · 视频导演 · 短剧工作台 · 3D模型 · 无限画布创作
                         </p>
                       </div>
                       <div className="text-primary opacity-0 group-hover:opacity-100 transition-opacity">

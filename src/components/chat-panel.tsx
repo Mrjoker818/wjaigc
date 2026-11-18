@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Bot, Send, Square, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Target, Sliders, Download, AlertCircle, LocateFixed, RotateCcw, FileText, Cpu, ChevronRight, AtSign, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { Bot, Clapperboard, Send, Square, Sparkles, Copy, Check, Trash2, Loader2, Eye, EyeOff, Wand2, User, Upload, X, Image as ImageIcon, Languages, Settings, Plug, Plus, History, FolderOpen, MessageSquare, Bookmark, BookmarkCheck, Lightbulb, Zap, ArrowRight, Palette, Target, Sliders, Download, AlertCircle, LocateFixed, RotateCcw, FileText, Cpu, ChevronRight, AtSign, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { AgentBuilderDialog, type AgentDefinition, type AgentRecipe } from '@/components/chat/AgentBuilderDialog';
 import { toast } from 'sonner';
 import { extractTaskResultImageUrl } from '@/lib/task-result-url';
@@ -131,6 +131,8 @@ interface ToolExecution {
   audioUrl?: string;      // 生成的音频URL
   progress?: number;      // 进度百分比 0-100
   error?: string;         // 错误信息
+  dramaId?: string;       // create_drama_draft 保存的剧本草稿
+  dramaTitle?: string;
 }
 
 function AgentRunMessageProgress({ runId }: { runId: string }): React.ReactElement {
@@ -598,6 +600,8 @@ interface ChatPanelProps {
   externalPrompt?: string;
   /** Called after the injected prompt is consumed */
   onExternalPromptConsumed?: () => void;
+  /** Opens a script draft saved by the chat in the drama workbench */
+  onOpenDrama?: (dramaId: string) => void;
 }
 
 interface CanvasSkillSaveFormProps {
@@ -1313,7 +1317,7 @@ function extractPromptForGeneration(content: string): string {
 /* ========== 智能体搭建弹窗 ========== */
 /* AgentBuilderDialog 已提取至 src/components/chat/AgentBuilderDialog.tsx */
 
-export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAuthority = 'legacy', onAddToPrompt, onAddImages, onAddGeneratedImage, onAddGeneratedImages, canvasImages = [], selectedCanvasImage, onResolveCanvasImageForChat, onChatModelChange, onSuggestionAction, onGenerateImage, brandDna, onInjectBrandDna, chatInitialImage, chatInitialImageResolved = false, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage, externalPrompt, onExternalPromptConsumed }: ChatPanelProps) {
+export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAuthority = 'legacy', onAddToPrompt, onAddImages, onAddGeneratedImage, onAddGeneratedImages, canvasImages = [], selectedCanvasImage, onResolveCanvasImageForChat, onChatModelChange, onSuggestionAction, onGenerateImage, brandDna, onInjectBrandDna, chatInitialImage, chatInitialImageResolved = false, onChatInitialImageConsumed, chatTabOpen, onChatTabOpenChange, onNavigateToImage, externalPrompt, onExternalPromptConsumed, onOpenDrama }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [showFullHistory, setShowFullHistory] = useState(false);
   const visibleMessages = useMemo(() => (showFullHistory ? messages : messages.slice(-CHAT_RENDER_WINDOW)).filter(Boolean), [messages, showFullHistory]);
@@ -3466,6 +3470,8 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                       imageUrls: parsed.imageUrls,
                       videoUrl: parsed.videoUrl || parsed.videoUrls?.[0],
                       error: parsed.error,
+                      ...(typeof parsed.dramaId === 'string' ? { dramaId: parsed.dramaId } : {}),
+                      ...(typeof parsed.dramaTitle === 'string' ? { dramaTitle: parsed.dramaTitle } : {}),
                     };
                   }
                   setMessages(prev => prev.map(msg =>
@@ -5376,6 +5382,19 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                           </div>
                         ))}
                       </div>
+                      {onOpenDrama && message.toolExecutions.filter(exec => exec.status === 'completed' && exec.dramaId).map(exec => (
+                        <div key={exec.dramaId} className="px-2 pb-2">
+                          <button
+                            type="button"
+                            data-testid="chat-open-drama"
+                            onClick={() => onOpenDrama(exec.dramaId!)}
+                            className={`min-h-9 text-xs px-2.5 py-1 rounded-lg flex items-center gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${isGold ? 'bg-gold/15 text-gold hover:bg-gold/25 focus-visible:outline-gold' : 'bg-blue-500 text-white hover:bg-blue-600 focus-visible:outline-blue-500'}`}
+                          >
+                            <Clapperboard size={12} />
+                            在短剧工作台打开{exec.dramaTitle ? `《${exec.dramaTitle}》` : ''}
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   )}
                   {/* [CANVAS_ACTION] 画布操作：点击后在画布打开对应工具，由用户确认参数和费用 */}

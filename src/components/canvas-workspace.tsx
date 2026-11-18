@@ -173,6 +173,7 @@ import {
   replaceWorkspaceHistoryState,
   useWorkspaceLocationSearch,
 } from '@/lib/project-workspace-url';
+import { parseSimpleChatWorkspaceHandoffIntent, type SimpleChatWorkspaceHandoffIntent } from '@/lib/simple-chat-workspace-handoff';
 import { toStableImageUrl, awaitStableImageUrl } from '@/lib/stable-image-url';
 import { APP_FULL_VERSION_LABEL, APP_NAME } from '@/config/app-meta';
 import { fetchSessionPayload, resolveSessionUser } from '@/lib/auth-session';
@@ -1213,6 +1214,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
   const [pendingModeSwitch, setPendingModeSwitch] = useState<'drama' | 'dashboard' | null>(null);
   /** Drama project the workbench opens next; set by「发送到短剧工作台」. */
   const [activeDramaId, setActiveDramaId] = useState<string | null>(null);
+  /** A simple chat message sent with「发送到短剧工作台」. Read once on load, because loading the project strips the chat params from the URL. */
+  const [dramaChatHandoff, setDramaChatHandoff] = useState<SimpleChatWorkspaceHandoffIntent | null>(() => (
+    typeof window === 'undefined' ? null : parseSimpleChatWorkspaceHandoffIntent(window.location.search)
+  ));
+  const clearDramaChatHandoff = useCallback(() => setDramaChatHandoff(null), []);
   /** Film the workbench asked to place on the canvas; inserted once the canvas is shown again. */
   const [pendingCanvasFilm, setPendingCanvasFilm] = useState<{ videoUrl: string; thumbnailUrl?: string; duration?: number; aspectRatio?: string } | null>(null);
   // Start with true so SSR renders the login panel (not a blank spinner).
@@ -7283,6 +7289,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
         onDramaIdChange={setActiveDramaId}
         onExit={() => setAppMode('canvas')}
         onPlaceOnCanvas={film => { setPendingCanvasFilm(film); setAppMode('canvas'); }}
+        chatHandoff={dramaChatHandoff}
+        onChatHandoffDone={clearDramaChatHandoff}
       />
     );
   }
@@ -8116,7 +8124,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
               </div>
             </div>
             <div className={activePanel === 'chat' ? 'flex-1 overflow-hidden' : 'hidden'}>
-              <ChatPanel isVisible={!panelCollapsed && activePanel === 'chat'} canvasAuthority={collaborativeCanvas.authority==='unknown'?'pending':collaborativeCanvas.authority} themeStyle={themeStyle} projectId={currentProject?.id} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} onAddGeneratedImage={handleAddEmbeddedChatImage} onAddGeneratedImages={handleAddEmbeddedChatImages} canvasImages={images} selectedCanvasImage={selectedImage} onResolveCanvasImageForChat={resolveCanvasImageForChat} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage?.scope === canvasChatScopeRef.current.epoch ? chatInitialImage.image : null} chatInitialImageResolved onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} onGenerateImage={handleChatGenerateImage} externalPrompt={externalChatPrompt} onExternalPromptConsumed={() => setExternalChatPrompt(undefined)} />
+              <ChatPanel isVisible={!panelCollapsed && activePanel === 'chat'} canvasAuthority={collaborativeCanvas.authority==='unknown'?'pending':collaborativeCanvas.authority} themeStyle={themeStyle} projectId={currentProject?.id} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} onAddGeneratedImage={handleAddEmbeddedChatImage} onAddGeneratedImages={handleAddEmbeddedChatImages} canvasImages={images} selectedCanvasImage={selectedImage} onResolveCanvasImageForChat={resolveCanvasImageForChat} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage?.scope === canvasChatScopeRef.current.epoch ? chatInitialImage.image : null} chatInitialImageResolved onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} onGenerateImage={handleChatGenerateImage} externalPrompt={externalChatPrompt} onExternalPromptConsumed={() => setExternalChatPrompt(undefined)} onOpenDrama={dramaId => { setActiveDramaId(dramaId); safeSwitchMode('drama'); }} />
             </div>
 
             {/* 固定在底部的开始生成按钮 */}

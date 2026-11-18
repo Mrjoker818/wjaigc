@@ -1046,5 +1046,7 @@
   "src/components/drama/use-drama-workbench.ts",
   "src/lib/drama/reference-prompts.ts",
   "src/lib/drama/workbench-client.ts",
-  "src/lib/drama/workbench-state.ts"
+  "src/lib/drama/workbench-state.ts",
+  "src/app/api/drama/from-chat/route.ts",
+  "src/lib/drama/draft.ts"
 ]

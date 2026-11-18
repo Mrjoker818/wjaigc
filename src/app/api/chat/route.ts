@@ -47,13 +47,20 @@ interface ChatTaskContext {
 }
 
 // 自带准入的工具：run_skill 经 createSkillRun 校验项目权限并预扣积分，不走单任务图像准入。
-const SELF_ADMITTED_TOOLS = new Set(['run_skill']);
+const SELF_ADMITTED_TOOLS = new Set(['run_skill', 'create_drama_draft']);
 
 function runtimeToolId(toolName: string): 'generate_image' | 'edit_image' | 'analyze_image' | null {
   if (toolName === 'generate_image' || toolName === 'img2img') return 'generate_image';
   if (toolName === 'edit_image') return 'edit_image';
   if (toolName === 'analyze_image') return 'analyze_image';
   return null;
+}
+
+/** The saved draft from create_drama_draft, so the chat panel can open it in the drama workbench. */
+function dramaDraftFields(result: ToolCallResult): { dramaId?: string; dramaTitle?: string } {
+  const dramaId = result.data?.dramaId;
+  if (!result.success || typeof dramaId !== 'string') return {};
+  return { dramaId, ...(typeof result.data?.title === 'string' ? { dramaTitle: result.data.title } : {}) };
 }
 
 async function executeCanvasChatTool(input: {
@@ -835,6 +842,7 @@ async function handleAgentStream(
           label: toolName === 'generate_image' ? '正在生成图片...' :
                  toolName === 'generate_video' ? '正在生成视频...' :
                  toolName === 'analyze_image' ? '正在分析图片...' :
+                 toolName === 'create_drama_draft' ? '正在写短剧剧本...' :
                  `正在执行 ${toolName}...`,
           iteration: toolIteration,
         })}\n\n`));
@@ -880,6 +888,7 @@ async function handleAgentStream(
           imageUrls: toolResult.imageUrls || [],
           videoUrls: toolResult.videoUrls || [],
           taskIds: toolResult.taskIds || [],
+          ...dramaDraftFields(toolResult),
           iteration: toolIteration,
         })}\n\n`));
         return toolResult;
@@ -1297,6 +1306,7 @@ async function handleNonStreamAgentLoop(
           imageUrls: r.result.imageUrls || [],
           videoUrls: r.result.videoUrls || [],
           taskIds: r.result.taskIds || [],
+          ...dramaDraftFields(r.result),
         })),
         _imageUrls: allImageUrls,
         _videoUrls: allVideoUrls,

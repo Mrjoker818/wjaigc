@@ -44,12 +44,13 @@ describe('chat canvas action', () => {
     expect(isChatCanvasActionRequest(null)).toBe(false);
   });
 
-  it('wires the chat button to the canvas listener and keeps the workflow on the message', () => {
+  it('wires the chat button to the canvas listener and opens saved drama drafts', () => {
     const chat = source('src/components/chat-panel.tsx');
     const canvas = source('src/components/infinite-canvas.tsx');
     expect(chat).toContain('requestChatCanvasAction(action)');
-    expect(chat).toContain('data-testid="chat-workflow-preview"');
-    expect(chat).toContain('workflow: builtWorkflow');
+    expect(chat).not.toContain('chat-workflow-preview');
+    expect(chat).toContain('data-testid="chat-open-drama"');
+    expect(chat).toContain('onClick={() => onOpenDrama(exec.dramaId!)}');
     expect(canvas).toContain('window.addEventListener(CHAT_CANVAS_ACTION_EVENT, onChatCanvasAction)');
   });
 });

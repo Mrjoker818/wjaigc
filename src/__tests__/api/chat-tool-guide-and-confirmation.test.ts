@@ -35,7 +35,7 @@ describe('chat tool guide', () => {
 describe('chat agent-v2 and confirmed tool calls', () => {
   it('lets run_skill self-admit under agent-v2', () => {
     const route = source('src/app/api/chat/route.ts');
-    expect(route).toContain("const SELF_ADMITTED_TOOLS = new Set(['run_skill']);");
+    expect(route).toContain("const SELF_ADMITTED_TOOLS = new Set(['run_skill', 'create_drama_draft']);");
     expect(route).toContain("input.agentRuntimeMode === 'agent-v2' && SELF_ADMITTED_TOOLS.has(input.toolName)");
   });
 

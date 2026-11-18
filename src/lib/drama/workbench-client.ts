@@ -1,4 +1,5 @@
 /** Browser calls made by the drama workbench. Every failure throws an Error whose message can be shown to the user. */
+import type { SimpleChatWorkspaceHandoffIntent } from '@/lib/simple-chat-workspace-handoff';
 import type { DramaProjectRecord, DramaProjectV1, DramaShot, DramaTake } from './types';
 
 export type WorkbenchFetch = (input: string, init?: RequestInit) => Promise<Response>;
@@ -83,6 +84,14 @@ export async function planDramaScript(input: ScriptRequest, fetcher: WorkbenchFe
   const data = await readJson(response);
   if (!response.ok || !data.doc) fail(data, '剧本生成失败，请稍后重试');
   return data.doc as DramaProjectV1;
+}
+
+/** Writes and saves a script draft from a simple chat message sent with「发送到短剧工作台」. */
+export async function createDramaFromChat(intent: SimpleChatWorkspaceHandoffIntent, fetcher: WorkbenchFetch = defaultFetch): Promise<DramaProjectRecord> {
+  const response = await fetcher('/api/drama/from-chat', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(intent) });
+  const data = await readJson(response);
+  if (!response.ok || !data.project) fail(data, '对话内容没能写成剧本，请稍后重试');
+  return data.project as DramaProjectRecord;
 }
 
 export async function planSceneShots(

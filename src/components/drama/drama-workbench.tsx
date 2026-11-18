@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Clapperboard, Loader2 } from 'lucide-react';
 import { createEmptyDramaProject, type DramaProjectRecord } from '@/lib/drama/types';
+import type { SimpleChatWorkspaceHandoffIntent } from '@/lib/simple-chat-workspace-handoff';
 import {
-  createDramaProject, listDramaProjects, loadDramaProject, planDramaScript, type DramaProjectSummary, type ScriptRequest,
+  createDramaFromChat, createDramaProject, listDramaProjects, loadDramaProject, planDramaScript, type DramaProjectSummary, type ScriptRequest,
 } from '@/lib/drama/workbench-client';
 import { blankEpisodeDoc } from '@/lib/drama/workbench-state';
 import { DramaIdeaForm } from './drama-idea-form';
@@ -20,6 +21,9 @@ export interface DramaWorkbenchProps {
   onExit: () => void;
   onPlaceOnCanvas?: DramaWorkbenchApi['onPlaceOnCanvas'];
   onOpenCredits?: () => void;
+  /** A message sent from simple chat; it is written into a new script draft once, then `onChatHandoffDone` clears it. */
+  chatHandoff?: SimpleChatWorkspaceHandoffIntent | null;
+  onChatHandoffDone?: () => void;
 }
 
 type LoadState = { status: 'loading' } | { status: 'ready'; record: DramaProjectRecord } | { status: 'error'; message: string };
@@ -68,7 +72,7 @@ export default function DramaWorkbench(props: DramaWorkbenchProps) {
 }
 
 /** Empty state: start a new drama from one sentence, or reopen one of this canvas project's dramas. */
-function DramaStart({ projectId, onDramaIdChange, onExit }: DramaWorkbenchProps) {
+function DramaStart({ projectId, onDramaIdChange, onExit, chatHandoff, onChatHandoffDone }: DramaWorkbenchProps) {
   const [projects, setProjects] = useState<DramaProjectSummary[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -83,24 +87,34 @@ function DramaStart({ projectId, onDramaIdChange, onExit }: DramaWorkbenchProps)
     return () => { live = false; };
   }, [projectId]);
 
-  const create = useCallback(async (label: string, build: () => Promise<Parameters<typeof createDramaProject>[0]>) => {
+  /** Runs one creation job; `save` resolves to the stored record, which is then opened. */
+  const create = useCallback(async (label: string, save: () => Promise<DramaProjectRecord>) => {
     setBusy(label);
     setError(null);
     try {
-      const record = await createDramaProject(await build(), projectId);
+      const record = await save();
       onDramaIdChange(record.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : `${label}失败，请稍后重试`);
     } finally {
       setBusy(null);
     }
-  }, [projectId, onDramaIdChange]);
+  }, [onDramaIdChange]);
 
-  const generate = (input: ScriptRequest) => create('生成剧本', () => planDramaScript(input));
-  const blank = (input: ScriptRequest) => create('新建剧本', async () => blankEpisodeDoc(
+  // The ref outlives StrictMode's second effect run, so one chat message never becomes two drafts.
+  const startedHandoff = useRef<SimpleChatWorkspaceHandoffIntent | null>(null);
+  useEffect(() => {
+    if (!chatHandoff || startedHandoff.current === chatHandoff) return;
+    startedHandoff.current = chatHandoff;
+    onChatHandoffDone?.();
+    void create('从对话写剧本', () => createDramaFromChat(chatHandoff));
+  }, [chatHandoff, onChatHandoffDone, create]);
+
+  const generate = (input: ScriptRequest) => create('生成剧本', async () => createDramaProject(await planDramaScript(input), projectId));
+  const blank = (input: ScriptRequest) => create('新建剧本', () => createDramaProject(blankEpisodeDoc(
     createEmptyDramaProject({ title: input.title || input.idea.slice(0, 24), genre: input.genre, style: input.style as never, aspectRatio: input.aspectRatio }),
     input.idea,
-  ));
+  ), projectId));
 
   return (
     <div className="drama-root min-h-dvh overflow-y-auto">
@@ -109,6 +123,11 @@ function DramaStart({ projectId, onDramaIdChange, onExit }: DramaWorkbenchProps)
         <span className="flex items-center gap-2 text-sm text-[var(--drama-muted)]"><Clapperboard className="h-4 w-4" />短剧工作台</span>
       </header>
       <main className="mx-auto flex max-w-3xl flex-col gap-10 px-4 py-10 sm:py-16">
+        {busy === '从对话写剧本' ? (
+          <p role="status" className="drama-panel flex items-center gap-2 px-4 py-3 text-sm">
+            <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />正在把对话内容写成分场剧本，约需 1 分钟
+          </p>
+        ) : null}
         <DramaIdeaForm busy={busy} error={error} onGenerate={generate} onBlank={blank} />
         <section aria-labelledby="drama-recent" className="flex flex-col gap-3">
           <h2 id="drama-recent" className="text-sm font-semibold">{projectId ? '这个项目里的短剧' : '我的短剧'}</h2>

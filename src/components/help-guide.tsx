@@ -407,6 +407,8 @@ function ChatSection() {
       <FeatureItem>生成后引导：AI 回复末尾推荐后续操作（图生图 / 修图 / 放大等）</FeatureItem>
       <FeatureItem>@引用系统：输入 @ 触发引用菜单（@图片 / @品牌 / @模型 / @提示词）</FeatureItem>
       <FeatureItem>Tab 模式：选中画布图片后自动切换为“针对此图片”模式</FeatureItem>
+      <FeatureItem>短剧草稿：描述一个故事，AI 写出分场剧本并保存，点“在短剧工作台打开”继续制作</FeatureItem>
+      <FeatureItem>简易对话：消息上的“发送到短剧工作台”把这条内容写成剧本草稿</FeatureItem>
     </div>
   );
 }
@@ -545,8 +547,14 @@ function VideoSection() {
       <FeatureItem>视频延长：在现有视频末尾继续生成内容（支持可灵 V3 / Seedance 等）</FeatureItem>
       <FeatureItem>音效生成：生成视频时可选同时生成音效</FeatureItem>
       <FeatureItem>视频播放器：黑金主题，进度条 / 音量 / 倍速（0.5x ~ 2x） / 全屏</FeatureItem>
+      <SubTitle>短剧工作台</SubTitle>
+      <FeatureItem>五个步骤：剧本 → 设定（角色 / 场景定妆图）→ 分镜 → 镜头生成与重拍 → 成片</FeatureItem>
+      <FeatureItem>逐镜头生成：自动接上一镜头的尾帧，出场角色的定妆图作为参考图</FeatureItem>
+      <FeatureItem>成片：保留每段音轨，可选硬切 / 淡入淡出 / 闪白转场，台词烧成字幕</FeatureItem>
+      <FeatureItem>视频面板的多镜头分镜可以“发送到短剧工作台”继续精修</FeatureItem>
       <SubTitle>入口</SubTitle>
       <FeatureItem>右侧面板图像 / 视频 Tab 切换到视频生成</FeatureItem>
+      <FeatureItem>画布底部工具栏“短剧工作台”</FeatureItem>
       <FeatureItem>画布右键菜单“视频编辑” / “视频延长”</FeatureItem>
       <FeatureItem>视频图片点击播放按钮覆盖层</FeatureItem>
     </div>

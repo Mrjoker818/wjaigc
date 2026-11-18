@@ -14,6 +14,7 @@ import { createSkillRun, dispatchSkillRunExecution, getSkillRun } from './skill-
 import { requiredSkillModelRoles, type SkillDefinition } from './skill-runtime/types';
 import type { FrozenBindings } from './skill-runtime/cost-estimator';
 import type { User } from './user-types';
+import { DIRECTOR_STYLE_IDS, normalizeDirectorStyle } from './video-director/director-styles';
 
 // 服务器端口，所有服务器间 fetch 调用统一使用 localhost + 此端口
 const SERVER_PORT = process.env.DEPLOY_RUN_PORT || '5000';
@@ -291,6 +292,37 @@ export const CHAT_TOOLS = [
       },
     },
   },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'create_drama_draft',
+      description: '把用户的故事或短剧想法写成分场剧本草稿（分集、场次、角色、场景），保存到短剧工作台。用户想拍短剧、故事短片或有剧情的多镜头视频时使用；只要一个视频片段时用 generate_video。写剧本不消耗积分，镜头视频在工作台里生成。',
+      parameters: {
+        type: 'object',
+        properties: {
+          idea: {
+            type: 'string',
+            description: '故事创意或大纲，保留用户原话里的人物、情节和台词',
+          },
+          title: {
+            type: 'string',
+            description: '片名，用户没有给出时省略',
+          },
+          style: {
+            type: 'string',
+            description: '视觉风格，用户没有要求时省略',
+            enum: [...DIRECTOR_STYLE_IDS],
+          },
+          aspect_ratio: {
+            type: 'string',
+            description: '画面比例，竖屏短剧用 9:16',
+            enum: ['9:16', '16:9', '1:1'],
+          },
+        },
+        required: ['idea'],
+      },
+    },
+  },
 ];
 
 // ============ Tool Execution ============
@@ -465,6 +497,8 @@ export async function executeToolCall(
       return executeExtendCanvas(args, context);
     case 'run_skill':
       return executeRunSkill(args, context);
+    case 'create_drama_draft':
+      return executeCreateDramaDraft(args, context);
     default:
       return { success: false, error: `未知工具: ${toolName}`, resultText: `错误：未知工具 ${toolName}` };
   }
@@ -1209,6 +1243,12 @@ export function buildChatToolGuide(availableToolNames: readonly string[]): strin
       ].join('\n'));
     }
   }
+  if (availableToolNames.includes('create_drama_draft')) {
+    sections.push([
+      '## 短剧（create_drama_draft）',
+      '用户要拍短剧、故事短片或有剧情的多镜头视频时，调用 create_drama_draft 写出剧本草稿，不要用 generate_video 逐个生成镜头。草稿保存后，告诉用户点「在短剧工作台打开」继续拆镜头、生成和成片。',
+    ].join('\n'));
+  }
   return sections.join('\n\n');
 }
 
@@ -1345,6 +1385,61 @@ interface AwaitedChatTasks {
  * 完成的图片/视频 URL 直接交还模型，让模型能基于成品继续下一步；
  * 超时仍未完成的任务保留为 pending，交由前端继续轮询。
  */
+const DRAMA_IDEA_LIMIT = 4000;
+
+/** Writes a script draft with the drama planner and saves it for the drama workbench. Planning is not billed. */
+async function executeCreateDramaDraft(
+  args: Record<string, unknown>,
+  context: ToolContext,
+): Promise<ToolCallResult> {
+  if (!context.userId || context.userId === 'anonymous') {
+    return { success: false, error: '请先登录', resultText: '错误：用户未登录，无法保存剧本草稿。' };
+  }
+  const [{ dramaPlannerConfig, writeDramaScript }, { createDramaProject }, { authorizeGenerationProject, GenerationProjectAccessError }, { DramaPlannerError }] = await Promise.all([
+    import('./drama/draft'),
+    import('./drama/store'),
+    import('./collaboration/generation-project-access'),
+    import('./drama/planner'),
+  ]);
+  try {
+    const access = await authorizeGenerationProject({ actorUserId: context.userId, projectId: context.projectId });
+    const config = await dramaPlannerConfig();
+    if (!config) {
+      return {
+        success: false, error: 'DRAMA_PLANNER_NOT_CONFIGURED',
+        resultText: '错误：还没有可用的对话模型，无法写剧本。请告诉用户先在后台供应商设置里启用一个对话模型。',
+      };
+    }
+    // One planner call only: the chat tool has a 120s limit and a call may take 90s.
+    const doc = await writeDramaScript(config, {
+      idea: String(args.idea).trim().slice(0, DRAMA_IDEA_LIMIT),
+      ...(typeof args.title === 'string' && args.title.trim() ? { title: args.title.trim().slice(0, 200) } : {}),
+      style: normalizeDirectorStyle(args.style),
+      aspectRatio: typeof args.aspect_ratio === 'string' ? args.aspect_ratio : '9:16',
+    }, { retry: false });
+    const record = await createDramaProject(context.userId, access.kind === 'unscoped' ? null : access.projectId, doc);
+    const sceneCount = doc.episodes.reduce((total, episode) => total + episode.scenes.length, 0);
+    return {
+      success: true,
+      data: { dramaId: record.id, title: record.title },
+      resultText: `已保存剧本草稿《${record.title}》：${doc.episodes.length} 集、${sceneCount} 场、${doc.cast.length} 个角色。`
+        + '告诉用户点击「在短剧工作台打开」继续拆镜头、生成镜头视频和渲染成片，不要再用 generate_video 逐个生成这些镜头。',
+    };
+  } catch (error) {
+    if (error instanceof GenerationProjectAccessError) {
+      return { success: false, error: error.message, resultText: `错误：${error.message}` };
+    }
+    if (error instanceof DramaPlannerError) {
+      const message = error.code === 'DRAMA_PLANNER_UNAVAILABLE'
+        ? '剧本助手暂时连不上对话模型，请稍后重试'
+        : 'AI 返回的内容无法整理成剧本，请再试一次';
+      return { success: false, error: message, resultText: `错误：${message}` };
+    }
+    console.error({ code: 'CHAT_DRAMA_DRAFT_FAILED', error });
+    return { success: false, error: '剧本草稿保存失败，请稍后重试', resultText: '错误：剧本草稿保存失败。' };
+  }
+}
+
 async function awaitChatTasks(
   tasks: SubmittedChatTask[],
   context: ToolContext,

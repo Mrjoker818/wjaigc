@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
-import {
-  buildDramaScriptPrompt, buildDramaShotMessages, callDramaLlm, DramaPlannerError, parseDramaScriptResponse, parseDramaShotResponse,
-  type DramaLlmConfig,
-} from '@/lib/drama/planner';
+import { dramaPlannerConfig, withPlanRetry, writeDramaScript } from '@/lib/drama/draft';
+import { buildDramaShotMessages, callDramaLlm, DramaPlannerError, parseDramaShotResponse } from '@/lib/drama/planner';
 import { DramaDocumentError, parseDramaProject } from '@/lib/drama/schema';
-import { findProviderForFeature } from '@/lib/server-api-config';
 import { normalizeDirectorStyle } from '@/lib/video-director/director-styles';
 
 export const dynamic = 'force-dynamic';
@@ -14,26 +11,6 @@ export const maxDuration = 200;
 
 const ASPECT_RATIOS = new Set(['9:16', '16:9', '1:1', '4:3', '3:4', '21:9']);
 const MAX_IDEA_CHARS = 4000;
-
-/** The planner uses the same chat provider as the video director's shot planning. Like shot planning it is not billed. */
-async function plannerConfig(signal: AbortSignal): Promise<DramaLlmConfig | null> {
-  const provider = await findProviderForFeature('chat') as unknown as Record<string, unknown> | null;
-  if (!provider) return null;
-  const models = Array.isArray(provider.selectedModels) ? provider.selectedModels : [];
-  const modelId = String(models[0] || provider.defaultChatModel || '');
-  const baseUrl = String(provider.baseUrl || provider.base_url || '').replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
-  const apiKey = String(provider.apiKey || provider.api_key || '');
-  return baseUrl && apiKey && modelId ? { baseUrl, apiKey, modelId, signal } : null;
-}
-
-async function withRetry<T>(run: () => Promise<T>): Promise<T> {
-  try {
-    return await run();
-  } catch (error) {
-    if (error instanceof DramaPlannerError && error.code === 'DRAMA_PLAN_INVALID' && error.retryable) return run();
-    throw error;
-  }
-}
 
 function plannerError(error: unknown): NextResponse {
   if (error instanceof DramaDocumentError) {
@@ -63,7 +40,7 @@ export async function POST(request: NextRequest) {
   if (!body || (body.action !== 'script' && body.action !== 'shots')) {
     return NextResponse.json({ error: '请求内容不正确，请刷新后重试' }, { status: 400 });
   }
-  const config = await plannerConfig(request.signal);
+  const config = await dramaPlannerConfig(request.signal);
   if (!config) {
     return NextResponse.json({
       error: '还没有可用的对话模型。请在后台供应商设置里启用一个对话模型后再生成剧本。', code: 'DRAMA_PLANNER_NOT_CONFIGURED',
@@ -83,9 +60,7 @@ export async function POST(request: NextRequest) {
         episodeCount: Number(body.episodeCount) || 1,
         episodeDurationSec: Number(body.episodeDurationSec) || 60,
       };
-      const prompt = buildDramaScriptPrompt(input);
-      const doc = await withRetry(async () => parseDramaScriptResponse(await callDramaLlm(config, [{ role: 'user', content: prompt }]), input));
-      return NextResponse.json({ success: true, doc: parseDramaProject(doc) });
+      return NextResponse.json({ success: true, doc: await writeDramaScript(config, input) });
     }
 
     const input = {
@@ -96,7 +71,7 @@ export async function POST(request: NextRequest) {
     };
     const shotCount = Number(body.shotCount) || undefined;
     const messages = buildDramaShotMessages({ ...input, shotCount });
-    const shots = await withRetry(async () => parseDramaShotResponse(await callDramaLlm(config, messages), input));
+    const shots = await withPlanRetry(async () => parseDramaShotResponse(await callDramaLlm(config, messages), input));
     return NextResponse.json({ success: true, shots });
   } catch (error) {
     return plannerError(error);

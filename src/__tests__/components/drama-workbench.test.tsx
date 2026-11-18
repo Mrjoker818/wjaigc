@@ -50,6 +50,8 @@ beforeEach(() => {
       saved = body.doc;
       return json({ success: true, project: { id: 'drama_1', projectId: 'p1', title: body.doc.title, doc: body.doc, version: body.version + 1, createdAt: 1, updatedAt: 2 } });
     }
+    if (url === '/api/drama/from-chat') return json({ success: true, project: { id: 'drama_1', projectId: 'p1', title: doc.title, doc, version: 1, createdAt: 1, updatedAt: 1 } }, 201);
+    if (url === '/api/drama/projects' && init?.method === 'POST') return json({ success: true, project: { id: 'drama_1', projectId: 'p1', title: body.doc.title, doc: body.doc, version: 1, createdAt: 1, updatedAt: 1 } }, 201);
     if (url === '/api/drama/estimate') return json({ success: true, total: 50, perShot: { s2: 50 }, balance: 20 });
     return json({ error: 'unexpected' }, 500);
   }));
@@ -67,6 +69,20 @@ describe('drama workbench', () => {
     expect((screen.getByRole('button', { name: '生成剧本' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(await screen.findByRole('button', { name: /雨夜来信/ }));
     expect(onDramaIdChange).toHaveBeenCalledWith('drama_1');
+  });
+
+  it('writes a simple chat message into one draft and opens it', async () => {
+    const onDramaIdChange = vi.fn();
+    const onChatHandoffDone = vi.fn();
+    const chatHandoff = { targetProjectId: 'p1', chatProjectId: 'cp', chatTaskId: 'ct', chatMessageId: 'cm' };
+    const { rerender } = render(<DramaWorkbench dramaId={null} projectId="p1" onDramaIdChange={onDramaIdChange} onExit={() => undefined}
+      chatHandoff={chatHandoff} onChatHandoffDone={onChatHandoffDone} />);
+    expect(screen.getByText(/正在把对话内容写成分场剧本/)).toBeTruthy();
+    rerender(<DramaWorkbench dramaId={null} projectId="p1" onDramaIdChange={onDramaIdChange} onExit={() => undefined}
+      chatHandoff={chatHandoff} onChatHandoffDone={onChatHandoffDone} />);
+    await waitFor(() => expect(onDramaIdChange).toHaveBeenCalledWith('drama_1'));
+    expect(onChatHandoffDone).toHaveBeenCalledOnce();
+    expect(requests.filter(r => r.url === '/api/drama/from-chat')).toEqual([{ url: '/api/drama/from-chat', method: 'POST', body: chatHandoff }]);
   });
 
   it('opens a project on the board, walks every step and saves an edit', async () => {
