@@ -3,7 +3,7 @@
 import { useMemo } from 'react';
 import { useTaskModelCatalog } from '@/hooks/use-task-model-catalog';
 import type { ShotModelCapability } from '@/lib/drama/shot-runner';
-import { taskModelKey } from '@/lib/task-core/model-capability-contract';
+import { taskModelKey, type TaskModelDescriptor } from '@/lib/task-core/model-capability-contract';
 
 /** One video model the workbench can generate shots with, with the limits the engine needs. */
 export interface DramaModelOption {
@@ -24,11 +24,23 @@ export function modelKey(providerId: string, modelId: string): string {
   return `${providerId}::${modelId}`;
 }
 
+/**
+ * Mirrors the admission in /api/video/generate. Pear rejects character references outright, and a
+ * model the catalog has not described gets none, so a shot never fails on references it guessed.
+ */
+export function shotCapabilityFromDescriptor(descriptor: TaskModelDescriptor | undefined): ShotModelCapability {
+  const operations = descriptor?.supportedOperations;
+  const acceptsReferences = Boolean(descriptor?.supportsReferenceImages) && descriptor?.protocol !== 'pearapi-video';
+  return {
+    imageToVideo: !operations || operations.includes('image-to-video') || operations.includes('first-last-frame'),
+    maxReferenceImages: acceptsReferences ? (descriptor?.maxReferenceImages ?? 4) : 0,
+  };
+}
+
 export function useDramaVideoModels(): { models: DramaModelOption[]; loading: boolean; error: Error | null } {
   const { models, descriptorsByKey, loading, error } = useTaskModelCatalog('video');
   const options = useMemo(() => models.map((model): DramaModelOption => {
     const descriptor = descriptorsByKey.get(taskModelKey(model.providerId, model.id));
-    const operations = descriptor?.supportedOperations;
     return {
       key: modelKey(model.providerId, model.id),
       modelId: model.id,
@@ -36,10 +48,7 @@ export function useDramaVideoModels(): { models: DramaModelOption[]; loading: bo
       name: model.displayName || model.name || model.id,
       providerName: model.providerName || model.providerId,
       isDefault: model.isDefault === true,
-      capability: {
-        imageToVideo: !operations || operations.includes('image-to-video') || operations.includes('first-last-frame'),
-        maxReferenceImages: descriptor?.supportsReferenceImages === false ? 0 : (descriptor?.maxReferenceImages ?? 4),
-      },
+      capability: shotCapabilityFromDescriptor(descriptor),
       durations: descriptor?.allowedDurationsSeconds ?? [],
       ...(descriptor?.maxDurationSeconds ? { maxDuration: descriptor.maxDurationSeconds } : {}),
       ratios: descriptor?.allowedRatios ?? [],

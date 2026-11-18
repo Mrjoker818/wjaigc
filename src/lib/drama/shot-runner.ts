@@ -88,10 +88,18 @@ export interface ShotRequestContext {
   resolution?: string;
 }
 
+/** The generate route counts the first frame against the same image limit as the references. */
+export function shotReferenceImages(
+  shot: DramaShot, cast: DramaCastMember[], capability: ShotModelCapability, firstFrameUrl?: string,
+): string[] {
+  if (!firstFrameUrl) return chooseReferenceImages(shot, cast, capability);
+  return chooseReferenceImages(shot, cast, { ...capability, maxReferenceImages: capability.maxReferenceImages - 1 }, [firstFrameUrl]);
+}
+
 /** Body for POST /api/video/generate. Billing, refunds and provider routing stay in that route. */
 export function buildShotGenerateRequest(context: ShotRequestContext): Record<string, unknown> {
   const { doc, shot, capability } = context;
-  const characterReferences = chooseReferenceImages(shot, doc.cast, capability, context.firstFrameUrl ? [context.firstFrameUrl] : []);
+  const characterReferences = shotReferenceImages(shot, doc.cast, capability, context.firstFrameUrl);
   const prompt = [shot.directedPrompt || shot.prompt, shot.dialogue ? `台词：「${shot.dialogue}」` : '']
     .filter(Boolean).join('\n');
   return {

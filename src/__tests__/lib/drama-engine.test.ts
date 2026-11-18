@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildDramaShotMessages, DramaPlannerError, parseDramaScriptResponse, parseDramaShotResponse } from '@/lib/drama/planner';
 import { DramaDocumentError, parseDramaProject } from '@/lib/drama/schema';
-import { buildShotGenerateRequest, chooseFirstFrame, chooseReferenceImages, runShot } from '@/lib/drama/shot-runner';
+import { buildShotGenerateRequest, chooseFirstFrame, chooseReferenceImages, runShot, shotReferenceImages } from '@/lib/drama/shot-runner';
+import { shotCapabilityFromDescriptor } from '@/components/drama/drama-models';
+import type { TaskModelDescriptor } from '@/lib/task-core/model-capability-contract';
 import { collectEpisodeTimeline, dialogueCues } from '@/lib/drama/timeline';
 import { activeTake, MAX_SHOTS_PER_EPISODE, type DramaProjectV1, type DramaShot } from '@/lib/drama/types';
 
@@ -117,6 +119,22 @@ describe('shot runner choices', () => {
     expect(chooseReferenceImages(s, cast, { imageToVideo: true, maxReferenceImages: 2 })).toEqual(['/a-front', '/b-locked']);
     expect(chooseReferenceImages(s, cast, { imageToVideo: true, maxReferenceImages: 0 })).toEqual([]);
     expect(chooseReferenceImages(s, cast, { imageToVideo: true, maxReferenceImages: 2 }, ['/a-front'])).toEqual(['/b-locked', '/c-front']);
+  });
+
+  it('counts the first frame against the model image limit', () => {
+    const cast = [{ id: 'a', name: 'A', appearance: '', imageUrlFront: '/a-front' }, { id: 'b', name: 'B', appearance: '', imageUrlFront: '/b-front' }];
+    const s = shot({ id: 's', characterIds: ['a', 'b'] });
+    expect(shotReferenceImages(s, cast, { imageToVideo: true, maxReferenceImages: 2 }, '/f.png')).toEqual(['/a-front']);
+    expect(shotReferenceImages(s, cast, { imageToVideo: true, maxReferenceImages: 1 }, '/f.png')).toEqual([]);
+    expect(shotReferenceImages(s, cast, { imageToVideo: true, maxReferenceImages: 2 })).toEqual(['/a-front', '/b-front']);
+  });
+
+  it('sends references only to models whose descriptor accepts them', () => {
+    const base = { supportsReferenceImages: true, maxReferenceImages: 3, protocol: 'openai-video', supportedOperations: ['image-to-video'] } as unknown as TaskModelDescriptor;
+    expect(shotCapabilityFromDescriptor(base)).toEqual({ imageToVideo: true, maxReferenceImages: 3 });
+    expect(shotCapabilityFromDescriptor({ ...base, protocol: 'pearapi-video' }).maxReferenceImages).toBe(0);
+    expect(shotCapabilityFromDescriptor({ ...base, supportsReferenceImages: false }).maxReferenceImages).toBe(0);
+    expect(shotCapabilityFromDescriptor(undefined)).toEqual({ imageToVideo: true, maxReferenceImages: 0 });
   });
 
   it('builds a generate request with the style, dialogue and duration', () => {

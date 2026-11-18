@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { RotateCcw, Stethoscope, X } from 'lucide-react';
-import { chooseFirstFrame, chooseReferenceImages } from '@/lib/drama/shot-runner';
+import { chooseFirstFrame, shotReferenceImages } from '@/lib/drama/shot-runner';
 import { applyRetakeSuggestion } from '@/lib/drama/workbench-client';
 import { findShot, orderedPrevious, updateShot } from '@/lib/drama/workbench-state';
 import { diagnoseFailure, listFailureTypes, type VideoFailureType } from '@/lib/video-director/retake-diagnosis';
@@ -48,7 +48,10 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
   const previous = orderedPrevious(doc, episode.id, shot.id);
   const location = doc.locations.find(item => item.id === shot.sceneId);
   const firstFrame = model ? chooseFirstFrame(shot, previous, location, model.capability) : { source: 'none' as const };
-  const references = model ? chooseReferenceImages(shot, doc.cast, model.capability, firstFrame.url ? [firstFrame.url] : []) : [];
+  // The previous shot's frame is extracted only at submit time; its video URL stands in so the count matches.
+  const references = model
+    ? shotReferenceImages(shot, doc.cast, model.capability, firstFrame.url ?? ('previousVideoUrl' in firstFrame ? firstFrame.previousVideoUrl : undefined))
+    : [];
   const diagnosis = failure ? diagnoseFailure(failure) : null;
   const running = runningShotIds.has(shot.id);
   const set = (patch: Parameters<typeof updateShot>[2]) => update(current => updateShot(current, shot.id, patch));

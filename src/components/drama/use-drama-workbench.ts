@@ -164,6 +164,7 @@ export function useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onOpenCr
     const signal = AbortSignal.any([batch.signal, life.signal]);
     let failed = 0;
     let completed = 0;
+    let lastError: string | undefined;
     try {
       for (const shotId of shotIds) {
         if (signal.aborted) break;
@@ -193,7 +194,8 @@ export function useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onOpenCr
           if (take.status === 'completed') completed += 1;
           else {
             failed += 1;
-            if (take.error && /积分不足|余额不足/u.test(take.error)) { creditsToast(take.error); break; }
+            lastError = take.error;
+            if (take.error && /积分不足|余额不足/u.test(take.error)) { creditsToast(take.error); lastError = undefined; break; }
           }
         } catch (error) {
           if (signal.aborted) break;
@@ -213,6 +215,7 @@ export function useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onOpenCr
       if (failed) toast.error(`${completed} 个镜头已生成，${failed} 个失败`, { description: '失败的镜头可在镜头步骤里重拍。' });
       else toast.success(`${completed} 个镜头已生成`);
     } else if (failed === 0 && completed === 1) toast.success('镜头已生成');
+    else if (lastError) toast.error('镜头生成失败', { description: lastError });
     void flushSave();
   }, [creditsToast, flushSave, generateAudio, markRunning, modelForShot, update]);
 
