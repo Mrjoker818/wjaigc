@@ -60,8 +60,12 @@ export async function readLocalVideoBuffer(url: string): Promise<Buffer | null> 
   const dataRoot = getServerDataRoot();
   const candidates: string[] = [];
   if (requestPath.startsWith('/api/serve-upload/')) {
-    const localPath = resolveWithinDirectory(dataRoot, requestPath.slice('/api/serve-upload/'.length));
-    if (localPath) candidates.push(localPath);
+    // Same lookup order as /api/serve-upload: generated media is stored under uploads/ first.
+    const relative = requestPath.slice('/api/serve-upload/'.length);
+    for (const root of [path.join(dataRoot, 'uploads'), dataRoot]) {
+      const localPath = resolveWithinDirectory(root, relative);
+      if (localPath) candidates.push(localPath);
+    }
   } else if (requestPath.startsWith('/uploads/')) {
     const localPath = resolveWithinDirectory(path.join(dataRoot, 'uploads'), requestPath.slice('/uploads/'.length));
     if (localPath) candidates.push(localPath);
@@ -82,14 +86,18 @@ export async function readLocalVideoBuffer(url: string): Promise<Buffer | null> 
   return null;
 }
 
+/** Origin for a platform path: the project domain (which may already carry a protocol), else this server. */
+export function platformBaseUrl(): string {
+  const domain = (process.env.COZE_PROJECT_DOMAIN_DEFAULT || '').trim().replace(/\/+$/, '');
+  if (!domain) return `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
+  return /^https?:\/\//i.test(domain) ? domain : `https://${domain}`;
+}
+
 export async function downloadToBuffer(url: string): Promise<Buffer> {
   const localBuffer = await readLocalVideoBuffer(url);
   if (localBuffer) return localBuffer;
 
-  const base = process.env.COZE_PROJECT_DOMAIN_DEFAULT
-    ? `https://${process.env.COZE_PROJECT_DOMAIN_DEFAULT}`
-    : `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}`;
-  const fullUrl = url.startsWith('http') ? url : `${base}${url}`;
+  const fullUrl = url.startsWith('http') ? url : `${platformBaseUrl()}${url}`;
   const response = await fetch(fullUrl, { signal: AbortSignal.timeout(90_000) });
   const contentLength = Number(response.headers.get('content-length') || 0);
   if (!response.ok || contentLength > MAX_CLIP_BYTES) {
