@@ -10,6 +10,7 @@ import { buildTimeline } from '@/lib/drama/timeline';
 import { currentVoiceover, shotsNeedingVoiceover } from '@/lib/drama/voiceover';
 import { pendingShots } from '@/lib/drama/workbench-state';
 import { useDrama } from './drama-context';
+import { EpisodeReadiness } from './drama-readiness';
 
 const TRANSITION_LABEL: Record<DramaTransition, string> = { cut: '硬切', fade: '淡入淡出', flash: '闪白' };
 
@@ -69,6 +70,7 @@ export function DramaFinalStep() {
             {blocks.find(block => block.subtitle)?.subtitle ?? '（镜头里还没有台词）'}
           </div>
         ) : null}
+        <EpisodeReadiness episode={episode} />
         <div className="flex flex-wrap items-center gap-3">
           <button type="button" className="drama-btn drama-btn--primary" disabled={missing > 0 || render.status === 'rendering'} onClick={() => void renderEpisode()}>
             {render.status === 'rendering' ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <Film className="h-4 w-4" />}

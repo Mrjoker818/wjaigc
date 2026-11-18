@@ -10,6 +10,7 @@ import { findShot, fitDuration, orderedPrevious, updateShot } from '@/lib/drama/
 import { diagnoseFailure, listFailureTypes, type VideoFailureType } from '@/lib/video-director/retake-diagnosis';
 import { useDrama } from './drama-context';
 import { MentionTextarea } from './mention-textarea';
+import { ShotReadinessList } from './drama-readiness';
 
 const FIRST_FRAME_TEXT = {
   user: '首帧：这一镜的关键帧',
@@ -71,6 +72,7 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
         <h2 className="font-serif text-base font-bold">镜头 {String(shot.index + 1).padStart(2, '0')} · {found.scene.heading}</h2>
         <button type="button" className="drama-btn drama-btn--quiet ml-auto px-2" aria-label="关闭检查器" onClick={onClose}><X className="h-4 w-4" /></button>
       </div>
+      <ShotReadinessList episodeId={episode.id} shot={shot} />
 
       <div className="flex flex-col gap-1">
         <span className="drama-label" id="drama-prompt-label">画面提示词（输入 @ 引用角色或道具）</span>

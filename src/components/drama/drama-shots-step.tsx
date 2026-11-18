@@ -4,6 +4,7 @@ import { ImagePlus, Loader2, Play, RotateCcw, Square, X } from 'lucide-react';
 import { activeTake } from '@/lib/drama/types';
 import { failedShots, pendingShots, selectTake, updateShot } from '@/lib/drama/workbench-state';
 import { useDrama } from './drama-context';
+import { ShotReadinessBadge } from './drama-readiness';
 import { DramaSlate } from './drama-slate';
 
 /** Step 4: the generation grid. Each cell keeps every take; the selected one is what renders. */
@@ -121,6 +122,7 @@ export function DramaShotsStep() {
                     ) : null}
                   </div>
                   <div className="flex flex-col gap-2 p-3">
+                    <ShotReadinessBadge episodeId={episode.id} shot={shot} />
                     <p className="line-clamp-2 text-sm">{shot.prompt || <span className="text-[var(--drama-muted)]">没有画面描述</span>}</p>
                     {shot.takes.length > 1 ? (
                       <div className="flex flex-wrap gap-1" role="group" aria-label="选用哪一次生成">

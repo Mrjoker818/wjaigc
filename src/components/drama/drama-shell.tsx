@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft, Clapperboard, Coins, FolderOpen, Loader2 } from 'lucide-react';
+import { ArrowLeft, Clapperboard, Coins, FolderOpen } from 'lucide-react';
 import type { DramaProjectRecord } from '@/lib/drama/types';
 import { DramaWorkbenchContext, DRAMA_STEPS, type DramaWorkbenchApi, type SaveState } from './drama-context';
 import { useDramaWorkbench } from './use-drama-workbench';
@@ -10,6 +10,7 @@ import { DramaBoardStep } from './drama-board-step';
 import { DramaShotsStep } from './drama-shots-step';
 import { DramaFinalStep } from './drama-final-step';
 import { DramaInspector } from './drama-inspector';
+import { DramaTaskPanel } from './drama-task-panel';
 import { DramaTimeline } from './drama-timeline';
 
 const SAVE_TEXT: Record<SaveState, string> = {
@@ -25,7 +26,7 @@ export function DramaShell({ record, projectId, onExit, onCloseProject, onPlaceO
   onOpenCredits?: () => void;
 }) {
   const api = useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onOpenCredits });
-  const { doc, episode, step, setStep, saveState, estimate, busyLabel } = api;
+  const { doc, episode, step, setStep, saveState, estimate } = api;
   const short = estimate ? Math.max(0, estimate.total - estimate.balance) : 0;
 
   return (
@@ -52,7 +53,7 @@ export function DramaShell({ record, projectId, onExit, onCloseProject, onPlaceO
             <button type="button" className="drama-btn" onClick={() => window.location.reload()}>载入最新版本</button>
           ) : null}
           <div className="ml-auto flex items-center gap-2">
-            {busyLabel ? <span role="status" className="flex items-center gap-1.5 text-xs text-[var(--drama-muted)]"><Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />{busyLabel}</span> : null}
+            <DramaTaskPanel />
             {estimate ? (
               <span className={`flex items-center gap-1 font-mono text-xs ${short ? 'text-[var(--drama-red)]' : 'text-[var(--drama-muted)]'}`}
                 title={`余额 ${estimate.balance} 积分`}>
