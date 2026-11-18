@@ -380,7 +380,8 @@ export function useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onOpenCr
         completed += 1;
       } catch (error) {
         lastError = errorText(error, '配音生成失败');
-        if (/语音生成|权限/u.test(lastError)) denied = true;
+        // No permission or no speech model configured: every other line would fail the same way.
+        if (/语音生成|权限|语音模型/u.test(lastError)) denied = true;
       } finally {
         markVoiceover(shotId, false);
       }
