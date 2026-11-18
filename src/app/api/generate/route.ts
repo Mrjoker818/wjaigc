@@ -153,7 +153,9 @@ export async function POST(request: NextRequest) {
       _skipCredits, // 内部标记：后台重试时跳过积分扣除（避免双重扣费）
       _skipCloudTaskPersistence,
       resolution, // GPT-Image系列分辨率档位参数（1K/2K/4K）
+      disableModelFallback, // 调用方要求严格使用所选模型：失败直接返回，不切换到其他模型
     } = body;
+    const strictModel = disableModelFallback === true;
     // quality 默认值 '1K'，后续可能被模型别名 resolutionTier 覆盖
     // Canvas-era callers use `n`; the current panels use `outputCount`.
     // Normalize them before task fan-out so every entry point has identical behavior.
@@ -407,6 +409,7 @@ export async function POST(request: NextRequest) {
         projectId,
         sessionId,
         messageId,
+        ...(strictModel ? { disableModelFallback: true } : {}),
         // 提交者模式：'local' = 本进程 after() 后台 worker 负责向供应商提交；
         // 'recovery' = 由 poll-task 的持久化恢复路径提交（默认，进程崩溃可恢复）。
         // poll-task 据此判断内存中的 pending 任务是否已有活着的提交者，防止重复提交扣费。
@@ -1056,6 +1059,7 @@ export async function POST(request: NextRequest) {
         sessionId,
         messageId,
         requestDigest,
+        ...(strictModel ? { disableModelFallback: true } : {}),
         workerMode: 'recovery',
       };
       const submittedSlots: Array<{
@@ -2316,7 +2320,7 @@ export async function POST(request: NextRequest) {
                   console.log('[generate] /chat/completions fallback succeeded, got', chatImageUrls.length, 'images');
                   return {
                     taskIds: [],
-                    directImageUrls: chatImageUrls,
+                    directImageUrls: chatImageUrls.map(url => absolutizeProviderUrl(url, currentApiBaseUrl)),
                     usedModel: currentModelConfig.modelId,
                     usedProviderId: currentProviderId,
                   };
@@ -2331,9 +2335,11 @@ export async function POST(request: NextRequest) {
             // /chat/completions 兜底也失败 → 标记为可重试（触发候选模型回退）
             const isRetryable = isChannelError || isCloudflareDown || isNoCompatibleAccount;
             const retryErr = new Error(
-              isRetryable
-                ? `当前模型渠道不可用，已尝试其他模型`
-                : `API 服务器错误 (${resp.status})，请稍后重试`
+              strictModel
+                ? `供应商返回错误 (${resp.status})：${errorMsg}`
+                : isRetryable
+                  ? `当前模型渠道不可用，已尝试其他模型`
+                  : `API 服务器错误 (${resp.status})，请稍后重试`
             );
             (retryErr as Error & { retryable?: boolean }).retryable = isRetryable;
             throw retryErr;
@@ -2409,7 +2415,8 @@ export async function POST(request: NextRequest) {
           console.log('Direct image response (no polling needed), profile:', profile.id, 'images:', parsed.directImageUrls.length);
           return {
             taskIds: [],
-            directImageUrls: parsed.directImageUrls,
+            // 部分中转站返回相对路径（如 /v1/images/proxy/xxx），需按供应商地址补全，否则浏览器会请求本站导致图片裂开
+            directImageUrls: parsed.directImageUrls.map(url => absolutizeProviderUrl(url, currentApiBaseUrl)),
             usedModel: currentModelConfig.modelId,
             usedProviderId: currentProviderId,
           };
@@ -2866,7 +2873,10 @@ export async function POST(request: NextRequest) {
           }
         }
         
-        if (!submitted && isRetryable && candidateModels.length > 0) {
+        if (!submitted && isRetryable && strictModel) {
+          console.log(`[generate] 模型 ${modelConfig.modelId} 不可用 (${errMsg})，调用方要求严格使用所选模型，不切换备选模型`);
+        }
+        if (!submitted && isRetryable && !strictModel && candidateModels.length > 0) {
           console.log(`模型 ${modelConfig.modelId} 不可用 (${errMsg})，尝试备选模型...`);
           
           for (let ci = 0; ci < candidateModels.length; ci++) {
