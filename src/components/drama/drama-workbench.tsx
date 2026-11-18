@@ -2,12 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Clapperboard, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { createEmptyDramaProject, type DramaProjectRecord } from '@/lib/drama/types';
 import type { SimpleChatWorkspaceHandoffIntent } from '@/lib/simple-chat-workspace-handoff';
 import {
-  createDramaFromChat, createDramaProject, listDramaProjects, loadDramaProject, planDramaScript, type DramaProjectSummary, type ScriptRequest,
+  createDramaFromChat, createDramaProject, listDramaProjects, loadDramaProject, planDramaScript, startAdaptation, waitForAdaptation,
+  type AdaptRequest, type DramaProjectSummary, type ScriptRequest,
 } from '@/lib/drama/workbench-client';
 import { blankEpisodeDoc } from '@/lib/drama/workbench-state';
+import { DramaAdaptForm } from './drama-adapt-form';
 import { DramaIdeaForm } from './drama-idea-form';
 import { DramaShell } from './drama-shell';
 import type { DramaWorkbenchApi } from './drama-context';
@@ -77,6 +80,7 @@ function DramaStart({ projectId, onDramaIdChange, onExit, chatHandoff, onChatHan
   const [listError, setListError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [adaptProgress, setAdaptProgress] = useState<{ value: number; label?: string } | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -111,6 +115,19 @@ function DramaStart({ projectId, onDramaIdChange, onExit, chatHandoff, onChatHan
   }, [chatHandoff, onChatHandoffDone, create]);
 
   const generate = (input: ScriptRequest) => create('生成剧本', async () => createDramaProject(await planDramaScript(input), projectId));
+  const adapt = (input: AdaptRequest) => create('改编小说', async () => {
+    setAdaptProgress({ value: 2 });
+    try {
+      const { taskId } = await startAdaptation({ ...input, ...(projectId ? { projectId } : {}) });
+      const result = await waitForAdaptation(taskId, { onProgress: (value, label) => setAdaptProgress({ value, label }) });
+      if (result.adaptedParts < result.totalParts) {
+        toast.error(`改编了 ${result.adaptedParts}/${result.totalParts} 段`, { description: '后面的部分剧本助手没有写出来，可以在剧本步骤里接着写。' });
+      }
+      return await loadDramaProject(result.dramaId);
+    } finally {
+      setAdaptProgress(null);
+    }
+  });
   const blank = (input: ScriptRequest) => create('新建剧本', () => createDramaProject(blankEpisodeDoc(
     createEmptyDramaProject({ title: input.title || input.idea.slice(0, 24), genre: input.genre, style: input.style as never, aspectRatio: input.aspectRatio }),
     input.idea,
@@ -129,6 +146,7 @@ function DramaStart({ projectId, onDramaIdChange, onExit, chatHandoff, onChatHan
           </p>
         ) : null}
         <DramaIdeaForm busy={busy} error={error} onGenerate={generate} onBlank={blank} />
+        <DramaAdaptForm busy={busy} progress={adaptProgress} onAdapt={adapt} />
         <section aria-labelledby="drama-recent" className="flex flex-col gap-3">
           <h2 id="drama-recent" className="text-sm font-semibold">{projectId ? '这个项目里的短剧' : '我的短剧'}</h2>
           {listError ? <p role="alert" className="drama-label">{listError}</p>

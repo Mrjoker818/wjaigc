@@ -86,6 +86,57 @@ export async function planDramaScript(input: ScriptRequest, fetcher: WorkbenchFe
   return data.doc as DramaProjectV1;
 }
 
+export interface AdaptRequest {
+  text: string;
+  title?: string;
+  style?: string;
+  aspectRatio?: string;
+  episodeDurationSec?: number;
+  projectId?: string;
+}
+
+export interface AdaptResult { dramaId: string; adaptedParts: number; totalParts: number }
+
+/** Starts adapting a long text on the server and returns its task id and how many parts it was split into. */
+export async function startAdaptation(input: AdaptRequest, fetcher: WorkbenchFetch = defaultFetch): Promise<{ taskId: string; parts: number }> {
+  const response = await fetcher('/api/drama/adapt', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(input) });
+  const data = await readJson(response);
+  if (!response.ok || typeof data.taskId !== 'string') fail(data, '小说改编没有启动，请稍后重试');
+  return { taskId: data.taskId, parts: typeof data.parts === 'number' ? data.parts : 0 };
+}
+
+/** Polls an adaptation until it settles. Each part takes about a minute. */
+export async function waitForAdaptation(taskId: string, options: {
+  fetch?: WorkbenchFetch; sleep?: (ms: number) => Promise<void>; now?: () => number; timeoutMs?: number;
+  onProgress?: (progress: number, label?: string) => void;
+} = {}): Promise<AdaptResult> {
+  const fetcher = options.fetch ?? defaultFetch;
+  const sleep = options.sleep ?? (ms => new Promise<void>(resolve => setTimeout(resolve, ms)));
+  const now = options.now ?? Date.now;
+  const deadline = now() + (options.timeoutMs ?? 30 * 60_000);
+  while (now() < deadline) {
+    await sleep(3000);
+    let data: Record<string, unknown>;
+    try {
+      data = await readJson(await fetcher('/api/poll-task', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ taskId }) }));
+    } catch {
+      continue;
+    }
+    if (data.status === 'completed') {
+      const result = (data.result ?? {}) as Record<string, unknown>;
+      if (typeof result.dramaId !== 'string') throw new Error('改编已完成，但没有返回剧本，请在下面的列表里查看');
+      return {
+        dramaId: result.dramaId,
+        adaptedParts: Number(result.adaptedParts) || 0,
+        totalParts: Number(result.totalParts) || 0,
+      };
+    }
+    if (['failed', 'cancelled', 'timeout'].includes(String(data.status))) fail(data, '小说改编失败，请稍后重试');
+    if (typeof data.progress === 'number') options.onProgress?.(data.progress, typeof data.label === 'string' ? data.label : undefined);
+  }
+  throw new Error('改编超过 30 分钟仍未完成。服务器会继续改编，完成后剧本会出现在列表里');
+}
+
 /** Writes and saves a script draft from a simple chat message sent with「发送到短剧工作台」. */
 export async function createDramaFromChat(intent: SimpleChatWorkspaceHandoffIntent, fetcher: WorkbenchFetch = defaultFetch): Promise<DramaProjectRecord> {
   const response = await fetcher('/api/drama/from-chat', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(intent) });
