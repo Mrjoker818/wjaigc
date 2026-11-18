@@ -23,7 +23,9 @@ export const dynamic = 'force-dynamic';
 
 const VIDEO_URL_PREFIX = '/api/serve-upload/generated-videos';
 const RENDER_TIMEOUT_MS = 20 * 60_000;
-const SUBTITLE_FONT = { file: 'src/lib/pdf/fonts/WujiePdfSansSC-Regular.ttf', family: 'Wujie PDF Sans SC' };
+// A literal path keeps the build trace to this one font; a computed path makes Turbopack trace the whole project.
+const SUBTITLE_FONT_PATH = path.join(process.cwd(), 'src/lib/pdf/fonts/WujiePdfSansSC-Regular.ttf');
+const SUBTITLE_FONT_FAMILY = 'Wujie PDF Sans SC';
 
 /** One render per user at a time keeps a single account from saturating the server's ffmpeg. */
 const activeRenders = new Map<string, string>();
@@ -72,11 +74,10 @@ async function renderEpisode(job: RenderJob): Promise<void> {
     let subtitleFont: { dir: string; family: string } | undefined;
     if (cues.length) {
       await writeFile(path.join(workDir, 'subs.srt'), buildSrt(cues), 'utf8');
-      const fontSource = path.join(process.cwd(), SUBTITLE_FONT.file);
-      if (await fileExists(fontSource)) {
+      if (await fileExists(SUBTITLE_FONT_PATH)) {
         await mkdir(path.join(workDir, 'fonts'));
-        await copyFile(fontSource, path.join(workDir, 'fonts', 'subtitle.ttf'));
-        subtitleFont = { dir: 'fonts', family: SUBTITLE_FONT.family };
+        await copyFile(SUBTITLE_FONT_PATH, path.join(workDir, 'fonts', 'subtitle.ttf'));
+        subtitleFont = { dir: 'fonts', family: SUBTITLE_FONT_FAMILY };
       }
     }
     const plan = buildRenderPlan({
