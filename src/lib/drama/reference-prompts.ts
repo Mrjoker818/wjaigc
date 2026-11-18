@@ -1,5 +1,6 @@
 /** Image prompts for cast turnarounds and location plates. Kept separate so the workbench and tests share them. */
 import { DIRECTOR_STYLES, type DirectorStyle } from '@/lib/video-director/director-styles';
+import { stripMentions } from './mentions';
 import type { DramaCastMember, DramaLocation, DramaProjectV1, DramaProp, DramaShot } from './types';
 
 const clean = (parts: Array<string | undefined>) => parts.map(part => part?.trim()).filter(Boolean).join(', ');
@@ -76,7 +77,7 @@ export function keyframePrompt(shot: DramaShot, doc: DramaProjectV1, kind: Keyfr
   const cast = shotCast(shot, doc).map(member => clean([member.name, member.appearance, member.costume ? `wearing ${member.costume}` : undefined]));
   return clean([
     kind === 'first' ? 'cinematic film still, opening frame of the shot' : 'cinematic film still, closing frame of the shot, the action has finished',
-    kind === 'first' ? shot.firstFramePrompt || shot.directedPrompt || shot.prompt : shot.lastFramePrompt || shot.directedPrompt || shot.prompt,
+    stripMentions(kind === 'first' ? shot.firstFramePrompt || shot.directedPrompt || shot.prompt : shot.lastFramePrompt || shot.directedPrompt || shot.prompt, doc),
     kind === 'last' && shot.actionBeat ? `ends after: ${shot.actionBeat}` : undefined,
     shot.shotSize, shot.cameraMove || shot.cameraMotion, shot.lighting,
     location ? clean([location.name, location.description, location.timeOfDay, location.lighting]) : undefined,

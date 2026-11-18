@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react';
 import { ArrowDown, ArrowUp, Loader2, Plus, Sparkles, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { mentionCandidates, mergeMentionIds } from '@/lib/drama/mentions';
 import { planSceneShots } from '@/lib/drama/workbench-client';
 import { MAX_SHOTS_PER_EPISODE, type DramaSceneBlock } from '@/lib/drama/types';
 import {
@@ -10,6 +11,7 @@ import {
 } from '@/lib/drama/workbench-state';
 import { useDrama } from './drama-context';
 import { DramaSlate } from './drama-slate';
+import { MentionTextarea } from './mention-textarea';
 
 /** Step 3: shots grouped by scene. The planner fills one scene at a time; ordering is by buttons so it stays keyboard accessible. */
 export function DramaBoardStep() {
@@ -66,7 +68,12 @@ export function DramaBoardStep() {
                 <li key={shot.id} className="drama-panel flex flex-col">
                   <DramaSlate sceneNumber={sceneIndex + 1} shotNumber={number} shot={shot} running={runningShotIds.has(shot.id)} durationSec={shot.durationSec} />
                   <div className="flex flex-col gap-2 p-3">
-                    <ShotText label="画面" value={shot.prompt} onChange={value => update(current => updateShot(current, shot.id, { prompt: value }))} />
+                    <div className="flex flex-col gap-1">
+                      <span className="drama-label">画面（@ 引用角色或道具）</span>
+                      <MentionTextarea className="drama-input min-h-14 w-full resize-y" maxLength={4000} value={shot.prompt} ariaLabel="画面"
+                        candidates={mentionCandidates(doc)}
+                        onChange={prompt => update(current => updateShot(current, shot.id, item => ({ ...item, prompt, ...mergeMentionIds(item, prompt, current) })))} />
+                    </div>
                     <ShotText label="台词（会烧成字幕）" value={shot.dialogue ?? ''} placeholder="没有台词就留空" onChange={value => update(current => updateShot(current, shot.id, { dialogue: value }))} />
                     <div className="flex items-center gap-1">
                       <label className="flex items-center gap-1 text-xs text-[var(--drama-muted)]">

@@ -1,4 +1,5 @@
 /** One implementation of per-shot generation, shared by the drama workbench and the canvas video panel. */
+import { stripMentions } from './mentions';
 import { activeTake, type DramaCastMember, type DramaLocation, type DramaProjectV1, type DramaProp, type DramaShot, type DramaTake } from './types';
 
 export interface ShotModelCapability {
@@ -118,7 +119,7 @@ export function shotReferenceImages(
 export function buildShotGenerateRequest(context: ShotRequestContext): Record<string, unknown> {
   const { doc, shot, capability } = context;
   const characterReferences = shotReferenceImages(shot, doc.cast, capability, [context.firstFrameUrl, context.lastFrameUrl], doc.props);
-  const prompt = [shot.directedPrompt || shot.prompt, shot.dialogue ? `台词：「${shot.dialogue}」` : '']
+  const prompt = [stripMentions(shot.directedPrompt || shot.prompt, doc), shot.dialogue ? `台词：「${shot.dialogue}」` : '']
     .filter(Boolean).join('\n');
   return {
     prompt,

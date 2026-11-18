@@ -2,11 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ImagePlus, Loader2, RotateCcw, Stethoscope, X } from 'lucide-react';
+import { mentionCandidates, mergeMentionIds } from '@/lib/drama/mentions';
 import { chooseFirstFrame, chooseLastFrame, shotReferenceImages } from '@/lib/drama/shot-runner';
 import { applyRetakeSuggestion, estimateShots } from '@/lib/drama/workbench-client';
 import { findShot, fitDuration, orderedPrevious, updateShot } from '@/lib/drama/workbench-state';
 import { diagnoseFailure, listFailureTypes, type VideoFailureType } from '@/lib/video-director/retake-diagnosis';
 import { useDrama } from './drama-context';
+import { MentionTextarea } from './mention-textarea';
 
 const FIRST_FRAME_TEXT = {
   user: '首帧：这一镜的关键帧',
@@ -69,10 +71,12 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
         <button type="button" className="drama-btn drama-btn--quiet ml-auto px-2" aria-label="关闭检查器" onClick={onClose}><X className="h-4 w-4" /></button>
       </div>
 
-      <label className="flex flex-col gap-1">
-        <span className="drama-label">画面提示词</span>
-        <textarea className="drama-input min-h-28 resize-y" maxLength={8000} value={shot.prompt} onChange={event => set({ prompt: event.target.value })} />
-      </label>
+      <div className="flex flex-col gap-1">
+        <span className="drama-label" id="drama-prompt-label">画面提示词（输入 @ 引用角色或道具）</span>
+        <MentionTextarea className="drama-input min-h-28 w-full resize-y" maxLength={8000} value={shot.prompt} ariaLabel="画面提示词"
+          candidates={mentionCandidates(doc)}
+          onChange={prompt => update(current => updateShot(current, shot.id, item => ({ ...item, prompt, ...mergeMentionIds(item, prompt, current) })))} />
+      </div>
       <label className="flex flex-col gap-1">
         <span className="drama-label">台词</span>
         <textarea className="drama-input min-h-14 resize-y" maxLength={2000} value={shot.dialogue ?? ''} onChange={event => set({ dialogue: event.target.value })} />
