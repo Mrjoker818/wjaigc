@@ -12,6 +12,12 @@ describe('translateApiError', () => {
     expect(translateApiError('invalid aspect ratio: 21:9'))
       .toBe('当前模型不支持此画面比例，请尝试切换到标准比例');
   });
+  it('reports an unreachable reference image URL instead of a missing editing feature', () => {
+    const expected = '供应商无法读取参考图片地址，请确认服务已配置公网媒体链接或对象存储后重试';
+    expect(translateApiError('image_urls[0]: Only http/https URLs or asset:// references are supported')).toBe(expected);
+    expect(translateApiError('media_url 必须是有效的 HTTP(S) URL')).toBe(expected);
+    expect(translateApiError('image_urls is not supported by this model')).toBe('当前模型不支持图像编辑功能，请尝试切换模型');
+  });
   it('keeps provider text for internal callers but hides it from the user-facing message', () => {
     expect(translateApiError('Unexpected token < in JSON')).toBe('API 返回错误: Unexpected token < in JSON');
     expect(toUserFacingError('Unexpected token < in JSON')).toBe('服务暂时出错，请稍后重试或切换模型');

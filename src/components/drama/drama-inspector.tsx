@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { RotateCcw, Stethoscope, X } from 'lucide-react';
 import { chooseFirstFrame, shotReferenceImages } from '@/lib/drama/shot-runner';
-import { applyRetakeSuggestion } from '@/lib/drama/workbench-client';
-import { findShot, orderedPrevious, updateShot } from '@/lib/drama/workbench-state';
+import { applyRetakeSuggestion, estimateShots } from '@/lib/drama/workbench-client';
+import { findShot, fitDuration, orderedPrevious, updateShot } from '@/lib/drama/workbench-state';
 import { diagnoseFailure, listFailureTypes, type VideoFailureType } from '@/lib/video-director/retake-diagnosis';
 import { useDrama } from './drama-context';
 
@@ -39,7 +39,7 @@ export function DramaInspector() {
 }
 
 function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => void }) {
-  const { doc, update, models, modelForShot, generateShots, runningShotIds, batchRunning } = useDrama();
+  const { doc, update, models, modelForShot, generateShots, runningShotIds, batchRunning, generateAudio } = useDrama();
   const [failure, setFailure] = useState<VideoFailureType | ''>('');
   const found = findShot(doc, shotId);
   if (!found) return null;
@@ -77,12 +77,20 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
           <span className="drama-label">视频模型</span>
           <select className="drama-input" value={shot.modelId ?? ''} onChange={event => {
             const picked = models.find(item => item.key === event.target.value);
-            set({ modelId: picked?.key, providerId: picked?.providerId });
+            const next = picked ?? modelForShot({ ...shot, modelId: undefined, providerId: undefined });
+            // Models reject lengths outside their list, so show the length the new model will really use.
+            const durationSec = next ? fitDuration(shot.durationSec, next.durations, next.maxDuration) : shot.durationSec;
+            set({ modelId: picked?.key, providerId: picked?.providerId, durationSec });
           }}>
             <option value="">跟随默认模型{model && !shot.modelId ? `（${model.name}）` : ''}</option>
             {models.map(item => <option key={item.key} value={item.key}>{item.name} · {item.providerName}</option>)}
           </select>
         </label>
+        {model ? (
+          <ShotCost shotId={shot.id} modelKey={model.key} modelName={model.name} providerId={model.providerId}
+            durationSec={fitDuration(shot.durationSec, model.durations, model.maxDuration)}
+            generateAudio={generateAudio || Boolean(shot.dialogue || shot.audioCues)} referenceImages={references.length} />
+        ) : null}
         <label className="flex flex-col gap-1">
           <span className="drama-label">时长（秒）</span>
           {model?.durations.length ? (
@@ -153,6 +161,56 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
       <button type="button" className="drama-btn drama-btn--primary" disabled={running || batchRunning || !model} onClick={() => void generateShots([shot.id])}>
         <RotateCcw className="h-4 w-4" />{shot.takes.length ? '按当前设置重拍' : '生成这个镜头'}
       </button>
+    </div>
+  );
+}
+
+interface CostSnapshot { modelKey: string; modelName: string; durationSec: number; credits: number }
+
+/**
+ * Estimated credits for the next take. When the model changes it says what the change did to the
+ * length and price, because a new model can force a different duration and cost several times more.
+ */
+function ShotCost(props: {
+  shotId: string; modelKey: string; modelName: string; providerId?: string;
+  durationSec: number; generateAudio: boolean; referenceImages: number;
+}) {
+  const { shotId, modelKey, modelName, providerId, durationSec, generateAudio, referenceImages } = props;
+  const [credits, setCredits] = useState<number | null>(null);
+  const [change, setChange] = useState<{ from: CostSnapshot; to: CostSnapshot } | null>(null);
+  const settled = useRef<CostSnapshot | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      estimateShots([{ shotId, modelId: modelKey, providerId, durationSec, generateAudio, referenceImages }], undefined, controller.signal)
+        .then(result => {
+          const next: CostSnapshot = { modelKey, modelName, durationSec, credits: result.perShot[shotId] ?? result.total };
+          const before = settled.current;
+          if (before && before.modelKey !== next.modelKey
+            && (before.durationSec !== next.durationSec || before.credits !== next.credits)) {
+            setChange({ from: before, to: next });
+          } else if (before && before.modelKey !== next.modelKey) setChange(null);
+          settled.current = next;
+          setCredits(next.credits);
+        }, () => { if (!controller.signal.aborted) setCredits(null); });
+    }, 400);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [shotId, modelKey, modelName, providerId, durationSec, generateAudio, referenceImages]);
+
+  return (
+    <div className="col-span-2 flex flex-col gap-1" aria-live="polite">
+      <p className="drama-label font-mono">{credits === null ? '正在估算积分…' : `这一镜预计 ${credits} 积分（提交时按实际价格扣费）`}</p>
+      {change ? (
+        <p className="rounded border border-[var(--drama-gold)] px-2 py-1.5 text-xs text-[var(--drama-gold)]">
+          换成 {change.to.modelName} 后：
+          <span className="font-mono">
+            {change.from.durationSec !== change.to.durationSec ? ` ${change.from.durationSec} 秒 → ${change.to.durationSec} 秒，` : ' '}
+            {change.from.credits} → {change.to.credits} 积分
+          </span>
+          {change.from.durationSec !== change.to.durationSec ? '。这个模型不支持原来的时长，已改成最接近的值。' : ''}
+        </p>
+      ) : null}
     </div>
   );
 }

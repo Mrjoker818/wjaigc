@@ -58,6 +58,11 @@ export function translateApiError(rawMsg: string): string {
     || msg.includes('not a valid size') || msg.includes('宽高比不在允许')) {
     return '当前模型不支持此画面比例，请尝试切换到标准比例';
   }
+  // 图片地址格式不被接受（如 Apimart 只收 http/https 或 asset://，Pear media_url 必须是 HTTP(S)）
+  if (msg.includes('only http') || msg.includes('asset://') || msg.includes('valid http')
+    || msg.includes('有效的 http') || msg.includes('remote image') || msg.includes('远程图片下载')) {
+    return '供应商无法读取参考图片地址，请确认服务已配置公网媒体链接或对象存储后重试';
+  }
   // 不支持图片编辑
   if (msg.includes('image_urls') || msg.includes('mask_image') || msg.includes('image editing')) {
     return '当前模型不支持图像编辑功能，请尝试切换模型';
