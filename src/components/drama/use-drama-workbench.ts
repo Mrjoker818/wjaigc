@@ -7,10 +7,12 @@ import { waitForRender } from '@/lib/drama/render-client';
 import { chooseReferenceImages, isRetryableTake, orderedShots, runShot } from '@/lib/drama/shot-runner';
 import type { DramaProjectRecord, DramaProjectV1, DramaShot } from '@/lib/drama/types';
 import {
-  DramaSaveConflictError, estimateShots, generateReferenceImage, persistImage, pollShotTake, saveDramaProject, startEpisodeRender,
+  DramaSaveConflictError, estimateShots, generateReferenceImage, generateVoiceover, persistImage, pollShotTake, saveDramaProject,
+  startEpisodeRender,
   type CreditEstimate, type ShotEstimateRequest,
 } from '@/lib/drama/workbench-client';
 import { findShot, fitDuration, pendingShots, updateShot, upsertTake } from '@/lib/drama/workbench-state';
+import { shotVoice } from '@/lib/drama/voiceover';
 import type { DramaStep, DramaWorkbenchApi, RenderState, SaveState } from './drama-context';
 import { useDramaImageModels, useDramaVideoModels, type DramaModelOption } from './drama-models';
 
@@ -19,6 +21,8 @@ const MODEL_STORAGE_KEY = 'wujie-drama-video-model';
 const IMAGE_MODEL_STORAGE_KEY = 'wujie-drama-image-model';
 /** Keyframes are drawn a few at a time so one slow image does not hold the rest. */
 const KEYFRAME_CONCURRENCY = 3;
+/** Speech requests are short; two at a time keeps the provider from rate limiting a batch. */
+const VOICEOVER_CONCURRENCY = 2;
 /** A failed take the server marked safe to resubmit gets one more attempt after this pause. */
 const AUTO_RETRY_DELAY_MS = 5000;
 
@@ -346,6 +350,53 @@ export function useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onOpenCr
     void flushSave();
   }, [creditsToast, flushSave, imageModel, markKeyframe, update]);
 
+  // --- Voiceover: each line recorded in its speaker's voice, mixed in when the episode renders ---
+  const [voiceoverShotIds, setVoiceoverShotIds] = useState<ReadonlySet<string>>(() => new Set());
+  const voiceoverRef = useRef(new Set<string>());
+  const markVoiceover = useCallback((id: string, on: boolean) => {
+    if (on) voiceoverRef.current.add(id); else voiceoverRef.current.delete(id);
+    setVoiceoverShotIds(new Set(voiceoverRef.current));
+  }, []);
+
+  const generateVoiceovers = useCallback(async (shotIds: string[]) => {
+    const life = lifeRef.current;
+    const queue = shotIds.filter(id => !voiceoverRef.current.has(id) && findShot(docRef.current, id)?.shot.dialogue?.trim());
+    if (!life || queue.length === 0) return;
+    queue.forEach(id => markVoiceover(id, true));
+    const total = queue.length;
+    let completed = 0;
+    let lastError: string | undefined;
+    let denied = false;
+    const recordOne = async (shotId: string) => {
+      try {
+        if (denied || life.signal.aborted) return;
+        const current = docRef.current;
+        const shot = findShot(current, shotId)?.shot;
+        const line = shot?.dialogue?.trim();
+        if (!shot || !line) return;
+        const url = await generateVoiceover(line, shotVoice(shot, current.cast));
+        if (life.signal.aborted) return;
+        update(latest => updateShot(latest, shotId, { voiceoverUrl: url, voiceoverText: line }));
+        completed += 1;
+      } catch (error) {
+        lastError = errorText(error, '配音生成失败');
+        if (/语音生成|权限/u.test(lastError)) denied = true;
+      } finally {
+        markVoiceover(shotId, false);
+      }
+    };
+    const workers = Array.from({ length: Math.min(VOICEOVER_CONCURRENCY, queue.length) }, async () => {
+      for (let next = queue.shift(); next; next = queue.shift()) await recordOne(next);
+    });
+    await Promise.all(workers);
+    if (life.signal.aborted) return;
+    const failed = total - completed;
+    if (failed === 0) toast.success(total > 1 ? `${completed} 段配音已生成` : '配音已生成');
+    else if (completed) toast.error(`${completed} 段配音已生成，${failed} 段失败`, { description: lastError });
+    else toast.error('配音生成失败', { description: lastError });
+    void flushSave();
+  }, [flushSave, markVoiceover, update]);
+
   const keyframeRequest = useMemo<ShotEstimateRequest[]>(() => {
     if (!imageModel || !episode) return [];
     return episode.scenes.flatMap(scene => scene.shots).filter(shot => !shot.firstFrameUrl).map(shot => ({
@@ -435,7 +486,8 @@ export function useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onOpenCr
     doc, episode, update, replaceDoc, setEpisodeId, step, setStep, selectedShotId, selectShot,
     models, modelsLoading, defaultModel, setDefaultModelKey, modelForShot, generateAudio, setGenerateAudio,
     runningShotIds, batchRunning, generateShots, stopGeneration, estimate,
-    imageModels, imageModel, setImageModelKey, keyframeShotIds, generateKeyframes, keyframeEstimate, busyLabel, runJob,
+    imageModels, imageModel, setImageModelKey, keyframeShotIds, generateKeyframes, voiceoverShotIds, generateVoiceovers,
+    keyframeEstimate, busyLabel, runJob,
     dramaId: record.id, projectId, saveState, flushSave, render, renderEpisode, onPlaceOnCanvas,
   };
 }

@@ -7,6 +7,7 @@ import {
   CAST_IMAGE_RATIO, castImagePrompt, locationImagePrompt, locationImageRatio, PROP_IMAGE_RATIO, propImagePrompt,
 } from '@/lib/drama/reference-prompts';
 import type { DramaCastMember, DramaLocation, DramaProp } from '@/lib/drama/types';
+import { DEFAULT_VOICE, DRAMA_VOICES } from '@/lib/drama/voiceover';
 import { generateReferenceImage, persistImage } from '@/lib/drama/workbench-client';
 import {
   nextBibleId, removeCastMember, removeLocation, removeProp, updateCastMember, updateLocation, updateProp,
@@ -75,6 +76,13 @@ export function DramaBibleStep() {
                 onChange={event => update(current => updateCastMember(current, member.id, { appearance: event.target.value }))} />
               <input className="drama-input" aria-label={`${member.name} 服装`} maxLength={1000} value={member.costume ?? ''} placeholder="服装"
                 onChange={event => update(current => updateCastMember(current, member.id, { costume: event.target.value }))} />
+              <label className="flex items-center gap-2 text-sm">
+                <span className="drama-label shrink-0">配音音色</span>
+                <select className="drama-input flex-1" value={member.voice || DEFAULT_VOICE}
+                  onChange={event => update(current => updateCastMember(current, member.id, { voice: event.target.value }))}>
+                  {DRAMA_VOICES.map(voice => <option key={voice.id} value={voice.id}>{voice.label}</option>)}
+                </select>
+              </label>
               <div className="grid grid-cols-2 gap-2">
                 {(['front', 'side'] as const).map(view => (
                   <ReferenceTile

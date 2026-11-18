@@ -28,6 +28,9 @@ const shot = z.looseObject({
   title: text(200),
   prompt: text(8000),
   dialogue: text(2000).optional(),
+  speakerId: id.optional(),
+  voiceoverUrl: text(4096).optional(),
+  voiceoverText: text(2000).optional(),
   durationSec: z.number().positive().max(60),
   duration: z.number().positive().max(60),
   aspectRatio: text(16),
@@ -58,7 +61,7 @@ const episode = z.looseObject({
   message: 'DRAMA_TOO_MANY_SHOTS',
 });
 
-const castMember = z.looseObject({ id, name: text(200), appearance: text(4000) });
+const castMember = z.looseObject({ id, name: text(200), appearance: text(4000), voice: text(128).optional() });
 const location = z.looseObject({ id, name: text(200) });
 const prop = z.looseObject({ id, name: text(200) });
 

@@ -26,8 +26,14 @@ export interface DramaTake {
 }
 
 export interface DramaShot extends VideoShotPlan {
-  /** Spoken line; first version renders it as a subtitle only. */
+  /** Spoken line, burned as a subtitle and optionally voiced. */
   dialogue?: string;
+  /** Cast member who says the line; defaults to the first character in the shot. */
+  speakerId?: string;
+  /** Generated voiceover of the line, mixed over the clip when the episode renders. */
+  voiceoverUrl?: string;
+  /** The line as it read when the voiceover was recorded; a different line means the recording is stale. */
+  voiceoverText?: string;
   durationSec: number;
   modelId?: string;
   providerId?: string;
@@ -60,6 +66,8 @@ export interface DramaEpisode {
 export interface DramaCastMember extends VideoCharacter {
   imageUrlFull?: string;
   lockedImageUrl?: string;
+  /** Text-to-speech voice id for this character's lines. */
+  voice?: string;
 }
 
 export interface DramaLocation extends VideoScene {

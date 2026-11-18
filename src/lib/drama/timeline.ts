@@ -1,11 +1,14 @@
 /** Pure helpers that turn an episode into render inputs: the selected take of every shot and dialogue subtitles. */
 import type { SubtitleCue } from './render';
 import { activeTake, type DramaProjectV1 } from './types';
+import { currentVoiceover } from './voiceover';
 
 export interface TimelineClip {
   shotId: string;
   videoUrl: string;
   dialogue?: string;
+  /** Voiceover recorded from the current line; a stale one is left out. */
+  voiceoverUrl?: string;
 }
 
 export interface EpisodeTimeline {
@@ -21,7 +24,12 @@ export function collectEpisodeTimeline(doc: DramaProjectV1, episodeId: string): 
   for (const shot of episode ? episode.scenes.flatMap(scene => scene.shots) : []) {
     const take = activeTake(shot);
     if (!take?.videoUrl) { missingShotIds.push(shot.id); continue; }
-    clips.push({ shotId: shot.id, videoUrl: take.videoUrl, ...(shot.dialogue?.trim() ? { dialogue: shot.dialogue.trim() } : {}) });
+    const voiceoverUrl = currentVoiceover(shot);
+    clips.push({
+      shotId: shot.id, videoUrl: take.videoUrl,
+      ...(shot.dialogue?.trim() ? { dialogue: shot.dialogue.trim() } : {}),
+      ...(voiceoverUrl ? { voiceoverUrl } : {}),
+    });
   }
   return { clips, missingShotIds };
 }

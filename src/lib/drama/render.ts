@@ -1,4 +1,4 @@
-/** Pure ffmpeg planning for stitching shots: keeps audio, fills silence, optional transitions and burned subtitles. */
+/** Pure ffmpeg planning for stitching shots: keeps audio, fills silence, optional transitions, burned subtitles and voiceovers. */
 
 export type DramaTransition = 'cut' | 'fade' | 'flash';
 
@@ -9,6 +9,13 @@ export interface RenderClip {
   path: string;
   durationSec: number;
   hasAudio: boolean;
+}
+
+/** A recorded line played from the start of a clip's visible part. */
+export interface RenderVoiceover {
+  clipIndex: number;
+  /** Audio file path inside the ffmpeg working directory. */
+  path: string;
 }
 
 export interface SubtitleCue {
@@ -29,6 +36,8 @@ export interface RenderPlanInput {
   subtitleFile?: string;
   /** Font for burned subtitles: a directory inside the working directory and the font family name. */
   subtitleFont?: { dir: string; family: string };
+  /** At most one per clip. The clip's own audio is turned down under its voiceover. */
+  voiceovers?: RenderVoiceover[];
   outputPath: string;
 }
 
@@ -43,6 +52,8 @@ const SAMPLE_RATE = 44100;
 const SAFE_SUBTITLE_FILE = /^[A-Za-z0-9_.-]+\.srt$/;
 const SAFE_FONT_DIR = /^[A-Za-z0-9_-]+$/;
 const SAFE_FONT_FAMILY = /^[A-Za-z0-9 ]+$/;
+/** Level of the clip's own sound (ambience, or a line the video model already spoke) under a voiceover. */
+const UNDER_VOICEOVER_VOLUME = 0.35;
 
 function even(value: number): number {
   const rounded = Math.max(2, Math.round(value));
@@ -83,6 +94,13 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlan {
   if (input.subtitleFont && (!SAFE_FONT_DIR.test(input.subtitleFont.dir) || !SAFE_FONT_FAMILY.test(input.subtitleFont.family))) {
     throw new Error('DRAMA_RENDER_BAD_SUBTITLE_FONT');
   }
+  const voiceovers = input.voiceovers ?? [];
+  const voiced = new Set<number>();
+  for (const voiceover of voiceovers) {
+    if (!Number.isInteger(voiceover.clipIndex) || voiceover.clipIndex < 0 || voiceover.clipIndex >= clips.length
+      || voiced.has(voiceover.clipIndex) || !voiceover.path) throw new Error('DRAMA_RENDER_BAD_VOICEOVER');
+    voiced.add(voiceover.clipIndex);
+  }
   const width = even(input.width);
   const height = even(input.height);
   const fps = input.fps ?? 30;
@@ -102,6 +120,11 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlan {
       nextInput += 1;
     }
   });
+  const voiceoverInputs = voiceovers.map(voiceover => {
+    args.push('-i', voiceover.path);
+    nextInput += 1;
+    return nextInput - 1;
+  });
 
   const filters: string[] = [];
   clips.forEach((clip, index) => {
@@ -110,7 +133,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlan {
       + `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${fps},format=yuv420p[v${index}]`);
     const audioSource = audioInputs[index] === -1 ? `${index}:a` : `${audioInputs[index]}:a`;
     filters.push(`[${audioSource}]aresample=${SAMPLE_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,`
-      + `apad,atrim=0:${dur},asetpts=PTS-STARTPTS[a${index}]`);
+      + `apad,atrim=0:${dur},asetpts=PTS-STARTPTS${voiced.has(index) ? `,volume=${UNDER_VOICEOVER_VOLUME}` : ''}[a${index}]`);
   });
 
   const clipStarts = timelineStarts(clips, transitionSec);
@@ -130,6 +153,19 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlan {
       videoOut = nextVideo;
       audioOut = nextAudio;
     }
+  }
+  if (voiceovers.length) {
+    // Same window as the clip's subtitle: after the incoming transition, cut before the outgoing one.
+    voiceovers.forEach((voiceover, k) => {
+      const i = voiceover.clipIndex;
+      const startSec = clipStarts[i] + (i > 0 ? transitionSec : 0);
+      const lengthSec = Math.max(0.1, clips[i].durationSec - (i > 0 ? transitionSec : 0) - (i < clips.length - 1 ? transitionSec : 0));
+      const delayMs = Math.round(startSec * 1000);
+      filters.push(`[${voiceoverInputs[k]}:a]aresample=${SAMPLE_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,`
+        + `atrim=0:${seconds(lengthSec)},asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1[vo${k}]`);
+    });
+    filters.push(`[${audioOut}]${voiceovers.map((_, k) => `[vo${k}]`).join('')}amix=inputs=${voiceovers.length + 1}:duration=first:normalize=0[amix]`);
+    audioOut = 'amix';
   }
   if (input.subtitleFile) {
     const fontSize = Math.max(12, Math.round(Math.min(width, height) / 22));

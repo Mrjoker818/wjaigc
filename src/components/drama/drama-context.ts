@@ -54,6 +54,10 @@ export interface DramaWorkbenchApi {
    * With `kind: 'last'` it draws the closing frame, which models with first/last-frame support end on.
    */
   generateKeyframes: (shotIds: string[], kind?: KeyframeKind) => Promise<void>;
+  /** Shots whose voiceover is being recorded. */
+  voiceoverShotIds: ReadonlySet<string>;
+  /** Records the line of each shot in its speaker's voice; free of credits. */
+  generateVoiceovers: (shotIds: string[]) => Promise<void>;
   /** Credits for drawing keyframes of the shots that have none yet. */
   keyframeEstimate: CreditEstimate | null;
   /** Label of the planner or image job that is running, shown in the top bar. */

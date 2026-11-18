@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ImagePlus, Loader2, RotateCcw, Stethoscope, X } from 'lucide-react';
+import { ImagePlus, Loader2, Mic, RotateCcw, Stethoscope, X } from 'lucide-react';
 import { mentionCandidates, mergeMentionIds } from '@/lib/drama/mentions';
 import { chooseFirstFrame, chooseLastFrame, shotReferenceImages } from '@/lib/drama/shot-runner';
 import { applyRetakeSuggestion, estimateShots } from '@/lib/drama/workbench-client';
+import { currentVoiceover, shotSpeaker } from '@/lib/drama/voiceover';
 import { findShot, fitDuration, orderedPrevious, updateShot } from '@/lib/drama/workbench-state';
 import { diagnoseFailure, listFailureTypes, type VideoFailureType } from '@/lib/video-director/retake-diagnosis';
 import { useDrama } from './drama-context';
@@ -43,7 +44,7 @@ export function DramaInspector() {
 function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => void }) {
   const {
     doc, update, models, modelForShot, generateShots, runningShotIds, batchRunning, generateAudio,
-    keyframeShotIds, generateKeyframes, imageModel,
+    keyframeShotIds, generateKeyframes, imageModel, voiceoverShotIds, generateVoiceovers,
   } = useDrama();
   const [failure, setFailure] = useState<VideoFailureType | ''>('');
   const found = findShot(doc, shotId);
@@ -81,6 +82,7 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
         <span className="drama-label">台词</span>
         <textarea className="drama-input min-h-14 resize-y" maxLength={2000} value={shot.dialogue ?? ''} onChange={event => set({ dialogue: event.target.value })} />
       </label>
+      {shot.dialogue?.trim() ? <VoiceoverPanel shotId={shot.id} busy={voiceoverShotIds.has(shot.id)} onRecord={() => void generateVoiceovers([shot.id])} /> : null}
 
       <div className="grid grid-cols-2 gap-3">
         <label className="col-span-2 flex flex-col gap-1">
@@ -206,6 +208,46 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
         <RotateCcw className="h-4 w-4" />{shot.takes.length ? '按当前设置重拍' : '生成这个镜头'}
       </button>
     </div>
+  );
+}
+
+/** Who says the line, and its recording. An edited line marks the old recording as stale; it is then left out of the render. */
+function VoiceoverPanel({ shotId, busy, onRecord }: { shotId: string; busy: boolean; onRecord: () => void }) {
+  const { doc, update } = useDrama();
+  const shot = findShot(doc, shotId)?.shot;
+  if (!shot) return null;
+  const speaker = shotSpeaker(shot, doc.cast);
+  const voiceover = currentVoiceover(shot);
+  const stale = Boolean(shot.voiceoverUrl && !voiceover);
+  return (
+    <section className="drama-panel flex flex-col gap-2 p-3" aria-labelledby="drama-voiceover">
+      <h3 id="drama-voiceover" className="flex items-center gap-1.5 text-sm font-semibold"><Mic className="h-4 w-4" />配音</h3>
+      {doc.cast.length ? (
+        <label className="flex items-center gap-2 text-sm">
+          <span className="drama-label shrink-0">说话人</span>
+          <select className="drama-input flex-1" value={shot.speakerId ?? ''}
+            onChange={event => update(current => updateShot(current, shot.id, { speakerId: event.target.value || undefined }))}>
+            <option value="">{speaker && !shot.speakerId ? `镜头里第一个角色（${speaker.name}）` : '镜头里第一个角色'}</option>
+            {doc.cast.map(member => <option key={member.id} value={member.id}>{member.name}</option>)}
+          </select>
+        </label>
+      ) : null}
+      {voiceover ? <audio src={voiceover} controls preload="none" className="h-9 w-full" aria-label="这一镜的配音" /> : null}
+      {stale ? <p className="text-xs text-[var(--drama-gold)]">台词改过了，旧配音不会混进成片。重新生成一次。</p> : null}
+      <div className="flex gap-1">
+        <button type="button" className="drama-btn flex-1 px-2 text-xs" disabled={busy} onClick={onRecord}>
+          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" /> : <Mic className="h-3.5 w-3.5" />}
+          {busy ? '正在生成配音' : voiceover ? '重新生成配音' : '生成配音'}
+        </button>
+        {shot.voiceoverUrl ? (
+          <button type="button" className="drama-btn px-2 text-xs" disabled={busy} aria-label="清除配音"
+            onClick={() => update(current => updateShot(current, shot.id, { voiceoverUrl: undefined, voiceoverText: undefined }))}>
+            <X className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
+      </div>
+      <p className="drama-label">用后台的语音模型生成，不扣积分。渲染成片时混在这一镜上，原声会调低。</p>
+    </section>
   );
 }
 

@@ -1,8 +1,9 @@
 'use client';
 
-import { Download, Film, ImageDown, Loader2 } from 'lucide-react';
+import { Download, Film, ImageDown, Loader2, Mic } from 'lucide-react';
 import { DRAMA_TRANSITIONS as TRANSITIONS, type DramaTransition } from '@/lib/drama/render';
 import { buildTimeline } from '@/lib/drama/timeline';
+import { currentVoiceover, shotsNeedingVoiceover } from '@/lib/drama/voiceover';
 import { pendingShots } from '@/lib/drama/workbench-state';
 import { useDrama } from './drama-context';
 
@@ -10,13 +11,18 @@ const TRANSITION_LABEL: Record<DramaTransition, string> = { cut: '硬切', fade:
 
 /** Step 5: transition and subtitle choices, then the rendered film. Rendering itself runs in the background and costs no credits. */
 export function DramaFinalStep() {
-  const { doc, episode, update, render, renderEpisode, onPlaceOnCanvas } = useDrama();
+  const { doc, episode, update, render, renderEpisode, onPlaceOnCanvas, voiceoverShotIds, generateVoiceovers } = useDrama();
   if (!episode) return <p className="drama-label">先在剧本步骤写好分集。</p>;
   const missing = pendingShots(episode).length;
   const blocks = buildTimeline(doc, episode.id);
   const totalSec = blocks.at(-1)?.endSec ?? 0;
   const last = doc.timeline.lastRender;
   const ready = last?.status === 'completed' && last.videoUrl && last.episodeId === episode.id;
+  const shots = episode.scenes.flatMap(scene => scene.shots);
+  const spoken = shots.filter(shot => shot.dialogue?.trim());
+  const voiced = spoken.filter(shot => currentVoiceover(shot)).length;
+  const unvoiced = shotsNeedingVoiceover(shots);
+  const recording = spoken.some(shot => voiceoverShotIds.has(shot.id));
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-6">
@@ -44,6 +50,16 @@ export function DramaFinalStep() {
             onChange={event => update(current => ({ ...current, timeline: { ...current.timeline, subtitles: event.target.checked } }))} />
           把台词烧成字幕
         </label>
+        {spoken.length ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="button" className="drama-btn" disabled={recording || unvoiced.length === 0}
+              onClick={() => void generateVoiceovers(unvoiced.map(shot => shot.id))}>
+              {recording ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <Mic className="h-4 w-4" />}
+              {recording ? '正在生成配音' : unvoiced.length ? `为 ${unvoiced.length} 句台词生成配音` : '台词都已配音'}
+            </button>
+            <span className="drama-label font-mono">已配音 {voiced}/{spoken.length} · 不扣积分，渲染时混进成片</span>
+          </div>
+        ) : null}
         {doc.timeline.subtitles ? (
           <div className="drama-paper flex min-h-16 items-end justify-center rounded-md px-6 pb-3 text-center font-serif text-sm leading-snug">
             {blocks.find(block => block.subtitle)?.subtitle ?? '（镜头里还没有台词）'}

@@ -205,6 +205,18 @@ export async function persistImage(url: string, fetcher: WorkbenchFetch = defaul
   }
 }
 
+/** Records one line with the admin's text-to-speech model through /api/audio/generate. Costs no credits. */
+export async function generateVoiceover(text: string, voice: string, fetcher: WorkbenchFetch = defaultFetch): Promise<string> {
+  const response = await fetcher('/api/audio/generate', {
+    method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ text, voice, format: 'mp3' }),
+  });
+  const data = await readJson(response);
+  if (response.status === 403) fail(data, '当前账号还没有开通语音生成，请联系管理员开通后再生成配音');
+  if (!response.ok || data.success === false) fail(data, '配音生成失败，请稍后重试');
+  if (typeof data.audioUrl !== 'string' || !data.audioUrl) throw new Error('配音已生成但没有返回音频地址，请重试');
+  return data.audioUrl;
+}
+
 /** Starts a background render of a saved episode and returns its task id. The project must be saved first. */
 export async function startEpisodeRender(dramaId: string, episodeId: string, fetcher: WorkbenchFetch = defaultFetch): Promise<string> {
   const response = await fetcher('/api/drama/render', {

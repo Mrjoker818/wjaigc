@@ -1,4 +1,4 @@
-/** Background episode render: stitches the selected take of every shot, keeps audio, adds transitions and subtitles. Free of credits. */
+/** Background episode render: stitches the selected take of every shot, keeps audio, adds transitions, subtitles and voiceovers. Free of credits. */
 import { after, NextRequest, NextResponse } from 'next/server';
 import { copyFile, mkdir, mkdtemp, rm, stat, writeFile } from 'fs/promises';
 import path from 'path';
@@ -8,8 +8,11 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { isSafeVideoSource } from '@/lib/api-validator';
+import { isGeneratedAudioLocation, readGeneratedAudioFromUrl } from '@/lib/generated-audio-storage';
 import { getServerDataRoot } from '@/lib/server-data-root';
-import { buildRenderPlan, buildSrt, DRAMA_TRANSITIONS, effectiveTransitionSec, timelineStarts, type DramaTransition } from '@/lib/drama/render';
+import {
+  buildRenderPlan, buildSrt, DRAMA_TRANSITIONS, effectiveTransitionSec, timelineStarts, type DramaTransition, type RenderVoiceover,
+} from '@/lib/drama/render';
 import { getDramaProject } from '@/lib/drama/store';
 import { collectEpisodeTimeline, dialogueCues } from '@/lib/drama/timeline';
 import { MAX_SHOTS_PER_EPISODE } from '@/lib/drama/types';
@@ -41,7 +44,7 @@ async function fileExists(file: string): Promise<boolean> {
 interface RenderJob {
   taskId: string;
   userId: string;
-  clips: Array<{ videoUrl: string; dialogue?: string }>;
+  clips: Array<{ videoUrl: string; dialogue?: string; voiceoverUrl?: string }>;
   transition: DramaTransition;
   transitionSec: number;
   subtitles: boolean;
@@ -66,6 +69,17 @@ async function renderEpisode(job: RenderJob): Promise<void> {
         label: `成片渲染 · 读取镜头 ${i + 1}/${job.clips.length}`,
       });
     }
+    const voiceovers: RenderVoiceover[] = [];
+    for (let i = 0; i < job.clips.length; i += 1) {
+      const url = job.clips[i].voiceoverUrl;
+      if (!url) continue;
+      // Read from the audio store so ownership is checked and database-only deployments work too.
+      const audio = await readGeneratedAudioFromUrl(url, undefined, job.userId).catch(() => null);
+      if (!audio) throw new Error(`第 ${i + 1} 个镜头的配音文件读不到了，请在检查器里重新生成配音后再渲染。`);
+      const name = `voice-${i}.${audio.format}`;
+      await writeFile(path.join(workDir, name), audio.buffer);
+      voiceovers.push({ clipIndex: i, path: name });
+    }
     const renderClips = probed.map(({ path: clipPath, durationSec, hasAudio }) => ({ path: clipPath, durationSec, hasAudio }));
     const transitionSec = effectiveTransitionSec(renderClips, job.transition, job.transitionSec);
     const cues = job.subtitles
@@ -83,6 +97,7 @@ async function renderEpisode(job: RenderJob): Promise<void> {
     const plan = buildRenderPlan({
       clips: renderClips, width: probed[0].width, height: probed[0].height,
       transition: job.transition, transitionSec, outputPath,
+      ...(voiceovers.length ? { voiceovers } : {}),
       ...(cues.length ? { subtitleFile: 'subs.srt', ...(subtitleFont ? { subtitleFont } : {}) } : {}),
     });
     updateTaskProgress(job.taskId, { progress: 55, label: '成片渲染 · 合成中' });
@@ -153,6 +168,9 @@ async function settingsFromProject(userId: string, body: Record<string, unknown>
   if (timeline.clips.length === 0) return NextResponse.json({ error: '这一集还没有镜头' }, { status: 409 });
   if (timeline.clips.some(clip => !allowedSource(clip.videoUrl))) {
     return NextResponse.json({ error: '镜头视频地址无效，请重新生成对应镜头' }, { status: 400 });
+  }
+  if (timeline.clips.some(clip => clip.voiceoverUrl && !isGeneratedAudioLocation(clip.voiceoverUrl))) {
+    return NextResponse.json({ error: '配音地址无效，请重新生成对应镜头的配音' }, { status: 400 });
   }
   return {
     clips: timeline.clips,
