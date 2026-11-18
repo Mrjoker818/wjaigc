@@ -93,12 +93,22 @@ export function platformBaseUrl(): string {
   return /^https?:\/\//i.test(domain) ? domain : `https://${domain}`;
 }
 
+/** Provider CDNs occasionally stall a whole request; one fresh attempt clears most of those. */
+async function fetchWithOneRetry(url: string): Promise<Response> {
+  try {
+    return await fetch(url, { signal: AbortSignal.timeout(90_000) });
+  } catch (error) {
+    console.warn('[video-media-io] Clip download failed, retrying once:', error instanceof Error ? error.name : error);
+    return fetch(url, { signal: AbortSignal.timeout(90_000) });
+  }
+}
+
 export async function downloadToBuffer(url: string): Promise<Buffer> {
   const localBuffer = await readLocalVideoBuffer(url);
   if (localBuffer) return localBuffer;
 
   const fullUrl = url.startsWith('http') ? url : `${platformBaseUrl()}${url}`;
-  const response = await fetch(fullUrl, { signal: AbortSignal.timeout(90_000) });
+  const response = await fetchWithOneRetry(fullUrl);
   const contentLength = Number(response.headers.get('content-length') || 0);
   if (!response.ok || contentLength > MAX_CLIP_BYTES) {
     void response.body?.cancel().catch(() => undefined);

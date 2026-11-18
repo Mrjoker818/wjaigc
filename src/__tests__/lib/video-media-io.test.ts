@@ -6,7 +6,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 const dataRoot = mkdtempSync(path.join(tmpdir(), 'wujie-media-io-'));
 vi.mock('@/lib/server-data-root', () => ({ getServerDataRoot: () => dataRoot }));
 
-import { platformBaseUrl, readLocalVideoBuffer } from '@/lib/video-media-io';
+import { downloadToBuffer, platformBaseUrl, readLocalVideoBuffer } from '@/lib/video-media-io';
 
 afterEach(() => vi.unstubAllEnvs());
 afterAll(() => rmSync(dataRoot, { recursive: true, force: true }));
@@ -21,6 +21,20 @@ describe('readLocalVideoBuffer', () => {
     expect((await readLocalVideoBuffer('/api/serve-upload/video/task1/clip.mp4'))?.toString()).toBe('uploaded');
     expect((await readLocalVideoBuffer('/api/serve-upload/generated-videos/film.mp4'))?.toString()).toBe('rendered');
     expect(await readLocalVideoBuffer('/api/serve-upload/../outside.mp4')).toBeNull();
+  });
+});
+
+describe('downloadToBuffer', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('retries a remote clip once after the first request fails', async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new DOMException('The operation was aborted due to timeout', 'TimeoutError'))
+      .mockResolvedValueOnce(new Response('clip-bytes', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    expect((await downloadToBuffer('https://cdn.example/clip.mp4')).toString()).toBe('clip-bytes');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 
