@@ -9,6 +9,7 @@ import { readSimpleCreateLoginTarget } from '@/lib/simple-create-navigation';
 import { LoginPanel } from '@/components/dashboard/login-panel';
 import { Toaster } from '@/components/ui/sonner';
 import { UserManager as UserManagerCore } from '@/lib/user-manager';
+import { platformRedirect, platformsForUser } from '@/lib/platform-routes';
 
 const CanvasWorkspace = dynamic(
   () => import('@/components/canvas-workspace').then(m => m.CanvasWorkspace),
@@ -60,6 +61,12 @@ function HomeContent() {
       try {
         const data = await fetchSessionPayload();
         if (!cancelled && data.success && data.user) {
+          // A user with one platform (chat only, for now) is sent there instead of the canvas workspace.
+          const redirect = platformRedirect(platformsForUser(data.user), window.location.pathname);
+          if (redirect) {
+            window.location.replace(redirect);
+            return;
+          }
           setCurrentUser(data.user);
         }
       } catch {

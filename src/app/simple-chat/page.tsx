@@ -3,6 +3,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Sidebar from "@/components/simple-chat/sidebar";
+import { PlatformSwitcher } from "@/components/platform/platform-switcher";
+import { platformsForUser } from "@/lib/platform-routes";
+import { useTheme } from "@/app/simple-chat/providers";
 import ChatArea, { type KnowledgeItemsMutation, type KnowledgeMutationResult } from "@/components/simple-chat/chat-area";
 import { SimpleChatSyncStatusView } from "@/components/simple-chat/simple-chat-sync-status";
 import { LoginPanel } from "@/components/dashboard/login-panel";
@@ -60,6 +63,7 @@ function mergeProjects(remote: Project[], local: Project[]): Project[] {
 export default function SimpleChatPage() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
+  const { theme } = useTheme();
   const [authLoading, setAuthLoading] = useState(true);
   const [showLogin, setShowLogin] = useState(false);
   const [logoutError, setLogoutError] = useState<string | null>(null);
@@ -546,6 +550,9 @@ export default function SimpleChatPage() {
         onDeleteTask={handleDeleteTask}
         onRenameTask={handleRenameTask}
         onLogout={() => { void handleLogout(); }}
+        switcher={platformsForUser(user).length > 1
+          ? <PlatformSwitcher current="chat" platforms={platformsForUser(user)} tone={theme} />
+          : undefined}
       />
       <div className="flex-1 flex flex-col min-w-0 w-full">
         <div className="flex min-h-7 shrink-0 items-center justify-end border-b border-border/60 px-3">

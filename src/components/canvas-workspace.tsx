@@ -174,6 +174,8 @@ import {
   useWorkspaceLocationSearch,
 } from '@/lib/project-workspace-url';
 import { parseSimpleChatWorkspaceHandoffIntent, type SimpleChatWorkspaceHandoffIntent } from '@/lib/simple-chat-workspace-handoff';
+import { dramaIdFromSearch, isWorkspacePath, platformsForUser, workspaceAddress, workspaceModeForPath } from '@/lib/platform-routes';
+import { PlatformSwitcher } from '@/components/platform/platform-switcher';
 import { toStableImageUrl, awaitStableImageUrl } from '@/lib/stable-image-url';
 import { APP_FULL_VERSION_LABEL, APP_NAME } from '@/config/app-meta';
 import { fetchSessionPayload, resolveSessionUser } from '@/lib/auth-session';
@@ -304,6 +306,8 @@ type WorkspaceMode = 'canvas' | 'drama' | 'dashboard';
 
 function getInitialWorkspaceMode(): WorkspaceMode {
   if (typeof window === 'undefined') return 'dashboard';
+  const pathMode = workspaceModeForPath(window.location.pathname, window.location.search);
+  if (pathMode) return pathMode;
   return getInitialWorkspaceModeFromSearch(window.location.search);
 }
 
@@ -1213,7 +1217,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
   const [createdShareAccess, setCreatedShareAccess] = useState<CanvasShareCreatedAccess>();
   const [pendingModeSwitch, setPendingModeSwitch] = useState<'drama' | 'dashboard' | null>(null);
   /** Drama project the workbench opens next; set by「发送到短剧工作台」. */
-  const [activeDramaId, setActiveDramaId] = useState<string | null>(null);
+  const [activeDramaId, setActiveDramaId] = useState<string | null>(() => (
+    typeof window === 'undefined' ? null : dramaIdFromSearch(window.location.search)
+  ));
   /** A simple chat message sent with「发送到短剧工作台」. Read once on load, because loading the project strips the chat params from the URL. */
   const [dramaChatHandoff, setDramaChatHandoff] = useState<SimpleChatWorkspaceHandoffIntent | null>(() => (
     typeof window === 'undefined' ? null : parseSimpleChatWorkspaceHandoffIntent(window.location.search)
@@ -7218,6 +7224,19 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
   }, [currentUser, getLocalFavorites, saveLocalFavorites]);
 
   const workspaceLocationSearch = useWorkspaceLocationSearch();
+  // Keep the address on the platform being shown (/canvas, /video, or /?view=dashboard), so a refresh reopens it.
+  useEffect(() => {
+    if (!isWorkspacePath(window.location.pathname)) return;
+    const next = workspaceAddress({ mode: appMode, projectId: currentProject?.id ?? null, dramaId: activeDramaId }, window.location);
+    if (next !== `${window.location.pathname}${window.location.search}${window.location.hash}`) replaceWorkspaceHistoryState(window, next);
+  }, [appMode, currentProject?.id, activeDramaId]);
+  const userPlatforms = useMemo(() => platformsForUser(currentUser), [currentUser]);
+  // Canvas and video share this page, so switching between them keeps the loaded project; chat is another page.
+  const navigatePlatform = useCallback((platform: 'canvas' | 'video' | 'chat'): boolean => {
+    if (platform === 'video') { safeSwitchMode('drama'); return true; }
+    if (platform === 'canvas') { setAppMode(currentProject ? 'canvas' : 'dashboard'); return true; }
+    return false;
+  }, [currentProject, safeSwitchMode]);
   useEffect(() => {
     if (!currentProject?.id || !currentUser?.id || collaborativeCanvas.projectId !== currentProject.id
       || collaborativeCanvas.authority === 'unknown') return;
@@ -7288,6 +7307,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
     return (
       <>
         <DramaWorkbench
+          switcher={userPlatforms.length > 1
+            ? <PlatformSwitcher current="video" platforms={userPlatforms} projectId={currentProject?.id} onNavigate={navigatePlatform} />
+            : undefined}
           dramaId={activeDramaId}
           projectId={currentProject?.id}
           onDramaIdChange={setActiveDramaId}
@@ -7500,6 +7522,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
           data-canvas-project-menu
           className={`pointer-events-auto flex min-w-0 max-w-full flex-wrap items-center gap-1 rounded-xl border px-2 py-1 shadow-lg backdrop-blur-md ${themeStyle === 'monochrome' ? 'border-gray-200 bg-white/90 text-gray-900' : 'border-white/10 bg-[#171717]/90 text-white'}`}
         >
+          <PlatformSwitcher current="canvas" platforms={userPlatforms} projectId={currentProject.id} dramaId={activeDramaId}
+            tone={themeStyle === 'monochrome' ? 'light' : 'dark'} onNavigate={navigatePlatform} />
           <span className="min-w-0 max-w-52 truncate px-2 text-sm font-medium" title={currentProject.name}>
             {currentProject.name}
           </span>

@@ -50,7 +50,7 @@ export function buildSimpleChatWorkspaceHandoffUrl(intent: SimpleChatWorkspaceHa
     chatTaskId: parsed.chatTaskId,
     chatMessageId: parsed.chatMessageId,
   });
-  return `/?${params.toString()}`;
+  return `/video?${params.toString()}`;
 }
 
 export function parseSimpleChatWorkspaceHandoffIntent(

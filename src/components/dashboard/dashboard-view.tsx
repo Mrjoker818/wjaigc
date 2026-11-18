@@ -3370,7 +3370,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               </div>
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => window.location.href = '/simple-chat'}
+                  onClick={() => window.location.href = '/chat'}
                   className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11 ${accentBgLight} ${accentClass} hover:opacity-90`}
                 >
                   <Plus className="w-4 h-4" />
@@ -3399,7 +3399,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 </div>
                 <p className={`text-sm ${textSecondary}`}>暂无对话项目</p>
                 <button
-                  onClick={() => window.location.href = '/simple-chat'}
+                  onClick={() => window.location.href = '/chat'}
                   className={`mt-4 px-4 py-2 rounded-xl text-sm font-medium transition-all cursor-pointer [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11 ${accentBgLight} ${accentClass} hover:opacity-90`}
                 >
                   开始第一个对话
@@ -3410,7 +3410,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 {chatProjects.map(project => (
                   <a
                     key={project.id}
-                    href={`/simple-chat?projectId=${project.id}`}
+                    href={`/chat?projectId=${encodeURIComponent(project.id)}`}
                     className="group block cursor-pointer rounded-xl border border-border bg-card hover:shadow-lg transition-all duration-200 overflow-hidden focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                   >
                     <div className="p-5">

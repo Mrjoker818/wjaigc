@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { ArrowLeft, Clapperboard, Coins, FolderOpen } from 'lucide-react';
 import type { DramaProjectRecord } from '@/lib/drama/types';
 import { DramaWorkbenchContext, DRAMA_STEPS, type DramaWorkbenchApi, type SaveState } from './drama-context';
@@ -17,10 +18,12 @@ const SAVE_TEXT: Record<SaveState, string> = {
   saved: '已保存', dirty: '有改动', saving: '正在保存', error: '保存失败，将自动重试', conflict: '已在其他窗口修改',
 };
 
-export function DramaShell({ record, projectId, onExit, onCloseProject, onPlaceOnCanvas, onOpenCredits }: {
+export function DramaShell({ record, projectId, onExit, switcher, onCloseProject, onPlaceOnCanvas, onOpenCredits }: {
   record: DramaProjectRecord;
   projectId?: string;
   onExit: () => void;
+  /** Platform switcher shown in place of the back button. */
+  switcher?: ReactNode;
   onCloseProject: () => void;
   onPlaceOnCanvas?: DramaWorkbenchApi['onPlaceOnCanvas'];
   onOpenCredits?: () => void;
@@ -33,7 +36,7 @@ export function DramaShell({ record, projectId, onExit, onCloseProject, onPlaceO
     <DramaWorkbenchContext.Provider value={api}>
       <div className="drama-root flex h-dvh flex-col overflow-hidden">
         <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-[var(--drama-line)] px-3 py-2">
-          <button type="button" className="drama-btn drama-btn--quiet" onClick={onExit} aria-label="返回画布"><ArrowLeft className="h-4 w-4" /><span className="hidden sm:inline">画布</span></button>
+          {switcher ?? <button type="button" className="drama-btn drama-btn--quiet" onClick={onExit} aria-label="返回画布"><ArrowLeft className="h-4 w-4" /><span className="hidden sm:inline">画布</span></button>}
           <Clapperboard className="hidden h-4 w-4 text-[var(--drama-gold)] sm:block" aria-hidden="true" />
           <input
             className="min-w-0 flex-1 basis-40 bg-transparent font-serif text-lg font-bold outline-none sm:flex-none sm:basis-auto sm:w-56"

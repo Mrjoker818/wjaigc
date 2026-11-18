@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowLeft, Clapperboard, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { createEmptyDramaProject, type DramaProjectRecord } from '@/lib/drama/types';
@@ -22,6 +22,8 @@ export interface DramaWorkbenchProps {
   projectId?: string;
   onDramaIdChange: (id: string | null) => void;
   onExit: () => void;
+  /** Platform switcher shown in place of the back button. */
+  switcher?: ReactNode;
   onPlaceOnCanvas?: DramaWorkbenchApi['onPlaceOnCanvas'];
   onOpenCredits?: () => void;
   /** A message sent from simple chat; it is written into a new script draft once, then `onChatHandoffDone` clears it. */
@@ -51,7 +53,7 @@ export default function DramaWorkbench(props: DramaWorkbenchProps) {
   if (state.status === 'ready' && state.record.id === dramaId) {
     return (
       <DramaShell
-        key={state.record.id} record={state.record} projectId={projectId} onExit={props.onExit}
+        key={state.record.id} record={state.record} projectId={projectId} onExit={props.onExit} switcher={props.switcher}
         onPlaceOnCanvas={props.onPlaceOnCanvas} onOpenCredits={props.onOpenCredits}
         onCloseProject={() => onDramaIdChange(null)}
       />
@@ -75,7 +77,7 @@ export default function DramaWorkbench(props: DramaWorkbenchProps) {
 }
 
 /** Empty state: start a new drama from one sentence, or reopen one of this canvas project's dramas. */
-function DramaStart({ projectId, onDramaIdChange, onExit, chatHandoff, onChatHandoffDone }: DramaWorkbenchProps) {
+function DramaStart({ projectId, onDramaIdChange, onExit, switcher, chatHandoff, onChatHandoffDone }: DramaWorkbenchProps) {
   const [projects, setProjects] = useState<DramaProjectSummary[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -136,7 +138,7 @@ function DramaStart({ projectId, onDramaIdChange, onExit, chatHandoff, onChatHan
   return (
     <div className="drama-root min-h-dvh overflow-y-auto">
       <header className="flex items-center gap-3 border-b border-[var(--drama-line)] px-4 py-3">
-        <button type="button" className="drama-btn drama-btn--quiet" onClick={onExit}><ArrowLeft className="h-4 w-4" />返回画布</button>
+        {switcher ?? <button type="button" className="drama-btn drama-btn--quiet" onClick={onExit}><ArrowLeft className="h-4 w-4" />返回画布</button>}
         <span className="flex items-center gap-2 text-sm text-[var(--drama-muted)]"><Clapperboard className="h-4 w-4" />短剧工作台</span>
       </header>
       <div role="main" className="mx-auto flex max-w-3xl flex-col gap-10 px-4 py-10 sm:py-16">

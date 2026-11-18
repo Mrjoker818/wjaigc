@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, Plus, Trash2, Edit3, LogOut, MessageSquare, FolderOpen, Settings, Home, User, X, PanelLeftClose, PanelLeft } from "lucide-react";
 import { SimpleChatProject, SimpleChatTask } from "./simple-chat-types";
 import { User as UserType } from "@/lib/user-types";
@@ -21,13 +21,15 @@ interface SidebarProps {
   onDeleteTask: (projectId: string, taskId: string) => void;
   onRenameTask: (projectId: string, taskId: string, name: string) => void;
   onLogout: () => void;
+  /** Platform switcher shown under the title. */
+  switcher?: ReactNode;
 }
 
 export default function Sidebar({
   user, projects, activeProjectId, activeTaskId, sidebarOpen,
   onToggleSidebar, onSelectProject, onSelectTask,
   onCreateProject, onDeleteProject, onRenameProject,
-  onCreateTask, onDeleteTask, onRenameTask, onLogout
+  onCreateTask, onDeleteTask, onRenameTask, onLogout, switcher
 }: SidebarProps) {
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => {
     return new Set(projects.map(p => p.id));
@@ -82,6 +84,7 @@ export default function Sidebar({
           <PanelLeftClose className="w-4 h-4" />
         </button>
       </div>
+      {switcher ? <div className="shrink-0 border-b border-sidebar-border px-4 py-2">{switcher}</div> : null}
 
       {/* Project List */}
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-2 px-2 space-y-1">

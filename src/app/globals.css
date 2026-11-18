@@ -1818,3 +1818,42 @@ input[type="range"]::-moz-range-thumb {
   .drama-root .drama-input.min-h-28 { min-height: 112px; }
   .drama-root .drama-input.min-h-80 { min-height: 320px; }
 }
+
+/* === 平台切换：画布 / 视频 / 对话。签名元素是"演播灯"：当前平台的圆点亮起本平台的强调色 === */
+@layer components {
+  .platform-switch {
+    --ps-bg: #12161d; --ps-line: rgba(230, 237, 243, 0.12); --ps-text: #e6edf3; --ps-muted: #8b949e;
+    --ps-canvas: #d4af37; --ps-video: #e5484d; --ps-chat: #58a6ff;
+    display: inline-flex; flex-shrink: 0; align-items: center; gap: 2px; padding: 3px;
+    border-radius: 9px; background: var(--ps-bg); border: 1px solid var(--ps-line);
+  }
+  .platform-switch[data-tone="light"] {
+    --ps-bg: #f6f8fa; --ps-line: rgba(31, 35, 40, 0.12); --ps-text: #1f2328; --ps-muted: #57606a;
+    --ps-canvas: #9a7b12; --ps-video: #c62a2f; --ps-chat: #0969da;
+  }
+  .platform-switch__tab {
+    --tally: var(--ps-canvas);
+    display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 10px;
+    border-radius: 6px; font-size: 13px; line-height: 1; white-space: nowrap; text-decoration: none;
+    color: var(--ps-muted); transition: color 120ms ease, background-color 120ms ease;
+  }
+  .platform-switch__tab[data-platform="video"] { --tally: var(--ps-video); }
+  .platform-switch__tab[data-platform="chat"] { --tally: var(--ps-chat); }
+  .platform-switch__tab:hover { color: var(--ps-text); }
+  .platform-switch__tab:focus-visible { outline: 2px solid var(--tally); outline-offset: 1px; }
+  .platform-switch__tab[aria-current="page"] {
+    color: var(--ps-text); font-weight: 600; background: color-mix(in srgb, var(--ps-text) 8%, transparent); cursor: default;
+  }
+  .platform-switch__tally {
+    width: 6px; height: 6px; border-radius: 9999px; flex-shrink: 0;
+    background: color-mix(in srgb, var(--ps-muted) 45%, transparent);
+    transition: background-color 120ms ease, box-shadow 120ms ease;
+  }
+  .platform-switch__tab[aria-current="page"] .platform-switch__tally {
+    background: var(--tally); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tally) 28%, transparent);
+  }
+  @media (pointer: coarse) { .platform-switch__tab { min-height: 44px; } }
+  @media (prefers-reduced-motion: reduce) {
+    .platform-switch__tab, .platform-switch__tally { transition: none; }
+  }
+}
