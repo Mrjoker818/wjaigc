@@ -7283,15 +7283,25 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
   // Mode switching - early return for non-canvas modes
   if (appMode === 'drama') {
     return (
-      <DramaWorkbench
-        dramaId={activeDramaId}
-        projectId={currentProject?.id}
-        onDramaIdChange={setActiveDramaId}
-        onExit={() => setAppMode('canvas')}
-        onPlaceOnCanvas={film => { setPendingCanvasFilm(film); setAppMode('canvas'); }}
-        chatHandoff={dramaChatHandoff}
-        onChatHandoffDone={clearDramaChatHandoff}
-      />
+      <>
+        <DramaWorkbench
+          dramaId={activeDramaId}
+          projectId={currentProject?.id}
+          onDramaIdChange={setActiveDramaId}
+          onExit={() => setAppMode('canvas')}
+          onPlaceOnCanvas={film => { setPendingCanvasFilm(film); setAppMode('canvas'); }}
+          chatHandoff={dramaChatHandoff}
+          onChatHandoffDone={clearDramaChatHandoff}
+        />
+        {/* This branch returns before the canvas Toaster, so the workbench needs its own to show errors. */}
+        <Toaster
+          position="top-center"
+          toastOptions={{
+            className: 'bg-[#1a1a1a] border border-[#2a2a2a] text-white shadow-lg shadow-black/30',
+            style: { borderRadius: '12px', fontSize: '13px' },
+          }}
+        />
+      </>
     );
   }
 

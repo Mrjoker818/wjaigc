@@ -148,12 +148,12 @@ const firstText = (...values: unknown[]): string | undefined =>
  * Generates one reference image through /api/generate (charged by the normal image pricing).
  * The route answers with an image URL directly or with a task to poll.
  */
-export async function generateReferenceImage(prompt: string, size: string, options: ImageOptions = {}): Promise<string> {
+export async function generateReferenceImage(prompt: string, aspectRatio: string, options: ImageOptions = {}): Promise<string> {
   const fetcher = options.fetch ?? defaultFetch;
   const sleep = options.sleep ?? (ms => new Promise<void>(resolve => setTimeout(resolve, ms)));
   const now = options.now ?? Date.now;
   const response = await fetcher('/api/generate', {
-    method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ prompt, n: 1, size }),
+    method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ prompt, n: 1, aspectRatio }),
   });
   const data = await readJson(response);
   if (!response.ok || data.success === false) fail(data, '设定图生成失败，请稍后重试');

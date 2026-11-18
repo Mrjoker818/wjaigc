@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { parseDramaScriptResponse } from '@/lib/drama/planner';
-import { castImagePrompt, locationImageSize } from '@/lib/drama/reference-prompts';
+import { castImagePrompt, locationImageRatio } from '@/lib/drama/reference-prompts';
 import { parseDramaProject } from '@/lib/drama/schema';
 import { buildTimeline } from '@/lib/drama/timeline';
 import { activeTake, type DramaProjectV1, type DramaShot } from '@/lib/drama/types';
@@ -111,10 +111,14 @@ describe('workbench client', () => {
   it('polls an image task until it returns a URL', async () => {
     const calls: string[] = [];
     const responses = [json({ success: true, taskId: 'img1' }), json({ status: 'processing' }), json({ status: 'completed', result: { imageUrl: '/i/a.png' } })];
-    const url = await generateReferenceImage('p', '1024x1536', {
-      fetch: async input => { calls.push(input); return responses.shift()!; }, sleep: async () => undefined,
+    const bodies: unknown[] = [];
+    const url = await generateReferenceImage('p', '2:3', {
+      fetch: async (input, init) => { calls.push(input); bodies.push(JSON.parse(String(init?.body))); return responses.shift()!; },
+      sleep: async () => undefined,
     });
     expect(url).toBe('/i/a.png');
+    // Image models are admitted by ratio; a pixel size is rejected by models that list none.
+    expect(bodies[0]).toEqual({ prompt: 'p', n: 1, aspectRatio: '2:3' });
     expect(calls).toEqual(['/api/generate', '/api/poll-task', '/api/poll-task']);
     await expect(generateReferenceImage('p', 's', { fetch: async () => json({ success: false, error: '积分不足' }, 402) })).rejects.toThrow('积分不足');
   });
@@ -145,7 +149,8 @@ describe('workbench client', () => {
 describe('reference prompts', () => {
   it('describes the character and matches the project ratio for location plates', () => {
     expect(castImagePrompt({ id: 'a', name: '林夏', appearance: '短发', costume: '风衣' }, 'side', 'cinematic')).toContain('wearing 风衣');
-    expect(locationImageSize('9:16')).toBe('1024x1536');
-    expect(locationImageSize('16:9')).toBe('1536x1024');
+    expect(locationImageRatio('9:16')).toBe('9:16');
+    expect(locationImageRatio('4:3')).toBe('16:9');
+    expect(locationImageRatio('1:1')).toBe('1:1');
   });
 });

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { ImagePlus, Loader2, Lock, LockOpen, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { CAST_IMAGE_SIZE, castImagePrompt, locationImagePrompt, locationImageSize } from '@/lib/drama/reference-prompts';
+import { CAST_IMAGE_RATIO, castImagePrompt, locationImagePrompt, locationImageRatio } from '@/lib/drama/reference-prompts';
 import type { DramaCastMember, DramaLocation } from '@/lib/drama/types';
 import { generateReferenceImage, persistImage } from '@/lib/drama/workbench-client';
 import {
@@ -24,10 +24,10 @@ export function DramaBibleStep() {
   });
 
   // Image jobs run in parallel; each card shows its own spinner.
-  const makeImage = async (key: string, prompt: string, size: string, apply: (url: string) => void) => {
+  const makeImage = async (key: string, prompt: string, aspectRatio: string, apply: (url: string) => void) => {
     mark(key, true);
     try {
-      apply(await persistImage(await generateReferenceImage(prompt, size)));
+      apply(await persistImage(await generateReferenceImage(prompt, aspectRatio)));
     } catch (error) {
       toast.error('设定图生成失败', { description: error instanceof Error ? error.message : '请稍后重试' });
     } finally {
@@ -36,10 +36,10 @@ export function DramaBibleStep() {
   };
 
   const castImage = (member: DramaCastMember, view: CastView) => makeImage(`${member.id}:${view}`,
-    castImagePrompt(member, view, doc.style), CAST_IMAGE_SIZE,
+    castImagePrompt(member, view, doc.style), CAST_IMAGE_RATIO,
     url => update(current => updateCastMember(current, member.id, view === 'front' ? { imageUrlFront: url } : { imageUrlSide: url })));
   const locationImage = (location: DramaLocation) => makeImage(`${location.id}:plate`,
-    locationImagePrompt(location, doc.style), locationImageSize(doc.aspectRatio),
+    locationImagePrompt(location, doc.style), locationImageRatio(doc.aspectRatio),
     url => update(current => updateLocation(current, location.id, { imageUrl: url })));
 
   return (

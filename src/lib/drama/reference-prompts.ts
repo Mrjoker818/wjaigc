@@ -30,11 +30,14 @@ export function locationImagePrompt(location: DramaLocation, style: DirectorStyl
   ]);
 }
 
-/** Location plates follow the project ratio so they can serve as a first frame. */
-export function locationImageSize(aspectRatio: string): string {
-  if (aspectRatio === '9:16' || aspectRatio === '3:4') return '1024x1536';
-  if (aspectRatio === '16:9' || aspectRatio === '4:3' || aspectRatio === '21:9') return '1536x1024';
-  return '1024x1024';
+/**
+ * Location plates follow the project ratio so they can serve as a first frame.
+ * Image models are admitted by ratio; many list no pixel sizes and reject one outright.
+ */
+export function locationImageRatio(aspectRatio: string): string {
+  if (aspectRatio === '9:16' || aspectRatio === '3:4') return '9:16';
+  if (aspectRatio === '16:9' || aspectRatio === '4:3' || aspectRatio === '21:9') return '16:9';
+  return '1:1';
 }
 
-export const CAST_IMAGE_SIZE = '1024x1536';
+export const CAST_IMAGE_RATIO = '2:3';
