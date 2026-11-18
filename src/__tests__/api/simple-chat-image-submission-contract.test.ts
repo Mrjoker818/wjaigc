@@ -18,7 +18,11 @@ describe('simple chat image submission', () => {
 
   it('sends the generate fields that /api/generate reads', () => {
     expect(route).toContain("getInternalApiUrl('/api/generate')");
-    expect(route).toContain('aspectRatio: imgAspectRatio');
+    // Ratio / resolution / quality are fitted to the selected model's spec before submission.
+    expect(route).toContain('aspectRatio: fitted.aspectRatio');
+    expect(route).toContain('resolution: fitted.resolution');
+    // Passing the chat model's description lets /api/generate skip its own vision pass.
+    expect(route).toContain('referenceDescriptions: [referenceDescription]');
     expect(route).toContain('submitOnly: true');
     expect(route).toContain("getInternalApiUrl('/api/poll-task')");
   });

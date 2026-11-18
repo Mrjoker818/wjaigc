@@ -1,5 +1,8 @@
 import { NextRequest } from 'next/server';
-import { findProviderForModel } from '@/lib/server-api-config';
+import { findProviderForModel, findProviderById } from '@/lib/server-api-config';
+import { prepareChatVisionMessages } from '@/lib/chat-vision-image';
+import { buildSkillInstructions, selectSimpleChatSkill } from '@/lib/simple-chat-skills';
+import { describeFittedParams, fitImageParams, parseImageRequest } from '@/lib/simple-chat-image-params';
 import type { ApiKind } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { SearchClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
@@ -15,7 +18,7 @@ const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手。你可以：
 3. 支持多模态理解（图片识别）
 
 请保持回复简洁、专业、友好。
-**重要**：请始终以自然语言（纯文本）回复用户，**不要**使用 JSON 格式或 Markdown 代码块格式输出你的回答内容。`;
+**重要**：默认以自然语言回复用户，不要输出 JSON；只有在系统提示"已加载技能"且该技能要求输出 json 代码块时，才按技能要求输出。`;
 
 interface KnowledgeItem {
   id: string;
@@ -57,6 +60,7 @@ export async function POST(request: NextRequest) {
     reasoningEffort?: string;
     responseSpeed?: string;
     workMode?: 'chat' | 'work';
+    skillId?: string;
   };
   const messages = body.messages || [];
   // No hard-coded fallback: a stale default model is rejected by the relay with an opaque error.
@@ -111,6 +115,18 @@ export async function POST(request: NextRequest) {
   // 构建增强的 system prompt（指令 + 知识库 + 联网搜索结果）
   let enhancedSystemPrompt = DEFAULT_SYSTEM_PROMPT;
   if (workPlan) enhancedSystemPrompt += `\n\n${buildWorkModeInstructions(workPlan)}`;
+
+  // Skill routing: load only the instructions of the skill that matches this request.
+  const latestUser = [...messages].reverse().find(m => m.role === 'user');
+  const skillSelection = selectSimpleChatSkill(latestUser?.content || '', {
+    explicitSkillId: body.skillId,
+    hasImages: Boolean(latestUser?.images?.length),
+  });
+  const activeSkill = skillSelection.skill;
+  if (activeSkill) {
+    enhancedSystemPrompt += buildSkillInstructions(activeSkill);
+    if (skillSelection.source === 'command' && latestUser) latestUser.content = skillSelection.text || latestUser.content;
+  }
 
   // 用户记忆注入
   if (memories.length > 0) {
@@ -196,8 +212,8 @@ export async function POST(request: NextRequest) {
   }
 
   // 构建消息列表
-  const fullMessages = [
-    { role: 'system', content: enhancedSystemPrompt },
+  const rawMessages = [
+    { role: 'system', content: enhancedSystemPrompt as string | ChatContentPart[] },
     ...messages.map((m) => {
       const parts: ChatContentPart[] = [{ type: 'text', text: m.content }];
       if (m.images && m.images.length > 0) {
@@ -209,11 +225,18 @@ export async function POST(request: NextRequest) {
         }
       }
       if (parts.length === 1) {
-        return { role: m.role, content: m.content };
+        return { role: m.role, content: m.content as string | ChatContentPart[] };
       }
-      return { role: m.role, content: parts };
+      return { role: m.role, content: parts as string | ChatContentPart[] };
     }),
   ];
+  // Inline every image as a size-normalized data URL with detail "high" and real pixel facts.
+  // Relays often cannot fetch our /api/serve-upload paths, which made the model guess.
+  const fullMessages = await prepareChatVisionMessages(rawMessages);
+
+  // Image tool: the model's spec decides which ratio / resolution / quality are valid.
+  const imageProvider = imageProviderId ? await findProviderById(imageProviderId) : null;
+  const imageProviderHint = `${imageProviderId} ${imageProvider?.name || ''} ${imageProvider?.baseUrl || ''}`;
 
   // SSE 流式响应
   const encoder = new TextEncoder();
@@ -221,6 +244,35 @@ export async function POST(request: NextRequest) {
     async start(controller) {
       const send = (data: Record<string, unknown>) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+      };
+
+      // Execution steps shown under the reply (like ChatGPT's "working" trace).
+      type StepStatus = 'pending' | 'running' | 'done' | 'failed';
+      let steps: { label: string; status: StepStatus; detail?: string }[] = (activeSkill?.steps || ['理解需求', '生成回复'])
+        .map((label, index) => ({ label, status: index === 0 ? 'running' : 'pending' }));
+      const emitSteps = () => send({ type: 'steps', skill: activeSkill ? { id: activeSkill.id, name: activeSkill.name } : null, steps });
+      const setStep = (index: number, status: StepStatus, detail?: string) => {
+        if (!steps[index]) return;
+        steps = steps.map((step, i) => {
+          if (i === index) return { ...step, status, ...(detail ? { detail } : {}) };
+          if (status === 'done' && i === index + 1 && step.status === 'pending') return { ...step, status: 'running' };
+          return step;
+        });
+        emitSteps();
+      };
+      const failCurrentStep = (detail: string) => {
+        const index = steps.findIndex(step => step.status === 'running');
+        setStep(index >= 0 ? index : steps.length - 1, 'failed', detail.slice(0, 160));
+      };
+      const finishSteps = () => {
+        if (steps.some(step => step.status === 'failed')) return;
+        steps = steps.map(step => ({ ...step, status: 'done' }));
+        emitSteps();
+      };
+      const switchToImageSteps = () => {
+        if (activeSkill?.id === 'image') return;
+        steps = ['理解画面需求', '匹配模型比例与分辨率', '提交生图任务', '等待供应商返回结果']
+          .map((label, index) => ({ label, status: index === 0 ? 'running' : 'pending' }));
       };
 
       try {
@@ -233,6 +285,7 @@ export async function POST(request: NextRequest) {
           support: chatControls.support,
         });
         if (workPlan) send({ type: 'work_plan', workPlan });
+        emitSteps();
 
         // 先发送搜索结果（如果有联网搜索）
         if (webSearch) {
@@ -263,6 +316,14 @@ export async function POST(request: NextRequest) {
                     type: 'string',
                     enum: [...IMAGE_ASPECT_RATIOS],
                     description: 'Aspect ratio of the image, default 1:1',
+                  },
+                  use_reference_image: {
+                    type: 'boolean',
+                    description: 'True when the user uploaded an image and wants the result based on it (edit, restyle, keep the product).',
+                  },
+                  reference_description: {
+                    type: 'string',
+                    description: 'When use_reference_image is true: a short factual description of the uploaded image subject.',
                   },
                 },
                 required: ['prompt'],
@@ -296,6 +357,7 @@ export async function POST(request: NextRequest) {
         if (!fetchRes.ok) {
           const errText = await fetchRes.text().catch(() => '');
           console.warn(`[simple-chat] upstream chat failed: model=${model}, provider=${provider.name}, status=${fetchRes.status}, body=${errText.slice(0, 200)}`);
+          failCurrentStep(`对话模型返回 ${fetchRes.status}`);
           send({ type: 'error', error: describeUpstreamChatError(fetchRes.status, errText, model) });
           controller.close();
           return;
@@ -334,6 +396,7 @@ export async function POST(request: NextRequest) {
 
               // 文本内容
               if (delta.content) {
+                if (!fullContent && steps[0]?.status === 'running') setStep(0, 'done');
                 fullContent += delta.content;
                 send({ type: 'text', content: delta.content });
               }
@@ -357,24 +420,39 @@ export async function POST(request: NextRequest) {
         if (Object.keys(toolCalls).length > 0) {
           const tc = toolCalls[0];
           if (tc.name === 'generate_image') {
+            switchToImageSteps();
+            setStep(0, 'done');
             send({ type: 'tool_status', tool: 'generating_image', status: 'generating', label: '正在生成图片...' });
 
-            let args: { prompt?: string; size?: string; aspect_ratio?: string } = {};
+            let args: {
+              prompt?: string; size?: string; aspect_ratio?: string;
+              use_reference_image?: boolean; reference_description?: string;
+            } = {};
             try { args = JSON.parse(tc.arguments); } catch { /* ignore */ }
 
             const imgPrompt = args.prompt || fullContent.slice(0, 500);
-            const imgAspectRatio = resolveToolAspectRatio(args);
             const failImage = (reason: string) => {
               console.warn(`[simple-chat] image generation failed: model=${imageModel || '(none)'}, reason=${reason.slice(0, 200)}`);
+              failCurrentStep(reason);
               send({ type: 'tool_status', tool: 'generating_image', status: 'failed', label: `图片生成失败：${reason}` });
             };
 
-            // 图生图：用户上传了参考图且意图是"基于图片生成/调整"时，传入参考图
+            // Size / ratio / quality: the user's own words win over the model's tool arguments,
+            // then everything is fitted to what the selected image model supports.
             const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+            const userText = lastUserMsg?.content || '';
+            const requested = { ...parseImageRequest(imgPrompt), ...parseImageRequest(userText) };
+            const fitted = fitImageParams(requested, resolveToolAspectRatio(args), imageModel, imageProviderHint);
+            setStep(1, 'done', [describeFittedParams(fitted), ...fitted.notes].join('；'));
+
+            // Image-to-image: the chat model decides via use_reference_image; the keyword check is a fallback.
             const userImages = lastUserMsg?.images || [];
-            const userText = (lastUserMsg?.content || '').toLowerCase();
-            const i2iIntent = /(这张图|这张|此图|图片|参考|改成|调整|换成|基于|类似风格|同款|根据这)/.test(userText);
-            const referenceImage = userImages.length > 0 && i2iIntent ? userImages[0] : undefined;
+            const i2iIntent = /(这张图|这张|此图|图片|参考|改成|调整|换成|基于|类似风格|同款|根据这|保持|不变)/.test(userText);
+            const wantsReference = args.use_reference_image ?? i2iIntent;
+            const referenceImage = userImages.length > 0 && wantsReference ? userImages[0] : undefined;
+            // The chat model has already looked at the image, so its description is passed along.
+            // This lets /api/generate skip its own vision identification pass (20s+ in production logs).
+            const referenceDescription = (args.reference_description || '').trim() || imgPrompt.slice(0, 300);
 
             if (!imageModel) {
               failImage('未选择图像模型，请在输入框上方选择一个图像模型后重试');
@@ -395,11 +473,18 @@ export async function POST(request: NextRequest) {
                   prompt: imgPrompt,
                   model: imageModel,
                   providerId: imageProviderId,
-                  aspectRatio: imgAspectRatio,
+                  aspectRatio: fitted.aspectRatio,
+                  ...(fitted.quality ? { quality: fitted.quality } : {}),
+                  ...(fitted.resolution ? { resolution: fitted.resolution } : {}),
                   outputCount: 1,
                   submitOnly: true,
                   projectId: body.projectId,
-                  ...(referenceImage ? { referenceImages: [referenceImage], referenceMode: 'reference', strength: i2iStrength } : {}),
+                  ...(referenceImage ? {
+                    referenceImages: [referenceImage],
+                    referenceDescriptions: [referenceDescription],
+                    referenceMode: 'reference',
+                    strength: i2iStrength,
+                  } : {}),
                 }),
                 signal: AbortSignal.timeout(60000),
               });
@@ -412,9 +497,12 @@ export async function POST(request: NextRequest) {
               if (!imgRes.ok || !imgData.success) {
                 failImage(imgData.error || `图像接口返回 ${imgRes.status}`);
               } else if (directUrls?.length && taskIds.length === 0) {
+                setStep(2, 'done');
                 send({ type: 'image', imageUrl: directUrls[0], prompt: imgPrompt });
+                setStep(3, 'done');
               } else if (taskIds.length > 0) {
                 const taskId = taskIds[0];
+                setStep(2, 'done', `任务 ${taskId.slice(0, 12)}`);
                 send({ type: 'tool_status', tool: 'generating_image', status: 'polling', label: '图片生成中...', taskId });
 
                 let settled = false;
@@ -433,6 +521,7 @@ export async function POST(request: NextRequest) {
                   const resultUrl = pollData.imageUrl || pollData.imageUrls?.[0];
                   if (pollData.status === 'completed' && resultUrl) {
                     send({ type: 'image', imageUrl: resultUrl, prompt: imgPrompt });
+                    setStep(3, 'done');
                     settled = true;
                     break;
                   }
@@ -453,8 +542,10 @@ export async function POST(request: NextRequest) {
           }
         }
 
+        finishSteps();
         send({ type: 'done' });
       } catch (e: unknown) {
+        failCurrentStep(errorMessage(e, '未知错误'));
         send({ type: 'error', error: errorMessage(e, '未知错误') });
       }
       controller.close();

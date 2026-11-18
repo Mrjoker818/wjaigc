@@ -16,8 +16,9 @@ import { UsageStats } from "./usage-stats";
 import {
   SimpleChatProject, SimpleChatTask, SimpleChatMessage, SimpleChatAgent, ChatAttachment, ChatArtifact,
   ProjectInstructions, ProjectKnowledgeItem,
-  PRESET_SKILLS, PresetSkill
+  PRESET_SKILLS, PresetSkill, SimpleChatStep
 } from "./simple-chat-types";
+import { SIMPLE_CHAT_SKILLS } from "@/lib/simple-chat-skills";
 import { User } from "@/lib/user-types";
 import type { ReasoningEffort, ResponseSpeed, ResolvedChatControls } from "@/lib/chat-generation-controls";
 import { useTheme } from "@/app/simple-chat/providers";
@@ -140,6 +141,8 @@ export default function ChatArea({
   const [uploadedImages, setUploadedImages] = useState<ChatAttachment[]>([]);
   const [webSearch, setWebSearch] = useState(false);
   const [workModeEnabled, setWorkModeEnabled] = useState(false);
+  // '' = automatic skill routing; otherwise force one built-in skill.
+  const [selectedSkillId, setSelectedSkillId] = useState('');
   const [showAgentPanel, setShowAgentPanel] = useState(false);
   const [showSkillPanel, setShowSkillPanel] = useState(false);
   const [showInstructionsPanel, setShowInstructionsPanel] = useState(false);
@@ -501,16 +504,10 @@ export default function ChatArea({
     if (idx === -1 || !editingContent.trim()) return;
     const updated = messages.slice(0, idx);
     const editedMsg: SimpleChatMessage = { ...messages[idx], content: editingContent.trim() };
-    setMessages([...updated, editedMsg]);
     setEditingMessageId(null);
     setEditingContent('');
-    // 用编辑后的内容触发重新生成
-    setInput(editingContent.trim());
-    setTimeout(() => {
-      setMessages(updated);
-      setInput(editingContent.trim());
-      handleSendRef.current?.();
-    }, 0);
+    // Re-run in place with the edited text; the input box is left untouched.
+    void handleSendRef.current?.({ userMsg: editedMsg, history: updated });
   }
 
   // 消息删除
@@ -602,15 +599,17 @@ export default function ChatArea({
     setInput(prompt);
   }
 
-  const handleSendRef = useRef<(() => void) | null>(null);
+  const handleSendRef = useRef<((regen?: { userMsg: SimpleChatMessage; history: SimpleChatMessage[] }) => Promise<void>) | null>(null);
 
   // Handle send
-  const handleSend = useCallback(async () => {
-    const content = input.trim();
-    if (!content && uploadedImages.length === 0) return;
+  // `regen` re-runs an earlier user message in place (ChatGPT-style regenerate): the old reply is
+  // dropped and a new one streams under the same user message, without touching the input box.
+  const handleSend = useCallback(async (regen?: { userMsg: SimpleChatMessage; history: SimpleChatMessage[] }) => {
+    const content = regen ? regen.userMsg.content : input.trim();
+    if (!regen && !content && uploadedImages.length === 0) return;
     if (isStreaming || !project || !task) return;
 
-    const userMsg: SimpleChatMessage = {
+    const userMsg: SimpleChatMessage = regen ? regen.userMsg : {
       id: Math.random().toString(36).slice(2, 10),
       role: 'user', content,
       images: uploadedImages.map(i => i.url).filter(Boolean) as string[],
@@ -625,9 +624,13 @@ export default function ChatArea({
       createdAt: Date.now(),
     };
 
-    setMessages(prev => [...prev, userMsg, aiMsg]);
-    setInput("");
-    setUploadedImages([]);
+    if (regen) {
+      setMessages([...regen.history, userMsg, aiMsg]);
+    } else {
+      setMessages(prev => [...prev, userMsg, aiMsg]);
+      setInput("");
+      setUploadedImages([]);
+    }
     setIsStreaming(true);
 
     // 提升作用域供 finally 中统计 token 用量
@@ -669,7 +672,7 @@ export default function ChatArea({
       }
 
       // 多轮图片上下文：仅保留最近 3 轮用户消息的图片（更早的图片会消耗大量 token）
-      const historyMsgs = messages.filter(m => m.role !== 'search');
+      const historyMsgs = (regen ? regen.history : messages).filter(m => m.role !== 'search');
       const recentUserImageIds = new Set(
         historyMsgs.filter(m => m.role === 'user' && m.images && m.images.length > 0).slice(-3).map(m => m.id)
       );
@@ -713,6 +716,7 @@ export default function ChatArea({
           reasoningEffort,
           responseSpeed,
           workMode: workModeEnabled ? 'work' : 'chat',
+          skillId: selectedSkillId || undefined,
         }),
       });
 
@@ -740,6 +744,11 @@ export default function ChatArea({
             if (data === '[DONE]' || data === '') continue;
             try {
               const parsed = JSON.parse(data);
+              if (parsed.type === 'steps' && Array.isArray(parsed.steps)) {
+                setMessages(prev => prev.map(item => item.id === aiMsg.id
+                  ? { ...item, steps: parsed.steps as SimpleChatStep[], skill: parsed.skill ?? null }
+                  : item));
+              }
               if (parsed.type === 'work_plan' && parsed.workPlan) {
                 setMessages(prev => prev.map(item => item.id === aiMsg.id ? { ...item, workPlan: parsed.workPlan } : item));
               }
@@ -879,7 +888,7 @@ export default function ChatArea({
         totalTokens: (prev?.totalTokens || 0) + promptEst + completionEst,
       }));
     }
-  }, [input, isStreaming, selectedModel, selectedProviderId, messages, project, task, uploadedImages, webSearch, memories, selectedImageModel, selectedImageProviderId, brandActive]);
+  }, [input, isStreaming, selectedModel, selectedProviderId, messages, project, task, uploadedImages, webSearch, memories, selectedImageModel, selectedImageProviderId, brandActive, workModeEnabled, selectedSkillId]);
 
   // 供消息编辑后重新生成调用
   handleSendRef.current = handleSend;
@@ -1151,7 +1160,12 @@ export default function ChatArea({
 
   // Message operations
   const copyMessage = (content: string) => { navigator.clipboard.writeText(content); };
-  const regenerateLast = () => { if (messages.length < 2) return; const lastUser = [...messages].reverse().find(m => m.role === 'user'); if (lastUser) { setMessages(prev => prev.slice(0, -2)); setInput(lastUser.content); setTimeout(() => { const btn = document.getElementById('send-btn') as HTMLButtonElement; btn?.click(); }, 50); } };
+  const regenerateLast = () => {
+    if (isStreaming) return;
+    const lastUserIndex = messages.map(m => m.role).lastIndexOf('user');
+    if (lastUserIndex < 0) return;
+    void handleSend({ userMsg: messages[lastUserIndex], history: messages.slice(0, lastUserIndex) });
+  };
   const continueConversation = (msg: SimpleChatMessage) => { setInput('继续'); };
   const makeShorter = (msg: SimpleChatMessage) => {
     if (msg?.role === 'assistant') setInput(`请将上面的回答缩短，保留核心要点。`);
@@ -1423,6 +1437,28 @@ export default function ChatArea({
                     </div>
                   ) : msg.role === 'assistant' ? (
                     <>
+                      {msg.steps && msg.steps.length > 0 && (
+                        <div className="mb-3 rounded-lg border border-border bg-muted/40 p-3 text-xs" data-testid="chat-steps">
+                          <div className="font-medium text-foreground">
+                            {msg.skill ? `技能 · ${msg.skill.name}` : '执行步骤'}
+                          </div>
+                          <ol className="mt-2 space-y-1">
+                            {msg.steps.map((step, stepIndex) => (
+                              <li key={`${msg.id}-step-${stepIndex}`} className={`flex items-start gap-2 ${step.status === 'failed' ? 'text-destructive' : step.status === 'pending' ? 'text-muted-foreground/60' : 'text-muted-foreground'}`}>
+                                <span className="mt-0.5 inline-flex w-4 shrink-0 justify-center">
+                                  {step.status === 'running'
+                                    ? <span className="h-3 w-3 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                                    : step.status === 'done' ? '✓' : step.status === 'failed' ? '✕' : '·'}
+                                </span>
+                                <span className="min-w-0">
+                                  {step.label}
+                                  {step.detail && <span className="ml-1 text-muted-foreground/80">（{step.detail}）</span>}
+                                </span>
+                              </li>
+                            ))}
+                          </ol>
+                        </div>
+                      )}
                       {msg.workPlan && (
                         <div className="mb-3 rounded-lg border border-border bg-muted/40 p-3 text-xs">
                           <div className="font-medium text-foreground">工作计划 · {msg.workPlan.deliverable}</div>
@@ -1630,6 +1666,18 @@ export default function ChatArea({
                 title="品牌DNA注入 - 将品牌规范注入对话上下文">
                 <Shield className="w-4 h-4" />
               </button>
+              <select
+                value={selectedSkillId}
+                onChange={e => setSelectedSkillId(e.target.value)}
+                aria-label="技能"
+                title="技能：默认按指令自动选择，也可输入 /ppt、/excel、/word、/pdf、/mindmap、/flow、/image"
+                className="max-w-[112px] rounded-lg bg-transparent px-1.5 py-1.5 text-xs text-muted-foreground hover:bg-muted outline-none"
+              >
+                <option value="">自动技能</option>
+                {SIMPLE_CHAT_SKILLS.map(skill => (
+                  <option key={skill.id} value={skill.id}>{skill.name}</option>
+                ))}
+              </select>
               <button onClick={() => setWorkModeEnabled(enabled => !enabled)}
                 className={`px-2 py-1.5 rounded-lg text-xs transition-colors ${workModeEnabled ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'}`}
                 aria-pressed={workModeEnabled}
@@ -1676,7 +1724,7 @@ export default function ChatArea({
                 <GitBranch className="w-4 h-4" />
               </button>
               </div>
-              <button onClick={handleSend} disabled={!input.trim() && uploadedImages.length === 0}
+              <button onClick={() => { void handleSend(); }} disabled={!input.trim() && uploadedImages.length === 0}
                 aria-label="发送"
                 className="shrink-0 p-2 rounded-lg bg-primary text-primary-foreground disabled:opacity-40 transition-all hover:bg-primary/90">
                 {isStreaming ? <div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" /> : <ArrowUp className="w-4 h-4" />}

@@ -42,11 +42,21 @@ export interface SimpleChatMessage {
   attachments?: ChatAttachment[];
   artifacts?: ChatArtifact[];
   workPlan?: WorkPlan;
+  /** Execution steps streamed by the server for this reply. */
+  steps?: SimpleChatStep[];
+  /** Built-in skill that handled this reply. */
+  skill?: { id: string; name: string } | null;
   model?: string;
   providerId?: string;
   parentMessageId?: string;
   branchId?: string;
   createdAt: number;
+}
+
+export interface SimpleChatStep {
+  label: string;
+  status: 'pending' | 'running' | 'done' | 'failed';
+  detail?: string;
 }
 
 export interface SimpleChatAgent {

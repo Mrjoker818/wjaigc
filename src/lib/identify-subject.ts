@@ -515,6 +515,30 @@ async function imageToBase64(imageUrl: string): Promise<string | null> {
   }
 }
 
+// Whole fallback chain may not take longer than this; production logs showed 8 failing
+// relay models adding 23-28s before each image submission.
+const IDENTIFY_TOTAL_BUDGET_MS = 10_000;
+// Models that returned an error are skipped for this long (process-local).
+const VISION_FAILURE_TTL_MS = 10 * 60 * 1000;
+const failedVisionModels = new Map<string, number>();
+let lastGoodVisionModel = '';
+
+function visionModelKey(provider: { baseUrl?: string; model?: string }): string {
+  return `${provider.baseUrl || ''}|${provider.model || ''}`;
+}
+
+function markVisionModelFailed(provider: { baseUrl?: string; model?: string }): void {
+  const key = visionModelKey(provider);
+  failedVisionModels.set(key, Date.now() + VISION_FAILURE_TTL_MS);
+  if (lastGoodVisionModel === key) lastGoodVisionModel = '';
+}
+
+/** Test hook: clears the process-local vision model health cache. */
+export function resetVisionModelHealth(): void {
+  failedVisionModels.clear();
+  lastGoodVisionModel = '';
+}
+
 /**
  * Identify the main subject in an image using AI vision
  *
@@ -542,11 +566,22 @@ export async function identifyImageSubject(
     return null;
   }
 
-  // Try each provider in priority order until one succeeds
-  // Limit to first 8 providers to avoid excessive API calls when all fail
-  const maxAttempts = Math.min(allProviders.length, 8);
+  // Try providers in priority order until one succeeds. Models that recently failed are
+  // skipped and the last model that worked goes first, so one bad relay model does not
+  // add seconds to every generation. A total budget caps the whole fallback chain.
+  const now = Date.now();
+  for (const [key, until] of failedVisionModels) if (until <= now) failedVisionModels.delete(key);
+  const candidates = allProviders
+    .filter(p => !failedVisionModels.has(visionModelKey(p)))
+    .sort((a, b) => Number(visionModelKey(b) === lastGoodVisionModel) - Number(visionModelKey(a) === lastGoodVisionModel));
+  const maxAttempts = Math.min(candidates.length, 4);
+  const deadline = now + Math.max(timeoutMs, IDENTIFY_TOTAL_BUDGET_MS);
   for (let i = 0; i < maxAttempts; i++) {
-    const provider = allProviders[i];
+    const provider = candidates[i];
+    if (Date.now() >= deadline) {
+      console.warn(`[identify-subject] Total budget ${IDENTIFY_TOTAL_BUDGET_MS}ms used up after ${i} attempt(s)`);
+      break;
+    }
     try {
       console.info(`[identify-subject] Trying provider ${i + 1}/${maxAttempts}: model=${provider.model}`);
 
@@ -572,8 +607,9 @@ export async function identifyImageSubject(
         stream: false,
       };
 
+      const attemptTimeoutMs = Math.max(1000, Math.min(timeoutMs, deadline - Date.now()));
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      const timeoutId = setTimeout(() => controller.abort(), attemptTimeoutMs);
 
       try {
         const response = await fetchWithV1Retry(
@@ -589,7 +625,7 @@ export async function identifyImageSubject(
             signal: controller.signal,
           },
           true,
-          timeoutMs,
+          attemptTimeoutMs,
         );
 
         clearTimeout(timeoutId);
@@ -597,6 +633,7 @@ export async function identifyImageSubject(
         if (!response.ok) {
           const errorText = await response.text().catch(() => '');
           console.warn(`[identify-subject] Provider ${i + 1} (${provider.model}) API error: ${response.status} ${errorText.slice(0, 200)}`);
+          markVisionModelFailed(provider);
           continue; // Try next provider
         }
 
@@ -624,6 +661,7 @@ export async function identifyImageSubject(
 
         if (!content) {
           console.warn(`[identify-subject] Provider ${i + 1} (${provider.model}) returned empty content`);
+          markVisionModelFailed(provider);
           continue; // Try next provider
         }
 
@@ -640,6 +678,7 @@ export async function identifyImageSubject(
         if (zhMatch) zhDesc = zhMatch[1].trim();
 
         console.info(`[identify-subject] Identified (provider ${i + 1}, model=${provider.model}): en="${enDesc}", zh="${zhDesc}"`);
+        lastGoodVisionModel = visionModelKey(provider);
         return {
           en: enDesc,
           zh: zhDesc || enDesc,
@@ -649,6 +688,7 @@ export async function identifyImageSubject(
       }
     } catch (err) {
       console.warn(`[identify-subject] Provider ${i + 1} (${provider.model}) failed:`, err instanceof Error ? err.message : String(err));
+      markVisionModelFailed(provider);
       // Continue to next provider
     }
   }
