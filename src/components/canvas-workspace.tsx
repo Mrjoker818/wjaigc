@@ -4852,9 +4852,12 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
   useEffect(() => {
     if (appMode !== 'canvas' || !pendingCanvasFilm) return;
     const film = pendingCanvasFilm;
-    setPendingCanvasFilm(null);
     // Wait one frame so the canvas viewport is mounted and the film lands in its centre.
-    const frame = window.requestAnimationFrame(() => { void handleStoryVideoComposed(film); });
+    // Clear the pending film inside the frame: clearing it here re-runs this effect, whose cleanup cancels the frame.
+    const frame = window.requestAnimationFrame(() => {
+      setPendingCanvasFilm(null);
+      void handleStoryVideoComposed(film);
+    });
     return () => window.cancelAnimationFrame(frame);
   }, [appMode, pendingCanvasFilm, handleStoryVideoComposed]);
 
