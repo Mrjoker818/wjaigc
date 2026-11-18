@@ -53,7 +53,7 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
   const firstFrame = model ? chooseFirstFrame(shot, previous, location, model.capability) : { source: 'none' as const };
   // The previous shot's frame is extracted only at submit time; its video URL stands in so the count matches.
   const references = model
-    ? shotReferenceImages(shot, doc.cast, model.capability, firstFrame.url ?? ('previousVideoUrl' in firstFrame ? firstFrame.previousVideoUrl : undefined))
+    ? shotReferenceImages(shot, doc.cast, model.capability, firstFrame.url ?? ('previousVideoUrl' in firstFrame ? firstFrame.previousVideoUrl : undefined), doc.props)
     : [];
   const diagnosis = failure ? diagnoseFailure(failure) : null;
   const running = runningShotIds.has(shot.id);
@@ -128,6 +128,23 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
         </div>
       </fieldset>
 
+      {doc.props.length ? (
+        <fieldset className="flex flex-col gap-1.5">
+          <legend className="drama-label mb-1">出场道具</legend>
+          <div className="flex flex-wrap gap-1">
+            {doc.props.map(prop => {
+              const on = shot.propIds?.includes(prop.id) ?? false;
+              return (
+                <button key={prop.id} type="button" className="drama-btn min-h-8 px-2 text-xs" aria-pressed={on}
+                  onClick={() => set({ propIds: on ? shot.propIds?.filter(id => id !== prop.id) : [...(shot.propIds ?? []), prop.id] })}>
+                  {prop.name}
+                </button>
+              );
+            })}
+          </div>
+        </fieldset>
+      ) : null}
+
       <section className="flex flex-col gap-2" aria-labelledby="drama-keyframe">
         <h3 id="drama-keyframe" className="text-sm font-semibold">关键帧</h3>
         <div className="relative overflow-hidden rounded-md bg-[var(--drama-ink)]" style={{ aspectRatio: (shot.aspectRatio || doc.aspectRatio).replace(':', ' / ') }}>
@@ -161,7 +178,7 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
       <section className="drama-panel flex flex-col gap-2 p-3" aria-label="下一次生成会用的素材">
         <p className="text-xs">{FIRST_FRAME_TEXT[firstFrame.source]}</p>
         <p className="text-xs text-[var(--drama-muted)]">
-          角色参考图 {references.length} 张{model ? `（模型最多接受 ${model.capability.maxReferenceImages} 张）` : ''}
+          角色和道具参考图 {references.length} 张{model ? `（模型最多接受 ${model.capability.maxReferenceImages} 张）` : ''}
         </p>
         {references.length ? (
           <div className="flex gap-1">

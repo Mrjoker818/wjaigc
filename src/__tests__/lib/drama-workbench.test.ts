@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { parseDramaScriptResponse } from '@/lib/drama/planner';
-import { castImagePrompt, keyframePrompt, keyframeReferences, locationImageRatio } from '@/lib/drama/reference-prompts';
+import { castImagePrompt, keyframePrompt, keyframeReferences, locationImageRatio, propImagePrompt } from '@/lib/drama/reference-prompts';
 import { parseDramaProject } from '@/lib/drama/schema';
 import { buildTimeline } from '@/lib/drama/timeline';
 import { activeTake, type DramaProjectV1, type DramaShot } from '@/lib/drama/types';
@@ -9,7 +9,7 @@ import {
 } from '@/lib/drama/workbench-client';
 import {
   addShot, blankEpisodeDoc, failedShots, findShot, fitDuration, formatTimecode, moveShot, orderedPrevious, pendingShots,
-  removeCastMember, removeShot, selectTake, setSceneShots, updateShot, upsertTake,
+  removeCastMember, removeProp, removeShot, selectTake, setSceneShots, updateShot, upsertTake,
 } from '@/lib/drama/workbench-state';
 
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
@@ -77,6 +77,16 @@ describe('workbench document edits', () => {
     expect(doc.cast).toEqual([]);
     expect(doc.episodes[0].scenes[0].characterIds).toEqual([]);
     expect(findShot(doc, 's1')?.shot.characterIds).toEqual([]);
+  });
+
+  it('removes a prop from every shot that shows it', () => {
+    let doc = docWithShots();
+    doc = { ...doc, props: [{ id: 'ticket', name: '彩票' }, { id: 'ring', name: '戒指' }] };
+    doc = updateShot(doc, 's1', { propIds: ['ticket', 'ring'] });
+    doc = removeProp(doc, 'ticket');
+    expect(doc.props.map(prop => prop.id)).toEqual(['ring']);
+    expect(findShot(doc, 's1')?.shot.propIds).toEqual(['ring']);
+    expect(() => parseDramaProject(doc)).not.toThrow();
   });
 
   it('builds a valid blank episode for users who write their own script', () => {
@@ -186,5 +196,16 @@ describe('reference prompts', () => {
     expect(keyframeReferences(keyShot, doc, 4)).toEqual(['/cast/lin.png', '/loc/plate.png']);
     expect(keyframeReferences(keyShot, doc, 1)).toEqual(['/cast/lin.png']);
     expect(keyframeReferences(keyShot, doc, 0)).toEqual([]);
+    const withProp: DramaProjectV1 = { ...doc, props: [{ id: 'ticket', name: '彩票', description: '泛黄', lockedImageUrl: '/prop/t.png' }] };
+    const propShot = { ...keyShot, propIds: ['ticket'] };
+    expect(keyframePrompt(propShot, withProp)).toContain('彩票');
+    expect(keyframeReferences(propShot, withProp, 4)).toEqual(['/cast/lin.png', '/loc/plate.png', '/prop/t.png']);
+  });
+
+  it('draws a prop sheet from its description', () => {
+    const prompt = propImagePrompt({ id: 'ticket', name: '彩票', description: '泛黄的旧彩票', material: '纸' }, 'cinematic');
+    expect(prompt).toContain('prop design reference sheet');
+    expect(prompt).toContain('泛黄的旧彩票');
+    expect(prompt).toContain('no people');
   });
 });

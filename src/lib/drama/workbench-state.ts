@@ -1,7 +1,7 @@
 /** Pure edits on a drama document for the workbench. Every function returns a new document and leaves the input untouched. */
 import {
   activeTake, MAX_SHOTS_PER_EPISODE,
-  type DramaCastMember, type DramaEpisode, type DramaLocation, type DramaProjectV1, type DramaSceneBlock, type DramaShot, type DramaTake,
+  type DramaCastMember, type DramaEpisode, type DramaLocation, type DramaProjectV1, type DramaProp, type DramaSceneBlock, type DramaShot, type DramaTake,
 } from './types';
 
 export interface ShotLocation {
@@ -123,8 +123,12 @@ export function updateLocation(doc: DramaProjectV1, id: string, patch: Partial<D
   return { ...doc, locations: doc.locations.map(item => (item.id === id ? { ...item, ...patch } : item)) };
 }
 
+export function updateProp(doc: DramaProjectV1, id: string, patch: Partial<DramaProp>): DramaProjectV1 {
+  return { ...doc, props: doc.props.map(item => (item.id === id ? { ...item, ...patch } : item)) };
+}
+
 /** A new id that is not used by any cast member, location or prop. */
-export function nextBibleId(doc: DramaProjectV1, prefix: 'char' | 'loc'): string {
+export function nextBibleId(doc: DramaProjectV1, prefix: 'char' | 'loc' | 'prop'): string {
   const used = new Set([...doc.cast, ...doc.locations, ...doc.props].map(item => item.id));
   for (let i = 1; ; i += 1) if (!used.has(`${prefix}_${i}`)) return `${prefix}_${i}`;
 }
@@ -134,6 +138,13 @@ export function removeCastMember(doc: DramaProjectV1, id: string): DramaProjectV
   const strip = (ids?: string[]) => ids?.filter(item => item !== id);
   return mapScenes({ ...doc, cast: doc.cast.filter(member => member.id !== id) }, scene => ({
     ...scene, characterIds: strip(scene.characterIds), shots: scene.shots.map(shot => ({ ...shot, characterIds: strip(shot.characterIds) })),
+  }));
+}
+
+/** Removes a prop and every shot reference to it. */
+export function removeProp(doc: DramaProjectV1, id: string): DramaProjectV1 {
+  return mapScenes({ ...doc, props: doc.props.filter(item => item.id !== id) }, scene => ({
+    ...scene, shots: scene.shots.map(shot => (shot.propIds ? { ...shot, propIds: shot.propIds.filter(item => item !== id) } : shot)),
   }));
 }
 

@@ -3,11 +3,13 @@
 import { useState } from 'react';
 import { ImagePlus, Loader2, Lock, LockOpen, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { CAST_IMAGE_RATIO, castImagePrompt, locationImagePrompt, locationImageRatio } from '@/lib/drama/reference-prompts';
-import type { DramaCastMember, DramaLocation } from '@/lib/drama/types';
+import {
+  CAST_IMAGE_RATIO, castImagePrompt, locationImagePrompt, locationImageRatio, PROP_IMAGE_RATIO, propImagePrompt,
+} from '@/lib/drama/reference-prompts';
+import type { DramaCastMember, DramaLocation, DramaProp } from '@/lib/drama/types';
 import { generateReferenceImage, persistImage } from '@/lib/drama/workbench-client';
 import {
-  nextBibleId, removeCastMember, removeLocation, updateCastMember, updateLocation,
+  nextBibleId, removeCastMember, removeLocation, removeProp, updateCastMember, updateLocation, updateProp,
 } from '@/lib/drama/workbench-state';
 import { useDrama } from './drama-context';
 
@@ -41,6 +43,9 @@ export function DramaBibleStep() {
   const locationImage = (location: DramaLocation) => makeImage(`${location.id}:plate`,
     locationImagePrompt(location, doc.style), locationImageRatio(doc.aspectRatio),
     url => update(current => updateLocation(current, location.id, { imageUrl: url })));
+  const propImage = (prop: DramaProp) => makeImage(`${prop.id}:sheet`,
+    propImagePrompt(prop, doc.style), PROP_IMAGE_RATIO,
+    url => update(current => updateProp(current, prop.id, { imageUrl: url })));
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-8">
@@ -117,6 +122,41 @@ export function DramaBibleStep() {
                 onToggleLock={url => update(current => updateLocation(current, location.id, { lockedImageUrl: location.lockedImageUrl === url ? undefined : url }))}
               />
               <p className="drama-label">有场景图时，这个场景里每场的第一个镜头会用它做首帧。</p>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section aria-labelledby="drama-props" className="flex flex-col gap-3">
+        <div className="flex items-center gap-3">
+          <h2 id="drama-props" className="text-sm font-semibold">道具（{doc.props.length}）</h2>
+          <button type="button" className="drama-btn" onClick={() => update(current => ({
+            ...current, props: [...current.props, { id: nextBibleId(current, 'prop'), name: `道具${current.props.length + 1}` }],
+          }))}><Plus className="h-4 w-4" />加道具</button>
+        </div>
+        {doc.props.length === 0 ? <p className="drama-label">还没有道具。信物、武器这类多次出现的物件，画一张设定图能让每个镜头里的样子一致。</p> : null}
+        <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {doc.props.map(prop => (
+            <li key={prop.id} className="drama-panel flex flex-col gap-3 p-3">
+              <div className="flex items-center gap-2">
+                <input className="drama-input font-serif font-bold" aria-label="道具名" maxLength={200} value={prop.name}
+                  onChange={event => update(current => updateProp(current, prop.id, { name: event.target.value }))} />
+                <button type="button" className="drama-btn drama-btn--quiet" aria-label={`删除道具 ${prop.name}`}
+                  onClick={() => { if (window.confirm(`删除道具「${prop.name}」？镜头里对它的引用也会去掉。`)) update(current => removeProp(current, prop.id)); }}>
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+              <textarea className="drama-input min-h-16 resize-y" aria-label={`${prop.name} 外观`} maxLength={4000} value={prop.description ?? ''}
+                placeholder="外观、材质、颜色，例如：泛黄的旧彩票，边角卷起"
+                onChange={event => update(current => updateProp(current, prop.id, { description: event.target.value }))} />
+              <ReferenceTile
+                label="道具图" ratio="1 / 1" url={prop.imageUrl}
+                locked={Boolean(prop.lockedImageUrl) && prop.lockedImageUrl === prop.imageUrl}
+                busy={pending.has(`${prop.id}:sheet`)} disabled={!prop.name.trim()}
+                onGenerate={() => void propImage(prop)}
+                onToggleLock={url => update(current => updateProp(current, prop.id, { lockedImageUrl: prop.lockedImageUrl === url ? undefined : url }))}
+              />
+              <p className="drama-label">镜头里勾选这个道具后，它的图会排在角色之后做参考。</p>
             </li>
           ))}
         </ul>

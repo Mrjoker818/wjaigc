@@ -66,7 +66,10 @@ export interface DramaLocation extends VideoScene {
   lockedImageUrl?: string;
 }
 
-export type DramaProp = VideoProp;
+/** Key prop with its design sheet. `lockedImageUrl` is the one sent as a reference for shots that show it. */
+export interface DramaProp extends VideoProp {
+  lockedImageUrl?: string;
+}
 
 export interface DramaTimeline {
   transition: DramaTransition;

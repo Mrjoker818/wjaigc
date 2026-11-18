@@ -10,6 +10,7 @@ import {
   type DramaEpisode,
   type DramaLocation,
   type DramaProjectV1,
+  type DramaProp,
   type DramaSceneBlock,
   type DramaShot,
 } from './types';
@@ -72,6 +73,7 @@ const scriptResponseSchema = z.object({
   logline: looseText(2000).optional(),
   cast: z.array(z.record(z.string(), z.unknown())).max(30).default([]),
   locations: z.array(z.record(z.string(), z.unknown())).max(50).default([]),
+  props: z.array(z.record(z.string(), z.unknown())).max(50).default([]),
   episodes: z.array(z.object({
     title: looseText(200),
     logline: looseText(2000).optional(),
@@ -97,9 +99,10 @@ export function buildDramaScriptPrompt(input: DramaScriptInput): string {
     'JSON 结构：{"title":string,"genre":string,"logline":string,',
     '"cast":[{"id":英文id,"name":string,"role":主角/配角/反派,"age":string,"gender":string,"appearance":外貌50-100字,"costume":string,"hair":string}],',
     '"locations":[{"id":英文id,"name":场景名,"location":string,"timeOfDay":string,"lighting":string,"mood":string,"description":50-100字}],',
+    '"props":[{"id":英文id,"name":道具名,"role":在故事里的作用,"description":外观材质颜色30-60字}]（只列推动剧情、多次出现的关键道具，没有就给空数组）,',
     '"episodes":[{"title":string,"logline":string,"script":完整剧本文本(含场次标题、动作描写、角色台词),',
     '"scenes":[{"heading":场次标题如"咖啡馆·内·夜","summary":本场发生的事和关键台词,"locationId":locations中的id,"characterIds":cast中的id数组}]}]}',
-    'id 只用英文字母、数字、下划线；scenes 引用的 id 必须存在。',
+    'id 只用英文字母、数字、下划线，cast/locations/props 之间不要重复；scenes 引用的 id 必须存在。',
     input.title ? `片名：${input.title}` : '',
     input.genre ? `类型：${input.genre}` : '',
     `用户创意：${input.idea}`,
@@ -128,6 +131,7 @@ export function parseDramaScriptResponse(text: string, input: DramaScriptInput, 
     };
   });
   const locationIds = new Set<string>();
+  const propIds = new Set<string>();
   const locations: DramaLocation[] = plan.locations.map((item, i) => {
     let id = safeId(item.id, `loc_${i + 1}`);
     while (locationIds.has(id)) id = `${id}_${i}`;
@@ -136,6 +140,13 @@ export function parseDramaScriptResponse(text: string, input: DramaScriptInput, 
       id, name: str(item.name, 200) || `场景${i + 1}`, location: str(item.location, 500), timeOfDay: str(item.timeOfDay, 50),
       lighting: str(item.lighting, 500), mood: str(item.mood, 200), description: str(item.description, 4000), status: 'pending',
     };
+  });
+
+  const props: DramaProp[] = plan.props.map((item, i) => {
+    let id = safeId(item.id, `prop_${i + 1}`);
+    while (castIds.has(id) || locationIds.has(id) || propIds.has(id)) id = `${id}_${i}`;
+    propIds.add(id);
+    return { id, name: str(item.name, 200) || `道具${i + 1}`, role: str(item.role, 200), description: str(item.description, 4000), status: 'pending' };
   });
 
   const episodes: DramaEpisode[] = plan.episodes.map((episode, e) => ({
@@ -162,7 +173,7 @@ export function parseDramaScriptResponse(text: string, input: DramaScriptInput, 
     title: plan.title || input.title, genre: plan.genre || input.genre, style: normalizeDirectorStyle(input.style),
     aspectRatio: input.aspectRatio,
   });
-  return { ...doc, episodes, cast, locations };
+  return { ...doc, episodes, cast, locations, props };
 }
 
 function sceneShotCount(summary: string, requested?: number): number {
@@ -192,6 +203,7 @@ export function buildDramaShotMessages(input: DramaShotPlanInput & { shotCount?:
     `本场内容：${scene.summary}`,
     cast.length ? `出场角色（characterIds 只能用这些 id）：${cast.map(member => `${member.id}=${member.name}，${member.appearance}`).join('；')}` : '本场没有固定角色。',
     location ? `场景（sceneId 固定为 ${location.id}）：${location.name}，${location.description || location.location || ''}` : '',
+    doc.props.length ? `关键道具（镜头里出现时把 id 写进 propIds，只能用这些 id）：${doc.props.map(prop => `${prop.id}=${prop.name}`).join('；')}` : '',
     `拆成 ${count} 个镜头，单镜头 ${perShot} 秒左右，画面比例 ${doc.aspectRatio}。`,
     '每个镜头额外给出 dialogue 字段：该镜头内角色说的台词原文（没有就给空字符串）。',
     'characters/scenes/props 可以返回空数组，角色和场景已经定好。',
@@ -212,12 +224,15 @@ export function parseDramaShotResponse(text: string, input: DramaShotPlanInput, 
   const parsed = parseShotPlanFullResponse(cleaned, perShot, doc.aspectRatio);
   if (parsed.shots.length === 0) throw new DramaPlannerError('DRAMA_PLAN_INVALID', true);
   let dialogues: unknown[] = [];
+  let rawPropIds: unknown[] = [];
   try {
-    const raw = JSON.parse(cleaned) as { shots?: Array<{ dialogue?: unknown }> };
+    const raw = JSON.parse(cleaned) as { shots?: Array<{ dialogue?: unknown; propIds?: unknown }> };
     dialogues = Array.isArray(raw.shots) ? raw.shots.map(item => item?.dialogue) : [];
+    rawPropIds = Array.isArray(raw.shots) ? raw.shots.map(item => item?.propIds) : [];
   } catch { /* parseShotPlanFullResponse already accepted the text */ }
 
   const castIds = new Set(doc.cast.map(member => member.id));
+  const knownProps = new Set(doc.props.map(prop => prop.id));
   const existing = episode.scenes.reduce((total, item) => total + (item.id === scene.id ? 0 : item.shots.length), 0);
   const room = MAX_SHOTS_PER_EPISODE - existing;
   if (room <= 0) throw new DramaPlannerError('DRAMA_PLAN_INVALID', false);
@@ -226,6 +241,8 @@ export function parseDramaShotResponse(text: string, input: DramaShotPlanInput, 
     const characterIds = (shot.characterIds ?? []).filter(id => castIds.has(id));
     const fallbackCast = scene.characterIds?.filter(id => castIds.has(id)) ?? [];
     const dialogue = typeof dialogues[i] === 'string' ? (dialogues[i] as string).slice(0, 2000) : '';
+    const listed = Array.isArray(rawPropIds[i]) ? (rawPropIds[i] as unknown[]) : [];
+    const propIds = [...new Set(listed)].filter((id): id is string => typeof id === 'string' && knownProps.has(id));
     return {
       ...shot,
       id: `shot_${now.toString(36)}_${scene.id.slice(-6)}_${i}`,
@@ -235,6 +252,7 @@ export function parseDramaShotResponse(text: string, input: DramaShotPlanInput, 
       aspectRatio: doc.aspectRatio,
       characterIds: characterIds.length ? characterIds : fallbackCast,
       sceneId: scene.locationId,
+      propIds,
       ...(dialogue ? { dialogue } : {}),
       takes: [],
       status: 'planned',

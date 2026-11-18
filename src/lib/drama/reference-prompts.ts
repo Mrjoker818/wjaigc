@@ -1,6 +1,6 @@
 /** Image prompts for cast turnarounds and location plates. Kept separate so the workbench and tests share them. */
 import { DIRECTOR_STYLES, type DirectorStyle } from '@/lib/video-director/director-styles';
-import type { DramaCastMember, DramaLocation, DramaProjectV1, DramaShot } from './types';
+import type { DramaCastMember, DramaLocation, DramaProjectV1, DramaProp, DramaShot } from './types';
 
 const clean = (parts: Array<string | undefined>) => parts.map(part => part?.trim()).filter(Boolean).join(', ');
 
@@ -41,6 +41,23 @@ export function locationImageRatio(aspectRatio: string): string {
 }
 
 export const CAST_IMAGE_RATIO = '2:3';
+export const PROP_IMAGE_RATIO = '1:1';
+
+export function propImagePrompt(prop: DramaProp, style: DirectorStyle): string {
+  return clean([
+    'prop design reference sheet, single object, product shot',
+    prop.name, prop.propPrompt || prop.description, prop.material, prop.color, prop.scale,
+    'centered, plain light grey background, even studio lighting, high detail, no people, no text, no watermark',
+    `视觉风格：${DIRECTOR_STYLES[style].planDescription}`,
+  ]);
+}
+
+/** Props the shot shows, in the order the shot lists them. */
+export function shotProps(shot: Pick<DramaShot, 'propIds'>, props: DramaProp[]): DramaProp[] {
+  return (shot.propIds ?? [])
+    .map(id => props.find(prop => prop.id === id))
+    .filter((prop): prop is DramaProp => Boolean(prop));
+}
 
 function shotCast(shot: DramaShot, doc: DramaProjectV1): DramaCastMember[] {
   return (shot.characterIds ?? [])
@@ -58,6 +75,7 @@ export function keyframePrompt(shot: DramaShot, doc: DramaProjectV1): string {
     shot.shotSize, shot.cameraMove || shot.cameraMotion, shot.lighting,
     location ? clean([location.name, location.description, location.timeOfDay, location.lighting]) : undefined,
     ...cast,
+    ...shotProps(shot, doc.props).map(prop => clean([prop.name, prop.description])),
     'keep characters and setting consistent with the reference images, no text, no watermark, no subtitles',
     `视觉风格：${DIRECTOR_STYLES[doc.style].planDescription}`,
   ]);
@@ -65,7 +83,7 @@ export function keyframePrompt(shot: DramaShot, doc: DramaProjectV1): string {
 
 /**
  * References for a keyframe: one locked image per character in the shot, then the location plate,
- * capped at what the image model accepts.
+ * then the shot's props, capped at what the image model accepts.
  */
 export function keyframeReferences(shot: DramaShot, doc: DramaProjectV1, limit: number): string[] {
   const max = Math.max(0, Math.floor(limit));
@@ -74,6 +92,7 @@ export function keyframeReferences(shot: DramaShot, doc: DramaProjectV1, limit: 
   const urls = [
     ...shotCast(shot, doc).map(member => member.lockedImageUrl || member.imageUrlFront || member.frontUrl),
     location?.lockedImageUrl || location?.imageUrl,
+    ...shotProps(shot, doc.props).map(prop => prop.lockedImageUrl || prop.imageUrl),
   ].filter((url): url is string => Boolean(url));
   return [...new Set(urls)].slice(0, max);
 }

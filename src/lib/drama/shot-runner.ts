@@ -1,5 +1,5 @@
 /** One implementation of per-shot generation, shared by the drama workbench and the canvas video panel. */
-import { activeTake, type DramaCastMember, type DramaLocation, type DramaProjectV1, type DramaShot, type DramaTake } from './types';
+import { activeTake, type DramaCastMember, type DramaLocation, type DramaProjectV1, type DramaProp, type DramaShot, type DramaTake } from './types';
 
 export interface ShotModelCapability {
   /** Model accepts a first-frame image. */
@@ -44,31 +44,36 @@ export function chooseFirstFrame(
   return { source: 'none' };
 }
 
-/** Character references for the cast in this shot, one image per character first, capped at the model limit. */
+/**
+ * References for this shot, capped at the model limit: one image per character, then one per prop the shot
+ * shows, then the characters' extra views. Identity drift is the worse failure, so characters go first,
+ * but a prop sheet is worth more than a second angle of someone already covered.
+ */
 export function chooseReferenceImages(
-  shot: DramaShot, cast: DramaCastMember[], capability: ShotModelCapability, exclude: string[] = [],
+  shot: DramaShot, cast: DramaCastMember[], capability: ShotModelCapability, exclude: string[] = [], props: DramaProp[] = [],
 ): string[] {
   const limit = Math.max(0, Math.floor(capability.maxReferenceImages));
   if (limit === 0) return [];
-  const members = (shot.characterIds ?? [])
+  const perMember = (shot.characterIds ?? [])
     .map(id => cast.find(member => member.id === id))
-    .filter((member): member is DramaCastMember => Boolean(member));
-  const perMember = members.map(castImage);
-  const picked: string[] = [];
+    .filter((member): member is DramaCastMember => Boolean(member))
+    .map(castImage);
+  const propImages = (shot.propIds ?? [])
+    .map(id => props.find(item => item.id === id))
+    .map(prop => prop?.lockedImageUrl || prop?.imageUrl);
+  const rounds = Math.max(0, ...perMember.map(images => images.length));
+  const candidates = [
+    ...perMember.map(images => images[0]),
+    ...propImages,
+    ...Array.from({ length: Math.max(0, rounds - 1) }, (_, i) => perMember.map(images => images[i + 1])).flat(),
+  ];
   const seen = new Set(exclude);
-  // Round-robin so every character gets one image before anyone gets a second.
-  for (let round = 0; picked.length < limit; round += 1) {
-    let added = false;
-    for (const images of perMember) {
-      const url = images[round];
-      if (!url) continue;
-      added = true;
-      if (seen.has(url)) continue;
-      seen.add(url);
-      picked.push(url);
-      if (picked.length >= limit) break;
-    }
-    if (!added) break;
+  const picked: string[] = [];
+  for (const url of candidates) {
+    if (picked.length >= limit) break;
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    picked.push(url);
   }
   return picked;
 }
@@ -90,16 +95,16 @@ export interface ShotRequestContext {
 
 /** The generate route counts the first frame against the same image limit as the references. */
 export function shotReferenceImages(
-  shot: DramaShot, cast: DramaCastMember[], capability: ShotModelCapability, firstFrameUrl?: string,
+  shot: DramaShot, cast: DramaCastMember[], capability: ShotModelCapability, firstFrameUrl?: string, props: DramaProp[] = [],
 ): string[] {
-  if (!firstFrameUrl) return chooseReferenceImages(shot, cast, capability);
-  return chooseReferenceImages(shot, cast, { ...capability, maxReferenceImages: capability.maxReferenceImages - 1 }, [firstFrameUrl]);
+  if (!firstFrameUrl) return chooseReferenceImages(shot, cast, capability, [], props);
+  return chooseReferenceImages(shot, cast, { ...capability, maxReferenceImages: capability.maxReferenceImages - 1 }, [firstFrameUrl], props);
 }
 
 /** Body for POST /api/video/generate. Billing, refunds and provider routing stay in that route. */
 export function buildShotGenerateRequest(context: ShotRequestContext): Record<string, unknown> {
   const { doc, shot, capability } = context;
-  const characterReferences = shotReferenceImages(shot, doc.cast, capability, context.firstFrameUrl);
+  const characterReferences = shotReferenceImages(shot, doc.cast, capability, context.firstFrameUrl, doc.props);
   const prompt = [shot.directedPrompt || shot.prompt, shot.dialogue ? `台词：「${shot.dialogue}」` : '']
     .filter(Boolean).join('\n');
   return {

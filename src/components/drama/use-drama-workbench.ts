@@ -268,9 +268,9 @@ export function useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onOpenCr
       shotId: shot.id, modelId: model.key, providerId: model.providerId,
       durationSec: fitDuration(shot.durationSec, model.durations, model.maxDuration),
       generateAudio: generateAudio || Boolean(shot.dialogue || shot.audioCues),
-      referenceImages: chooseReferenceImages(shot, doc.cast, model.capability).length,
+      referenceImages: chooseReferenceImages(shot, doc.cast, model.capability, [], doc.props).length,
     }];
-  }), [episode, modelForShot, generateAudio, doc.cast]);
+  }), [episode, modelForShot, generateAudio, doc.cast, doc.props]);
   const estimateKey = JSON.stringify(estimateRequest);
   useEffect(() => {
     const shots = JSON.parse(estimateKey) as ShotEstimateRequest[];

@@ -34,6 +34,7 @@ const shot = z.looseObject({
   takes: z.array(take).max(50),
   selectedTakeId: id.optional(),
   firstFrameUrl: text(4096).optional(),
+  propIds: z.array(id).max(50).optional(),
 });
 
 const sceneBlock = z.looseObject({

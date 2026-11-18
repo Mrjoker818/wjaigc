@@ -74,6 +74,23 @@ describe('drama planner', () => {
     expect(shots[1].characterIds).toEqual(['lin']);
   });
 
+  it('plans key props and keeps only known prop ids on shots', () => {
+    const doc = parseDramaScriptResponse(JSON.stringify({
+      title: 't', cast: [{ id: 'lin', name: '林夏' }], locations: [],
+      props: [{ id: 'letter', name: '信', description: '牛皮纸信封' }, { id: 'lin', name: '撞名' }, { id: 'bad id', name: '' }],
+      episodes: [{ title: '一', scenes: [{ heading: 'A', summary: '林夏收信。' }] }],
+    }), { idea: 'x' }, 1000);
+    expect(doc.props.map(prop => prop.id)).toEqual(['letter', 'lin_1', 'prop_3']);
+    expect(doc.props[2].name).toBe('道具3');
+    const [episode] = doc.episodes;
+    const messages = buildDramaShotMessages({ doc, episodeId: episode.id, sceneId: episode.scenes[0].id });
+    expect(messages[1].content).toContain('letter=信');
+    const shots = parseDramaShotResponse(JSON.stringify({ shots: [{ prompt: '拆信', propIds: ['letter', 'letter', 'ghost', 3] }, { prompt: '特写' }] }),
+      { doc, episodeId: episode.id, sceneId: episode.scenes[0].id }, 2000);
+    expect(shots.map(item => item.propIds)).toEqual([['letter'], []]);
+    expect(() => parseDramaProject({ ...doc, episodes: [{ ...episode, scenes: [{ ...episode.scenes[0], shots }] }] })).not.toThrow();
+  });
+
   it('stops adding shots at the per-episode cap', () => {
     const doc = plannedDoc();
     const episode = doc.episodes[0];
@@ -119,6 +136,15 @@ describe('shot runner choices', () => {
     expect(chooseReferenceImages(s, cast, { imageToVideo: true, maxReferenceImages: 2 })).toEqual(['/a-front', '/b-locked']);
     expect(chooseReferenceImages(s, cast, { imageToVideo: true, maxReferenceImages: 0 })).toEqual([]);
     expect(chooseReferenceImages(s, cast, { imageToVideo: true, maxReferenceImages: 2 }, ['/a-front'])).toEqual(['/b-locked', '/c-front']);
+  });
+
+  it('puts prop sheets after one image per character and before second views', () => {
+    const cast = [{ id: 'a', name: 'A', appearance: '', imageUrlFront: '/a-front', imageUrlSide: '/a-side' }];
+    const props = [{ id: 'ticket', name: '彩票', lockedImageUrl: '/t-locked', imageUrl: '/t' }, { id: 'bare', name: '无图' }];
+    const s = shot({ id: 's', characterIds: ['a'], propIds: ['bare', 'ticket', 'ghost'] });
+    expect(chooseReferenceImages(s, cast, { imageToVideo: true, maxReferenceImages: 3 }, [], props)).toEqual(['/a-front', '/t-locked', '/a-side']);
+    expect(chooseReferenceImages(s, cast, { imageToVideo: true, maxReferenceImages: 2 }, [], props)).toEqual(['/a-front', '/t-locked']);
+    expect(shotReferenceImages(s, cast, { imageToVideo: true, maxReferenceImages: 2 }, '/f.png', props)).toEqual(['/a-front']);
   });
 
   it('counts the first frame against the model image limit', () => {
