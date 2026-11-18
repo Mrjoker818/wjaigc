@@ -3,7 +3,7 @@
 import { createContext, useContext } from 'react';
 import type { CreditEstimate } from '@/lib/drama/workbench-client';
 import type { DramaEpisode, DramaProjectV1, DramaShot } from '@/lib/drama/types';
-import type { DramaModelOption } from './drama-models';
+import type { DramaImageModelOption, DramaModelOption } from './drama-models';
 
 export type DramaStep = 'script' | 'bible' | 'board' | 'shots' | 'final';
 
@@ -42,6 +42,16 @@ export interface DramaWorkbenchApi {
   generateShots: (shotIds: string[]) => Promise<void>;
   stopGeneration: () => void;
   estimate: CreditEstimate | null;
+  imageModels: DramaImageModelOption[];
+  /** Image model that draws keyframes; undefined lets the server pick its default. */
+  imageModel: DramaImageModelOption | undefined;
+  setImageModelKey: (key: string) => void;
+  /** Shots whose keyframe is being drawn. */
+  keyframeShotIds: ReadonlySet<string>;
+  /** Draws the opening frame of each shot with the image model; the video then starts from it. */
+  generateKeyframes: (shotIds: string[]) => Promise<void>;
+  /** Credits for drawing keyframes of the shots that have none yet. */
+  keyframeEstimate: CreditEstimate | null;
   /** Label of the planner or image job that is running, shown in the top bar. */
   busyLabel: string | null;
   /** Runs one job at a time and reports its error as a toast. Resolves false when it failed or another job is running. */

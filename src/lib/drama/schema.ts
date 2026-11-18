@@ -32,6 +32,7 @@ const shot = z.looseObject({
   aspectRatio: text(16),
   takes: z.array(take).max(50),
   selectedTakeId: id.optional(),
+  firstFrameUrl: text(4096).optional(),
 });
 
 const sceneBlock = z.looseObject({

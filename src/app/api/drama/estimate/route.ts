@@ -14,6 +14,8 @@ interface ShotEstimateInput {
   durationSec: number;
   generateAudio: boolean;
   referenceImages: number;
+  /** Keyframes are priced as one image; shots as video by the second. */
+  kind: 'video' | 'image';
 }
 
 function readShot(value: unknown): ShotEstimateInput | null {
@@ -31,11 +33,12 @@ function readShot(value: unknown): ShotEstimateInput | null {
     durationSec: Math.max(1, Math.min(60, Math.round(durationSec))),
     generateAudio: item.generateAudio === true,
     referenceImages: Math.max(0, Math.min(10, Math.floor(Number(item.referenceImages) || 0))),
+    kind: item.kind === 'image' ? 'image' : 'video',
   };
 }
 
 /**
- * POST /api/drama/estimate { shots: [{ shotId, modelId, providerId?, durationSec, generateAudio?, referenceImages? }] }
+ * POST /api/drama/estimate { shots: [{ shotId, modelId, providerId?, durationSec, generateAudio?, referenceImages?, kind? }] }
  * → { total, perShot: { [shotId]: credits }, balance }
  * Uses the same pricing as /api/video/generate; the charge itself still happens at submission.
  */
@@ -52,10 +55,12 @@ export async function POST(request: NextRequest) {
     const pricingConfig = await loadCreditPricingConfig();
     const perShot: Record<string, number> = {};
     for (const shot of shots as ShotEstimateInput[]) {
-      perShot[shot.shotId] = await calculateConfiguredCreditCost('video_generate', shot.modelId, {
-        durationSeconds: shot.durationSec, audio: shot.generateAudio, inputImages: shot.referenceImages,
-        ...(shot.providerId ? { providerId: shot.providerId } : {}), pricingConfig,
-      });
+      const provider = shot.providerId ? { providerId: shot.providerId } : {};
+      perShot[shot.shotId] = shot.kind === 'image'
+        ? await calculateConfiguredCreditCost('image_generate', shot.modelId, { inputImages: shot.referenceImages, ...provider, pricingConfig })
+        : await calculateConfiguredCreditCost('video_generate', shot.modelId, {
+          durationSeconds: shot.durationSec, audio: shot.generateAudio, inputImages: shot.referenceImages, ...provider, pricingConfig,
+        });
     }
     const credits = await dbGetCredits(auth.userId, { throwOnError: true });
     return NextResponse.json({

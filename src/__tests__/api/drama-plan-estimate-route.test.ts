@@ -24,9 +24,9 @@ vi.mock('@/lib/api-helpers', () => ({
   },
 }));
 vi.mock('@/lib/credits', () => ({
-  calculateConfiguredCreditCost: async (_op: string, model: string, options: Record<string, unknown>) => {
-    mocks.prices.push({ model, options });
-    return 10 * Number(options.durationSeconds);
+  calculateConfiguredCreditCost: async (op: string, model: string, options: Record<string, unknown>) => {
+    mocks.prices.push({ model, options: { ...options, op } });
+    return op === 'image_generate' ? 8 : 10 * Number(options.durationSeconds);
   },
 }));
 vi.mock('@/lib/credit-pricing', () => ({ loadCreditPricingConfig: async () => ({ modelCredits: {} }) }));
@@ -101,6 +101,15 @@ describe('POST /api/drama/estimate', () => {
     expect(data).toMatchObject({ total: 150, perShot: { s1: 50, s2: 100 }, balance: 30 });
     expect(mocks.prices[0]).toMatchObject({ model: 'kling', options: { providerId: 'pear', audio: true, inputImages: 2, durationSeconds: 5 } });
     expect(mocks.prices[1]).toMatchObject({ model: 'kling', options: { providerId: 'apimart', durationSeconds: 10 } });
+  });
+
+  it('prices a keyframe as one image instead of video seconds', async () => {
+    const response = await estimate(post('/api/drama/estimate', { shots: [
+      { shotId: 'k1', modelId: 'pear::gpt-image', durationSec: 1, referenceImages: 2, kind: 'image' },
+    ] }));
+    expect(await response.json()).toMatchObject({ total: 8, perShot: { k1: 8 } });
+    expect(mocks.prices[0]).toMatchObject({ model: 'gpt-image', options: { op: 'image_generate', providerId: 'pear', inputImages: 2 } });
+    expect(mocks.prices[0].options).not.toHaveProperty('durationSeconds');
   });
 
   it('rejects shots without a model', async () => {

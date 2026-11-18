@@ -113,6 +113,8 @@ export interface ShotEstimateRequest {
   durationSec: number;
   generateAudio?: boolean;
   referenceImages?: number;
+  /** 'image' prices a keyframe with the image model; the default prices the shot video. */
+  kind?: 'video' | 'image';
 }
 
 export interface CreditEstimate {
@@ -139,6 +141,11 @@ export interface ImageOptions {
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
   timeoutMs?: number;
+  /** `providerId::modelId` from the image catalog; omitted means the server's default image model. */
+  model?: string;
+  providerId?: string;
+  /** Locked cast and location images the image model should keep consistent with. */
+  referenceImages?: string[];
 }
 
 const firstText = (...values: unknown[]): string | undefined =>
@@ -153,7 +160,12 @@ export async function generateReferenceImage(prompt: string, aspectRatio: string
   const sleep = options.sleep ?? (ms => new Promise<void>(resolve => setTimeout(resolve, ms)));
   const now = options.now ?? Date.now;
   const response = await fetcher('/api/generate', {
-    method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ prompt, n: 1, aspectRatio }),
+    method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({
+      prompt, n: 1, aspectRatio,
+      ...(options.model ? { model: options.model } : {}),
+      ...(options.providerId ? { providerId: options.providerId } : {}),
+      ...(options.referenceImages?.length ? { referenceImages: options.referenceImages } : {}),
+    }),
   });
   const data = await readJson(response);
   if (!response.ok || data.success === false) fail(data, '设定图生成失败，请稍后重试');

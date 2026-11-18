@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { parseDramaScriptResponse } from '@/lib/drama/planner';
-import { castImagePrompt, locationImageRatio } from '@/lib/drama/reference-prompts';
+import { castImagePrompt, keyframePrompt, keyframeReferences, locationImageRatio } from '@/lib/drama/reference-prompts';
 import { parseDramaProject } from '@/lib/drama/schema';
 import { buildTimeline } from '@/lib/drama/timeline';
 import { activeTake, type DramaProjectV1, type DramaShot } from '@/lib/drama/types';
@@ -123,6 +123,15 @@ describe('workbench client', () => {
     await expect(generateReferenceImage('p', 's', { fetch: async () => json({ success: false, error: '积分不足' }, 402) })).rejects.toThrow('积分不足');
   });
 
+  it('sends the chosen image model and references for a keyframe', async () => {
+    const bodies: unknown[] = [];
+    await generateReferenceImage('p', '9:16', {
+      model: 'pear::gpt-image', providerId: 'pear', referenceImages: ['/a.png', '/b.png'],
+      fetch: async (_input, init) => { bodies.push(JSON.parse(String(init?.body))); return json({ imageUrl: '/i/k.png' }); },
+    });
+    expect(bodies[0]).toEqual({ prompt: 'p', n: 1, aspectRatio: '9:16', model: 'pear::gpt-image', providerId: 'pear', referenceImages: ['/a.png', '/b.png'] });
+  });
+
   it('resumes a take by task id and refuses to guess when the id is missing', async () => {
     const take = { id: 't', status: 'generating' as const, taskId: 'task-1', createdAt: 1 };
     const fetcher = vi.fn(async () => json({ status: 'completed', videoUrl: '/v/a.mp4' }));
@@ -152,5 +161,23 @@ describe('reference prompts', () => {
     expect(locationImageRatio('9:16')).toBe('9:16');
     expect(locationImageRatio('4:3')).toBe('16:9');
     expect(locationImageRatio('1:1')).toBe('1:1');
+  });
+
+  it('draws a keyframe from the shot, its cast and its location, with locked images first', () => {
+    const base = docWithShots();
+    const doc: DramaProjectV1 = {
+      ...base,
+      cast: [{ ...base.cast[0], lockedImageUrl: '/cast/lin.png', imageUrlFront: '/cast/lin-front.png', costume: '风衣' }],
+      locations: [{ id: 'loc1', name: '便利店', description: '冷白灯管', imageUrl: '/loc/plate.png' }],
+    };
+    const keyShot = shot('k', { prompt: '林夏推门而入', characterIds: ['lin'], sceneId: 'loc1', shotSize: '中景' });
+    const prompt = keyframePrompt(keyShot, doc);
+    expect(prompt).toContain('林夏推门而入');
+    expect(prompt).toContain('wearing 风衣');
+    expect(prompt).toContain('便利店');
+    expect(prompt).toContain('中景');
+    expect(keyframeReferences(keyShot, doc, 4)).toEqual(['/cast/lin.png', '/loc/plate.png']);
+    expect(keyframeReferences(keyShot, doc, 1)).toEqual(['/cast/lin.png']);
+    expect(keyframeReferences(keyShot, doc, 0)).toEqual([]);
   });
 });

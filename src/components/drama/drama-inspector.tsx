@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { RotateCcw, Stethoscope, X } from 'lucide-react';
+import { ImagePlus, Loader2, RotateCcw, Stethoscope, X } from 'lucide-react';
 import { chooseFirstFrame, shotReferenceImages } from '@/lib/drama/shot-runner';
 import { applyRetakeSuggestion, estimateShots } from '@/lib/drama/workbench-client';
 import { findShot, fitDuration, orderedPrevious, updateShot } from '@/lib/drama/workbench-state';
@@ -9,7 +9,7 @@ import { diagnoseFailure, listFailureTypes, type VideoFailureType } from '@/lib/
 import { useDrama } from './drama-context';
 
 const FIRST_FRAME_TEXT = {
-  user: '首帧：你指定的图片',
+  user: '首帧：这一镜的关键帧',
   location: '首帧：场景图',
   'previous-shot': '首帧：上一镜头的最后一帧',
   none: '首帧：无，模型按文字生成',
@@ -39,7 +39,10 @@ export function DramaInspector() {
 }
 
 function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => void }) {
-  const { doc, update, models, modelForShot, generateShots, runningShotIds, batchRunning, generateAudio } = useDrama();
+  const {
+    doc, update, models, modelForShot, generateShots, runningShotIds, batchRunning, generateAudio,
+    keyframeShotIds, generateKeyframes, imageModel,
+  } = useDrama();
   const [failure, setFailure] = useState<VideoFailureType | ''>('');
   const found = findShot(doc, shotId);
   if (!found) return null;
@@ -124,6 +127,36 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
           })}
         </div>
       </fieldset>
+
+      <section className="flex flex-col gap-2" aria-labelledby="drama-keyframe">
+        <h3 id="drama-keyframe" className="text-sm font-semibold">关键帧</h3>
+        <div className="relative overflow-hidden rounded-md bg-[var(--drama-ink)]" style={{ aspectRatio: (shot.aspectRatio || doc.aspectRatio).replace(':', ' / ') }}>
+          {shot.firstFrameUrl
+            // eslint-disable-next-line @next/next/no-img-element
+            ? <img src={shot.firstFrameUrl} alt="这一镜的关键帧" className="h-full w-full object-contain" />
+            : <span className="absolute inset-0 flex items-center justify-center p-3 text-center text-xs text-[var(--drama-muted)]">还没有关键帧</span>}
+          {keyframeShotIds.has(shot.id) ? (
+            <span className="absolute inset-0 flex items-center justify-center bg-black/55" role="status">
+              <Loader2 className="h-5 w-5 animate-spin motion-reduce:animate-none" /><span className="sr-only">正在画关键帧</span>
+            </span>
+          ) : null}
+        </div>
+        <div className="flex gap-2">
+          <button type="button" className="drama-btn flex-1 text-xs" disabled={keyframeShotIds.has(shot.id)}
+            onClick={() => void generateKeyframes([shot.id])}>
+            <ImagePlus className="h-3.5 w-3.5" />{shot.firstFrameUrl ? '重画关键帧' : '画关键帧'}
+          </button>
+          {shot.firstFrameUrl ? (
+            <button type="button" className="drama-btn text-xs" disabled={keyframeShotIds.has(shot.id)} onClick={() => set({ firstFrameUrl: undefined })}>
+              清除
+            </button>
+          ) : null}
+        </div>
+        <p className="drama-label">
+          {imageModel ? `用 ${imageModel.name} 画，按图像模型价格扣费。` : '按后台默认图像模型价格扣费。'}
+          {model && !model.capability.imageToVideo ? '当前视频模型不接受首帧图片，关键帧不会用上。' : '有关键帧时，视频从这张图开始。'}
+        </p>
+      </section>
 
       <section className="drama-panel flex flex-col gap-2 p-3" aria-label="下一次生成会用的素材">
         <p className="text-xs">{FIRST_FRAME_TEXT[firstFrame.source]}</p>

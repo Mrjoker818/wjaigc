@@ -37,6 +37,35 @@ export function shotCapabilityFromDescriptor(descriptor: TaskModelDescriptor | u
   };
 }
 
+/** One image model the workbench can draw keyframes with. */
+export interface DramaImageModelOption {
+  key: string;
+  modelId: string;
+  providerId: string;
+  name: string;
+  providerName: string;
+  isDefault: boolean;
+  /** Reference images the model accepts; 0 means it draws from the prompt alone. */
+  maxReferenceImages: number;
+}
+
+export function useDramaImageModels(): { models: DramaImageModelOption[]; loading: boolean } {
+  const { models, descriptorsByKey, loading } = useTaskModelCatalog('image');
+  const options = useMemo(() => models.map((model): DramaImageModelOption => {
+    const descriptor = descriptorsByKey.get(taskModelKey(model.providerId, model.id));
+    return {
+      key: modelKey(model.providerId, model.id),
+      modelId: model.id,
+      providerId: model.providerId,
+      name: model.displayName || model.name || model.id,
+      providerName: model.providerName || model.providerId,
+      isDefault: model.isDefault === true,
+      maxReferenceImages: descriptor?.supportsReferenceImages ? (descriptor.maxReferenceImages ?? 4) : 0,
+    };
+  }), [models, descriptorsByKey]);
+  return { models: options, loading };
+}
+
 export function useDramaVideoModels(): { models: DramaModelOption[]; loading: boolean; error: Error | null } {
   const { models, descriptorsByKey, loading, error } = useTaskModelCatalog('video');
   const options = useMemo(() => models.map((model): DramaModelOption => {

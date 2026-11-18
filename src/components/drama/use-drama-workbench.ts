@@ -2,19 +2,23 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { keyframePrompt, keyframeReferences, locationImageRatio } from '@/lib/drama/reference-prompts';
 import { waitForRender } from '@/lib/drama/render-client';
 import { chooseReferenceImages, orderedShots, runShot } from '@/lib/drama/shot-runner';
 import type { DramaProjectRecord, DramaProjectV1, DramaShot } from '@/lib/drama/types';
 import {
-  DramaSaveConflictError, estimateShots, pollShotTake, saveDramaProject, startEpisodeRender,
+  DramaSaveConflictError, estimateShots, generateReferenceImage, persistImage, pollShotTake, saveDramaProject, startEpisodeRender,
   type CreditEstimate, type ShotEstimateRequest,
 } from '@/lib/drama/workbench-client';
 import { findShot, fitDuration, pendingShots, updateShot, upsertTake } from '@/lib/drama/workbench-state';
 import type { DramaStep, DramaWorkbenchApi, RenderState, SaveState } from './drama-context';
-import { useDramaVideoModels, type DramaModelOption } from './drama-models';
+import { useDramaImageModels, useDramaVideoModels, type DramaModelOption } from './drama-models';
 
 const SAVE_DELAY_MS = 1200;
 const MODEL_STORAGE_KEY = 'wujie-drama-video-model';
+const IMAGE_MODEL_STORAGE_KEY = 'wujie-drama-image-model';
+/** Keyframes are drawn a few at a time so one slow image does not hold the rest. */
+const KEYFRAME_CONCURRENCY = 3;
 
 export interface UseDramaWorkbenchOptions {
   record: DramaProjectRecord;
@@ -25,9 +29,12 @@ export interface UseDramaWorkbenchOptions {
 
 const errorText = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
 
-function readStoredModel(): string {
-  try { return window.localStorage.getItem(MODEL_STORAGE_KEY) ?? ''; } catch { return ''; }
+function readStored(key: string): string {
+  try { return window.localStorage.getItem(key) ?? ''; } catch { return ''; }
 }
+
+const readStoredModel = () => readStored(MODEL_STORAGE_KEY);
+const readStoredImageModel = () => readStored(IMAGE_MODEL_STORAGE_KEY);
 
 export function useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onOpenCredits }: UseDramaWorkbenchOptions): DramaWorkbenchApi {
   const [doc, setDoc] = useState<DramaProjectV1>(record.doc);
@@ -260,6 +267,87 @@ export function useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onOpenCr
     return () => { window.clearTimeout(timer); controller.abort(); };
   }, [estimateKey]);
 
+  // --- Keyframes: the opening still of each shot, drawn with an image model ---
+  const { models: imageModels } = useDramaImageModels();
+  const [imageModelKey, setImageModelKeyState] = useState(readStoredImageModel);
+  const imageModel = imageModels.find(model => model.key === imageModelKey) ?? imageModels.find(model => model.isDefault) ?? imageModels[0];
+  const setImageModelKey = useCallback((key: string) => {
+    setImageModelKeyState(key);
+    try { window.localStorage.setItem(IMAGE_MODEL_STORAGE_KEY, key); } catch { /* private mode */ }
+  }, []);
+  const [keyframeShotIds, setKeyframeShotIds] = useState<ReadonlySet<string>>(() => new Set());
+  const keyframeRef = useRef(new Set<string>());
+  const markKeyframe = useCallback((id: string, on: boolean) => {
+    if (on) keyframeRef.current.add(id); else keyframeRef.current.delete(id);
+    setKeyframeShotIds(new Set(keyframeRef.current));
+  }, []);
+
+  const generateKeyframes = useCallback(async (shotIds: string[]) => {
+    const life = lifeRef.current;
+    const queue = shotIds.filter(id => !keyframeRef.current.has(id));
+    if (!life || queue.length === 0) return;
+    queue.forEach(id => markKeyframe(id, true));
+    const total = queue.length;
+    let completed = 0;
+    let lastError: string | undefined;
+    let outOfCredits = false;
+    const drawOne = async (shotId: string) => {
+      try {
+        if (outOfCredits || life.signal.aborted) return;
+        const current = docRef.current;
+        const found = findShot(current, shotId);
+        if (!found) return;
+        const url = await generateReferenceImage(
+          keyframePrompt(found.shot, current),
+          locationImageRatio(found.shot.aspectRatio || current.aspectRatio),
+          {
+            ...(imageModel ? { model: imageModel.key, providerId: imageModel.providerId } : {}),
+            referenceImages: keyframeReferences(found.shot, current, imageModel?.maxReferenceImages ?? 0),
+          },
+        );
+        const saved = await persistImage(url);
+        if (life.signal.aborted) return;
+        update(latest => updateShot(latest, shotId, { firstFrameUrl: saved }));
+        completed += 1;
+      } catch (error) {
+        lastError = errorText(error, '关键帧生成失败');
+        if (/积分不足|余额不足/u.test(lastError)) outOfCredits = true;
+      } finally {
+        markKeyframe(shotId, false);
+      }
+    };
+    const workers = Array.from({ length: Math.min(KEYFRAME_CONCURRENCY, queue.length) }, async () => {
+      for (let next = queue.shift(); next; next = queue.shift()) await drawOne(next);
+    });
+    await Promise.all(workers);
+    if (life.signal.aborted) return;
+    if (outOfCredits && lastError) { creditsToast(lastError); return; }
+    const failed = total - completed;
+    if (failed === 0) toast.success(total > 1 ? `${completed} 张关键帧已生成` : '关键帧已生成');
+    else if (completed) toast.error(`${completed} 张关键帧已生成，${failed} 张失败`, { description: lastError });
+    else toast.error('关键帧生成失败', { description: lastError });
+    void flushSave();
+  }, [creditsToast, flushSave, imageModel, markKeyframe, update]);
+
+  const keyframeRequest = useMemo<ShotEstimateRequest[]>(() => {
+    if (!imageModel || !episode) return [];
+    return episode.scenes.flatMap(scene => scene.shots).filter(shot => !shot.firstFrameUrl).map(shot => ({
+      shotId: shot.id, modelId: imageModel.key, providerId: imageModel.providerId, durationSec: 1, kind: 'image' as const,
+      referenceImages: keyframeReferences(shot, doc, imageModel.maxReferenceImages).length,
+    }));
+  }, [imageModel, episode, doc]);
+  const [keyframeEstimate, setKeyframeEstimate] = useState<CreditEstimate | null>(null);
+  const keyframeKey = JSON.stringify(keyframeRequest);
+  useEffect(() => {
+    const shots = JSON.parse(keyframeKey) as ShotEstimateRequest[];
+    if (shots.length === 0) { setKeyframeEstimate(null); return; }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      estimateShots(shots, undefined, controller.signal).then(setKeyframeEstimate, () => { if (!controller.signal.aborted) setKeyframeEstimate(null); });
+    }, 600);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [keyframeKey]);
+
   // --- One planner or image job at a time ---
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const busyRef = useRef(false);
@@ -329,7 +417,8 @@ export function useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onOpenCr
   return {
     doc, episode, update, replaceDoc, setEpisodeId, step, setStep, selectedShotId, selectShot,
     models, modelsLoading, defaultModel, setDefaultModelKey, modelForShot, generateAudio, setGenerateAudio,
-    runningShotIds, batchRunning, generateShots, stopGeneration, estimate, busyLabel, runJob,
+    runningShotIds, batchRunning, generateShots, stopGeneration, estimate,
+    imageModels, imageModel, setImageModelKey, keyframeShotIds, generateKeyframes, keyframeEstimate, busyLabel, runJob,
     dramaId: record.id, projectId, saveState, flushSave, render, renderEpisode, onPlaceOnCanvas,
   };
 }
