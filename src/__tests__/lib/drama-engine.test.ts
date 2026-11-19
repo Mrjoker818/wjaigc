@@ -171,13 +171,51 @@ describe('shot runner choices', () => {
 
   it('sends references only to models whose descriptor accepts them', () => {
     const base = { supportsReferenceImages: true, maxReferenceImages: 3, protocol: 'openai-video', supportedOperations: ['image-to-video'] } as unknown as TaskModelDescriptor;
-    expect(shotCapabilityFromDescriptor(base)).toEqual({ imageToVideo: true, maxReferenceImages: 3, firstLastFrame: false });
+    expect(shotCapabilityFromDescriptor(base)).toEqual({ imageToVideo: true, maxReferenceImages: 3, firstLastFrame: false, maxReferenceAudios: 0 });
     const firstLast = { ...base, supportedOperations: ['image-to-video', 'first-last-frame'] } as unknown as TaskModelDescriptor;
     expect(shotCapabilityFromDescriptor(firstLast).firstLastFrame).toBe(true);
     expect(shotCapabilityFromDescriptor({ ...firstLast, protocol: 'pearapi-video' }).firstLastFrame).toBe(false);
     expect(shotCapabilityFromDescriptor({ ...base, protocol: 'pearapi-video' }).maxReferenceImages).toBe(0);
     expect(shotCapabilityFromDescriptor({ ...base, supportsReferenceImages: false }).maxReferenceImages).toBe(0);
-    expect(shotCapabilityFromDescriptor(undefined)).toEqual({ imageToVideo: true, maxReferenceImages: 0, firstLastFrame: false });
+    expect(shotCapabilityFromDescriptor(undefined)).toEqual({ imageToVideo: true, maxReferenceImages: 0, firstLastFrame: false, maxReferenceAudios: 0 });
+  });
+
+  it('reads the reference audio limit from the protocol and model', () => {
+    const pear = { supportsReferenceImages: true, protocol: 'pearapi-video', modelId: 'doubao-seedance-2-0-fast-260128' } as unknown as TaskModelDescriptor;
+    expect(shotCapabilityFromDescriptor(pear).maxReferenceAudios).toBe(3);
+    expect(shotCapabilityFromDescriptor({ ...pear, modelId: 'hailuo-2.3' }).maxReferenceAudios).toBe(0);
+    expect(shotCapabilityFromDescriptor({ ...pear, protocol: 'apimart-video', modelId: 'seedance-2.5' }).maxReferenceAudios).toBe(10);
+    expect(shotCapabilityFromDescriptor({ ...pear, protocol: 'ai-link' }).maxReferenceAudios).toBe(0);
+  });
+
+  it('sends the speaker\'s voice sample with a line, and says so in the prompt', () => {
+    const doc = plannedDoc();
+    doc.cast = [{ id: 'lin', name: '林夏', appearance: '', voiceSampleUrl: '/api/serve-upload/generated-audio/a.mp3' }];
+    const withAudio = { imageToVideo: true, maxReferenceImages: 0, maxReferenceAudios: 3 };
+    const line = shot({ id: 's1', dialogue: '是你？', characterIds: ['lin'] });
+    const body = buildShotGenerateRequest({ doc, shot: line, modelId: 'm', capability: withAudio, firstFrameUrl: '/f.png' });
+    expect(body.referenceAudios).toEqual(['/api/serve-upload/generated-audio/a.mp3']);
+    expect(body.generateAudio).toBe(true);
+    expect(String(body.prompt)).toContain('声音：林夏的台词用音频1的音色和语气说。');
+    // Seedance needs an image with the audio, a line to speak, and a model that takes audio.
+    expect(buildShotGenerateRequest({ doc, shot: line, modelId: 'm', capability: withAudio })).not.toHaveProperty('referenceAudios');
+    expect(buildShotGenerateRequest({ doc, shot: { ...line, dialogue: '' }, modelId: 'm', capability: withAudio, firstFrameUrl: '/f.png' }))
+      .not.toHaveProperty('referenceAudios');
+    expect(buildShotGenerateRequest({ doc, shot: line, modelId: 'm', capability: { ...withAudio, maxReferenceAudios: 0 }, firstFrameUrl: '/f.png' }))
+      .not.toHaveProperty('referenceAudios');
+    expect(buildShotGenerateRequest({ doc, shot: { ...line, voiceSampleOff: true }, modelId: 'm', capability: withAudio, firstFrameUrl: '/f.png' }))
+      .not.toHaveProperty('referenceAudios');
+  });
+
+  it('keeps voice sample fields through the document schema', () => {
+    const doc = plannedDoc();
+    doc.cast = [{ id: 'lin', name: '林夏', appearance: '', voiceSampleUrl: '/v.mp3', voiceSampleName: '林夏.mp3', voiceSampleSec: 6.2 }];
+    doc.episodes[0].scenes[0].shots = [shot({ id: 's1', voiceSampleOff: true })];
+    const parsed = parseDramaProject(JSON.parse(JSON.stringify(doc)));
+    expect(parsed.cast[0]).toMatchObject({ voiceSampleUrl: '/v.mp3', voiceSampleName: '林夏.mp3', voiceSampleSec: 6.2 });
+    expect(parsed.episodes[0].scenes[0].shots[0].voiceSampleOff).toBe(true);
+    expect(() => parseDramaProject({ ...JSON.parse(JSON.stringify(doc)), cast: [{ id: 'lin', name: 'x', appearance: '', voiceSampleSec: -1 }] }))
+      .toThrow(DramaDocumentError);
   });
 
   it('builds a generate request with the style, dialogue and duration', () => {

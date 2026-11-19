@@ -17,6 +17,7 @@ import { DramaLibraryPicker } from './drama-library-picker';
 import { MentionTextarea } from './mention-textarea';
 import { ShotReadinessList } from './drama-readiness';
 import { PolishButton, ShotLanguageFields, usePromptPolish } from './drama-shot-language';
+import { ShotVoiceSampleNote } from './drama-voice-sample';
 
 const FIRST_FRAME_TEXT = {
   user: '首帧：这一镜的关键帧',
@@ -237,6 +238,8 @@ function InspectorFields({ found, onClose }: { found: NonNullable<ReturnType<typ
             {references.map(url => <img key={url} src={url} alt="" className="h-12 w-9 rounded object-cover" />)}
           </div>
         ) : null}
+        <ShotVoiceSampleNote shot={shot} capability={model?.capability}
+          images={[firstFrameStandIn, lastFrame].filter(Boolean).length + references.length} />
       </section>
 
       <section className="flex flex-col gap-2" aria-labelledby="drama-retake">

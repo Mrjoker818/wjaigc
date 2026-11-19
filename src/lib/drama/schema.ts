@@ -48,6 +48,7 @@ const shot = z.looseObject({
     volume: z.number().min(0).max(2).optional(),
   }).optional(),
   still: z.object({ motion: z.enum(STILL_MOTIONS) }).optional(),
+  voiceSampleOff: z.boolean().optional(),
 });
 
 const sceneBlock = z.looseObject({
@@ -71,7 +72,10 @@ const episode = z.looseObject({
 });
 
 const imageHistory = z.partialRecord(z.enum(['front', 'side', 'back', 'face', 'plate', 'sheet']), z.array(text(4096)).max(MAX_IMAGE_HISTORY)).optional();
-const castMember = z.looseObject({ id, name: text(200), appearance: text(4000), voice: text(128).optional(), imageHistory });
+const castMember = z.looseObject({
+  id, name: text(200), appearance: text(4000), voice: text(128).optional(), imageHistory,
+  voiceSampleUrl: text(4096).optional(), voiceSampleName: text(200).optional(), voiceSampleSec: z.number().positive().max(60).optional(),
+});
 const location = z.looseObject({ id, name: text(200), imageHistory });
 const prop = z.looseObject({ id, name: text(200), imageHistory });
 

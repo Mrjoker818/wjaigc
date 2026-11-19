@@ -54,6 +54,8 @@ import {
 import type { User } from '@/lib/user-types';
 import { getRuntimeSettings } from '@/lib/runtime-settings';
 import { canPublishProviderMedia, toProviderMediaUrl } from '@/lib/provider-media-url';
+import { ProviderAudioError, toProviderAudioUrls } from '@/lib/provider-audio-url';
+import { referenceAudioLimit } from '@/lib/video-reference-audio';
 import {
   createTaskEntryAudit,
   executeTaskEntryMigration,
@@ -123,7 +125,10 @@ function toSupportedVideoOperation(
   lastFrameImageUrl: unknown,
   referenceImages: unknown,
   characterReferences: unknown,
+  referenceAudioCount = 0,
 ): SupportedOperation {
+  // With reference audio every image is sent as a reference, frames included.
+  if (referenceAudioCount > 0) return 'multi-reference';
   if (typeof lastFrameImageUrl === 'string' && lastFrameImageUrl.trim()) return 'first-last-frame';
   if (
     (Array.isArray(referenceImages) && referenceImages.length > 0)
@@ -213,6 +218,7 @@ export async function POST(request: NextRequest) {
       cameraControl,
       motionBrush,
       characterReferences,
+      referenceAudios: rawReferenceAudios,
       motionStrength,
       shotId,
       assetWorkspace,
@@ -227,6 +233,11 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+    if (rawReferenceAudios !== undefined && (!Array.isArray(rawReferenceAudios)
+      || !rawReferenceAudios.every((url: unknown) => typeof url === 'string' && url.trim()))) {
+      return NextResponse.json({ error: 'referenceAudios 必须是声音样本地址数组' }, { status: 400 });
+    }
+    const referenceAudios: string[] = (rawReferenceAudios ?? []).map((url: string) => url.trim());
 
     let pureModel = model;
 
@@ -370,8 +381,15 @@ export async function POST(request: NextRequest) {
     if (parsedDuration > runtimeSettings.maxVideoDuration) {
       return NextResponse.json({ error: `Video duration exceeds the ${runtimeSettings.maxVideoDuration}s platform limit` }, { status: 400 });
     }
+    const audioLimit = referenceAudioLimit(profile, pureModel);
+    if (referenceAudios.length > audioLimit) {
+      throw new ModelCapabilityError('MODEL_CAPABILITY_MISMATCH', audioLimit ? `这个视频模型最多接受 ${audioLimit} 段参考音频` : '这个视频模型不接受参考音频', {
+        providerId: provider.id, modelId: pureModel, field: 'referenceAudios', received: referenceAudios.length,
+        allowed: Array.from({ length: audioLimit + 1 }, (_, count) => count),
+      });
+    }
     const pearMaterials = profile === 'pearapi-video' ? resolvePearVideoMaterials({
-      model: pureModel, imageUrl, lastFrameImageUrl, referenceImages, characterReferences,
+      model: pureModel, imageUrl, lastFrameImageUrl, referenceImages, characterReferences, referenceAudios,
       videoUrl: body.videoUrl, mode, action: body.action,
     }) : undefined;
     const pearOperation = pearMaterials && PEAR_VIDEO_GENERATE_OPERATIONS[pearMaterials.generationMode];
@@ -395,6 +413,7 @@ export async function POST(request: NextRequest) {
         lastFrameImageUrl,
         referenceImages,
         characterReferences,
+        referenceAudios.length,
       ),
       aspectRatio,
       size: typeof resolution === 'string' && resolution.trim() ? resolution : undefined,
@@ -447,10 +466,12 @@ export async function POST(request: NextRequest) {
     };
 
     const [resolvedImageUrl, resolvedLastFrameUrl, ...resolvedRefs] = await Promise.all([
-      resolveImageUrl(pearMaterials?.imageUrl ?? imageUrl),
+      // Pear's materials decide the frame: with reference audio the first frame is sent as a reference instead.
+      resolveImageUrl(pearMaterials ? pearMaterials.imageUrl : imageUrl),
       resolveImageUrl(lastFrameImageUrl),
       ...(pearMaterials?.referenceImages ?? (referenceImages || [])).map((img: string) => resolveImageUrl(img)),
     ]);
+    const resolvedAudios = referenceAudios.length ? await toProviderAudioUrls(referenceAudios, auth.userId, request.signal) : [];
     // Character references are managed images too; providers cannot fetch /api/serve-upload paths.
     const resolvedCharacterRefs = Array.isArray(characterReferences)
       ? (await Promise.all(characterReferences.map(url => resolveImageUrl(typeof url === 'string' ? url : undefined))))
@@ -482,6 +503,7 @@ export async function POST(request: NextRequest) {
       cameraControl,
       motionBrush,
       characterReferences: resolvedCharacterRefs,
+      ...(resolvedAudios.length ? { referenceAudios: resolvedAudios } : {}),
       motionStrength,
     };
     const pearSubmitRequest = pearMaterials ? buildVideoSubmitRequest(profile, videoParams) : undefined;
@@ -990,6 +1012,9 @@ export async function POST(request: NextRequest) {
     }
     if (err instanceof ModelCapabilityError) {
       return modelCapabilityConfigurationErrorResponse(err, requestId);
+    }
+    if (err instanceof ProviderAudioError) {
+      return NextResponse.json({ success: false, code: 'REFERENCE_AUDIO_UNAVAILABLE', error: err.message, retryable: false, requestId }, { status: 400 });
     }
     console.error('[video/generate] Error:', err);
     // 记录操作日志 - 视频生成失败

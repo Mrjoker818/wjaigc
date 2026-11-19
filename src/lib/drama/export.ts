@@ -91,6 +91,7 @@ export function episodePackageMedia(doc: DramaProjectV1, episodeId: string): Pac
     add(member.imageUrlSide, `设定/角色_${name}_侧面`, 'png');
     add(member.imageUrlBack, `设定/角色_${name}_背面`, 'png');
     add(member.imageUrlFace, `设定/角色_${name}_面部`, 'png');
+    add(member.voiceSampleUrl, `设定/角色_${name}_声音样本`, 'mp3');
   }
   for (const location of doc.locations) add(location.lockedImageUrl || location.imageUrl, `设定/场景_${safeFileName(location.name, location.id)}`, 'png');
   for (const prop of doc.props) add(prop.lockedImageUrl || prop.imageUrl, `设定/道具_${safeFileName(prop.name, prop.id)}`, 'png');

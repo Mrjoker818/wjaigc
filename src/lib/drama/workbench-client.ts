@@ -317,6 +317,27 @@ export async function uploadDramaMusic(file: File, fetcher: WorkbenchFetch = def
   return { url: data.audioUrl, name: typeof data.name === 'string' && data.name ? data.name : file.name };
 }
 
+/** Uploads a character's voice sample (MP3 or WAV, 2–15 seconds, up to 15MB). Costs no credits. */
+export async function uploadVoiceSample(
+  file: File, fetcher: WorkbenchFetch = defaultFetch,
+): Promise<{ url: string; name: string; durationSec?: number }> {
+  const body = new FormData();
+  body.append('file', file);
+  let response: Response;
+  try {
+    response = await fetcher('/api/drama/voice-sample', { method: 'POST', body });
+  } catch {
+    throw new Error('网络中断，声音样本没有上传，请重试');
+  }
+  const data = await readJson(response);
+  if (!response.ok || typeof data.audioUrl !== 'string' || !data.audioUrl) fail(data, '声音样本上传失败，请稍后重试');
+  return {
+    url: data.audioUrl,
+    name: typeof data.name === 'string' && data.name ? data.name : file.name,
+    ...(typeof data.durationSec === 'number' ? { durationSec: data.durationSec } : {}),
+  };
+}
+
 /** Uploads a shot video (MP4, WebM or MOV, up to 48MB) and returns its stored URL. Costs no credits. */
 export async function uploadDramaClip(file: File, fetcher: WorkbenchFetch = defaultFetch): Promise<string> {
   const body = new FormData();

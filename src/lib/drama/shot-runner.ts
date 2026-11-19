@@ -1,6 +1,7 @@
 /** One implementation of per-shot generation for the drama workbench. */
 import { DIRECTOR_STYLES, normalizeDirectorStyle } from '@/lib/video-director/director-styles';
 import { shotLanguageText } from './shot-language';
+import { shotSpeaker } from './voiceover';
 import { stripMentions } from './mentions';
 import { activeTake, type DramaCastMember, type DramaLocation, type DramaProjectV1, type DramaProp, type DramaShot, type DramaTake } from './types';
 
@@ -11,6 +12,8 @@ export interface ShotModelCapability {
   maxReferenceImages: number;
   /** Model accepts a last frame together with the first frame. */
   firstLastFrame?: boolean;
+  /** Reference audio clips the model accepts (a character's voice sample); 0 or missing means none. */
+  maxReferenceAudios?: number;
 }
 
 export type FirstFrameSource = 'user' | 'location' | 'previous-shot' | 'none';
@@ -189,14 +192,31 @@ export function shotReferenceImages(
   return chooseReferenceImages(shot, cast, { ...capability, maxReferenceImages: capability.maxReferenceImages - used.length }, used, props);
 }
 
+/**
+ * The speaker whose voice sample goes with this shot: the shot has a line, the speaker has a sample, the model
+ * takes reference audio and the shot did not turn it off. Seedance also needs at least one image with the audio,
+ * so `images` counts the frames and references that will be sent.
+ */
+export function shotVoiceSample(
+  shot: DramaShot, cast: DramaCastMember[], capability: ShotModelCapability, images?: number,
+): DramaCastMember | undefined {
+  if (!shot.dialogue?.trim() || shot.voiceSampleOff || !capability.maxReferenceAudios) return undefined;
+  if (images !== undefined && images < 1) return undefined;
+  const speaker = shotSpeaker(shot, cast);
+  return speaker?.voiceSampleUrl ? speaker : undefined;
+}
+
 /** Body for POST /api/video/generate. Billing, refunds and provider routing stay in that route. */
 export function buildShotGenerateRequest(context: ShotRequestContext): Record<string, unknown> {
   const { doc, shot, capability } = context;
   const characterReferences = shotReferenceImages(shot, doc.cast, capability, [context.firstFrameUrl, context.lastFrameUrl], doc.props);
+  const images = [context.firstFrameUrl, context.lastFrameUrl].filter(Boolean).length + characterReferences.length;
+  const voice = shotVoiceSample(shot, doc.cast, capability, images);
   const prompt = [
     stripMentions(shot.directedPrompt || shot.prompt, doc),
     shotLanguageText(shot),
     shot.dialogue ? `台词：「${shot.dialogue}」` : '',
+    voice ? `声音：${voice.name}的台词用音频1的音色和语气说。` : '',
     shotContinuityText(doc, shot, context.previous, context.firstFrameSource),
   ].filter(Boolean).join('\n');
   return {
@@ -209,11 +229,12 @@ export function buildShotGenerateRequest(context: ShotRequestContext): Record<st
         : { imageUrl: context.firstFrameUrl, mode: 'image2video-first' }
       : { mode: 'text2video' }),
     ...(characterReferences.length ? { characterReferences } : {}),
+    ...(voice?.voiceSampleUrl ? { referenceAudios: [voice.voiceSampleUrl] } : {}),
     aspectRatio: shot.aspectRatio || doc.aspectRatio,
     duration: shot.durationSec,
     ...(context.quality ? { quality: context.quality } : {}),
     ...(context.resolution ? { resolution: context.resolution } : {}),
-    generateAudio: context.generateAudio ?? Boolean(shot.dialogue || shot.audioCues),
+    generateAudio: voice ? true : context.generateAudio ?? Boolean(shot.dialogue || shot.audioCues),
     shotId: shot.id,
     ...(context.projectId ? { projectId: context.projectId } : {}),
   };

@@ -2,20 +2,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { videoForbidden } from '@/lib/drama/access';
-import { persistGeneratedAudioResponse, type GeneratedAudioFormat } from '@/lib/generated-audio-storage';
+import { sniffAudioFormat } from '@/lib/drama/audio-upload';
+import { persistGeneratedAudioResponse } from '@/lib/generated-audio-storage';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /** Same ceiling as the audio store. */
 const MAX_MUSIC_BYTES = 25 * 1024 * 1024;
-
-function sniff(bytes: Uint8Array): GeneratedAudioFormat | null {
-  const ascii = (from: number, to: number) => String.fromCharCode(...bytes.subarray(from, to));
-  if (bytes.length >= 12 && ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WAVE') return 'wav';
-  if (bytes.length >= 3 && (ascii(0, 3) === 'ID3' || (bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0))) return 'mp3';
-  return null;
-}
 
 /** POST /api/drama/music (multipart, field "file") → { audioUrl, name }. Costs no credits. */
 export async function POST(request: NextRequest) {
@@ -28,7 +22,7 @@ export async function POST(request: NextRequest) {
   if (!(file instanceof File)) return NextResponse.json({ error: '没有收到音乐文件，请重新选择' }, { status: 400 });
   if (file.size > MAX_MUSIC_BYTES) return NextResponse.json({ error: '音乐文件超过 25MB，压缩或剪短后再上传' }, { status: 400 });
   const bytes = new Uint8Array(await file.arrayBuffer());
-  const format = sniff(bytes);
+  const format = sniffAudioFormat(bytes);
   if (!format) return NextResponse.json({ error: '只能上传 MP3 或 WAV 音乐' }, { status: 400 });
   try {
     const stored = await persistGeneratedAudioResponse(

@@ -21,6 +21,8 @@ export interface PearVideoModelSpec {
   modes: PearVideoGenerationMode[];
   maxImages: number;
   maxVideos: number;
+  /** Reference audio clips; models that do not list audios take none. */
+  maxAudios?: number;
   /** Override the general guidance to use multiple materials for reference2video. */
   minReferenceImages?: number;
   /** These model schemas document separate media arrays only. */
@@ -42,13 +44,14 @@ const SEEDANCE_2: PearVideoModelSpec = {
   modes: ALL_MODES,
   maxImages: 9,
   maxVideos: 3,
+  maxAudios: 3,
 };
 
 export const PEAR_VIDEO_MODEL_SPECS: Readonly<Record<string, PearVideoModelSpec>> = {
   // The docs also list 480P, but live PearAPI tokens reject it with "resolution 参数仅支持 720P" (2026-11-15).
   'doubao-seedance-2-0-260128': { ...SEEDANCE_2, resolutions: ['720P'] },
   'doubao-seedance-2-0-fast-260128': SEEDANCE_2,
-  'doubao-seedance-2-0-mini-260615': { ...SEEDANCE_2, resolutions: ['720P'], maxImages: 10, maxVideos: 10 },
+  'doubao-seedance-2-0-mini-260615': { ...SEEDANCE_2, resolutions: ['720P'], maxImages: 10, maxVideos: 10, maxAudios: 10 },
   'doubao-seedance-2-5-260628': { ...SEEDANCE_2, durations: range(4, 30), resolutions: ['480P', '720P', '1080P'] },
   // 海螺：必须提供 1 张图片；不支持纯文字生成、视频或音频参考。
   'hailuo-2.3': {

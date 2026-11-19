@@ -52,6 +52,8 @@ export interface DramaShot extends VideoShotPlan {
   clipEdit?: DramaClipEdit;
   /** Use the first frame in the film instead of a video, moved by a slow camera move. Needs `firstFrameUrl`. */
   still?: { motion: StillMotion };
+  /** Do not send the speaker's voice sample with this shot, e.g. to keep an exact first frame. */
+  voiceSampleOff?: boolean;
 }
 
 export interface DramaSceneBlock {
@@ -92,6 +94,10 @@ export interface DramaCastMember extends VideoCharacter {
   imageHistory?: BibleImageHistory;
   /** Text-to-speech voice id for this character's lines. */
   voice?: string;
+  /** Voice sample (MP3 or WAV, 2–15 s) sent to video models that take reference audio, so the lines keep this voice. */
+  voiceSampleUrl?: string;
+  voiceSampleName?: string;
+  voiceSampleSec?: number;
 }
 
 export interface DramaLocation extends VideoScene {

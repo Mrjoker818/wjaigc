@@ -48,6 +48,43 @@ function isSignablePath(relativePath: string): boolean {
     && parts[0] !== 'generated-audio' && publicMediaContentType(relativePath) !== null;
 }
 
+const AUDIO_FILENAME = /^(?:tts|ttsdb)_\d{13}_[0-9a-f]{8}_[0-9a-f]{64}\.(mp3|wav)$/u;
+const AUDIO_OWNER = /^[A-Za-z0-9._-]{1,128}$/u;
+
+/**
+ * Signed link to one stored audio file (a character's voice sample) for a video model.
+ * Generated audio can be owner-scoped, so the owner is part of the signed path:
+ * `/api/public/media/<expires>/<signature>/generated-audio/<ownerId>/<filename>`.
+ */
+export function signPublicAudioPath(
+  filename: string, ownerId: string, options: { now?: number; ttlSec?: number } = {},
+): string | null {
+  const key = secret();
+  if (!key || !AUDIO_FILENAME.test(filename) || !AUDIO_OWNER.test(ownerId)) return null;
+  const ttl = Math.min(Math.max(1, Math.floor(options.ttlSec ?? DEFAULT_PUBLIC_MEDIA_TTL_SEC)), MAX_PUBLIC_MEDIA_TTL_SEC);
+  const expires = Math.floor((options.now ?? Date.now()) / 1000) + ttl;
+  const relativePath = `generated-audio/${ownerId}/${filename}`;
+  return `${PUBLIC_MEDIA_ROUTE}/${expires}/${signature(key, expires, relativePath)}/${relativePath}`;
+}
+
+/** Checks `[expires, signature, 'generated-audio', ownerId, filename]` and returns the file it grants. */
+export function verifyPublicAudioParts(
+  parts: readonly string[], now: number = Date.now(),
+): { ownerId: string; filename: string; contentType: string } | null {
+  const key = secret();
+  if (!key || parts.length !== 5 || parts[2] !== 'generated-audio') return null;
+  const [expiresText, given, , ownerId, filename] = parts;
+  const match = AUDIO_FILENAME.exec(filename);
+  if (!/^\d{1,12}$/.test(expiresText) || !match || !AUDIO_OWNER.test(ownerId)) return null;
+  const expires = Number(expiresText);
+  const nowSec = Math.floor(now / 1000);
+  if (expires <= nowSec || expires - nowSec > MAX_PUBLIC_MEDIA_TTL_SEC) return null;
+  const expected = Buffer.from(signature(key, expires, `generated-audio/${ownerId}/${filename}`));
+  const actual = Buffer.from(given);
+  if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) return null;
+  return { ownerId, filename, contentType: match[1] === 'mp3' ? 'audio/mpeg' : 'audio/wav' };
+}
+
 /** Returns the signed route path, or null when signing is not configured or the path is not shareable. */
 export function signPublicMediaPath(
   relativePath: string,

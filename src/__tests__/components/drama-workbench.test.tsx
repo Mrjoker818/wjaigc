@@ -196,7 +196,7 @@ describe('drama workbench', () => {
     await screen.findByRole('heading', { name: /咖啡馆·内·夜/ });
     goTo(/^2\s*设定/);
     const upload = (n: number) => {
-      const input = document.querySelectorAll<HTMLInputElement>('input[type="file"]')[0];
+      const input = document.querySelectorAll<HTMLInputElement>('input[type="file"][accept^="image"]')[0];
       fireEvent.change(input, { target: { files: [new File([new Uint8Array([n])], `me${n}.png`, { type: 'image/png' })] } });
     };
     upload(1);
@@ -220,7 +220,7 @@ describe('drama workbench', () => {
     fireEvent.click(screen.getByRole('button', { name: '生成侧面' }));
     expect(await screen.findByRole('img', { name: '侧面定妆图' })).toBeTruthy();
     expect((requests.find(r => r.url === '/api/generate')?.body as { referenceImages?: string[] }).referenceImages).toBeUndefined();
-    const input = document.querySelectorAll<HTMLInputElement>('input[type="file"]')[0];
+    const input = document.querySelectorAll<HTMLInputElement>('input[type="file"][accept^="image"]')[0];
     fireEvent.change(input, { target: { files: [new File([new Uint8Array([1])], 'front.png', { type: 'image/png' })] } });
     expect(await screen.findByRole('img', { name: '正面定妆图' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '生成背面' }));

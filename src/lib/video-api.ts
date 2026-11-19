@@ -7,6 +7,7 @@
 import { PEAR_VIDEO_DEFAULT_DURATIONS, getPearVideoModelSpec, type PearVideoGenerationMode } from './pear-video-models';
 import { assertSafeProviderUrl } from './poisoned-api-host';
 import { ModelCapabilityError } from './task-core/model-capability-contract';
+import { referenceAudioLimit } from './video-reference-audio';
 
 // ==================== Types ====================
 
@@ -70,6 +71,8 @@ export interface VideoGenerateParams {
   motionBrush?: MotionBrushParams;
   // 角色一致性
   characterReferences?: string[]; // 角色参考图URL列表
+  /** 参考音频（角色声音样本），见 video-reference-audio.ts；带它时首尾帧都改作参考图。 */
+  referenceAudios?: string[];
   // 多镜头叙事
   multiShotScenes?: Array<{ id: string; prompt: string; duration: number; cameraControl?: CameraControlParams }>;
   // 其他高级参数
@@ -1415,7 +1418,12 @@ function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
   const spec = getApiMartVideoSpec(params.model);
   if (!spec.sendsDuration) resolveVideoSubmitDuration('apimart-video', params.model, params.duration);
   const referenceImages = params.referenceImages || [];
+  const referenceAudios = params.referenceAudios || [];
   const lowerModel = params.model.toLowerCase();
+  const audioLimit = referenceAudioLimit('apimart-video', params.model);
+  if (referenceAudios.length > audioLimit) {
+    throw new Error(audioLimit ? `${params.model} 最多接受 ${audioLimit} 段参考音频` : `${params.model} 不支持参考音频`);
+  }
 
   // Most models reject uppercase tier suffixes ("1K" → invalid_resolution), so normalize the trailing K;
   // MiniMax H3, HappyHorse, Wan2.7 and Wan3.0 document upper-case values (2K / 768P / 1080P).
@@ -1458,7 +1466,12 @@ function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
 
   const imageFields: Record<string, unknown> = {};
   let hasFrameRoles = false;
-  if (spec.images === 'roles') {
+  if (spec.images === 'roles' && referenceAudios.length > 0) {
+    // "When using first/last frame images (image_with_roles), reference audio is not available": every image is a reference.
+    const urls = [params.imageUrl, params.lastFrameImageUrl, ...referenceImages]
+      .filter((url): url is string => typeof url === 'string' && url.length > 0);
+    if (urls.length > 0) imageFields.image_urls = urls;
+  } else if (spec.images === 'roles') {
     const roles: Array<{ url: string; role: 'first_frame' | 'last_frame' | 'reference_image' | 'reference' }> = [];
     if (params.imageUrl) roles.push({ url: params.imageUrl, role: 'first_frame' });
     if (params.lastFrameImageUrl) roles.push({ url: params.lastFrameImageUrl, role: 'last_frame' });
@@ -1495,6 +1508,7 @@ function buildApiMartVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
     prompt: params.prompt,
     ...(spec.sendsN ? { n: 1 } : {}),
     ...imageFields,
+    ...(referenceAudios.length > 0 ? { audio_urls: [...referenceAudios] } : {}),
     ...(sendRatio && spec.ratioField ? { [spec.ratioField]: params.aspectRatio } : {}),
     ...(spec.sendsDuration && params.duration ? { duration: params.duration } : {}),
     ...(spec.resolutionField === 'mode'
@@ -1567,6 +1581,7 @@ export function resolvePearVideoMaterials(input: {
   lastFrameImageUrl?: unknown;
   referenceImages?: unknown;
   characterReferences?: unknown;
+  referenceAudios?: unknown;
   videoUrl?: unknown;
   mode?: unknown;
   action?: unknown;
@@ -1591,6 +1606,23 @@ export function resolvePearVideoMaterials(input: {
   const suppliedRefs = input.referenceImages ?? [];
   if (!Array.isArray(suppliedRefs) || !suppliedRefs.every((url): url is string => typeof url === 'string' && Boolean(url.trim()))) {
     throw mismatch('referenceImages', 'invalid');
+  }
+  const suppliedAudios = input.referenceAudios ?? [];
+  if (!Array.isArray(suppliedAudios) || !suppliedAudios.every((url): url is string => typeof url === 'string' && Boolean(url.trim()))) {
+    throw mismatch('referenceAudios', 'invalid');
+  }
+  const referenceAudios = suppliedAudios.map(url => url.trim());
+  if (referenceAudios.length > 0) {
+    const maxAudios = spec?.maxAudios ?? 0;
+    if (referenceAudios.length > maxAudios) throw mismatch('referenceAudios', referenceAudios.length, secondsRange(0, maxAudios));
+    // Audio is a reference material: the first frame joins the reference images, and it needs at least one image.
+    const images = [...new Set([...(imageUrl ? [imageUrl] : []), ...suppliedRefs.map(url => url.trim())])];
+    if (videoUrl || input.action === 'extend' || input.action === 'edit') throw mismatch('operation', 'video-with-reference-audio');
+    if (spec && !spec.modes.includes('reference2video')) throw mismatch('operation', 'reference2video', spec.modes);
+    if (images.length === 0 || images.length > (spec?.maxImages ?? 10)) {
+      throw mismatch('referenceImages', images.length, secondsRange(1, spec?.maxImages ?? 10));
+    }
+    return { generationMode: 'reference2video' as PearVideoGenerationMode, imageUrl: undefined, referenceImages: images, videoUrl, referenceAudios };
   }
   const referenceImages = suppliedRefs.map(url => url.trim());
   const usesReferences = referenceImages.length > 0 || input.mode === 'image2video-ref';
@@ -1620,13 +1652,13 @@ export function resolvePearVideoMaterials(input: {
       throw mismatch('referenceImages', count, secondsRange(min, max));
     }
   }
-  return { generationMode, imageUrl, referenceImages, videoUrl };
+  return { generationMode, imageUrl, referenceImages, videoUrl, referenceAudios };
 }
 
 /** Build PearAPI's POST /v1/videos/generations request. */
 function buildPearApiVideoSubmit(baseUrl: string, apiKey: string, params: VideoGenerateParams) {
   const cleanBase = ensureBaseUrl(baseUrl);
-  const { generationMode, imageUrl, referenceImages, videoUrl } = resolvePearVideoMaterials(params);
+  const { generationMode, imageUrl, referenceImages, videoUrl, referenceAudios } = resolvePearVideoMaterials(params);
   const images = imageUrl ? [imageUrl] : referenceImages;
   const spec = getPearVideoModelSpec(params.model);
   const duration = resolveVideoSubmitDuration('pearapi-video', params.model, params.duration);
@@ -1654,6 +1686,7 @@ function buildPearApiVideoSubmit(baseUrl: string, apiKey: string, params: VideoG
     body.reference_contents = [
       ...images.map(media_url => ({ type: 'image', media_url })),
       ...(videoUrl ? [{ type: 'video', media_url: videoUrl }] : []),
+      ...referenceAudios.map(media_url => ({ type: 'audio', media_url })),
     ];
   }
 

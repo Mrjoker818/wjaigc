@@ -16,6 +16,7 @@ import {
 } from '@/lib/drama/workbench-state';
 import { useDrama } from './drama-context';
 import { DramaLibraryPicker } from './drama-library-picker';
+import { VoiceSampleField } from './drama-voice-sample';
 
 const VIEW_LABEL: Record<CastView, string> = { front: '正面', side: '侧面', back: '背面', face: '面部' };
 
@@ -107,6 +108,7 @@ export function DramaBibleStep() {
                   {DRAMA_VOICES.map(voice => <option key={voice.id} value={voice.id}>{voice.label}</option>)}
                 </select>
               </label>
+              <VoiceSampleField member={member} />
               <div className="grid grid-cols-2 gap-2">
                 {CAST_VIEWS.map(view => (
                   <ReferenceTile

@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { useTaskModelCatalog } from '@/hooks/use-task-model-catalog';
 import type { ShotModelCapability } from '@/lib/drama/shot-runner';
 import { taskModelKey, type TaskModelDescriptor } from '@/lib/task-core/model-capability-contract';
+import { referenceAudioLimit } from '@/lib/video-reference-audio';
 
 /** One video model the workbench can generate shots with, with the limits the engine needs. */
 export interface DramaModelOption {
@@ -36,6 +37,7 @@ export function shotCapabilityFromDescriptor(descriptor: TaskModelDescriptor | u
     maxReferenceImages: acceptsReferences ? (descriptor?.maxReferenceImages ?? 4) : 0,
     // Pear video rejects any last frame, whatever the descriptor says.
     firstLastFrame: Boolean(operations?.includes('first-last-frame')) && descriptor?.protocol !== 'pearapi-video',
+    maxReferenceAudios: descriptor ? referenceAudioLimit(descriptor.protocol, descriptor.modelId ?? '') : 0,
   };
 }
 
