@@ -1226,7 +1226,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
   ));
   const clearDramaChatHandoff = useCallback(() => setDramaChatHandoff(null), []);
   /** Film the workbench asked to place on the canvas; inserted once the canvas is shown again. */
-  const [pendingCanvasFilm, setPendingCanvasFilm] = useState<{ videoUrl: string; thumbnailUrl?: string; duration?: number; aspectRatio?: string } | null>(null);
+  const [pendingCanvasFilm, setPendingCanvasFilm] = useState<{ videoUrl: string; thumbnailUrl?: string; duration?: number; aspectRatio?: string; label?: string } | null>(null);
+  // A bible image or keyframe sent from the drama workbench, placed once the canvas is showing.
+  const [pendingCanvasImage, setPendingCanvasImage] = useState<{ url: string; name?: string } | null>(null);
   // Start with true so SSR renders the login panel (not a blank spinner).
   // The useEffect below will update currentUser if a valid session exists.
   const [authChecked, setAuthChecked] = useState(true);
@@ -4813,7 +4815,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
   }, [captureCanvasInsertionScope, handleAddImages, handleDocumentCanvasFiles, isDocumentHistoryRecoveryPending, setImages]);
 
   // 多镜头成片放到画布当前视口中央，协作画布走受控导入
-  const handleStoryVideoComposed = useCallback(async (result: { videoUrl: string; thumbnailUrl?: string; duration?: number; aspectRatio?: string }) => {
+  const handleStoryVideoComposed = useCallback(async (result: { videoUrl: string; thumbnailUrl?: string; duration?: number; aspectRatio?: string; label?: string }) => {
     try {
       const insertion = captureVideoToolInsertion();
       const [ratioW, ratioH] = (result.aspectRatio || '16:9').split(':').map(Number);
@@ -4829,13 +4831,13 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
       const video = {
         id: crypto.randomUUID(), x: centerX - width / 2, y: centerY - height / 2, width, height,
         originalWidth: width * 2, originalHeight: height * 2, createdAt: Date.now(), mediaType: 'video' as const,
-        videoDuration: result.duration, prompt: '多镜头故事视频', aspectRatio: result.aspectRatio,
+        videoDuration: result.duration, prompt: result.label || '多镜头故事视频', aspectRatio: result.aspectRatio,
         ...buildCompletedVideoCanvasMedia({ videoUrl: result.videoUrl, thumbnailUrl: result.thumbnailUrl }),
       } as CanvasImage & { videoUrl: string };
-      if (await insertion.insert({ format: 'video/mp4', video }) !== 1) throw new Error('故事视频尚未确认添加到画布');
-      toast.success('故事视频已添加到画布');
+      if (await insertion.insert({ format: 'video/mp4', video }) !== 1) throw new Error('视频尚未确认添加到画布');
+      toast.success(result.label ? `${result.label}已添加到画布` : '故事视频已添加到画布');
     } catch (error) {
-      toast.error('故事视频添加失败', { description: error instanceof Error ? error.message : '请稍后重试' });
+      toast.error(result.label ? `${result.label}添加失败` : '故事视频添加失败', { description: error instanceof Error ? error.message : '请稍后重试' });
     }
   }, [captureVideoToolInsertion]);
 
@@ -4866,6 +4868,24 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
     });
     return () => window.cancelAnimationFrame(frame);
   }, [appMode, pendingCanvasFilm, handleStoryVideoComposed]);
+
+  useEffect(() => {
+    if (appMode !== 'canvas' || !pendingCanvasImage) return;
+    const image = pendingCanvasImage;
+    const frame = window.requestAnimationFrame(() => {
+      setPendingCanvasImage(null);
+      // The canvas skips an address it already shows, so say so instead of reporting a silent no-op as success.
+      if (latestImagesRef.current.some(item => item.url === image.url)) {
+        toast.info('画布上已经有这张图');
+        return;
+      }
+      void handleAddImages([image.url]).then(
+        () => toast.success(image.name ? `${image.name}已添加到画布` : '图片已添加到画布'),
+        error => toast.error('图片添加到画布失败', { description: error instanceof Error ? error.message : '请稍后重试' }),
+      );
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [appMode, pendingCanvasImage, handleAddImages]);
 
   const documentMediaTransferIntentsRef = useRef(new Map<string, {
     isCurrent: () => boolean; request: Promise<DocumentMediaBatchRequest>;
@@ -7320,6 +7340,8 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
           onDramaIdChange={setActiveDramaId}
           onExit={() => setAppMode('canvas')}
           onPlaceOnCanvas={film => { setPendingCanvasFilm(film); setAppMode('canvas'); }}
+          onPlaceImageOnCanvas={image => { setPendingCanvasImage(image); setAppMode('canvas'); }}
+          canvasMedia={images}
           chatHandoff={dramaChatHandoff}
           onChatHandoffDone={clearDramaChatHandoff}
         />

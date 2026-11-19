@@ -38,6 +38,8 @@ export interface UseDramaWorkbenchOptions {
   record: DramaProjectRecord;
   projectId?: string;
   onPlaceOnCanvas?: DramaWorkbenchApi['onPlaceOnCanvas'];
+  onPlaceImageOnCanvas?: DramaWorkbenchApi['onPlaceImageOnCanvas'];
+  canvasMedia?: DramaWorkbenchApi['canvasMedia'];
   onOpenCredits?: () => void;
 }
 
@@ -55,7 +57,9 @@ const pause = (ms: number, signal: AbortSignal) => new Promise<void>(resolve => 
   signal.addEventListener('abort', () => { window.clearTimeout(timer); resolve(); }, { once: true });
 });
 
-export function useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onOpenCredits }: UseDramaWorkbenchOptions): DramaWorkbenchApi {
+export function useDramaWorkbench({
+  record, projectId, onPlaceOnCanvas, onPlaceImageOnCanvas, canvasMedia, onOpenCredits,
+}: UseDramaWorkbenchOptions): DramaWorkbenchApi {
   const [doc, setDoc] = useState<DramaProjectV1>(record.doc);
   const docRef = useRef(record.doc);
   const versionRef = useRef(record.version);
@@ -682,7 +686,7 @@ export function useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onOpenCr
     runningShotIds, batchRunning, generateShots, stopGeneration, estimate,
     imageModels, imageModel, setImageModelKey, keyframeShotIds, generateKeyframes, voiceoverShotIds, generateVoiceovers,
     keyframeEstimate, busyLabel, runJob,
-    dramaId: record.id, projectId, saveState, flushSave, render, renderEpisode, onPlaceOnCanvas,
+    dramaId: record.id, projectId, saveState, flushSave, render, renderEpisode, onPlaceOnCanvas, onPlaceImageOnCanvas, canvasMedia,
     autopilot, quoteAutopilot, runAutopilot, stopAutopilot, voiceAvailable,
   };
 }

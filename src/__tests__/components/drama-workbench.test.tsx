@@ -222,6 +222,32 @@ describe('drama workbench', () => {
     await waitFor(() => expect(saved?.cast[0]).toMatchObject({ imageUrlFront: '/u/upload-1.png', imageUrlBack: '/g/cast-2.png' }), { timeout: 3000 });
   });
 
+  it('picks a canvas picture as a character view and sends images and shots back to the canvas', async () => {
+    const onPlaceImageOnCanvas = vi.fn();
+    const onPlaceOnCanvas = vi.fn();
+    render(<DramaWorkbench dramaId="drama_1" projectId="p1" onDramaIdChange={() => undefined} onExit={() => undefined}
+      canvasMedia={[{ url: '/canvas/rain.png', prompt: '雨夜街景' }, { url: 'blob:x' }]}
+      onPlaceImageOnCanvas={onPlaceImageOnCanvas} onPlaceOnCanvas={onPlaceOnCanvas} />);
+    await screen.findByRole('heading', { name: /咖啡馆·内·夜/ });
+    goTo(/^2\s*设定/);
+    fireEvent.click(screen.getByRole('button', { name: '从素材库选正面' }));
+    const dialog = within(await screen.findByRole('dialog'));
+    expect(dialog.getByRole('heading', { name: '从素材库选林夏正面' })).toBeTruthy();
+    await waitFor(() => expect(dialog.queryByText('正在读取同项目的其他短剧')).toBeNull());
+    fireEvent.click(dialog.getByRole('button', { name: '选用 雨夜街景' }));
+    expect((await screen.findByRole('img', { name: '正面定妆图' })).getAttribute('src')).toBe('/canvas/rain.png');
+    await waitFor(() => expect(saved?.cast[0].imageUrlFront).toBe('/canvas/rain.png'), { timeout: 3000 });
+    expect(requests.some(r => r.url === '/api/generate' || r.url === '/api/upload')).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: '把正面放到画布' }));
+    expect(onPlaceImageOnCanvas).toHaveBeenCalledWith({ url: '/canvas/rain.png', name: '林夏正面' });
+
+    goTo(/^4\s*镜头/);
+    fireEvent.click(screen.getByRole('button', { name: '把镜头 1 放到画布' }));
+    expect(onPlaceOnCanvas).toHaveBeenCalledWith(expect.objectContaining({ videoUrl: '/v/1.mp4', label: '雨夜来信 镜头 01', aspectRatio: '9:16' }));
+    expect(screen.queryByRole('button', { name: '把镜头 2 放到画布' })).toBeNull();
+  });
+
   it('adds background music with a level and ducking, and removes it again', async () => {
     render(<DramaWorkbench dramaId="drama_1" projectId="p1" onDramaIdChange={() => undefined} onExit={() => undefined} />);
     await screen.findByRole('heading', { name: /咖啡馆·内·夜/ });

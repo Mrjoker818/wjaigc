@@ -18,7 +18,9 @@ const SAVE_TEXT: Record<SaveState, string> = {
   saved: '已保存', dirty: '有改动', saving: '正在保存', error: '保存失败，将自动重试', conflict: '已在其他窗口修改',
 };
 
-export function DramaShell({ record, projectId, onExit, switcher, onCloseProject, onPlaceOnCanvas, onOpenCredits }: {
+export function DramaShell({
+  record, projectId, onExit, switcher, onCloseProject, onPlaceOnCanvas, onPlaceImageOnCanvas, canvasMedia, onOpenCredits,
+}: {
   record: DramaProjectRecord;
   projectId?: string;
   onExit: () => void;
@@ -26,9 +28,11 @@ export function DramaShell({ record, projectId, onExit, switcher, onCloseProject
   switcher?: ReactNode;
   onCloseProject: () => void;
   onPlaceOnCanvas?: DramaWorkbenchApi['onPlaceOnCanvas'];
+  onPlaceImageOnCanvas?: DramaWorkbenchApi['onPlaceImageOnCanvas'];
+  canvasMedia?: DramaWorkbenchApi['canvasMedia'];
   onOpenCredits?: () => void;
 }) {
-  const api = useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onOpenCredits });
+  const api = useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onPlaceImageOnCanvas, canvasMedia, onOpenCredits });
   const { doc, episode, step, setStep, saveState, estimate } = api;
   const short = estimate ? Math.max(0, estimate.total - estimate.balance) : 0;
 

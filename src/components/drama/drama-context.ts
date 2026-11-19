@@ -2,6 +2,7 @@
 
 import { createContext, useContext } from 'react';
 import type { AutopilotChoices, AutopilotQuote, AutopilotRun } from '@/lib/drama/autopilot';
+import type { CanvasMediaLike } from '@/lib/drama/library';
 import type { KeyframeKind } from '@/lib/drama/reference-prompts';
 import type { CreditEstimate } from '@/lib/drama/workbench-client';
 import type { DramaEpisode, DramaProjectV1, DramaShot } from '@/lib/drama/types';
@@ -85,7 +86,12 @@ export interface DramaWorkbenchApi {
   stopAutopilot: () => void;
   /** The admin has a speech model; without one voiceovers cannot be recorded. */
   voiceAvailable: boolean;
-  onPlaceOnCanvas?: (result: { videoUrl: string; thumbnailUrl?: string; duration?: number; aspectRatio?: string }) => void;
+  /** Puts a video on the project's canvas; `label` names it there ("镜头 03"), the film when absent. */
+  onPlaceOnCanvas?: (result: { videoUrl: string; thumbnailUrl?: string; duration?: number; aspectRatio?: string; label?: string }) => void;
+  /** Puts one image (a bible image or keyframe) on the project's canvas. */
+  onPlaceImageOnCanvas?: (image: { url: string; name?: string }) => void;
+  /** Pictures and videos on the project's canvas, offered in the library picker. */
+  canvasMedia?: readonly CanvasMediaLike[];
 }
 
 export type SaveState = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict';

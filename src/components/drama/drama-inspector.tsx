@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Film, ImagePlus, Loader2, Mic, RotateCcw, Scissors, Stethoscope, Upload, X } from 'lucide-react';
+import { Film, ImagePlus, Images, Loader2, Mic, RotateCcw, Scissors, Stethoscope, Upload, X } from 'lucide-react';
 import { mentionCandidates, mergeMentionIds } from '@/lib/drama/mentions';
 import { CLIP_SPEED_RANGE, CLIP_VOLUME_MAX, MIN_CLIP_SEC, STILL_MOTIONS, type StillMotion } from '@/lib/drama/render';
 import { shotFilmLength } from '@/lib/drama/timeline';
@@ -13,6 +13,7 @@ import { currentVoiceover, shotSpeaker } from '@/lib/drama/voiceover';
 import { findShot, fitDuration, orderedPrevious, updateShot } from '@/lib/drama/workbench-state';
 import { diagnoseFailure, listFailureTypes, type VideoFailureType } from '@/lib/video-director/retake-diagnosis';
 import { useDrama } from './drama-context';
+import { DramaLibraryPicker } from './drama-library-picker';
 import { MentionTextarea } from './mention-textarea';
 import { ShotReadinessList } from './drama-readiness';
 
@@ -53,6 +54,7 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
   } = useDrama();
   const [failure, setFailure] = useState<VideoFailureType | ''>('');
   const [uploading, setUploading] = useState<ReadonlySet<'first' | 'last'>>(() => new Set());
+  const [picking, setPicking] = useState<'first' | 'last' | null>(null);
   const found = findShot(doc, shotId);
   if (!found) return null;
   const { shot, episode } = found;
@@ -180,11 +182,15 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
         <div className="grid grid-cols-2 gap-2">
           <FrameTile label="首帧" alt="这一镜的关键帧" url={shot.firstFrameUrl} ratio={ratio}
             busy={keyframeShotIds.has(shot.id) || uploading.has('first')} onDraw={() => void generateKeyframes([shot.id])}
-            onUpload={file => void uploadFrame('first', file)} onClear={() => set({ firstFrameUrl: undefined, still: undefined })} />
+            onUpload={file => void uploadFrame('first', file)} onPick={() => setPicking('first')}
+            onClear={() => set({ firstFrameUrl: undefined, still: undefined })} />
           <FrameTile label="尾帧" alt="这一镜的尾帧" url={shot.lastFrameUrl} ratio={ratio}
             busy={keyframeShotIds.has(`${shot.id}:last`) || uploading.has('last')} onDraw={() => void generateKeyframes([shot.id], 'last')}
-            onUpload={file => void uploadFrame('last', file)} onClear={() => set({ lastFrameUrl: undefined })} />
+            onUpload={file => void uploadFrame('last', file)} onPick={() => setPicking('last')} onClear={() => set({ lastFrameUrl: undefined })} />
         </div>
+        <DramaLibraryPicker open={picking !== null} onOpenChange={open => { if (!open) setPicking(null); }}
+          title={picking === 'last' ? '从素材库选尾帧' : '从素材库选首帧'}
+          onPick={item => set(picking === 'last' ? { lastFrameUrl: item.url } : { firstFrameUrl: item.url })} />
         <p className="drama-label">
           {imageModel ? `用 ${imageModel.name} 画，按图像模型价格扣费；上传自己的图不扣积分。` : '按后台默认图像模型价格扣费；上传自己的图不扣积分。'}
           {model && !model.capability.imageToVideo ? '当前视频模型不接受首帧图片，关键帧不会用上。' : '有首帧时，视频从这张图开始。'}
@@ -403,8 +409,9 @@ function VoiceoverPanel({ shotId, busy, onRecord }: { shotId: string; busy: bool
   );
 }
 
-function FrameTile({ label, alt, url, ratio, busy, onDraw, onUpload, onClear }: {
-  label: string; alt: string; url?: string; ratio: string; busy: boolean; onDraw: () => void; onUpload: (file: File) => void; onClear: () => void;
+function FrameTile({ label, alt, url, ratio, busy, onDraw, onUpload, onPick, onClear }: {
+  label: string; alt: string; url?: string; ratio: string; busy: boolean; onDraw: () => void; onUpload: (file: File) => void;
+  onPick: () => void; onClear: () => void;
 }) {
   const picker = useRef<HTMLInputElement>(null);
   return (
@@ -430,6 +437,10 @@ function FrameTile({ label, alt, url, ratio, busy, onDraw, onUpload, onClear }: 
         <button type="button" className="drama-btn px-2" disabled={busy} aria-label={`上传${label}`} title="上传自己的图，不扣积分"
           onClick={() => picker.current?.click()}>
           <Upload className="h-3.5 w-3.5" />
+        </button>
+        <button type="button" className="drama-btn px-2" disabled={busy} aria-label={`从素材库选${label}`} title="从画布、设定图或其他短剧里选，不扣积分"
+          onClick={onPick}>
+          <Images className="h-3.5 w-3.5" />
         </button>
         {url ? (
           <button type="button" className="drama-btn px-2 text-xs" disabled={busy} aria-label={`清除${label}`} onClick={onClear}>

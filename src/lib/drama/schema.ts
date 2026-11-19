@@ -7,6 +7,7 @@ import { DRAMA_PROJECT_SCHEMA_ID, MAX_SHOTS_PER_EPISODE, type DramaProjectV1 } f
 
 export const MAX_DRAMA_DOC_BYTES = 2 * 1024 * 1024;
 const MAX_EPISODES = 50;
+export const MAX_REFERENCES = 30;
 
 const text = (max: number) => z.string().max(max);
 const id = z.string().min(1).max(128);
@@ -90,6 +91,7 @@ export const dramaProjectSchema = z.object({
     subtitles: z.boolean(),
     music: z.object({ url: text(4096), name: text(200), volume: z.number().min(0).max(1), ducking: z.boolean() }).optional(),
   }),
+  references: z.array(z.object({ url: text(4096), name: text(200).optional(), source: z.enum(['chat', 'canvas']) })).max(MAX_REFERENCES).optional(),
 });
 
 export class DramaDocumentError extends Error {

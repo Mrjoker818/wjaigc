@@ -26,6 +26,9 @@ export interface DramaWorkbenchProps {
   /** Platform switcher shown in place of the back button. */
   switcher?: ReactNode;
   onPlaceOnCanvas?: DramaWorkbenchApi['onPlaceOnCanvas'];
+  onPlaceImageOnCanvas?: DramaWorkbenchApi['onPlaceImageOnCanvas'];
+  /** The project's canvas pictures, offered when picking a reference image. */
+  canvasMedia?: DramaWorkbenchApi['canvasMedia'];
   onOpenCredits?: () => void;
   /** A message sent from simple chat; it is written into a new script draft once, then `onChatHandoffDone` clears it. */
   chatHandoff?: SimpleChatWorkspaceHandoffIntent | null;
@@ -55,7 +58,8 @@ export default function DramaWorkbench(props: DramaWorkbenchProps) {
     return (
       <DramaShell
         key={state.record.id} record={state.record} projectId={projectId} onExit={props.onExit} switcher={props.switcher}
-        onPlaceOnCanvas={props.onPlaceOnCanvas} onOpenCredits={props.onOpenCredits}
+        onPlaceOnCanvas={props.onPlaceOnCanvas} onPlaceImageOnCanvas={props.onPlaceImageOnCanvas} canvasMedia={props.canvasMedia}
+        onOpenCredits={props.onOpenCredits}
         onCloseProject={() => onDramaIdChange(null)}
       />
     );

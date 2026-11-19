@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { History, ImagePlus, Loader2, Lock, LockOpen, Plus, Trash2, Upload } from 'lucide-react';
+import { ArrowUpRight, History, ImagePlus, Images, Loader2, Lock, LockOpen, Plus, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   CAST_IMAGE_RATIO, CAST_VIEWS, castImagePrompt, locationImagePrompt, locationImageRatio, PROP_IMAGE_RATIO, propImagePrompt,
@@ -15,12 +15,14 @@ import {
   nextBibleId, removeCastMember, removeLocation, removeProp, updateCastMember, updateLocation, updateProp,
 } from '@/lib/drama/workbench-state';
 import { useDrama } from './drama-context';
+import { DramaLibraryPicker } from './drama-library-picker';
 
 const VIEW_LABEL: Record<CastView, string> = { front: '正面', side: '侧面', back: '背面', face: '面部' };
 
 /** Step 2: cast and location cards. The locked image is the reference every shot uses. */
 export function DramaBibleStep() {
-  const { doc, update, setStep, imageModel } = useDrama();
+  const { doc, update, setStep, imageModel, onPlaceImageOnCanvas } = useDrama();
+  const [picking, setPicking] = useState<{ slot: BibleSlot; label: string } | null>(null);
   const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set());
   const mark = (key: string, on: boolean) => setPending(previous => {
     const next = new Set(previous);
@@ -61,11 +63,13 @@ export function DramaBibleStep() {
     makeImage({ kind: 'location', id: location.id, view: 'plate' }, locationImagePrompt(location, doc.style), locationImageRatio(doc.aspectRatio));
   const propImage = (prop: DramaProp) =>
     makeImage({ kind: 'prop', id: prop.id, view: 'sheet' }, propImagePrompt(prop, doc.style), PROP_IMAGE_RATIO);
-  const tileActions = (slot: BibleSlot) => ({
+  const tileActions = (slot: BibleSlot, name: string) => ({
     busy: pending.has(slotKey(slot)),
     history: slotHistory(doc, slot),
     onUpload: (file: File) => void uploadImage(slot, file),
     onRestore: (url: string) => restoreImage(slot, url),
+    onPick: () => setPicking({ slot, label: name }),
+    ...(onPlaceImageOnCanvas ? { onPlace: (url: string) => onPlaceImageOnCanvas({ url, name }) } : {}),
   });
 
   return (
@@ -109,7 +113,7 @@ export function DramaBibleStep() {
                     key={view} label={VIEW_LABEL[view]} ratio="2 / 3"
                     url={castViewImage(member, view)}
                     locked={Boolean(member.lockedImageUrl) && member.lockedImageUrl === castViewImage(member, view)}
-                    {...tileActions({ kind: 'cast', id: member.id, view })}
+                    {...tileActions({ kind: 'cast', id: member.id, view }, `${member.name}${VIEW_LABEL[view]}`)}
                     disabled={!member.appearance.trim() && !member.name.trim()}
                     onGenerate={() => void castImage(member, view)}
                     onToggleLock={url => update(current => updateCastMember(current, member.id, { lockedImageUrl: member.lockedImageUrl === url ? undefined : url }))}
@@ -145,7 +149,7 @@ export function DramaBibleStep() {
               <ReferenceTile
                 label="场景图" ratio={doc.aspectRatio.replace(':', ' / ')} url={location.imageUrl}
                 locked={Boolean(location.lockedImageUrl) && location.lockedImageUrl === location.imageUrl}
-                {...tileActions({ kind: 'location', id: location.id, view: 'plate' })} disabled={!location.name.trim()}
+                {...tileActions({ kind: 'location', id: location.id, view: 'plate' }, `场景 ${location.name}`)} disabled={!location.name.trim()}
                 onGenerate={() => void locationImage(location)}
                 onToggleLock={url => update(current => updateLocation(current, location.id, { lockedImageUrl: location.lockedImageUrl === url ? undefined : url }))}
               />
@@ -180,7 +184,7 @@ export function DramaBibleStep() {
               <ReferenceTile
                 label="道具图" ratio="1 / 1" url={prop.imageUrl}
                 locked={Boolean(prop.lockedImageUrl) && prop.lockedImageUrl === prop.imageUrl}
-                {...tileActions({ kind: 'prop', id: prop.id, view: 'sheet' })} disabled={!prop.name.trim()}
+                {...tileActions({ kind: 'prop', id: prop.id, view: 'sheet' }, `道具 ${prop.name}`)} disabled={!prop.name.trim()}
                 onGenerate={() => void propImage(prop)}
                 onToggleLock={url => update(current => updateProp(current, prop.id, { lockedImageUrl: prop.lockedImageUrl === url ? undefined : url }))}
               />
@@ -193,11 +197,14 @@ export function DramaBibleStep() {
       <div>
         <button type="button" className="drama-btn drama-btn--primary" onClick={() => setStep('board')}>下一步：拆分镜</button>
       </div>
+      <DramaLibraryPicker open={picking !== null} onOpenChange={open => { if (!open) setPicking(null); }}
+        title={picking ? `从素材库选${picking.label}` : '从素材库选图'}
+        onPick={item => { if (picking) restoreImage(picking.slot, item.url); }} />
     </div>
   );
 }
 
-function ReferenceTile({ label, ratio, url, locked, busy, disabled, history, onGenerate, onUpload, onRestore, onToggleLock }: {
+function ReferenceTile({ label, ratio, url, locked, busy, disabled, history, onGenerate, onUpload, onRestore, onToggleLock, onPick, onPlace }: {
   label: string;
   ratio: string;
   url?: string;
@@ -211,6 +218,10 @@ function ReferenceTile({ label, ratio, url, locked, busy, disabled, history, onG
   onUpload: (file: File) => void;
   onRestore: (url: string) => void;
   onToggleLock: (url: string) => void;
+  /** Opens the library picker for this tile. */
+  onPick: () => void;
+  /** Puts the image on the project's canvas; absent when the workbench has no canvas. */
+  onPlace?: (url: string) => void;
 }) {
   const picker = useRef<HTMLInputElement>(null);
   return (
@@ -226,6 +237,12 @@ function ReferenceTile({ label, ratio, url, locked, busy, disabled, history, onG
           </span>
         ) : null}
         {locked ? <span className="absolute left-1 top-1 rounded bg-[var(--drama-green)] px-1.5 py-0.5 text-[11px] text-[var(--drama-ink)]">已锁定</span> : null}
+        {url && onPlace && !busy ? (
+          <button type="button" className="drama-btn absolute right-1 top-1 min-h-7 bg-black/60 px-1.5" aria-label={`把${label}放到画布`}
+            title="放到画布" onClick={() => onPlace(url)}>
+            <ArrowUpRight className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
       </div>
       <div className="flex gap-1">
         {/* Three buttons share a narrow tile once an image exists, so the visible label stays short and on one line. */}
@@ -242,6 +259,10 @@ function ReferenceTile({ label, ratio, url, locked, busy, disabled, history, onG
         <button type="button" className="drama-btn px-2" disabled={busy} aria-label={`上传${label}`} title="上传自己的图，不扣积分"
           onClick={() => picker.current?.click()}>
           <Upload className="h-3.5 w-3.5" />
+        </button>
+        <button type="button" className="drama-btn px-2" disabled={busy} aria-label={`从素材库选${label}`} title="从画布、其他短剧或对话的图里选，不扣积分"
+          onClick={onPick}>
+          <Images className="h-3.5 w-3.5" />
         </button>
         {url ? (
           <button type="button" className="drama-btn px-2" aria-pressed={locked} aria-label={locked ? `取消锁定${label}` : `锁定${label}`} onClick={() => onToggleLock(url)}>

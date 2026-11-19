@@ -1,6 +1,6 @@
 'use client';
 
-import { ImagePlus, Loader2, Play, RotateCcw, Square, X } from 'lucide-react';
+import { ArrowUpRight, ImagePlus, Loader2, Play, RotateCcw, Square, X } from 'lucide-react';
 import { activeTake, shotSource } from '@/lib/drama/types';
 import { failedShots, pendingShots, selectTake, updateShot } from '@/lib/drama/workbench-state';
 import { useDrama } from './drama-context';
@@ -12,7 +12,7 @@ export function DramaShotsStep() {
   const {
     doc, episode, update, models, modelsLoading, defaultModel, setDefaultModelKey, generateAudio, setGenerateAudio,
     runningShotIds, batchRunning, generateShots, stopGeneration, estimate, selectedShotId, selectShot, setStep,
-    imageModels, imageModel, setImageModelKey, keyframeShotIds, generateKeyframes, keyframeEstimate,
+    imageModels, imageModel, setImageModelKey, keyframeShotIds, generateKeyframes, keyframeEstimate, onPlaceOnCanvas,
   } = useDrama();
   if (!episode) return <p className="drama-label">先在剧本步骤写好分集。</p>;
   const waiting = pendingShots(episode);
@@ -145,6 +145,16 @@ export function DramaShotsStep() {
                         {estimate?.perShot[shot.id] ? <span className="font-mono text-xs opacity-70">{estimate.perShot[shot.id]} 积分</span> : null}
                       </button>
                       <button type="button" className="drama-btn" onClick={() => selectShot(shot.id)}>调整</button>
+                      {onPlaceOnCanvas && take?.videoUrl ? (
+                        <button type="button" className="drama-btn px-2" aria-label={`把镜头 ${shotNumber} 放到画布`} title="放到画布"
+                          onClick={() => onPlaceOnCanvas({
+                            videoUrl: take.videoUrl!, label: `${doc.title} 镜头 ${String(shotNumber).padStart(2, '0')}`,
+                            aspectRatio: shot.aspectRatio || doc.aspectRatio, duration: shot.durationSec,
+                            ...(take.thumbnailUrl ? { thumbnailUrl: take.thumbnailUrl } : {}),
+                          })}>
+                          <ArrowUpRight className="h-4 w-4" />
+                        </button>
+                      ) : null}
                     </div>
                     <div className="flex gap-2">
                       <button type="button" className="drama-btn flex-1 text-xs" disabled={drawing}

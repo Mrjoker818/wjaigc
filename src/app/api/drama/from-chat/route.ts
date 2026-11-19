@@ -4,6 +4,7 @@ import { videoForbidden } from '@/lib/drama/access';
 import { authorizeGenerationProject, GenerationProjectAccessError } from '@/lib/collaboration/generation-project-access';
 import { dramaPlannerConfig, writeDramaScript } from '@/lib/drama/draft';
 import { DramaPlannerError } from '@/lib/drama/planner';
+import { MAX_REFERENCES } from '@/lib/drama/schema';
 import { createDramaProject } from '@/lib/drama/store';
 import { parseSimpleChatWorkspaceHandoffBody } from '@/lib/simple-chat-workspace-handoff';
 import { resolveSimpleChatWorkspaceHandoff, SimpleChatWorkspaceHandoffError } from '@/lib/simple-chat-workspace-handoff-server';
@@ -23,6 +24,7 @@ const HANDOFF_ERRORS: Record<SimpleChatWorkspaceHandoffError['code'], string> = 
 /**
  * POST /api/drama/from-chat { targetProjectId, chatProjectId, chatTaskId, chatMessageId } → { project }
  * Writes a script draft from a simple chat message. The text is read from the user's own chat history, never from the request.
+ * Images in the message that the asset library manages are kept on the draft, so they can be picked as references in the bible.
  */
 export async function POST(request: NextRequest) {
   const auth = await requireApiAuthOrReject(request);
@@ -43,7 +45,12 @@ export async function POST(request: NextRequest) {
         error: '还没有可用的对话模型。请在后台供应商设置里启用一个对话模型后再生成剧本。', code: 'DRAMA_PLANNER_NOT_CONFIGURED',
       }, { status: 503 });
     }
-    const doc = await writeDramaScript(config, { idea: handoff.text.slice(0, MAX_IDEA_CHARS) });
+    const written = await writeDramaScript(config, { idea: handoff.text.slice(0, MAX_IDEA_CHARS) });
+    const references = handoff.images
+      .map(image => ({ url: image.assetRef.url, name: image.assetRef.name?.slice(0, 200) || `对话图片 ${image.imageIndex + 1}`, source: 'chat' as const }))
+      .filter(reference => reference.url.startsWith('/') || reference.url.startsWith('https://'))
+      .slice(0, MAX_REFERENCES);
+    const doc = references.length ? { ...written, references } : written;
     const record = await createDramaProject(auth.userId, access.kind === 'unscoped' ? null : access.projectId, doc);
     return NextResponse.json({ success: true, project: record }, { status: 201 });
   } catch (error) {

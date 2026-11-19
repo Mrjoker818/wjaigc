@@ -132,6 +132,13 @@ export interface DramaTimeline {
   };
 }
 
+/** An image brought in from another platform, kept so the user can pick it as a reference later. */
+export interface DramaReference {
+  url: string;
+  name?: string;
+  source: 'chat' | 'canvas';
+}
+
 export interface DramaProjectV1 {
   schemaId: typeof DRAMA_PROJECT_SCHEMA_ID;
   title: string;
@@ -143,6 +150,8 @@ export interface DramaProjectV1 {
   locations: DramaLocation[];
   props: DramaProp[];
   timeline: DramaTimeline;
+  /** Images sent with the chat message the script was written from. */
+  references?: DramaReference[];
 }
 
 export interface DramaProjectRecord {

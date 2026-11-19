@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   handoffError: null as Error | null,
   config: { baseUrl: 'https://llm.example.com/v1', apiKey: 'k', modelId: 'chat-1' } as Record<string, unknown> | null,
   ideas: [] as string[],
-  created: [] as Array<{ userId: string; projectId: string | null }>,
+  created: [] as Array<{ userId: string; projectId: string | null; references?: unknown }>,
 }));
 
 vi.mock('server-only', () => ({}));
@@ -41,8 +41,8 @@ vi.mock('@/lib/drama/draft', () => ({
   },
 }));
 vi.mock('@/lib/drama/store', () => ({
-  createDramaProject: async (userId: string, projectId: string | null) => {
-    mocks.created.push({ userId, projectId });
+  createDramaProject: async (userId: string, projectId: string | null, doc: { references?: unknown }) => {
+    mocks.created.push({ userId, projectId, ...(doc.references ? { references: doc.references } : {}) });
     return { id: 'drama_9', projectId, title: '雨夜来信' };
   },
 }));
@@ -58,7 +58,7 @@ const post = (body: unknown) => new NextRequest('http://localhost/api/drama/from
 beforeEach(() => {
   mocks.userId = 'user-a';
   mocks.productType = 'canvas,video';
-  mocks.handoff = { text: '雨夜收到一封信' };
+  mocks.handoff = { text: '雨夜收到一封信', images: [] };
   mocks.handoffError = null;
   mocks.config = { baseUrl: 'https://llm.example.com/v1', apiKey: 'k', modelId: 'chat-1' };
   mocks.ideas = [];
@@ -74,6 +74,19 @@ describe('POST /api/drama/from-chat', () => {
     expect(mocks.created).toEqual([{ userId: 'user-a', projectId: 'canvas-1' }]);
   });
 
+  it('keeps the managed images of the message on the draft for the bible to pick', async () => {
+    mocks.handoff = { text: '雨夜收到一封信', images: [
+      { imageIndex: 0, assetRef: { url: '/api/serve-upload/uploads/a.png', name: '林夏照片' } },
+      { imageIndex: 1, assetRef: { url: 'data:image/png;base64,AAAA' } },
+      { imageIndex: 2, assetRef: { url: 'https://cdn.example.com/b.png' } },
+    ] };
+    expect((await POST(post(intent))).status).toBe(201);
+    expect(mocks.created[0].references).toEqual([
+      { url: '/api/serve-upload/uploads/a.png', name: '林夏照片', source: 'chat' },
+      { url: 'https://cdn.example.com/b.png', name: '对话图片 3', source: 'chat' },
+    ]);
+  });
+
   it('rejects incomplete intents and unauthenticated callers', async () => {
     expect((await POST(post({ ...intent, chatMessageId: '' }))).status).toBe(400);
     mocks.userId = null;
@@ -82,7 +95,7 @@ describe('POST /api/drama/from-chat', () => {
   });
 
   it('refuses a message without text', async () => {
-    mocks.handoff = { text: null };
+    mocks.handoff = { text: null, images: [] };
     const response = await POST(post(intent));
     expect(response.status).toBe(422);
     expect((await response.json()).code).toBe('DRAMA_HANDOFF_NO_TEXT');
