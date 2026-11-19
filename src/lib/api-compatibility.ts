@@ -731,6 +731,21 @@ export function parseGeminiChatImageResponse(
 }
 
 /**
+ * Some relays answer with a path such as /v1/images/proxy/abc. Left relative, the browser
+ * and the image saver resolve it against this site and the image breaks, so it is resolved
+ * against the provider's origin. data:, blob: and http(s) URLs are returned unchanged.
+ */
+export function absolutizeProviderImageUrl(url: string, providerBaseUrl: string): string {
+  const trimmed = url.trim();
+  if (!trimmed || /^(https?:|data:|blob:)/i.test(trimmed) || !providerBaseUrl) return trimmed;
+  try {
+    return new URL(trimmed, `${new URL(providerBaseUrl).origin}/`).toString();
+  } catch {
+    return trimmed;
+  }
+}
+
+/**
  * Try to generate an image via /chat/completions as a fallback when
  * /images/generations and /images/edits endpoints are unavailable.
  *
@@ -806,7 +821,8 @@ export async function tryChatCompletionsImageFallback(params: {
     }
 
     const chatData = await chatResponse.json() as Record<string, unknown>;
-    const resultImageUrls = parseGeminiChatImageResponse(chatData);
+    const resultImageUrls = parseGeminiChatImageResponse(chatData)
+      .map(url => absolutizeProviderImageUrl(url, baseUrl));
 
     if (resultImageUrls.length > 0) {
       console.log(`[${requestIdPrefix}] /chat/completions fallback succeeded, got ${resultImageUrls.length} image(s)`);

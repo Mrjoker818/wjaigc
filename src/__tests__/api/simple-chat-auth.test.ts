@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   recordTaskProjectionCompleted: vi.fn(),
   getInternalApiUrl: vi.fn((path: string) => `http://127.0.0.1:5000${path}`),
   getInternalRequestHeaders: vi.fn(),
+  toProviderMediaUrl: vi.fn(),
 }));
 
 vi.mock('server-only', () => ({}));
@@ -33,6 +34,10 @@ vi.mock('@/lib/api-helpers', async (importOriginal) => {
     getInternalApiUrl: mocks.getInternalApiUrl,
   };
 });
+
+vi.mock('@/lib/provider-media-url', () => ({
+  toProviderMediaUrl: mocks.toProviderMediaUrl,
+}));
 
 vi.mock('@/lib/api-auth', () => ({
   getInternalRequestHeaders: mocks.getInternalRequestHeaders,
@@ -144,6 +149,9 @@ describe('POST /api/simple-chat/chat', () => {
   beforeEach(() => {
     Object.values(mocks).forEach(mock => mock.mockReset());
     mocks.getInternalApiUrl.mockImplementation((path: string) => `http://127.0.0.1:5000${path}`);
+    mocks.toProviderMediaUrl.mockImplementation(async (url: string) => (
+      url.startsWith('/api/serve-upload/') ? `https://media.example/signed${url}` : /^(https?:|data:)/.test(url) ? url : undefined
+    ));
     mocks.getInternalRequestHeaders.mockResolvedValue({
       Authorization: 'Bearer internal-test',
       'x-wujie-internal-secret': 'internal-secret',
@@ -603,6 +611,32 @@ describe('POST /api/simple-chat/chat', () => {
     expect(chatBody).toContain('1. 【偏好】喜欢蓝色');
     expect(chatBody).toContain('2. 住在杭州');
     expect(chatBody).not.toContain('[object Object]');
+  });
+
+  it('gives the model a reachable URL for stored chat images and drops unusable ones', async () => {
+    mocks.findProviderForModel.mockResolvedValue({
+      id: 'chat-provider', apiKey: 'chat-key', baseUrl: 'https://chat.example/v1', advancedParams: {},
+    });
+    let chatBody: { messages?: Array<{ content: unknown }> } = {};
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (_input, init) => {
+      chatBody = JSON.parse(String(init?.body));
+      return new Response('data: [DONE]\n\n', { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    }));
+
+    const response = await POST(imageToolRequest('http://localhost', {
+      messages: [{
+        role: 'user',
+        content: '这张图里是什么',
+        images: ['/api/serve-upload/uploads/upload-1.png', 'https://cdn.example/b.png', 'javascript:alert(1)'],
+      }],
+    }));
+    await response.text();
+
+    expect(chatBody.messages?.[1]?.content).toEqual([
+      { type: 'text', text: '这张图里是什么' },
+      { type: 'image_url', image_url: { url: 'https://media.example/signed/api/serve-upload/uploads/upload-1.png', detail: 'auto' } },
+      { type: 'image_url', image_url: { url: 'https://cdn.example/b.png', detail: 'auto' } },
+    ]);
   });
 
   it('explains a relay rejection instead of echoing the raw JSON body', async () => {

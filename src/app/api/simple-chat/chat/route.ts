@@ -9,6 +9,7 @@ import { fetchWithTimeout, getInternalApiUrl, shouldSkipV1Retry } from '@/lib/ap
 import { assertSafeProviderUrl, PoisonedApiHostError } from '@/lib/poisoned-api-host';
 import { resolveChatControls } from '@/lib/chat-generation-controls';
 import { IMAGE_ASPECT_RATIOS, describeUpstreamChatError, resolveToolAspectRatio } from '@/lib/simple-chat-upstream';
+import { toProviderMediaUrl } from '@/lib/provider-media-url';
 import { getInternalRequestHeaders } from '@/lib/api-auth';
 import { AssetServiceError, createAssetService } from '@/lib/asset-core/service';
 import { parseWorkspaceSourceTrace, type WorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
@@ -868,18 +869,31 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Uploads and generated images are stored as /api/serve-upload/... paths, which the model
+  // provider cannot open. toProviderMediaUrl only publishes managed paths (presigned, signed link
+  // or inline data); public http(s) and data URLs pass through and anything else is dropped.
+  const providerImageUrlCache = new Map<string, Promise<string | undefined>>();
+  const providerImageUrl = (url: string) => {
+    let pending = providerImageUrlCache.get(url);
+    if (!pending) {
+      pending = toProviderMediaUrl(url);
+      providerImageUrlCache.set(url, pending);
+    }
+    return pending;
+  };
+  const providerMessageImages = await Promise.all(messages.map(async (m) => {
+    const urls = (m.images || []).map(img => (agentRuntimeMode === 'agent-v2' ? canonicalSourceUrls.shift() || img : img));
+    const resolved = await Promise.all(urls.map(providerImageUrl));
+    return resolved.filter((url): url is string => Boolean(url));
+  }));
+
   // 构建消息列表
   const fullMessages = [
     { role: 'system', content: enhancedSystemPrompt },
-    ...messages.map((m) => {
+    ...messages.map((m, messageIndex) => {
       const parts: ChatContentPart[] = [{ type: 'text', text: m.content }];
-      if (m.images && m.images.length > 0) {
-        for (const img of m.images) {
-          parts.push({
-            type: 'image_url',
-            image_url: { url: agentRuntimeMode === 'agent-v2' ? canonicalSourceUrls.shift() || img : img, detail: 'auto' },
-          });
-        }
+      for (const url of providerMessageImages[messageIndex]) {
+        parts.push({ type: 'image_url', image_url: { url, detail: 'auto' } });
       }
       if (parts.length === 1) {
         return { role: m.role, content: m.content };
@@ -1131,7 +1145,8 @@ export async function POST(request: NextRequest) {
             const i2iIntent = /(这张图|这张|此图|图片|参考|改成|调整|换成|基于|类似风格|同款|根据这)/.test(userText);
             const referenceImage = userImages.length > 0 && i2iIntent ? userImages[0] : undefined;
 
-            if (!imageModel) {
+            // Without the exact provider, /api/generate may pick another model for the request.
+            if (!imageModel || !imageProviderId) {
               send({
                 type: 'tool_status',
                 tool: 'generating_image',

@@ -1786,9 +1786,13 @@ export default function ChatArea({
                 ? {
                   ...message,
                   // Keep the text the model already streamed; the status line goes underneath it.
-                  content: fullContent.trim()
-                    ? `${fullContent}\n\n*${parsed.label || '正在处理图片任务...'}*`
-                    : `*${parsed.label || '正在处理图片任务...'}*`,
+                  // A failure states the reason and the next step instead of a lingering progress line.
+                  content: [
+                    fullContent.trim() ? fullContent : '',
+                    parsed.status === 'failed'
+                      ? `${parsed.label || '图片生成失败'}\n\n建议：切换图像模型或稍后重试。`
+                      : `*${parsed.label || '正在处理图片任务...'}*`,
+                  ].filter(Boolean).join('\n\n'),
                   ...(typeof parsed.runId === 'string' ? { agentRunId: parsed.runId } : {}),
                 }
                 : message

@@ -1,7 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   PROFILE_APIMART,
+  absolutizeProviderImageUrl,
+  tryChatCompletionsImageFallback,
   PROFILE_4SAPI,
   apimartSupportsNativeMask,
   PROFILE_OPENAI,
@@ -297,5 +299,43 @@ describe('provider request contracts', () => {
     expect(body).not.toHaveProperty('width');
     expect(body).not.toHaveProperty('height');
     expect(body).not.toHaveProperty('size_px');
+  });
+});
+
+describe('absolutizeProviderImageUrl', () => {
+  it('resolves a relay-relative image path against the provider origin', () => {
+    expect(absolutizeProviderImageUrl('/v1/images/proxy/abc.png', 'https://relay.example/v1'))
+      .toBe('https://relay.example/v1/images/proxy/abc.png');
+  });
+
+  it('keeps absolute, data and blob URLs unchanged', () => {
+    expect(absolutizeProviderImageUrl('https://cdn.example/a.png', 'https://relay.example/v1')).toBe('https://cdn.example/a.png');
+    expect(absolutizeProviderImageUrl('data:image/png;base64,AAAA', 'https://relay.example')).toBe('data:image/png;base64,AAAA');
+    expect(absolutizeProviderImageUrl('blob:https://x/1', 'https://relay.example')).toBe('blob:https://x/1');
+  });
+
+  it('leaves the path alone when the provider base URL is missing or invalid', () => {
+    expect(absolutizeProviderImageUrl('/a.png', '')).toBe('/a.png');
+    expect(absolutizeProviderImageUrl('/a.png', 'not a url')).toBe('/a.png');
+  });
+});
+
+describe('tryChatCompletionsImageFallback relative image URLs', () => {
+  it('returns provider-relative images as absolute URLs on the provider origin', async () => {
+    const transport = vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ message: { content: [{ type: 'image_url', image_url: { url: '/v1/images/proxy/xyz' } }] } }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+    const urls = await tryChatCompletionsImageFallback({
+      transport: transport as unknown as typeof fetch,
+      baseUrl: 'https://relay.example/v1',
+      apiKey: 'k',
+      model: 'm',
+      prompt: 'p',
+      originalError: 'channel unavailable',
+      skipChannelCheck: true,
+    });
+
+    expect(urls).toEqual(['https://relay.example/v1/images/proxy/xyz']);
   });
 });
