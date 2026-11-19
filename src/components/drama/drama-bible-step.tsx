@@ -1,14 +1,15 @@
 'use client';
 
-import { useState } from 'react';
-import { ImagePlus, Loader2, Lock, LockOpen, Plus, Trash2 } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { History, ImagePlus, Loader2, Lock, LockOpen, Plus, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   CAST_IMAGE_RATIO, castImagePrompt, locationImagePrompt, locationImageRatio, PROP_IMAGE_RATIO, propImagePrompt,
 } from '@/lib/drama/reference-prompts';
 import type { DramaCastMember, DramaLocation, DramaProp } from '@/lib/drama/types';
 import { DEFAULT_VOICE, DRAMA_VOICES } from '@/lib/drama/voiceover';
-import { generateReferenceImage, persistImage } from '@/lib/drama/workbench-client';
+import { setSlotImage, slotHistory, type BibleSlot } from '@/lib/drama/bible-images';
+import { generateReferenceImage, persistImage, REFERENCE_IMAGE_TYPES, uploadReferenceImage } from '@/lib/drama/workbench-client';
 import {
   nextBibleId, removeCastMember, removeLocation, removeProp, updateCastMember, updateLocation, updateProp,
 } from '@/lib/drama/workbench-state';
@@ -26,31 +27,40 @@ export function DramaBibleStep() {
     return next;
   });
 
-  // Image jobs run in parallel; each card shows its own spinner.
-  const makeImage = async (key: string, prompt: string, aspectRatio: string, apply: (url: string) => void) => {
-    mark(key, true);
+  const slotKey = (slot: BibleSlot) => `${slot.id}:${slot.view}`;
+  // Image jobs run in parallel; each card shows its own spinner. The image a job replaces stays in the card's history.
+  const fillSlot = async (slot: BibleSlot, failure: string, produce: () => Promise<string>) => {
+    mark(slotKey(slot), true);
     try {
-      apply(await persistImage(await generateReferenceImage(prompt, aspectRatio)));
+      const url = await produce();
+      update(current => setSlotImage(current, slot, url));
     } catch (error) {
-      toast.error('设定图生成失败', { description: error instanceof Error ? error.message : '请稍后重试' });
+      toast.error(failure, { description: error instanceof Error ? error.message : '请稍后重试' });
     } finally {
-      mark(key, false);
+      mark(slotKey(slot), false);
     }
   };
+  const makeImage = (slot: BibleSlot, prompt: string, aspectRatio: string) =>
+    fillSlot(slot, '设定图生成失败', async () => persistImage(await generateReferenceImage(prompt, aspectRatio)));
+  const uploadImage = (slot: BibleSlot, file: File) => fillSlot(slot, '图片上传失败', () => uploadReferenceImage(file));
+  const restoreImage = (slot: BibleSlot, url: string) => update(current => setSlotImage(current, slot, url));
 
-  const castImage = (member: DramaCastMember, view: CastView) => makeImage(`${member.id}:${view}`,
-    castImagePrompt(member, view, doc.style), CAST_IMAGE_RATIO,
-    url => update(current => updateCastMember(current, member.id, view === 'front' ? { imageUrlFront: url } : { imageUrlSide: url })));
-  const locationImage = (location: DramaLocation) => makeImage(`${location.id}:plate`,
-    locationImagePrompt(location, doc.style), locationImageRatio(doc.aspectRatio),
-    url => update(current => updateLocation(current, location.id, { imageUrl: url })));
-  const propImage = (prop: DramaProp) => makeImage(`${prop.id}:sheet`,
-    propImagePrompt(prop, doc.style), PROP_IMAGE_RATIO,
-    url => update(current => updateProp(current, prop.id, { imageUrl: url })));
+  const castImage = (member: DramaCastMember, view: CastView) =>
+    makeImage({ kind: 'cast', id: member.id, view }, castImagePrompt(member, view, doc.style), CAST_IMAGE_RATIO);
+  const locationImage = (location: DramaLocation) =>
+    makeImage({ kind: 'location', id: location.id, view: 'plate' }, locationImagePrompt(location, doc.style), locationImageRatio(doc.aspectRatio));
+  const propImage = (prop: DramaProp) =>
+    makeImage({ kind: 'prop', id: prop.id, view: 'sheet' }, propImagePrompt(prop, doc.style), PROP_IMAGE_RATIO);
+  const tileActions = (slot: BibleSlot) => ({
+    busy: pending.has(slotKey(slot)),
+    history: slotHistory(doc, slot),
+    onUpload: (file: File) => void uploadImage(slot, file),
+    onRestore: (url: string) => restoreImage(slot, url),
+  });
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-8">
-      <p className="drama-label">每张定妆图按图像模型价格扣费。锁定一张后，所有出场镜头都用它做角色参考或首帧。</p>
+      <p className="drama-label">生成的定妆图按图像模型价格扣费，上传自己的图不扣积分。锁定一张后，所有出场镜头都用它做角色参考或首帧。换掉的图留在下方，可以随时换回。</p>
 
       <section aria-labelledby="drama-cast" className="flex flex-col gap-3">
         <div className="flex items-center gap-3">
@@ -89,7 +99,7 @@ export function DramaBibleStep() {
                     key={view} label={view === 'front' ? '正面' : '侧面'} ratio="2 / 3"
                     url={view === 'front' ? member.imageUrlFront : member.imageUrlSide}
                     locked={Boolean(member.lockedImageUrl) && member.lockedImageUrl === (view === 'front' ? member.imageUrlFront : member.imageUrlSide)}
-                    busy={pending.has(`${member.id}:${view}`)}
+                    {...tileActions({ kind: 'cast', id: member.id, view })}
                     disabled={!member.appearance.trim() && !member.name.trim()}
                     onGenerate={() => void castImage(member, view)}
                     onToggleLock={url => update(current => updateCastMember(current, member.id, { lockedImageUrl: member.lockedImageUrl === url ? undefined : url }))}
@@ -125,7 +135,7 @@ export function DramaBibleStep() {
               <ReferenceTile
                 label="场景图" ratio={doc.aspectRatio.replace(':', ' / ')} url={location.imageUrl}
                 locked={Boolean(location.lockedImageUrl) && location.lockedImageUrl === location.imageUrl}
-                busy={pending.has(`${location.id}:plate`)} disabled={!location.name.trim()}
+                {...tileActions({ kind: 'location', id: location.id, view: 'plate' })} disabled={!location.name.trim()}
                 onGenerate={() => void locationImage(location)}
                 onToggleLock={url => update(current => updateLocation(current, location.id, { lockedImageUrl: location.lockedImageUrl === url ? undefined : url }))}
               />
@@ -160,7 +170,7 @@ export function DramaBibleStep() {
               <ReferenceTile
                 label="道具图" ratio="1 / 1" url={prop.imageUrl}
                 locked={Boolean(prop.lockedImageUrl) && prop.lockedImageUrl === prop.imageUrl}
-                busy={pending.has(`${prop.id}:sheet`)} disabled={!prop.name.trim()}
+                {...tileActions({ kind: 'prop', id: prop.id, view: 'sheet' })} disabled={!prop.name.trim()}
                 onGenerate={() => void propImage(prop)}
                 onToggleLock={url => update(current => updateProp(current, prop.id, { lockedImageUrl: prop.lockedImageUrl === url ? undefined : url }))}
               />
@@ -177,16 +187,22 @@ export function DramaBibleStep() {
   );
 }
 
-function ReferenceTile({ label, ratio, url, locked, busy, disabled, onGenerate, onToggleLock }: {
+function ReferenceTile({ label, ratio, url, locked, busy, disabled, history, onGenerate, onUpload, onRestore, onToggleLock }: {
   label: string;
   ratio: string;
   url?: string;
   locked: boolean;
   busy: boolean;
+  /** Generating needs a name or description; uploading does not. */
   disabled: boolean;
+  /** Earlier versions, newest first. */
+  history: string[];
   onGenerate: () => void;
+  onUpload: (file: File) => void;
+  onRestore: (url: string) => void;
   onToggleLock: (url: string) => void;
 }) {
+  const picker = useRef<HTMLInputElement>(null);
   return (
     <div className="flex flex-col gap-1.5">
       <div className="relative overflow-hidden rounded-md bg-[var(--drama-ink)]" style={{ aspectRatio: ratio }}>
@@ -196,7 +212,7 @@ function ReferenceTile({ label, ratio, url, locked, busy, disabled, onGenerate, 
           : <span className="absolute inset-0 flex items-center justify-center text-xs text-[var(--drama-muted)]">{label}</span>}
         {busy ? (
           <span className="absolute inset-0 flex items-center justify-center bg-black/50" role="status">
-            <Loader2 className="h-5 w-5 animate-spin motion-reduce:animate-none" /><span className="sr-only">正在生成{label}</span>
+            <Loader2 className="h-5 w-5 animate-spin motion-reduce:animate-none" /><span className="sr-only">正在处理{label}</span>
           </span>
         ) : null}
         {locked ? <span className="absolute left-1 top-1 rounded bg-[var(--drama-green)] px-1.5 py-0.5 text-[11px] text-[var(--drama-ink)]">已锁定</span> : null}
@@ -205,12 +221,38 @@ function ReferenceTile({ label, ratio, url, locked, busy, disabled, onGenerate, 
         <button type="button" className="drama-btn flex-1 px-2 text-xs" disabled={busy || disabled} onClick={onGenerate}>
           <ImagePlus className="h-3.5 w-3.5" />{url ? '重新生成' : `生成${label}`}
         </button>
+        <input ref={picker} type="file" accept={REFERENCE_IMAGE_TYPES} className="sr-only" tabIndex={-1} aria-hidden="true"
+          onChange={event => {
+            const file = event.target.files?.[0];
+            event.target.value = '';
+            if (file) onUpload(file);
+          }} />
+        <button type="button" className="drama-btn px-2" disabled={busy} aria-label={`上传${label}`} title="上传自己的图，不扣积分"
+          onClick={() => picker.current?.click()}>
+          <Upload className="h-3.5 w-3.5" />
+        </button>
         {url ? (
           <button type="button" className="drama-btn px-2" aria-pressed={locked} aria-label={locked ? `取消锁定${label}` : `锁定${label}`} onClick={() => onToggleLock(url)}>
             {locked ? <Lock className="h-3.5 w-3.5" /> : <LockOpen className="h-3.5 w-3.5" />}
           </button>
         ) : null}
       </div>
+      {history.length ? (
+        <div className="flex items-center gap-1" role="group" aria-label={`${label}的旧版本`}>
+          <History className="h-3.5 w-3.5 shrink-0 text-[var(--drama-muted)]" aria-hidden="true" />
+          <ul className="flex min-w-0 gap-1 overflow-x-auto">
+            {history.map((old, i) => (
+              <li key={old} className="shrink-0">
+                <button type="button" className="block h-9 w-9 overflow-hidden rounded border border-[var(--drama-line)] hover:border-[var(--drama-gold)]"
+                  disabled={busy} aria-label={`换回${label}第 ${i + 1} 个旧版本`} title="换回这一版，当前的图会留在这里" onClick={() => onRestore(old)}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={old} alt="" className="h-full w-full object-cover" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </div>
   );
 }

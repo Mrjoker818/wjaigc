@@ -256,6 +256,35 @@ export async function persistImage(url: string, fetcher: WorkbenchFetch = defaul
   }
 }
 
+/** Image types the upload route accepts; the file picker offers only these. */
+export const REFERENCE_IMAGE_TYPES = 'image/png,image/jpeg,image/webp,image/gif,image/bmp,image/avif';
+
+/** The upload route answers in English; these say what to change in the user's words. */
+function uploadError(status: number, message: unknown): string {
+  const text = typeof message === 'string' ? message : '';
+  const size = /max (\d+)MB/i.exec(text);
+  if (size) return `图片超过 ${size[1]}MB，压缩后再上传`;
+  if (/dimension|edge|too large|pixels/i.test(text)) return '图片尺寸太大，缩小后再上传';
+  if (/format|raster|does not match|allowed/i.test(text)) return '只能上传 PNG、JPG、WebP、GIF、BMP 或 AVIF 图片';
+  if (status === 401) return '登录已过期，刷新页面重新登录后再上传';
+  return '图片上传失败，请稍后重试';
+}
+
+/** Uploads a reference image the user picked and returns its stored URL. Costs no credits. */
+export async function uploadReferenceImage(file: File, fetcher: WorkbenchFetch = defaultFetch): Promise<string> {
+  const body = new FormData();
+  body.append('file', file);
+  let response: Response;
+  try {
+    response = await fetcher('/api/upload', { method: 'POST', body });
+  } catch {
+    throw new Error('网络中断，图片没有上传，请重试');
+  }
+  const data = await readJson(response);
+  if (!response.ok || typeof data.url !== 'string' || !data.url) throw new Error(uploadError(response.status, data.error));
+  return data.url;
+}
+
 /** Records one line with the admin's text-to-speech model through /api/audio/generate. Costs no credits. */
 export async function generateVoiceover(text: string, voice: string, fetcher: WorkbenchFetch = defaultFetch): Promise<string> {
   const response = await fetcher('/api/audio/generate', {

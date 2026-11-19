@@ -1,6 +1,7 @@
 /** Validation for drama documents saved by the client. Unknown fields on shots/cast are kept for forward compatibility. */
 import { z } from 'zod';
 import { DIRECTOR_STYLE_IDS } from '@/lib/video-director/director-styles';
+import { MAX_IMAGE_HISTORY } from './bible-images';
 import { DRAMA_TRANSITIONS } from './render';
 import { DRAMA_PROJECT_SCHEMA_ID, MAX_SHOTS_PER_EPISODE, type DramaProjectV1 } from './types';
 
@@ -61,9 +62,10 @@ const episode = z.looseObject({
   message: 'DRAMA_TOO_MANY_SHOTS',
 });
 
-const castMember = z.looseObject({ id, name: text(200), appearance: text(4000), voice: text(128).optional() });
-const location = z.looseObject({ id, name: text(200) });
-const prop = z.looseObject({ id, name: text(200) });
+const imageHistory = z.partialRecord(z.enum(['front', 'side', 'plate', 'sheet']), z.array(text(4096)).max(MAX_IMAGE_HISTORY)).optional();
+const castMember = z.looseObject({ id, name: text(200), appearance: text(4000), voice: text(128).optional(), imageHistory });
+const location = z.looseObject({ id, name: text(200), imageHistory });
+const prop = z.looseObject({ id, name: text(200), imageHistory });
 
 export const dramaProjectSchema = z.object({
   schemaId: z.literal(DRAMA_PROJECT_SCHEMA_ID),

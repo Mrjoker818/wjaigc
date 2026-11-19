@@ -53,6 +53,7 @@ beforeEach(() => {
     if (url === '/api/drama/from-chat') return json({ success: true, project: { id: 'drama_1', projectId: 'p1', title: doc.title, doc, version: 1, createdAt: 1, updatedAt: 1 } }, 201);
     if (url === '/api/drama/projects' && init?.method === 'POST') return json({ success: true, project: { id: 'drama_1', projectId: 'p1', title: body.doc.title, doc: body.doc, version: 1, createdAt: 1, updatedAt: 1 } }, 201);
     if (url === '/api/drama/estimate') return json({ success: true, total: 50, perShot: { s2: 50 }, balance: 20 });
+    if (url === '/api/upload') return json({ success: true, url: `/u/upload-${requests.filter(r => r.url === '/api/upload').length}.png` });
     return json({ error: 'unexpected' }, 500);
   }));
 });
@@ -142,5 +143,25 @@ describe('drama workbench', () => {
     fireEvent.click(panel.getAllByRole('checkbox', { name: '要做' })[0]);
     fireEvent.click(panel.getAllByRole('checkbox', { name: '要做' })[1]);
     expect(panel.getByRole('button', { name: '花约 50 积分开始' })).toBeTruthy();
+  });
+
+  it('uploads a reference image without credits and keeps the replaced one to restore', async () => {
+    render(<DramaWorkbench dramaId="drama_1" projectId="p1" onDramaIdChange={() => undefined} onExit={() => undefined} />);
+    await screen.findByRole('heading', { name: /咖啡馆·内·夜/ });
+    goTo(/^2\s*设定/);
+    const upload = (n: number) => {
+      const input = document.querySelectorAll<HTMLInputElement>('input[type="file"]')[0];
+      fireEvent.change(input, { target: { files: [new File([new Uint8Array([n])], `me${n}.png`, { type: 'image/png' })] } });
+    };
+    upload(1);
+    expect(await screen.findByRole('img', { name: '正面定妆图' })).toBeTruthy();
+    upload(2);
+    const restore = await screen.findByRole('button', { name: '换回正面第 1 个旧版本' });
+    await waitFor(() => expect(saved?.cast[0].imageUrlFront).toBe('/u/upload-2.png'), { timeout: 3000 });
+    expect(saved?.cast[0].imageHistory).toEqual({ front: ['/u/upload-1.png'] });
+    fireEvent.click(restore);
+    await waitFor(() => expect(saved?.cast[0].imageUrlFront).toBe('/u/upload-1.png'), { timeout: 3000 });
+    expect(saved?.cast[0].imageHistory).toEqual({ front: ['/u/upload-2.png'] });
+    expect(requests.some(r => r.url === '/api/generate')).toBe(false);
   });
 });
