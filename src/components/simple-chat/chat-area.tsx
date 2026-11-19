@@ -445,25 +445,42 @@ export default function ChatArea({
     return tags;
   }
 
+  // ===== 单张图片持久化上传（base64 兜底），避免 data URL 进入对话历史 =====
+  const uploadOneImage = useCallback(async (file: File): Promise<ChatAttachment> => {
+    const id = Math.random().toString(36).slice(2, 10);
+    const name = file.name || `粘贴图片-${Date.now()}.png`;
+    const mimeType = file.type || 'image/png';
+    // 1) 优先上传换取持久化 URL
+    try {
+      const form = new FormData();
+      form.append('file', file, name);
+      const resp = await fetch('/api/save-image', { method: 'POST', body: form });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data?.url) {
+          return { id, type: 'image' as const, name, url: data.url as string, mimeType };
+        }
+      }
+    } catch { /* 上传失败则回退 base64 */ }
+    // 2) 回退：读取为 data URL（保证离线可用）
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+    return { id, type: 'image' as const, name, url: dataUrl, mimeType };
+  }, []);
+
   // ===== 图片上传统一入口（按钮/粘贴/拖拽共用） =====
   const handleImageFiles = useCallback((files: File[]) => {
     const imageFiles = files.filter(f => f.type.startsWith('image/'));
     if (imageFiles.length === 0) return;
-    imageFiles.forEach(file => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const dataUrl = reader.result as string;
-        setUploadedImages(prev => [...prev, {
-          id: Math.random().toString(36).slice(2, 10),
-          type: 'image' as const,
-          name: file.name || `粘贴图片-${Date.now()}.png`,
-          url: dataUrl,
-          mimeType: file.type || 'image/png',
-        }]);
-      };
-      reader.readAsDataURL(file);
+    imageFiles.forEach(async file => {
+      const att = await uploadOneImage(file);
+      setUploadedImages(prev => [...prev, att]);
     });
-  }, []);
+  }, [uploadOneImage]);
 
   // Ctrl+V 粘贴图片
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
@@ -1741,17 +1758,8 @@ export default function ChatArea({
             <input id="chat-file-upload" type="file" accept="image/*" multiple className="hidden"
               onChange={e => {
                 const files = Array.from(e.target.files || []);
-                files.forEach(f => {
-                  const reader = new FileReader();
-                  reader.onload = ev => {
-                    setUploadedImages(prev => [...prev, {
-                      id: Math.random().toString(36).slice(2, 10),
-                      type: 'image', name: f.name, mimeType: f.type,
-                      url: ev.target?.result as string
-                    }]);
-                  };
-                  reader.readAsDataURL(f);
-                });
+                handleImageFiles(files);
+                e.target.value = '';
               }} />
           </div>
           <p className="text-xs text-muted-foreground/50 text-center mt-2 flex items-center justify-center gap-3">
