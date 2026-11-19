@@ -145,6 +145,16 @@ describe('drama workbench', () => {
     expect(requests.find(r => r.method === 'PUT')?.body).toMatchObject({ version: 1 });
   });
 
+  it('asks for the drama\'s canvas project when it was opened without one', async () => {
+    const onOpenDramaProject = vi.fn();
+    const { rerender } = render(<DramaWorkbench dramaId="drama_1" onDramaIdChange={() => undefined} onExit={() => undefined}
+      onOpenDramaProject={onOpenDramaProject} />);
+    await waitFor(() => expect(onOpenDramaProject).toHaveBeenCalledWith('p1'));
+    rerender(<DramaWorkbench dramaId="drama_1" projectId="p1" onDramaIdChange={() => undefined} onExit={() => undefined}
+      onOpenDramaProject={onOpenDramaProject} />);
+    expect(onOpenDramaProject).toHaveBeenCalledTimes(1);
+  });
+
   it('blocks rendering while a shot has no video and explains why', async () => {
     render(<DramaWorkbench dramaId="drama_1" projectId="p1" onDramaIdChange={() => undefined} onExit={() => undefined} />);
     await screen.findByRole('heading', { name: /咖啡馆·内·夜/ });

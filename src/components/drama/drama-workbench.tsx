@@ -22,6 +22,8 @@ export interface DramaWorkbenchProps {
   /** Canvas project the drama belongs to. */
   projectId?: string;
   onDramaIdChange: (id: string | null) => void;
+  /** Called when the opened drama belongs to a canvas project but none is loaded, e.g. from a `/video?dramaId=` link. */
+  onOpenDramaProject?: (projectId: string) => void;
   onExit: () => void;
   /** Platform switcher shown in place of the back button. */
   switcher?: ReactNode;
@@ -38,9 +40,14 @@ export interface DramaWorkbenchProps {
 type LoadState = { status: 'loading' } | { status: 'ready'; record: DramaProjectRecord } | { status: 'error'; message: string };
 
 export default function DramaWorkbench(props: DramaWorkbenchProps) {
-  const { dramaId, projectId, onDramaIdChange } = props;
+  const { dramaId, projectId, onDramaIdChange, onOpenDramaProject } = props;
   const [state, setState] = useState<LoadState>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
+  const dramaProjectId = state.status === 'ready' ? state.record.projectId : null;
+
+  useEffect(() => {
+    if (dramaProjectId && !projectId) onOpenDramaProject?.(dramaProjectId);
+  }, [dramaProjectId, projectId, onOpenDramaProject]);
 
   useEffect(() => {
     if (!dramaId) return;

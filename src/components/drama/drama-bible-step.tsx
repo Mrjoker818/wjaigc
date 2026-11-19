@@ -245,10 +245,10 @@ function ReferenceTile({ label, ratio, url, locked, busy, disabled, history, onG
         ) : null}
       </div>
       <div className="flex gap-1">
-        {/* Three buttons share a narrow tile once an image exists, so the visible label stays short and on one line. */}
+        {/* Four buttons share a narrow tile once an image exists, so redrawing shows only its icon then. */}
         <button type="button" className="drama-btn min-w-0 flex-1 whitespace-nowrap px-2 text-xs" disabled={busy || disabled} onClick={onGenerate}
-          aria-label={url ? `重新生成${label}` : undefined}>
-          <ImagePlus className="h-3.5 w-3.5 shrink-0" />{url ? '重画' : `生成${label}`}
+          aria-label={url ? `重新生成${label}` : undefined} title={url ? '重画，会扣积分' : undefined}>
+          <ImagePlus className="h-3.5 w-3.5 shrink-0" />{url ? null : `生成${label}`}
         </button>
         <input ref={picker} type="file" accept={REFERENCE_IMAGE_TYPES} className="sr-only" tabIndex={-1} aria-hidden="true"
           onChange={event => {

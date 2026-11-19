@@ -4879,8 +4879,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
         toast.info('画布上已经有这张图');
         return;
       }
-      void handleAddImages([image.url]).then(
-        () => toast.success(image.name ? `${image.name}已添加到画布` : '图片已添加到画布'),
+      void handleAddImages([image.url]).catch(
         error => toast.error('图片添加到画布失败', { description: error instanceof Error ? error.message : '请稍后重试' }),
       );
     });
@@ -7257,6 +7256,19 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
     if (appMode === 'drama' && currentUser && !videoEnabled) setAppMode(currentProject ? 'canvas' : 'dashboard');
   }, [appMode, currentUser, currentProject, videoEnabled]);
   // Canvas and video share this page, so switching between them keeps the loaded project; chat is another page.
+  // A `/video?dramaId=` link opens the drama without its canvas project; load that project once the
+  // background client hydration has set the user, so its canvas can take placed images and feed the picker.
+  const [dramaProjectId, setDramaProjectId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!dramaProjectId || currentProject || initialProjectIdRef.current || !currentUser) return;
+    const mgr = UserManagerCore.getInstance();
+    if (mgr.getCurrentUserId() !== currentUser.id) return;
+    let live = true;
+    void mgr.waitForProjectHydration(currentUser.id).then(() => {
+      if (live) void loadProjectById(dramaProjectId);
+    });
+    return () => { live = false; };
+  }, [dramaProjectId, currentProject, currentUser, loadProjectById]);
   const navigatePlatform = useCallback((platform: 'canvas' | 'video' | 'chat'): boolean => {
     if (platform === 'video') { safeSwitchMode('drama'); return true; }
     if (platform === 'canvas') { setAppMode(currentProject ? 'canvas' : 'dashboard'); return true; }
@@ -7338,10 +7350,12 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
           dramaId={activeDramaId}
           projectId={currentProject?.id}
           onDramaIdChange={setActiveDramaId}
+          onOpenDramaProject={setDramaProjectId}
           onExit={() => setAppMode('canvas')}
-          onPlaceOnCanvas={film => { setPendingCanvasFilm(film); setAppMode('canvas'); }}
-          onPlaceImageOnCanvas={image => { setPendingCanvasImage(image); setAppMode('canvas'); }}
-          canvasMedia={images}
+          // Without a loaded canvas project there is no canvas to place into.
+          onPlaceOnCanvas={currentProject ? film => { setPendingCanvasFilm(film); setAppMode('canvas'); } : undefined}
+          onPlaceImageOnCanvas={currentProject ? image => { setPendingCanvasImage(image); setAppMode('canvas'); } : undefined}
+          canvasMedia={currentProject ? images : undefined}
           chatHandoff={dramaChatHandoff}
           onChatHandoffDone={clearDramaChatHandoff}
         />
