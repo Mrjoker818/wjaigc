@@ -23,6 +23,9 @@ async function readJson(response: Response): Promise<Record<string, unknown>> {
 
 const text = (value: unknown): string | undefined => (typeof value === 'string' && value ? value : undefined);
 
+/** Render tasks live in the server's memory, so a restart mid-render leaves the poll with "not found". */
+export const RENDER_LOST = '渲染中断了：服务器在渲染途中重启过。渲染不扣积分，点「渲染成片」重新开始即可。';
+
 /** Polls a render task until it settles. Rejects with the server's message when the render fails. */
 export async function waitForRender(taskId: string, options: RenderClientOptions = {}): Promise<RenderResult> {
   const fetcher = options.fetch ?? ((input, init) => fetch(input, init));
@@ -51,7 +54,9 @@ export async function waitForRender(taskId: string, options: RenderClientOptions
       };
     }
     if (['failed', 'cancelled', 'timeout'].includes(String(data.status))) {
-      throw new Error(text(data.error) ?? '成片渲染失败，请确认所有镜头视频都能正常播放后重试');
+      const message = text(data.error);
+      if (message && /不存在或已过期/u.test(message)) throw new Error(RENDER_LOST);
+      throw new Error(message ?? '成片渲染失败，请确认所有镜头视频都能正常播放后重试');
     }
     if (typeof data.progress === 'number') options.onProgress?.(data.progress, text(data.label));
   }

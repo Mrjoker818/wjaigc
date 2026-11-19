@@ -39,6 +39,17 @@ export function shotCapabilityFromDescriptor(descriptor: TaskModelDescriptor | u
   };
 }
 
+export const VOICE_MODEL_MISSING = '后台还没有可用的语音模型，请管理员在供应商设置里添加一个语音（TTS）模型后再生成配音。';
+
+/**
+ * Whether the admin configured a speech model; without one every voiceover fails the same way.
+ * While the catalog loads, or when it cannot be read, the workbench lets the request through and shows the server's answer.
+ */
+export function useDramaVoiceAvailable(): boolean {
+  const { models, loading, error } = useTaskModelCatalog('audio');
+  return loading || Boolean(error) || models.length > 0;
+}
+
 /** One image model the workbench can draw keyframes with. */
 export interface DramaImageModelOption {
   key: string;

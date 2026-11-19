@@ -12,6 +12,7 @@ import type { DramaMusic } from '@/lib/drama/types';
 import { uploadDramaMusic } from '@/lib/drama/workbench-client';
 import { pendingShots } from '@/lib/drama/workbench-state';
 import { DramaAutopilot } from './drama-autopilot';
+import { VOICE_MODEL_MISSING } from './drama-models';
 import { useDrama } from './drama-context';
 import { EpisodeReadiness } from './drama-readiness';
 
@@ -19,7 +20,7 @@ const TRANSITION_LABEL: Record<DramaTransition, string> = { cut: '硬切', fade:
 
 /** Step 5: transition and subtitle choices, then the rendered film. Rendering itself runs in the background and costs no credits. */
 export function DramaFinalStep() {
-  const { doc, episode, update, render, renderEpisode, onPlaceOnCanvas, voiceoverShotIds, generateVoiceovers } = useDrama();
+  const { doc, episode, update, render, renderEpisode, onPlaceOnCanvas, voiceoverShotIds, generateVoiceovers, voiceAvailable } = useDrama();
   if (!episode) return <p className="drama-label">先在剧本步骤写好分集。</p>;
   const missing = pendingShots(episode).length;
   const blocks = buildTimeline(doc, episode.id);
@@ -61,12 +62,14 @@ export function DramaFinalStep() {
         </label>
         {spoken.length ? (
           <div className="flex flex-wrap items-center gap-3">
-            <button type="button" className="drama-btn" disabled={recording || unvoiced.length === 0}
+            <button type="button" className="drama-btn" disabled={recording || unvoiced.length === 0 || !voiceAvailable}
               onClick={() => void generateVoiceovers(unvoiced.map(shot => shot.id))}>
               {recording ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <Mic className="h-4 w-4" />}
               {recording ? '正在生成配音' : unvoiced.length ? `为 ${unvoiced.length} 句台词生成配音` : '台词都已配音'}
             </button>
-            <span className="drama-label font-mono">已配音 {voiced}/{spoken.length} · 不扣积分，渲染时混进成片</span>
+            {voiceAvailable
+              ? <span className="drama-label font-mono">已配音 {voiced}/{spoken.length} · 不扣积分，渲染时混进成片</span>
+              : <span className="text-xs text-[var(--drama-red)]">{VOICE_MODEL_MISSING}</span>}
           </div>
         ) : null}
         <MusicSettings />

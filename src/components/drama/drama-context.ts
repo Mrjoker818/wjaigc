@@ -83,6 +83,8 @@ export interface DramaWorkbenchApi {
   /** Fills the quoted gaps stage by stage; refuses when the episode gained paid work since the quote. */
   runAutopilot: (quote: AutopilotQuote, choices: AutopilotChoices) => Promise<void>;
   stopAutopilot: () => void;
+  /** The admin has a speech model; without one voiceovers cannot be recorded. */
+  voiceAvailable: boolean;
   onPlaceOnCanvas?: (result: { videoUrl: string; thumbnailUrl?: string; duration?: number; aspectRatio?: string }) => void;
 }
 

@@ -6,9 +6,10 @@ import { setSceneShots } from '@/lib/drama/workbench-state';
 import type { DramaProjectV1, DramaShot } from '@/lib/drama/types';
 
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
+const catalog = vi.hoisted(() => ({ voice: true }));
 vi.mock('@/hooks/use-task-model-catalog', () => ({
-  useTaskModelCatalog: () => ({
-    models: [{ id: 'kling', name: 'Kling', providerId: 'pear', providerName: 'Pear', isDefault: true }],
+  useTaskModelCatalog: (type: string) => ({
+    models: type === 'audio' && !catalog.voice ? [] : [{ id: 'kling', name: 'Kling', providerId: 'pear', providerName: 'Pear', isDefault: true }],
     descriptorsByKey: new Map([['pear::kling', { supportedOperations: ['text-to-video', 'image-to-video'], supportsReferenceImages: true, maxReferenceImages: 2, allowedDurationsSeconds: [5, 10] }]]),
     loading: false, error: null, reload: async () => undefined,
   }),
@@ -37,6 +38,7 @@ let requests: Array<{ url: string; method: string; body: unknown }>;
 let saved: DramaProjectV1 | null;
 
 beforeEach(() => {
+  catalog.voice = true;
   requests = [];
   saved = null;
   const doc = projectDoc();
@@ -225,5 +227,32 @@ describe('drama workbench', () => {
 
     fireEvent.click(panel.getByRole('checkbox', { name: '成片里用首帧加运镜代替视频' }));
     await waitFor(() => expect(saved?.episodes[0].scenes[0].shots[1]).not.toHaveProperty('still'), { timeout: 3000 });
+  });
+  it('uploads a first frame without credits, which then offers the still', async () => {
+    render(<DramaWorkbench dramaId="drama_1" projectId="p1" onDramaIdChange={() => undefined} onExit={() => undefined} />);
+    await screen.findByRole('heading', { name: /咖啡馆·内·夜/ });
+    fireEvent.click(screen.getByRole('button', { name: '镜头 2，场 1，5 秒，待拍' }));
+    const inspector = within(await screen.findByRole('complementary', { name: '镜头检查器' }));
+    expect(inspector.queryByRole('region', { name: '静帧镜头' })).toBeNull();
+    expect(inspector.getByRole('button', { name: '上传首帧' })).toBeTruthy();
+    const input = inspector.getByRole('region', { name: '关键帧' }).querySelector<HTMLInputElement>('input[type="file"]')!;
+    fireEvent.change(input, { target: { files: [new File([new Uint8Array([1])], 'f.png', { type: 'image/png' })] } });
+    expect(await inspector.findByRole('img', { name: '这一镜的关键帧' })).toBeTruthy();
+    expect(inspector.getByRole('region', { name: '静帧镜头' })).toBeTruthy();
+    await waitFor(() => expect(saved?.episodes[0].scenes[0].shots[1].firstFrameUrl).toBe('/u/upload-1.png'), { timeout: 3000 });
+    expect(requests.some(r => r.url === '/api/generate')).toBe(false);
+  });
+
+  it('says a voice model is missing instead of sending lines that will fail', async () => {
+    catalog.voice = false;
+    render(<DramaWorkbench dramaId="drama_1" projectId="p1" onDramaIdChange={() => undefined} onExit={() => undefined} />);
+    await screen.findByRole('heading', { name: /咖啡馆·内·夜/ });
+    goTo(/^5\s*成片/);
+    expect((screen.getByRole('button', { name: '为 1 句台词生成配音' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/后台还没有可用的语音模型/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '清点还缺什么' }));
+    const panel = within(screen.getByRole('region', { name: '一键成片' }));
+    expect(await panel.findByText('后台没有语音模型，跳过')).toBeTruthy();
+    expect(requests.some(r => r.url === '/api/audio/generate')).toBe(false);
   });
 });

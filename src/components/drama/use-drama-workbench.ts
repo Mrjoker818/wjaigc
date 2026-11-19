@@ -18,7 +18,7 @@ import {
 import { findShot, fitDuration, pendingShots, setSceneShots, updateShot, upsertTake } from '@/lib/drama/workbench-state';
 import { shotVoice } from '@/lib/drama/voiceover';
 import type { DramaStep, DramaWorkbenchApi, RenderState, SaveState } from './drama-context';
-import { useDramaImageModels, useDramaVideoModels, type DramaModelOption } from './drama-models';
+import { useDramaImageModels, useDramaVideoModels, useDramaVoiceAvailable, VOICE_MODEL_MISSING, type DramaModelOption } from './drama-models';
 
 const SAVE_DELAY_MS = 1200;
 const MODEL_STORAGE_KEY = 'wujie-drama-video-model';
@@ -299,6 +299,7 @@ export function useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onOpenCr
 
   // --- Keyframes: the opening still of each shot, drawn with an image model ---
   const { models: imageModels } = useDramaImageModels();
+  const voiceAvailable = useDramaVoiceAvailable();
   const [imageModelKey, setImageModelKeyState] = useState(readStoredImageModel);
   const imageModel = imageModels.find(model => model.key === imageModelKey) ?? imageModels.find(model => model.isDefault) ?? imageModels[0];
   const setImageModelKey = useCallback((key: string) => {
@@ -374,6 +375,7 @@ export function useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onOpenCr
 
   const generateVoiceovers = useCallback(async (shotIds: string[]) => {
     const life = lifeRef.current;
+    if (!voiceAvailable) { toast.error('还不能生成配音', { description: VOICE_MODEL_MISSING }); return; }
     const queue = shotIds.filter(id => !voiceoverRef.current.has(id) && findShot(docRef.current, id)?.shot.dialogue?.trim());
     if (!life || queue.length === 0) return;
     queue.forEach(id => markVoiceover(id, true));
@@ -410,7 +412,7 @@ export function useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onOpenCr
     else if (completed) toast.error(`${completed} 段配音已生成，${failed} 段失败`, { description: lastError });
     else toast.error('配音生成失败', { description: lastError });
     void flushSave();
-  }, [flushSave, markVoiceover, update]);
+  }, [flushSave, markVoiceover, update, voiceAvailable]);
 
   const keyframeRequest = useMemo<ShotEstimateRequest[]>(() => {
     if (!imageModel || !episode) return [];
@@ -644,7 +646,7 @@ export function useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onOpenCr
         }
       }
       if (signal.aborted) return;
-      if (choices.voiceover && open().voiceovers.length) {
+      if (choices.voiceover && voiceAvailable && open().voiceovers.length) {
         enter('voiceover');
         await latestRef.current.generateVoiceovers(open().voiceovers);
       }
@@ -667,7 +669,7 @@ export function useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onOpenCr
         else if (finished && !choices.render) toast.success('一键成片已完成', { description: '镜头都已备齐，可以在成片步骤渲染。' });
       }
     }
-  }, [drawBible, needsKeyframe]);
+  }, [drawBible, needsKeyframe, voiceAvailable]);
 
   const stopAutopilot = useCallback(() => {
     autopilotRef.current?.abort();
@@ -681,7 +683,7 @@ export function useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onOpenCr
     imageModels, imageModel, setImageModelKey, keyframeShotIds, generateKeyframes, voiceoverShotIds, generateVoiceovers,
     keyframeEstimate, busyLabel, runJob,
     dramaId: record.id, projectId, saveState, flushSave, render, renderEpisode, onPlaceOnCanvas,
-    autopilot, quoteAutopilot, runAutopilot, stopAutopilot,
+    autopilot, quoteAutopilot, runAutopilot, stopAutopilot, voiceAvailable,
   };
 }
 

@@ -17,15 +17,18 @@ interface StageRow {
   /** Credits; null for free stages. */
   credits: number | null | undefined;
   choice?: keyof AutopilotChoices;
+  /** Why the stage cannot run; it is then skipped. */
+  unavailable?: string;
 }
 
-function rows(quote: AutopilotQuote): StageRow[] {
+function rows(quote: AutopilotQuote, voiceAvailable: boolean): StageRow[] {
   const { plan, credits } = quote;
   return [
     { stage: 'bible', label: '设定图', unit: '张', count: plan.bible.length, credits: credits.bible, choice: 'bible' },
     { stage: 'keyframes', label: '关键帧', unit: '张', count: plan.keyframes.length, credits: credits.keyframes, choice: 'keyframes' },
     { stage: 'shots', label: '镜头视频', unit: '个', count: plan.shots.length, credits: credits.shots },
-    { stage: 'voiceover', label: '配音', unit: '句', count: plan.voiceovers.length, credits: null, choice: 'voiceover' },
+    { stage: 'voiceover', label: '配音', unit: '句', count: plan.voiceovers.length, credits: null, choice: 'voiceover',
+      ...(voiceAvailable ? {} : { unavailable: '后台没有语音模型，跳过' }) },
     { stage: 'render', label: '渲染成片', unit: '', count: 1, credits: null, choice: 'render' },
   ];
 }
@@ -34,7 +37,7 @@ const priceText = (row: StageRow) => (row.credits === null ? '不扣积分' : ro
 
 /** Final step panel: price everything the episode still lacks, then fill it in one run. */
 export function DramaAutopilot() {
-  const { doc, episode, autopilot, quoteAutopilot, runAutopilot, stopAutopilot, busyLabel, batchRunning, render } = useDrama();
+  const { doc, episode, autopilot, quoteAutopilot, runAutopilot, stopAutopilot, busyLabel, batchRunning, render, voiceAvailable } = useDrama();
   const [quote, setQuote] = useState<AutopilotQuote | null>(null);
   const [quoting, setQuoting] = useState(false);
   const [choices, setChoices] = useState<AutopilotChoices>(ALL_CHOSEN);
@@ -44,10 +47,10 @@ export function DramaAutopilot() {
   const shown = running ? autopilot.quote : quote?.episodeId === episode.id ? quote : null;
   const busy = Boolean(busyLabel) || batchRunning || render.status === 'rendering';
   const done = shown ? autopilotDone(shown, autopilotPlan(doc, shown.episodeId)) : null;
-  const active = running ? autopilot.choices : choices;
+  const active = { ...(running ? autopilot.choices : choices), ...(voiceAvailable ? {} : { voiceover: false }) };
   const total = shown ? quoteTotal(shown, active) : undefined;
   const short = shown?.balance !== undefined && total !== undefined ? Math.max(0, total - shown.balance) : 0;
-  const nothingToDo = shown ? shown.plan.bible.length + shown.plan.keyframes.length + shown.plan.shots.length + shown.plan.voiceovers.length === 0 : false;
+  const nothingToDo = shown ? shown.plan.bible.length + shown.plan.keyframes.length + shown.plan.shots.length + (voiceAvailable ? shown.plan.voiceovers.length : 0) === 0 : false;
 
   const ask = async () => {
     setQuoting(true);
@@ -60,7 +63,7 @@ export function DramaAutopilot() {
   };
   const start = async () => {
     if (!shown) return;
-    await runAutopilot(shown, choices);
+    await runAutopilot(shown, active);
     setQuote(null);
   };
 
@@ -73,7 +76,7 @@ export function DramaAutopilot() {
 
       {shown ? (
         <ol className="flex flex-col divide-y divide-[var(--drama-line)] rounded-md border border-[var(--drama-line)]">
-          {rows(shown).map(row => {
+          {rows(shown, voiceAvailable).map(row => {
             const chosen = row.choice ? active[row.choice] : true;
             const current = running && autopilot.stage === row.stage;
             const finished = row.stage !== 'render' && done ? done[row.stage] : 0;
@@ -89,11 +92,11 @@ export function DramaAutopilot() {
                   {row.stage === 'render' ? '' : empty ? '已备齐' : running ? `${finished}/${row.count} ${row.unit}` : `${row.count} ${row.unit}`}
                 </span>
                 <span className={`flex-1 font-mono text-xs ${row.credits === undefined && !empty ? 'text-[var(--drama-red)]' : 'text-[var(--drama-muted)]'}`}>
-                  {empty ? '' : priceText(row)}
+                  {empty ? '' : row.unavailable ?? priceText(row)}
                 </span>
                 {row.choice ? (
                   <label className="flex items-center gap-1.5 text-xs">
-                    <input type="checkbox" checked={chosen} disabled={running || empty}
+                    <input type="checkbox" checked={chosen} disabled={running || empty || Boolean(row.unavailable)}
                       onChange={event => setChoices(previous => ({ ...previous, [row.choice!]: event.target.checked }))} />
                     {row.stage === 'render' ? '最后渲染' : '要做'}
                   </label>

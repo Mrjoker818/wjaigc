@@ -1,13 +1,14 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Film, ImagePlus, Loader2, Mic, RotateCcw, Scissors, Stethoscope, X } from 'lucide-react';
+import { toast } from 'sonner';
+import { Film, ImagePlus, Loader2, Mic, RotateCcw, Scissors, Stethoscope, Upload, X } from 'lucide-react';
 import { mentionCandidates, mergeMentionIds } from '@/lib/drama/mentions';
 import { CLIP_SPEED_RANGE, CLIP_VOLUME_MAX, MIN_CLIP_SEC, STILL_MOTIONS, type StillMotion } from '@/lib/drama/render';
 import { shotFilmLength } from '@/lib/drama/timeline';
 import { activeTake, type DramaClipEdit, type DramaShot } from '@/lib/drama/types';
 import { chooseFirstFrame, chooseLastFrame, shotReferenceImages } from '@/lib/drama/shot-runner';
-import { applyRetakeSuggestion, estimateShots } from '@/lib/drama/workbench-client';
+import { applyRetakeSuggestion, estimateShots, REFERENCE_IMAGE_TYPES, uploadReferenceImage } from '@/lib/drama/workbench-client';
 import { currentVoiceover, shotSpeaker } from '@/lib/drama/voiceover';
 import { findShot, fitDuration, orderedPrevious, updateShot } from '@/lib/drama/workbench-state';
 import { diagnoseFailure, listFailureTypes, type VideoFailureType } from '@/lib/video-director/retake-diagnosis';
@@ -51,6 +52,7 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
     keyframeShotIds, generateKeyframes, imageModel, voiceoverShotIds, generateVoiceovers,
   } = useDrama();
   const [failure, setFailure] = useState<VideoFailureType | ''>('');
+  const [uploading, setUploading] = useState<ReadonlySet<'first' | 'last'>>(() => new Set());
   const found = findShot(doc, shotId);
   if (!found) return null;
   const { shot, episode } = found;
@@ -68,6 +70,18 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
   const diagnosis = failure ? diagnoseFailure(failure) : null;
   const running = runningShotIds.has(shot.id);
   const set = (patch: Parameters<typeof updateShot>[2]) => update(current => updateShot(current, shot.id, patch));
+  // Uploading a frame is free, so a shot can get a first frame (and go into the film as a still) without drawing one.
+  const uploadFrame = async (kind: 'first' | 'last', file: File) => {
+    setUploading(previous => new Set(previous).add(kind));
+    try {
+      const url = await uploadReferenceImage(file);
+      update(current => updateShot(current, shot.id, kind === 'first' ? { firstFrameUrl: url } : { lastFrameUrl: url }));
+    } catch (error) {
+      toast.error(`${kind === 'first' ? '首帧' : '尾帧'}上传失败`, { description: error instanceof Error ? error.message : '请稍后重试' });
+    } finally {
+      setUploading(previous => { const next = new Set(previous); next.delete(kind); return next; });
+    }
+  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -165,12 +179,14 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
         <h3 id="drama-keyframe" className="text-sm font-semibold">关键帧</h3>
         <div className="grid grid-cols-2 gap-2">
           <FrameTile label="首帧" alt="这一镜的关键帧" url={shot.firstFrameUrl} ratio={ratio}
-            busy={keyframeShotIds.has(shot.id)} onDraw={() => void generateKeyframes([shot.id])} onClear={() => set({ firstFrameUrl: undefined, still: undefined })} />
+            busy={keyframeShotIds.has(shot.id) || uploading.has('first')} onDraw={() => void generateKeyframes([shot.id])}
+            onUpload={file => void uploadFrame('first', file)} onClear={() => set({ firstFrameUrl: undefined, still: undefined })} />
           <FrameTile label="尾帧" alt="这一镜的尾帧" url={shot.lastFrameUrl} ratio={ratio}
-            busy={keyframeShotIds.has(`${shot.id}:last`)} onDraw={() => void generateKeyframes([shot.id], 'last')} onClear={() => set({ lastFrameUrl: undefined })} />
+            busy={keyframeShotIds.has(`${shot.id}:last`) || uploading.has('last')} onDraw={() => void generateKeyframes([shot.id], 'last')}
+            onUpload={file => void uploadFrame('last', file)} onClear={() => set({ lastFrameUrl: undefined })} />
         </div>
         <p className="drama-label">
-          {imageModel ? `用 ${imageModel.name} 画，按图像模型价格扣费。` : '按后台默认图像模型价格扣费。'}
+          {imageModel ? `用 ${imageModel.name} 画，按图像模型价格扣费；上传自己的图不扣积分。` : '按后台默认图像模型价格扣费；上传自己的图不扣积分。'}
           {model && !model.capability.imageToVideo ? '当前视频模型不接受首帧图片，关键帧不会用上。' : '有首帧时，视频从这张图开始。'}
           {shot.lastFrameUrl && model?.capability.imageToVideo && !model.capability.firstLastFrame ? '当前视频模型不支持首尾帧，尾帧不会用上。' : ''}
           {!shot.lastFrameUrl && model?.capability.firstLastFrame ? '再画一张尾帧，视频会停在那张图上，动作更可控。' : ''}
@@ -387,9 +403,10 @@ function VoiceoverPanel({ shotId, busy, onRecord }: { shotId: string; busy: bool
   );
 }
 
-function FrameTile({ label, alt, url, ratio, busy, onDraw, onClear }: {
-  label: string; alt: string; url?: string; ratio: string; busy: boolean; onDraw: () => void; onClear: () => void;
+function FrameTile({ label, alt, url, ratio, busy, onDraw, onUpload, onClear }: {
+  label: string; alt: string; url?: string; ratio: string; busy: boolean; onDraw: () => void; onUpload: (file: File) => void; onClear: () => void;
 }) {
+  const picker = useRef<HTMLInputElement>(null);
   return (
     <div className="flex flex-col gap-1.5">
       <div className="relative overflow-hidden rounded-md bg-[var(--drama-ink)]" style={{ aspectRatio: ratio }}>
@@ -400,13 +417,19 @@ function FrameTile({ label, alt, url, ratio, busy, onDraw, onClear }: {
         <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 font-mono text-[11px]">{label}</span>
         {busy ? (
           <span className="absolute inset-0 flex items-center justify-center bg-black/55" role="status">
-            <Loader2 className="h-5 w-5 animate-spin motion-reduce:animate-none" /><span className="sr-only">正在画{label}</span>
+            <Loader2 className="h-5 w-5 animate-spin motion-reduce:animate-none" /><span className="sr-only">正在处理{label}</span>
           </span>
         ) : null}
       </div>
       <div className="flex gap-1">
-        <button type="button" className="drama-btn flex-1 px-2 text-xs" disabled={busy} onClick={onDraw}>
-          <ImagePlus className="h-3.5 w-3.5" />{url ? `重画${label}` : `画${label}`}
+        <button type="button" className="drama-btn min-w-0 flex-1 whitespace-nowrap px-2 text-xs" disabled={busy} onClick={onDraw}>
+          <ImagePlus className="h-3.5 w-3.5 shrink-0" />{url ? `重画${label}` : `画${label}`}
+        </button>
+        <input ref={picker} type="file" accept={REFERENCE_IMAGE_TYPES} className="sr-only" tabIndex={-1} aria-hidden="true"
+          onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) onUpload(file); }} />
+        <button type="button" className="drama-btn px-2" disabled={busy} aria-label={`上传${label}`} title="上传自己的图，不扣积分"
+          onClick={() => picker.current?.click()}>
+          <Upload className="h-3.5 w-3.5" />
         </button>
         {url ? (
           <button type="button" className="drama-btn px-2 text-xs" disabled={busy} aria-label={`清除${label}`} onClick={onClear}>
