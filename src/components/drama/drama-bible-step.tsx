@@ -218,8 +218,10 @@ function ReferenceTile({ label, ratio, url, locked, busy, disabled, history, onG
         {locked ? <span className="absolute left-1 top-1 rounded bg-[var(--drama-green)] px-1.5 py-0.5 text-[11px] text-[var(--drama-ink)]">已锁定</span> : null}
       </div>
       <div className="flex gap-1">
-        <button type="button" className="drama-btn flex-1 px-2 text-xs" disabled={busy || disabled} onClick={onGenerate}>
-          <ImagePlus className="h-3.5 w-3.5" />{url ? '重新生成' : `生成${label}`}
+        {/* Three buttons share a narrow tile once an image exists, so the visible label stays short and on one line. */}
+        <button type="button" className="drama-btn min-w-0 flex-1 whitespace-nowrap px-2 text-xs" disabled={busy || disabled} onClick={onGenerate}
+          aria-label={url ? `重新生成${label}` : undefined}>
+          <ImagePlus className="h-3.5 w-3.5 shrink-0" />{url ? '重画' : `生成${label}`}
         </button>
         <input ref={picker} type="file" accept={REFERENCE_IMAGE_TYPES} className="sr-only" tabIndex={-1} aria-hidden="true"
           onChange={event => {
