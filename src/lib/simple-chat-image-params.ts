@@ -78,6 +78,27 @@ export function parseImageRequest(text: string): RequestedImageParams {
   return result;
 }
 
+const CN_NUM: Record<string, number> = { 一: 1, 两: 2, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6 };
+
+/**
+ * How many image variations the user asked for. Returns 1 when unspecified.
+ * Recognizes "3张/三张方案/多张/几张" etc. Capped at `max` (default 4).
+ */
+export function parseImageCount(text: string, max = 4): number {
+  const source = text || '';
+  const digit = source.match(/(\d{1,2})\s*(张|幅|个|版|款|套)\s*(?:不同\s*)?(?:的\s*)?(?:方案|设计|版本|图|海报|效果图|变体|选择|option)?/i);
+  if (digit) {
+    const n = Number(digit[1]);
+    if (n >= 1) return Math.min(n, max);
+  }
+  const cn = source.match(/(一|两|二|三|四|五|六)\s*(张|幅|个|版|款|套)/);
+  if (cn && CN_NUM[cn[1]]) return Math.min(CN_NUM[cn[1]], max);
+  if (/(多张|多个|几张|几个|多版|多款|多套|多种方案|不同方案|几种方案|几版|批量)/.test(source)) {
+    return Math.min(3, max);
+  }
+  return 1;
+}
+
 const TIER_ORDER = ['1K', '2K', '4K'];
 const LEVEL_ORDER = ['low', 'medium', 'high'];
 

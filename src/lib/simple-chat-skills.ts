@@ -29,7 +29,10 @@ export const SIMPLE_CHAT_SKILLS: SimpleChatSkill[] = [
     command: '/image',
     triggers: /(生成|画|绘制|做|出).{0,8}(图|图片|海报|插画|头像|壁纸|logo|封面|banner)|(图生图|改图|换背景|重绘)|\b(draw|generate an? image)\b/i,
     steps: ['理解画面需求', '匹配模型比例与分辨率', '提交生图任务', '等待供应商返回结果'],
-    instructions: '必须调用 generate_image 工具。prompt 用详细的画面描述（主体、场景、构图、光线、风格）。若用户指定比例，在 aspect_ratio 中填写；尺寸、分辨率、质量要求保留在 prompt 原文中即可，系统会自动匹配模型规格。',
+    instructions: `必须调用一次 generate_image 工具（即使用户要多张，也只调用一次，由 image_count 控制数量）。prompt 用详细的画面描述（主体、场景、构图、光线、风格）。
+- 数量：用户要"多张/N 张/几版方案"时，在 image_count 填写对应数字（最多 4）；未说明则填 1。多张时 prompt 要给出统一的主体与风格，让各张保持同一方案的一致性。
+- 参考图：只要本次对话中用户上传过图片（即使是在更早的轮次），且这次是要基于那张图继续生成/改图/延续，就把 use_reference_image 设为 true，并在 reference_description 里如实描述那张图的主体。后续追加生成时同样要保持 use_reference_image=true，不要脱离原参考图另起炉灶。
+- 比例：若用户指定比例，在 aspect_ratio 中填写；尺寸、分辨率、质量要求保留在 prompt 原文中即可，系统会自动匹配模型规格。`,
   },
   {
     id: 'pptx',

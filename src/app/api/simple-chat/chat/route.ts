@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { findProviderForModel, findProviderById } from '@/lib/server-api-config';
 import { prepareChatVisionMessages } from '@/lib/chat-vision-image';
 import { buildSkillInstructions, selectSimpleChatSkill } from '@/lib/simple-chat-skills';
-import { describeFittedParams, fitImageParams, parseImageRequest } from '@/lib/simple-chat-image-params';
+import { describeFittedParams, fitImageParams, parseImageCount, parseImageRequest } from '@/lib/simple-chat-image-params';
 import type { ApiKind } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
 import { SearchClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
@@ -317,9 +317,15 @@ export async function POST(request: NextRequest) {
                     enum: [...IMAGE_ASPECT_RATIOS],
                     description: 'Aspect ratio of the image, default 1:1',
                   },
+                  image_count: {
+                    type: 'integer',
+                    minimum: 1,
+                    maximum: 4,
+                    description: 'How many image variations to generate (1-4). Use the number the user asked for, e.g. "3 张方案" -> 3. Default 1.',
+                  },
                   use_reference_image: {
                     type: 'boolean',
-                    description: 'True when the user uploaded an image and wants the result based on it (edit, restyle, keep the product).',
+                    description: 'True when the user has uploaded an image anywhere in this conversation and wants the result based on it (edit, restyle, keep the product, continue the same design). Keep this true on follow-up generations that should stay consistent with that image.',
                   },
                   reference_description: {
                     type: 'string',
@@ -425,7 +431,7 @@ export async function POST(request: NextRequest) {
             send({ type: 'tool_status', tool: 'generating_image', status: 'generating', label: '正在生成图片...' });
 
             let args: {
-              prompt?: string; size?: string; aspect_ratio?: string;
+              prompt?: string; size?: string; aspect_ratio?: string; image_count?: number;
               use_reference_image?: boolean; reference_description?: string;
             } = {};
             try { args = JSON.parse(tc.arguments); } catch { /* ignore */ }
@@ -446,10 +452,17 @@ export async function POST(request: NextRequest) {
             setStep(1, 'done', [describeFittedParams(fitted), ...fitted.notes].join('；'));
 
             // Image-to-image: the chat model decides via use_reference_image; the keyword check is a fallback.
-            const userImages = lastUserMsg?.images || [];
-            const i2iIntent = /(这张图|这张|此图|图片|参考|改成|调整|换成|基于|类似风格|同款|根据这|保持|不变)/.test(userText);
-            const wantsReference = args.use_reference_image ?? i2iIntent;
-            const referenceImage = userImages.length > 0 && wantsReference ? userImages[0] : undefined;
+            // The reference image may have been uploaded in an EARLIER turn (user says "再生成一张" with
+            // no new image). Fall back to the most recent image anywhere in the conversation so follow-up
+            // requests stay anchored to the original reference instead of drifting away from it.
+            const lastTurnImages = lastUserMsg?.images || [];
+            const anyConversationImage = [...messages].reverse().find(m => m.role === 'user' && m.images && m.images.length > 0)?.images || [];
+            const i2iIntent = /(这张图|这张|此图|图片|参考|改成|调整|换成|基于|类似风格|同款|根据这|保持|不变|再(生成|来|画|出)|继续|还是)/.test(userText);
+            const wantsReference = args.use_reference_image ?? (i2iIntent && anyConversationImage.length > 0);
+            const referenceSource = lastTurnImages.length > 0 ? lastTurnImages : anyConversationImage;
+            const referenceImage = referenceSource.length > 0 && wantsReference ? referenceSource[0] : undefined;
+            // How many variations: the model's image_count wins, else parse the user's words. Capped at 4.
+            const imageCount = Math.max(1, Math.min(4, args.image_count || parseImageCount(userText)));
             // The chat model has already looked at the image, so its description is passed along.
             // This lets /api/generate skip its own vision identification pass (20s+ in production logs).
             const referenceDescription = (args.reference_description || '').trim() || imgPrompt.slice(0, 300);
@@ -476,7 +489,7 @@ export async function POST(request: NextRequest) {
                   aspectRatio: fitted.aspectRatio,
                   ...(fitted.quality ? { quality: fitted.quality } : {}),
                   ...(fitted.resolution ? { resolution: fitted.resolution } : {}),
-                  outputCount: 1,
+                  outputCount: imageCount,
                   submitOnly: true,
                   // Use exactly the model the user picked. If it fails, surface the error instead of
                   // silently switching to another model — that mismatch left the provider panel showing
@@ -495,21 +508,11 @@ export async function POST(request: NextRequest) {
               const imgData = await imgRes.json().catch(() => ({})) as {
                 success?: boolean; error?: string; taskIds?: string[]; taskId?: string; imageUrls?: string[]; directImageUrls?: string[];
               };
-              const directUrls = imgData.directImageUrls || imgData.imageUrls;
+              const directUrls = imgData.directImageUrls || imgData.imageUrls || [];
               const taskIds = imgData.taskIds || (imgData.taskId ? [imgData.taskId] : []);
 
-              if (!imgRes.ok || !imgData.success) {
-                failImage(imgData.error || `图像接口返回 ${imgRes.status}`);
-              } else if (directUrls?.length && taskIds.length === 0) {
-                setStep(2, 'done');
-                send({ type: 'image', imageUrl: directUrls[0], prompt: imgPrompt });
-                setStep(3, 'done');
-              } else if (taskIds.length > 0) {
-                const taskId = taskIds[0];
-                setStep(2, 'done', `任务 ${taskId.slice(0, 12)}`);
-                send({ type: 'tool_status', tool: 'generating_image', status: 'polling', label: '图片生成中...', taskId });
-
-                let settled = false;
+              // Poll one task to completion and stream its image; returns true once settled.
+              const pollOneTask = async (taskId: string, labelPrefix: string): Promise<boolean> => {
                 for (let attempt = 0; attempt < 200; attempt += 1) {
                   await new Promise(r => setTimeout(r, attempt === 0 ? 500 : 2000));
                   const pollRes = await fetch(getInternalApiUrl('/api/poll-task'), {
@@ -522,21 +525,36 @@ export async function POST(request: NextRequest) {
                   const pollData = await pollRes.json().catch(() => ({})) as {
                     status?: string; imageUrl?: string; imageUrls?: string[]; progress?: number; error?: string;
                   };
-                  const resultUrl = pollData.imageUrl || pollData.imageUrls?.[0];
-                  if (pollData.status === 'completed' && resultUrl) {
-                    send({ type: 'image', imageUrl: resultUrl, prompt: imgPrompt });
-                    setStep(3, 'done');
-                    settled = true;
-                    break;
+                  const urls = pollData.imageUrls?.length ? pollData.imageUrls : (pollData.imageUrl ? [pollData.imageUrl] : []);
+                  if (pollData.status === 'completed' && urls.length > 0) {
+                    for (const url of urls) send({ type: 'image', imageUrl: url, prompt: imgPrompt });
+                    return true;
                   }
                   if (pollData.status === 'failed' || pollData.status === 'cancelled') {
                     failImage(pollData.error || '上游返回失败');
-                    settled = true;
-                    break;
+                    return true;
                   }
-                  send({ type: 'tool_status', tool: 'generating_image', status: 'polling', label: `图片生成中...${pollData.progress ? ` ${pollData.progress}%` : ''}`, taskId, progress: pollData.progress });
+                  send({ type: 'tool_status', tool: 'generating_image', status: 'polling', label: `${labelPrefix}图片生成中...${pollData.progress ? ` ${pollData.progress}%` : ''}`, taskId, progress: pollData.progress });
                 }
-                if (!settled) failImage('等待超时，图片可能仍在生成，请稍后在历史中查看');
+                return false;
+              };
+
+              if (!imgRes.ok || !imgData.success) {
+                failImage(imgData.error || `图像接口返回 ${imgRes.status}`);
+              } else if (directUrls.length > 0 && taskIds.length === 0) {
+                setStep(2, 'done');
+                for (const url of directUrls) send({ type: 'image', imageUrl: url, prompt: imgPrompt });
+                setStep(3, 'done');
+              } else if (taskIds.length > 0) {
+                setStep(2, 'done', taskIds.length > 1 ? `${taskIds.length} 个任务` : `任务 ${taskIds[0].slice(0, 12)}`);
+                send({ type: 'tool_status', tool: 'generating_image', status: 'polling', label: `图片生成中...（共 ${taskIds.length} 张）`, taskId: taskIds[0] });
+
+                // Poll every task so each of the N variations streams back as it finishes.
+                const results = await Promise.all(
+                  taskIds.map((id, i) => pollOneTask(id, taskIds.length > 1 ? `第 ${i + 1}/${taskIds.length} 张 ` : ''))
+                );
+                if (results.some(Boolean)) setStep(3, 'done');
+                else failImage('等待超时，图片可能仍在生成，请稍后在历史中查看');
               } else {
                 failImage('图像接口未返回图片或任务编号');
               }

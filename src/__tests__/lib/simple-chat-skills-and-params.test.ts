@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { selectSimpleChatSkill, SIMPLE_CHAT_SKILLS } from '@/lib/simple-chat-skills';
-import { fitImageParams, parseImageRequest } from '@/lib/simple-chat-image-params';
+import { fitImageParams, parseImageCount, parseImageRequest } from '@/lib/simple-chat-image-params';
 import { getProviderAspectRatios } from '@/lib/canvas-generation-group';
 
 describe('parseImageRequest', () => {
@@ -23,6 +23,20 @@ describe('parseImageRequest', () => {
     expect(parseImageRequest('要高质量、细节丰富').quality).toBe('high');
     expect(parseImageRequest('先出个草图').quality).toBe('low');
     expect(parseImageRequest('一只猫')).toEqual({});
+  });
+});
+
+describe('parseImageCount', () => {
+  it('reads how many variations the user asked for', () => {
+    expect(parseImageCount('生成3张方案')).toBe(3);
+    expect(parseImageCount('来两张不同的海报')).toBe(2);
+    expect(parseImageCount('多出几张看看')).toBe(3);
+    expect(parseImageCount('画一只猫')).toBe(1);
+  });
+
+  it('caps the count at the allowed maximum', () => {
+    expect(parseImageCount('给我10张')).toBe(4);
+    expect(parseImageCount('生成6个版本', 4)).toBe(4);
   });
 });
 
