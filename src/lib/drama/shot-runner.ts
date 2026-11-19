@@ -103,7 +103,8 @@ export function chooseReferenceImages(
 const CONTINUITY_FIELD_MAX = 120;
 
 function brief(text: string | undefined, max = CONTINUITY_FIELD_MAX): string {
-  const flat = (text ?? '').replace(/\s+/gu, ' ').trim();
+  // Bible text usually ends a sentence; the block joins fields with its own punctuation.
+  const flat = (text ?? '').replace(/\s+/gu, ' ').trim().replace(/[。．.，,、；;：:！!？?\s]+$/u, '');
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
@@ -128,7 +129,8 @@ export function shotContinuityText(
       const traits = [
         brief(member.appearance),
         hasValue(member.costume) ? `服装 ${brief(member.costume)}` : '',
-        hasValue(member.hair) ? `发型 ${brief(member.hair, 40)}` : '',
+        // Unlabelled: the field also holds an animal's fur, which "发型" would misname.
+        hasValue(member.hair) ? brief(member.hair, 40) : '',
       ].filter(Boolean);
       return traits.length ? `${member.name}（${traits.join('，')}）` : member.name;
     });

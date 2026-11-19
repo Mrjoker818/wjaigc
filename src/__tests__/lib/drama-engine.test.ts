@@ -192,14 +192,15 @@ describe('shot runner choices', () => {
 
   it('writes continuity from the bible and the previous shot in the same scene', () => {
     const doc = plannedDoc();
-    doc.cast[0] = { ...doc.cast[0], costume: '黑色风衣', hair: '短发' };
-    doc.cast.push({ id: 'cat', name: '大橘', appearance: '圆润的橘猫', costume: '无' });
+    doc.cast[0] = { ...doc.cast[0], costume: '黑色风衣。', hair: '短发' };
+    doc.cast.push({ id: 'cat', name: '大橘', appearance: '圆润的橘猫。', costume: '无', hair: '橘色短毛' });
     doc.props = [{ id: 'letter', name: '信', description: '泛黄的信封' }];
     const scene = doc.episodes[0].scenes[0];
     const current = shot({ id: 'b', sceneId: 'cafe', characterIds: ['lin', 'cat'], propIds: ['letter'], continuityNotes: ['信在左手'] });
     scene.shots = [shot({ id: 'a', actionBeat: '林夏接过信' }), current];
     const chained = shotContinuityText(doc, current, scene.shots[0], 'previous-shot');
-    expect(chained).toContain('人物：林夏（短发，黑色风衣，服装 黑色风衣，发型 短发）；大橘（圆润的橘猫）');
+    // Trailing sentence marks are dropped so the joined line does not read "。，".
+    expect(chained).toContain('人物：林夏（短发，黑色风衣，服装 黑色风衣，短发）；大橘（圆润的橘猫，橘色短毛）');
     expect(chained).toContain('场景：咖啡馆·内·夜，雨夜的街角咖啡馆');
     expect(chained).toContain('道具：信（泛黄的信封）');
     expect(chained).toContain('画风：节奏感画面');
