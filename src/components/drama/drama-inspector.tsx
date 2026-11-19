@@ -429,8 +429,10 @@ function FrameTile({ label, alt, url, ratio, busy, onDraw, onUpload, onPick, onC
         ) : null}
       </div>
       <div className="flex gap-1">
-        <button type="button" className="drama-btn min-w-0 flex-1 whitespace-nowrap px-2 text-xs" disabled={busy} onClick={onDraw}>
-          <ImagePlus className="h-3.5 w-3.5 shrink-0" />{url ? `重画${label}` : `画${label}`}
+        {/* Four buttons share the tile once a frame exists, so redrawing shows only its icon then. */}
+        <button type="button" className="drama-btn min-w-0 flex-1 whitespace-nowrap px-2 text-xs" disabled={busy} onClick={onDraw}
+          aria-label={url ? `重画${label}` : undefined} title={url ? `重画${label}，会扣积分` : undefined}>
+          <ImagePlus className="h-3.5 w-3.5 shrink-0" />{url ? null : `画${label}`}
         </button>
         <input ref={picker} type="file" accept={REFERENCE_IMAGE_TYPES} className="sr-only" tabIndex={-1} aria-hidden="true"
           onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) onUpload(file); }} />

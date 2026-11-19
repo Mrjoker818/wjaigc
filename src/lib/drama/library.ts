@@ -28,6 +28,8 @@ export interface CanvasMediaLike {
 
 const VIEW_NAME: Record<CastView, string> = { front: '正面', side: '侧面', back: '背面', face: '面部' };
 const UNUSABLE = new Set(['missing', 'unrecoverable', 'recovering', 'pending-persist']);
+/** Name of a canvas picture with neither a name nor a prompt, e.g. one placed from a drama. */
+const UNNAMED_CANVAS = '画布上的图';
 
 /** Only stored addresses can be referenced later; data: and blob: URLs live in one browser tab. */
 function storedUrl(url: string | undefined): url is string {
@@ -38,7 +40,7 @@ export function canvasLibraryItems(images: readonly CanvasMediaLike[]): LibraryI
   const out: LibraryItem[] = [];
   for (const image of images) {
     if (image.isProcessingPlaceholder || (image.mediaAvailability && UNUSABLE.has(image.mediaAvailability))) continue;
-    const name = (image.name || image.prompt || '').trim().slice(0, 80) || '画布上的图';
+    const name = (image.name || image.prompt || '').trim().slice(0, 80) || UNNAMED_CANVAS;
     if (image.mediaType === 'video') {
       if (storedUrl(image.videoUrl)) {
         out.push({ url: image.videoUrl, kind: 'video', name, source: 'canvas', ...(storedUrl(image.thumbnailUrl) ? { thumbnailUrl: image.thumbnailUrl } : {}) });
@@ -82,9 +84,18 @@ export function dramaLibraryItems(doc: DramaProjectV1, label = doc.title || '未
   return dedupe(out);
 }
 
-/** Joins lists, keeping the first entry of each address so the nearer source wins. */
+/**
+ * Joins lists, keeping the first entry of each address so the nearer source wins. An unnamed canvas
+ * picture takes the name a later list gives the same address, so a placed bible image keeps its name.
+ */
 export function mergeLibrary(...lists: ReadonlyArray<readonly LibraryItem[]>): LibraryItem[] {
-  return dedupe(lists.flat());
+  const byUrl = new Map<string, LibraryItem>();
+  for (const item of lists.flat()) {
+    const kept = byUrl.get(item.url);
+    if (!kept) byUrl.set(item.url, item);
+    else if (kept.name === UNNAMED_CANVAS && item.name !== UNNAMED_CANVAS) byUrl.set(item.url, { ...kept, name: item.name });
+  }
+  return [...byUrl.values()];
 }
 
 function dedupe(items: readonly LibraryItem[]): LibraryItem[] {

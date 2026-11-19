@@ -58,6 +58,11 @@ describe('drama library', () => {
     expect(merged.filter(item => item.url === '/f.png')).toEqual([{ url: '/f.png', kind: 'image', name: '画布版', source: 'canvas' }]);
   });
 
+  it('names an unnamed canvas picture after the drama image it was placed from', () => {
+    const merged = mergeLibrary(canvasLibraryItems([{ url: '/f.png', prompt: '' }]), dramaLibraryItems(doc(), '本片'));
+    expect(merged.filter(item => item.url === '/f.png')).toEqual([{ url: '/f.png', kind: 'image', name: '本片 · 林辰正面', source: 'canvas' }]);
+  });
+
   it('saves images brought in from chat with the document', () => {
     expect(parseDramaProject(doc()).references).toEqual([{ url: '/chat.png', name: '对话图片 1', source: 'chat' }]);
     expect(() => parseDramaProject({ ...doc(), references: [{ url: '/x.png', source: 'email' }] })).toThrow();
