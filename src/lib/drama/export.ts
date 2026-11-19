@@ -94,5 +94,6 @@ export function episodePackageMedia(doc: DramaProjectV1, episodeId: string): Pac
   }
   for (const location of doc.locations) add(location.lockedImageUrl || location.imageUrl, `设定/场景_${safeFileName(location.name, location.id)}`, 'png');
   for (const prop of doc.props) add(prop.lockedImageUrl || prop.imageUrl, `设定/道具_${safeFileName(prop.name, prop.id)}`, 'png');
+  add(doc.timeline.music?.url, '音乐/背景音乐', 'mp3');
   return out;
 }

@@ -56,7 +56,7 @@ describe('drama export', () => {
     expect(result.missing).toEqual(['配音/01.mp3']);
     const zip = await JSZip.loadAsync(await result.blob.arrayBuffer());
     expect(Object.keys(zip.files).filter(name => !zip.files[name].dir).sort()).toEqual([
-      '剧本.txt', '字幕.srt', '缺失文件.txt', '设定/角色_林辰.png', '设定/道具_彩票.webp', '镜头/01_视频.mp4', '镜头/01_首帧.png', '镜头表.csv',
+      '剧本.txt', '字幕.srt', '短剧.json', '缺失文件.txt', '设定/角色_林辰.png', '设定/道具_彩票.webp', '镜头/01_视频.mp4', '镜头/01_首帧.png', '镜头表.csv',
     ].sort());
     expect(await zip.file('镜头/01_视频.mp4')!.async('string')).toBe('bytes:/v/a.mp4');
   });

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { ArrowLeft, Clapperboard, Loader2 } from 'lucide-react';
+import { ArrowLeft, Clapperboard, FileArchive, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { createEmptyDramaProject, type DramaProjectRecord } from '@/lib/drama/types';
 import type { SimpleChatWorkspaceHandoffIntent } from '@/lib/simple-chat-workspace-handoff';
@@ -9,6 +9,7 @@ import {
   createDramaFromChat, createDramaProject, listDramaProjects, loadDramaProject, planDramaScript, startAdaptation, waitForAdaptation,
   type AdaptRequest, type DramaProjectSummary, type ScriptRequest,
 } from '@/lib/drama/workbench-client';
+import { importDramaPackage } from '@/lib/drama/import-client';
 import { blankEpisodeDoc } from '@/lib/drama/workbench-state';
 import { DramaAdaptForm } from './drama-adapt-form';
 import { DramaIdeaForm } from './drama-idea-form';
@@ -83,6 +84,9 @@ function DramaStart({ projectId, onDramaIdChange, onExit, switcher, chatHandoff,
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [adaptProgress, setAdaptProgress] = useState<{ value: number; label?: string } | null>(null);
+  const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const packagePicker = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let live = true;
@@ -130,6 +134,24 @@ function DramaStart({ projectId, onDramaIdChange, onExit, switcher, chatHandoff,
       setAdaptProgress(null);
     }
   });
+  // Import errors show beside the import button, not in the idea form above it.
+  const importPackage = async (file: File) => {
+    setBusy('导入制作包');
+    setImportError(null);
+    setImportProgress({ done: 0, total: 0 });
+    try {
+      const result = await importDramaPackage(file, { ...(projectId ? { projectId } : {}), onProgress: (done, total) => setImportProgress({ done, total }) });
+      if (result.failed.length) {
+        toast.error(`${result.failed.length} 个文件没有导入`, { description: `${result.failed.slice(0, 3).join('、')}${result.failed.length > 3 ? ' 等' : ''}仍指向原地址，可以在工作台里重新上传或生成。` });
+      } else toast.success('制作包已导入');
+      onDramaIdChange(result.record.id);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : '制作包导入失败，请稍后重试');
+    } finally {
+      setImportProgress(null);
+      setBusy(null);
+    }
+  };
   const blank = (input: ScriptRequest) => create('新建剧本', () => createDramaProject(blankEpisodeDoc(
     createEmptyDramaProject({ title: input.title || input.idea.slice(0, 24), genre: input.genre, style: input.style as never, aspectRatio: input.aspectRatio }),
     input.idea,
@@ -149,6 +171,23 @@ function DramaStart({ projectId, onDramaIdChange, onExit, switcher, chatHandoff,
         ) : null}
         <DramaIdeaForm busy={busy} error={error} onGenerate={generate} onBlank={blank} />
         <DramaAdaptForm busy={busy} progress={adaptProgress} onAdapt={adapt} />
+        <section aria-labelledby="drama-import" className="drama-panel flex flex-col gap-3 p-4">
+          <h2 id="drama-import" className="flex items-center gap-2 text-sm font-semibold"><FileArchive className="h-4 w-4" />导入制作包</h2>
+          <p className="drama-label">选择在成片步骤导出的「制作包 ZIP」，剧本、镜头、定妆图、视频和配音会变成一部新短剧，原来那部不受影响。导入不扣积分，单个视频最大 48MB。</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="button" className="drama-btn" disabled={Boolean(busy)} onClick={() => packagePicker.current?.click()}>
+              {importProgress ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <FileArchive className="h-4 w-4" />}
+              {importProgress ? `正在导入 ${importProgress.done}/${importProgress.total || '…'}` : '选择制作包'}
+            </button>
+          </div>
+          {importError ? <p role="alert" className="text-sm text-[var(--drama-red)]">{importError}</p> : null}
+          <input ref={packagePicker} type="file" accept=".zip,application/zip" className="sr-only" tabIndex={-1} aria-hidden="true"
+            onChange={event => {
+              const file = event.target.files?.[0];
+              event.target.value = '';
+              if (file) void importPackage(file);
+            }} />
+        </section>
         <section aria-labelledby="drama-recent" className="flex flex-col gap-3">
           <h2 id="drama-recent" className="text-sm font-semibold">{projectId ? '这个项目里的短剧' : '我的短剧'}</h2>
           {listError ? <p role="alert" className="drama-label">{listError}</p>

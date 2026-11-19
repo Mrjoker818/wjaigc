@@ -57,6 +57,7 @@ beforeEach(() => {
     if (url === '/api/drama/estimate') return json({ success: true, total: 50, perShot: { s2: 50 }, balance: 20 });
     if (url === '/api/generate') return json({ success: true, imageUrl: `/g/${body.aspectRatio === '2:3' ? 'cast' : 'other'}-${requests.filter(r => r.url === '/api/generate').length}.png` });
     if (url === '/api/drama/music') return json({ success: true, audioUrl: '/api/serve-upload/generated-audio/tts_1.mp3', name: '雨夜.mp3' });
+    if (url === '/api/drama/clip') return json({ success: true, videoUrl: '/c/clip-1.mp4' });
     if (url === '/api/upload') return json({ success: true, url: `/u/upload-${requests.filter(r => r.url === '/api/upload').length}.png` });
     return json({ error: 'unexpected' }, 500);
   }));
@@ -88,6 +89,37 @@ describe('drama workbench', () => {
     await waitFor(() => expect(onDramaIdChange).toHaveBeenCalledWith('drama_1'));
     expect(onChatHandoffDone).toHaveBeenCalledOnce();
     expect(requests.filter(r => r.url === '/api/drama/from-chat')).toEqual([{ url: '/api/drama/from-chat', method: 'POST', body: chatHandoff }]);
+  });
+
+  it('imports a production package as a new drama and explains a file that is not one', async () => {
+    const onDramaIdChange = vi.fn();
+    const { buildEpisodePackage } = await import('@/lib/drama/export-client');
+    const doc = projectDoc();
+    const exported = await buildEpisodePackage(doc, doc.episodes[0].id, { fetch: async url => new Response(`bytes:${url}`) });
+    render(<DramaWorkbench dramaId={null} projectId="p1" onDramaIdChange={onDramaIdChange} onExit={() => undefined} />);
+    expect(screen.getByRole('button', { name: '选择制作包' })).toBeTruthy();
+    const input = document.querySelector('input[accept=".zip,application/zip"]') as HTMLInputElement;
+
+    const notZip = new File(['hello'], 'a.zip', { type: 'application/zip' });
+    Object.defineProperty(notZip, 'arrayBuffer', { value: async () => new TextEncoder().encode('hello').buffer });
+    fireEvent.change(input, { target: { files: [notZip] } });
+    expect((await screen.findByRole('alert')).textContent).toContain('不是 ZIP 压缩包');
+
+    // jsdom's Blob has no arrayBuffer(); FileReader reads it the way an older browser would.
+    const bytes = await new Promise<ArrayBuffer>(resolve => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.readAsArrayBuffer(exported.blob);
+    });
+    const pack = new File([bytes], '雨夜来信_制作包.zip', { type: 'application/zip' });
+    Object.defineProperty(pack, 'arrayBuffer', { value: async () => bytes });
+    fireEvent.change(input, { target: { files: [pack] } });
+    await waitFor(() => expect(onDramaIdChange).toHaveBeenCalledWith('drama_1'));
+    const created = requests.find(r => r.url === '/api/drama/projects' && r.method === 'POST')?.body as { doc: DramaProjectV1; projectId: string };
+    expect(created.projectId).toBe('p1');
+    expect(created.doc.title).toBe('雨夜来信');
+    expect(requests.filter(r => r.url === '/api/drama/clip')).toHaveLength(1);
+    expect(created.doc.episodes[0].scenes[0].shots[0].takes[0].videoUrl).toBe('/c/clip-1.mp4');
   });
 
   it('opens a project on the board, walks every step and saves an edit', async () => {

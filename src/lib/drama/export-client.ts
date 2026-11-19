@@ -1,6 +1,7 @@
 /** Builds the episode's production package in the browser and hands files to the user as downloads. */
 import JSZip from 'jszip';
 import { episodePackageMedia, episodeSrt, safeFileName, shotListCsv } from './export';
+import { PACKAGE_MANIFEST, packageManifest } from './package';
 import type { DramaProjectV1 } from './types';
 
 type Fetcher = (input: string) => Promise<Response>;
@@ -22,7 +23,10 @@ export function exportFileName(doc: DramaProjectV1, episodeId: string, suffix: s
   return `${episodeLabel(doc, episodeId)}_${suffix}`;
 }
 
-/** ZIP with the script, shot list, subtitles and every media file of the episode. Downloads run a few at a time. */
+/**
+ * ZIP with the script, shot list, subtitles and every media file of the episode, plus the document so the workbench can import it.
+ * Downloads run a few at a time.
+ */
 export async function buildEpisodePackage(
   doc: DramaProjectV1, episodeId: string,
   options: { fetch?: Fetcher; onProgress?: (done: number, total: number) => void; signal?: AbortSignal } = {},
@@ -38,6 +42,7 @@ export async function buildEpisodePackage(
 
   const media = episodePackageMedia(doc, episodeId);
   const missing: string[] = [];
+  const packed: typeof media = [];
   let done = 0;
   const queue = [...media];
   const workers = Array.from({ length: Math.min(3, queue.length) }, async () => {
@@ -47,6 +52,7 @@ export async function buildEpisodePackage(
         const response = await fetcher(item.url);
         if (!response.ok) throw new Error(String(response.status));
         zip.file(item.name, await response.arrayBuffer());
+        packed.push(item);
       } catch (error) {
         if (options.signal?.aborted) throw error;
         missing.push(item.name);
@@ -56,6 +62,7 @@ export async function buildEpisodePackage(
     }
   });
   await Promise.all(workers);
+  zip.file(PACKAGE_MANIFEST, JSON.stringify(packageManifest(doc, episodeId, packed), null, 2));
   if (missing.length) zip.file('缺失文件.txt', `以下文件下载失败，没有打进压缩包：\r\n${missing.sort().join('\r\n')}\r\n`);
   const blob = await zip.generateAsync({ type: 'blob' });
   return { blob, fileName: exportFileName(doc, episodeId, '制作包.zip'), missing };
