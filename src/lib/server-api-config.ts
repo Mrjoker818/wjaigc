@@ -484,6 +484,31 @@ export async function getPublicApiProviders(): Promise<PublicApiProvider[]> {
   return sanitizeProviders(await getApiProviders({ migrateFileProviders: false }));
 }
 
+/**
+ * 把 /models 被拒绝的原因翻译成可执行的中文说明。
+ * 典型场景：APIMart 等中转站要求账户余额不低于阈值才允许拉取模型列表，
+ * 返回 4xx + insufficient balance，原样透出英文会让管理员误以为是密钥问题。
+ */
+function explainModelListDenial(rawMessage: string): string | null {
+  const lower = rawMessage.toLowerCase();
+  const isQuotaDenial =
+    lower.includes('insufficient balance') ||
+    lower.includes('insufficient_quota') ||
+    lower.includes('insufficient credit') ||
+    lower.includes('余额不足') ||
+    lower.includes('exceeded your current quota');
+  if (!isQuotaDenial) return null;
+
+  const required = rawMessage.match(/required:\s*([0-9.]+)\s*([A-Za-z]{3})?/i);
+  const current = rawMessage.match(/current:\s*([0-9.]+)/i);
+  const details: string[] = [];
+  if (current) details.push(`当前余额 ${current[1]}${required?.[2] ? ` ${required[2].toUpperCase()}` : ''}`);
+  if (required) details.push(`需要至少 ${required[1]}${required[2] ? ` ${required[2].toUpperCase()}` : ''}`);
+  const detailText = details.length > 0 ? `（${details.join('，')}）` : '';
+
+  return `账户余额不足，无法获取模型列表${detailText}。该提供商的模型列表接口要求余额达到最低额度，请充值后重新获取。模型列表不可用不代表密钥无效，生成功能可能仍然正常。`;
+}
+
 export async function discoverModelsForCredentials(
   baseUrl: string,
   apiKey: string,
@@ -515,6 +540,7 @@ export async function discoverModelsForCredentials(
       latencyMs: Date.now() - startedAt,
     };
   }
+  const quotaDenial = (text: string) => explainModelListDenial(text);
   const probeProvider: ApiProvider = {
     id: 'probe',
     name: 'probe',
@@ -550,12 +576,15 @@ export async function discoverModelsForCredentials(
       try {
         const errorData = await response.json();
         const errorMsg = errorData?.error?.message || errorData?.message || `${response.status} ${response.statusText}`;
+        const denial = quotaDenial(String(errorMsg));
         return {
           success: isReachable, // 4xx means API is reachable even if /models failed
           models: [],
-          message: isReachable
-            ? `API 可达但模型列表不可用（${errorMsg}），生成功能可能正常`
-            : errorMsg,
+          message: denial
+            ? denial
+            : isReachable
+              ? `API 可达但模型列表不可用（${errorMsg}），生成功能可能正常`
+              : errorMsg,
           latencyMs
         };
       } catch {
@@ -774,6 +803,32 @@ export async function addApiProvider(input: AddProviderInput): Promise<ApiProvid
   return provider;
 }
 
+/**
+ * 合并一次模型发现的结果。
+ *
+ * 当重新发现没有拿到任何模型（密钥刚换、提供商不暴露 /models、请求超时）时，
+ * 保留已有的模型列表，避免一次失败的发现把可用配置清空。
+ *
+ * @param keepWhenEmpty 发现结果为空时是否保留旧列表
+ */
+export function mergeDiscoveryModels(
+  currentModels: ModelInfo[] | undefined,
+  discovered: ModelInfo[],
+  providerId: string,
+  keepWhenEmpty: boolean,
+): ModelInfo[] {
+  const existingModels = currentModels || [];
+  if (discovered.length === 0 && keepWhenEmpty) return existingModels;
+
+  const existingById = new Map(existingModels.map(model => [model.id, model]));
+  return discovered.map(model => ({
+    ...model,
+    providerId,
+    // 保留用户手动修改过的 displayName
+    displayName: existingById.get(model.id)?.displayName || model.displayName,
+  }));
+}
+
 export async function updateApiProvider(providerId: string, updates: Partial<ApiProvider>): Promise<ApiProvider | null> {
   const config = await readConfig();
   const index = config.providers.findIndex(provider => provider.id === providerId);
@@ -793,17 +848,15 @@ export async function updateApiProvider(providerId: string, updates: Partial<Api
   const apiKeyChanged = updates.apiKey && updates.apiKey !== current.apiKey;
   if (baseUrlChanged || apiKeyChanged) {
     const discovery = await discoverModelsForCredentials(next.baseUrl, next.apiKey, next.modelType || 'universal');
-    // 合并：保留用户手动修改的 displayName
-    const existingModelMap = new Map((current.discoveredModels || []).map(m => [m.id, m]));
-    next.discoveredModels = discovery.models.map(model => {
-      const existing = existingModelMap.get(model.id);
-      return {
-        ...model,
-        providerId: next.id,
-        // 如果用户手动修改过 displayName，保留用户的修改
-        displayName: existing?.displayName || model.displayName,
-      };
-    });
+    // 仅换密钥时，若重新发现拿不到模型（密钥刚生效、提供商不暴露 /models、请求超时），
+    // 保留已保存的模型列表，避免一次失败的发现把可用配置清空。
+    // baseUrl 变更时旧模型不再可信，仍按发现结果整体替换。
+    next.discoveredModels = mergeDiscoveryModels(
+      current.discoveredModels,
+      discovery.models,
+      next.id,
+      Boolean(apiKeyChanged && !baseUrlChanged),
+    );
     next.connectionStatus = discovery.success ? 'success' : 'failed';
     next.lastTestedAt = Date.now();
   } else if (updates.discoveredModels) {
@@ -884,7 +937,8 @@ export async function refreshApiProvider(providerId: string): Promise<ApiProvide
   const discovery = await discoverModelsForCredentials(provider.baseUrl, provider.apiKey, provider.modelType || 'universal');
   const balance = await refreshProviderBalance(provider);
   return updateApiProvider(providerId, {
-    discoveredModels: discovery.models.map(model => ({ ...model, providerId })),
+    // 刷新失败时保留已有模型，避免手动刷新把列表清空
+    discoveredModels: mergeDiscoveryModels(provider.discoveredModels, discovery.models, providerId, true),
     connectionStatus: discovery.success ? 'success' : 'failed',
     lastTestedAt: Date.now(),
     balance,
