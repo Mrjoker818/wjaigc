@@ -93,7 +93,7 @@ function imageToolRequest(
   });
 }
 
-function imageToolCallResponse(): Response {
+function imageToolCallResponse(args: Record<string, unknown> = { prompt: 'A lighthouse at night', aspect_ratio: '1:1' }): Response {
   const toolCall = JSON.stringify({
     choices: [{
       delta: {
@@ -102,7 +102,7 @@ function imageToolCallResponse(): Response {
           id: 'tool-call-1',
           function: {
             name: 'generate_image',
-            arguments: JSON.stringify({ prompt: 'A lighthouse at night', size: '1024x1024' }),
+            arguments: JSON.stringify(args),
           },
         }],
       },
@@ -517,5 +517,104 @@ describe('POST /api/simple-chat/chat', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.createVersionWithPlacement).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks for a chat model instead of falling back to a hard-coded one', async () => {
+    const response = await POST(new NextRequest('http://localhost/api/simple-chat/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'Hello' }] }),
+    }));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: '请先在输入框上方选择一个对话模型' });
+    expect(mocks.findProviderForModel).not.toHaveBeenCalled();
+  });
+
+  it('sends the aspect ratio, one output and the user reference image in the /api/generate contract', async () => {
+    mocks.findProviderForModel.mockResolvedValue({
+      id: 'chat-provider', apiKey: 'chat-key', baseUrl: 'https://chat.example/v1', advancedParams: {},
+    });
+    let generateBody: Record<string, unknown> = {};
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === 'https://chat.example/v1/chat/completions') {
+        return imageToolCallResponse({ prompt: 'The same street at night', aspect_ratio: '16:9' });
+      }
+      if (url === 'http://127.0.0.1:5000/api/generate') {
+        generateBody = JSON.parse(String(init?.body));
+        return jsonResponse({ success: true, directImageUrls: ['/api/serve-upload/direct.png'] });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    }));
+
+    const response = await POST(imageToolRequest('http://localhost', {
+      messages: [{ role: 'user', content: '把这张图改成夜景', images: ['/api/serve-upload/street.png'] }],
+    }));
+    await response.text();
+
+    expect(generateBody).toMatchObject({
+      prompt: 'The same street at night',
+      model: 'image-model',
+      providerId: 'image-provider',
+      aspectRatio: '16:9',
+      outputCount: 1,
+      referenceImages: ['/api/serve-upload/street.png'],
+      referenceMode: 'reference',
+    });
+    expect(generateBody).not.toHaveProperty('size');
+    expect(generateBody).not.toHaveProperty('count');
+    expect(generateBody).not.toHaveProperty('imageUrl');
+  });
+
+  it('fails the image tool with a next step when no image model is selected', async () => {
+    mocks.findProviderForModel.mockResolvedValue({
+      id: 'chat-provider', apiKey: 'chat-key', baseUrl: 'https://chat.example/v1', advancedParams: {},
+    });
+    const fetchMock = vi.fn<typeof fetch>(async input => {
+      const url = String(input);
+      if (url === 'https://chat.example/v1/chat/completions') return imageToolCallResponse();
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await POST(imageToolRequest('http://localhost', { imageModel: '', imageProviderId: '' }));
+    const events = await response.text();
+
+    expect(events).toContain('未选择图像模型');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('injects {category, content} memories as readable lines', async () => {
+    mocks.findProviderForModel.mockResolvedValue({
+      id: 'chat-provider', apiKey: 'chat-key', baseUrl: 'https://chat.example/v1', advancedParams: {},
+    });
+    let chatBody = '';
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (input, init) => {
+      chatBody = String(init?.body);
+      return new Response('data: [DONE]\n\n', { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    }));
+
+    const response = await POST(imageToolRequest('http://localhost', {
+      memories: [{ category: '偏好', content: '喜欢蓝色' }, { category: '', content: '  ' }, '住在杭州'],
+    }));
+    await response.text();
+
+    expect(chatBody).toContain('1. 【偏好】喜欢蓝色');
+    expect(chatBody).toContain('2. 住在杭州');
+    expect(chatBody).not.toContain('[object Object]');
+  });
+
+  it('explains a relay rejection instead of echoing the raw JSON body', async () => {
+    mocks.findProviderForModel.mockResolvedValue({
+      id: 'chat-provider', name: 'Relay', apiKey: 'chat-key', baseUrl: 'https://chat.example/v1', advancedParams: {},
+    });
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => new Response('{"error":"不支持的模型"}', { status: 400 })));
+
+    const response = await POST(request());
+    const events = await response.text();
+
+    expect(events).toContain('中转站不支持模型「chat-model」');
+    expect(events).not.toContain('API 错误 400');
   });
 });

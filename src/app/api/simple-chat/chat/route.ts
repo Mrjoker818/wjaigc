@@ -8,6 +8,7 @@ import { SearchClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
 import { fetchWithTimeout, getInternalApiUrl, shouldSkipV1Retry } from '@/lib/api-helpers';
 import { assertSafeProviderUrl, PoisonedApiHostError } from '@/lib/poisoned-api-host';
 import { resolveChatControls } from '@/lib/chat-generation-controls';
+import { IMAGE_ASPECT_RATIOS, describeUpstreamChatError, resolveToolAspectRatio } from '@/lib/simple-chat-upstream';
 import { getInternalRequestHeaders } from '@/lib/api-auth';
 import { AssetServiceError, createAssetService } from '@/lib/asset-core/service';
 import { parseWorkspaceSourceTrace, type WorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
@@ -67,7 +68,7 @@ const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手。你可以：
 3. 支持多模态理解（图片识别）
 
 请保持回复简洁、专业、友好。
-**重要**：请始终以自然语言（纯文本）回复用户，**不要**使用 JSON 格式或 Markdown 代码块格式输出你的回答内容。`;
+**重要**：默认以自然语言回复用户，不要输出 JSON；只有当系统消息里启用的技能要求输出 json 代码块时，才按技能要求输出。`;
 
 interface KnowledgeItem {
   id: string;
@@ -340,7 +341,7 @@ export async function POST(request: NextRequest) {
     image?: { url?: string; name?: string; mimeType?: string };
     imageModel?: string;
     imageProviderId?: string;
-    memories?: string[];
+    memories?: Array<string | { category?: string; content?: string }>;
     deepAnalysis?: boolean;
     i2iStrength?: number;
     reasoningEffort?: string;
@@ -359,12 +360,14 @@ export async function POST(request: NextRequest) {
     throw error;
   }
   const messages = body.messages || [];
-  const model = body.model || 'deepseek-v4-flash';
+  // No hard-coded fallback: a stale default model is rejected by the relay with an opaque error.
+  const model = (body.model || '').trim();
   const providerId = body.providerId || '';
   const webSearch = body.webSearch || false;
   const knowledgeItems = body.knowledgeItems || [];
-  const imageModel = body.imageModel || model;
-  const imageProviderId = body.imageProviderId || providerId;
+  // The image model must be chosen explicitly; a chat model cannot generate images.
+  const imageModel = body.imageModel || '';
+  const imageProviderId = body.imageProviderId || '';
   const memories = body.memories || [];
   const deepAnalysis = body.deepAnalysis || false;
   const i2iStrength = body.i2iStrength || 0.7;
@@ -695,6 +698,10 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  if (!model) {
+    return Response.json({ error: '请先在输入框上方选择一个对话模型' }, { status: 400 });
+  }
+
   // 查找提供商
   let provider;
   if (agentRuntimeMode === 'agent-v2') {
@@ -776,9 +783,21 @@ export async function POST(request: NextRequest) {
   // 构建增强的 system prompt（指令 + 知识库 + 联网搜索结果）
   let enhancedSystemPrompt = DEFAULT_SYSTEM_PROMPT;
 
-  // 用户记忆注入
-  if (memories.length > 0) {
-    const memoryContext = memories.slice(0, 20).map((m, i) => `${i + 1}. ${m}`).join('\n');
+  // 用户记忆注入。前端发送 {category, content} 对象，旧数据可能是字符串。
+  const memoryLines = memories
+    .slice(0, 20)
+    .map((m) => {
+      if (typeof m === 'string') return m.trim();
+      if (m && typeof m === 'object') {
+        const content = typeof m.content === 'string' ? m.content.trim() : '';
+        if (!content) return '';
+        return typeof m.category === 'string' && m.category ? `【${m.category}】${content}` : content;
+      }
+      return '';
+    })
+    .filter((line) => line.length > 0);
+  if (memoryLines.length > 0) {
+    const memoryContext = memoryLines.map((line, i) => `${i + 1}. ${line}`).join('\n');
     enhancedSystemPrompt += `\n\n## 用户记忆\n以下是关于用户的长期记忆信息，请在回答时参考：\n${memoryContext}`;
   }
 
@@ -997,10 +1016,10 @@ export async function POST(request: NextRequest) {
                     type: 'string',
                     description: 'A detailed description of the image to generate',
                   },
-                  size: {
+                  aspect_ratio: {
                     type: 'string',
-                    enum: ['1024x1024', '1792x1024', '1024x1792'],
-                    description: 'Image size, default 1024x1024',
+                    enum: [...IMAGE_ASPECT_RATIOS],
+                    description: 'Aspect ratio of the image, default 1:1',
                   },
                 },
                 required: ['prompt'],
@@ -1035,7 +1054,8 @@ export async function POST(request: NextRequest) {
 
         if (!fetchRes.ok) {
           const errText = await fetchRes.text().catch(() => '');
-          send({ type: 'error', error: `API 错误 ${fetchRes.status}: ${errText.slice(0, 200)}` });
+          console.warn(`[simple-chat] upstream chat failed: model=${model}, provider=${provider.name}, status=${fetchRes.status}`);
+          send({ type: 'error', error: describeUpstreamChatError(fetchRes.status, errText, model) });
           controller.close();
           return;
         }
@@ -1098,11 +1118,11 @@ export async function POST(request: NextRequest) {
           if (tc.name === 'generate_image') {
             send({ type: 'tool_status', tool: 'generating_image', status: 'generating', label: '正在生成图片...' });
 
-            let args: { prompt?: string; size?: string } = {};
+            let args: { prompt?: string; size?: string; aspect_ratio?: string } = {};
             try { args = JSON.parse(tc.arguments); } catch { /* ignore */ }
 
             const imgPrompt = args.prompt || fullContent.slice(0, 500);
-            const imgSize = args.size || '1024x1024';
+            const imgAspectRatio = resolveToolAspectRatio(args);
 
             // 图生图：用户上传了参考图且意图是"基于图片生成/调整"时，传入参考图
             const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
@@ -1111,7 +1131,14 @@ export async function POST(request: NextRequest) {
             const i2iIntent = /(这张图|这张|此图|图片|参考|改成|调整|换成|基于|类似风格|同款|根据这)/.test(userText);
             const referenceImage = userImages.length > 0 && i2iIntent ? userImages[0] : undefined;
 
-            try {
+            if (!imageModel) {
+              send({
+                type: 'tool_status',
+                tool: 'generating_image',
+                status: 'failed',
+                label: '图片生成失败: 未选择图像模型，请在输入框上方选择一个图像模型后重试',
+              });
+            } else try {
               const internalHeaders = await getInternalRequestHeaders(user.id, user.role === 'admin' ? 'admin' : 'user');
               const stableIdempotencyKey = `simple-chat:${body.taskId || body.projectId || 'chat'}:${body.responseMessageId || tc.id}:generate`;
               const sourceVersionIds = Array.isArray(body.sourceVersionIds)
@@ -1152,8 +1179,8 @@ export async function POST(request: NextRequest) {
                   prompt: imgPrompt,
                   model: imageModel,
                   providerId: imageProviderId,
-                  size: imgSize,
-                  count: 1,
+                  aspectRatio: imgAspectRatio,
+                  outputCount: 1,
                   submitOnly: true,
                   projectId: body.assetProjectId,
                   sessionId: `standalone-chat:${body.projectId}`,
@@ -1162,7 +1189,9 @@ export async function POST(request: NextRequest) {
                   assetWorkspaceId: `standalone-chat:${body.projectId}`,
                   assetSourceEntityId: body.responseMessageId,
                   assetParentVersionIds: sourceVersionIds,
-                  ...(referenceImage ? { imageUrl: referenceImage, strength: i2iStrength } : {}),
+                  ...(referenceImage
+                    ? { referenceImages: [referenceImage], referenceMode: 'reference', strength: i2iStrength }
+                    : {}),
                 }),
               });
               const imgRes = agentRuntimeMode === 'agent-v2'

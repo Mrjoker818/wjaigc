@@ -179,7 +179,7 @@ function standaloneToolCallResponse(): Response {
           id: 'standalone-tool-call',
           function: {
             name: 'generate_image',
-            arguments: JSON.stringify({ prompt: 'Standalone exact prompt', size: '1024x1024' }),
+            arguments: JSON.stringify({ prompt: 'Standalone exact prompt', aspect_ratio: '1:1' }),
           },
         }],
       },

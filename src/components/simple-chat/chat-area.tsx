@@ -104,6 +104,9 @@ type SimpleChatStreamPayload = {
   projectId?: string;
 };
 
+/** A request the chat route refused with a readable reason. */
+class SimpleChatRequestRejectedError extends Error {}
+
 function readSimpleChatStreamPayload(value: unknown): SimpleChatStreamPayload | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   return value as SimpleChatStreamPayload;
@@ -1725,7 +1728,12 @@ export default function ChatArea({
         }),
       });
 
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (!response.ok) {
+        // The route explains rejections (no model selected, no permission) in `error`.
+        const errorBody = await response.json().catch(() => null) as { error?: unknown } | null;
+        const reason = typeof errorBody?.error === 'string' ? errorBody.error.trim().slice(0, 300) : '';
+        throw reason ? new SimpleChatRequestRejectedError(reason) : new Error(`HTTP ${response.status}`);
+      }
       if (!response.body) throw new Error('No response body');
 
       const streamResult = await consumeSimpleChatJsonStream(response.body, {
@@ -1777,7 +1785,10 @@ export default function ChatArea({
               message.id === context.assistantMessageId
                 ? {
                   ...message,
-                  content: `*${parsed.label || '正在处理图片任务...'}*`,
+                  // Keep the text the model already streamed; the status line goes underneath it.
+                  content: fullContent.trim()
+                    ? `${fullContent}\n\n*${parsed.label || '正在处理图片任务...'}*`
+                    : `*${parsed.label || '正在处理图片任务...'}*`,
                   ...(typeof parsed.runId === 'string' ? { agentRunId: parsed.runId } : {}),
                 }
                 : message
@@ -1821,7 +1832,7 @@ export default function ChatArea({
               const imageIndex = message.images?.length || 0;
               return {
                 ...message,
-                content: completedChatImageMessageContent(message.content),
+                content: fullContent.trim() ? fullContent : completedChatImageMessageContent(message.content),
                 images: [...(message.images || []), imageUrl],
                 imageRefs: [...(message.imageRefs || []), imageRef?.assetVersionId && imageRef.placementId
                   ? imageRef
@@ -1877,7 +1888,7 @@ export default function ChatArea({
       }
       const errorMessage = error instanceof SimpleChatSseProtocolError
         ? error.message
-        : error instanceof Error && /^HTTP \d+$/u.test(error.message)
+        : error instanceof SimpleChatRequestRejectedError || (error instanceof Error && /^HTTP \d+$/u.test(error.message))
           ? `请求失败：${error.message}`
           : '抱歉，请求失败，请重试。';
       failMessage(errorMessage);

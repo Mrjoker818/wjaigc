@@ -92,7 +92,7 @@ function imageToolCallResponse(): Response {
           id: 'tool-call-1',
           function: {
             name: 'generate_image',
-            arguments: JSON.stringify({ prompt: 'A lighthouse at night', size: '1024x1024' }),
+            arguments: JSON.stringify({ prompt: 'A lighthouse at night', aspect_ratio: '1:1' }),
           },
         }],
       },
