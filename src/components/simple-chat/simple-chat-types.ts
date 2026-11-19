@@ -46,6 +46,10 @@ export interface SimpleChatMessage {
   steps?: SimpleChatStep[];
   /** Built-in skill that handled this reply. */
   skill?: { id: string; name: string } | null;
+  /** Reasoning / thinking content streamed before the final answer. */
+  reasoning?: string;
+  /** Web-search sources cited in this reply. */
+  sources?: SimpleChatSource[];
   model?: string;
   providerId?: string;
   parentMessageId?: string;
@@ -57,6 +61,14 @@ export interface SimpleChatStep {
   label: string;
   status: 'pending' | 'running' | 'done' | 'failed';
   detail?: string;
+}
+
+export interface SimpleChatSource {
+  index: number;
+  title: string;
+  url: string;
+  snippet: string;
+  summary?: string;
 }
 
 export interface SimpleChatAgent {

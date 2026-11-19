@@ -326,97 +326,160 @@ export async function POST(request: NextRequest) {
           },
         ];
 
-        const fetchRes = await fetchWithV1Retry(
-          baseUrl,
-          '/chat/completions',
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify({
-              model,
-              messages: fullMessages,
-              stream: true,
-              tools,
-              tool_choice: 'auto',
-              ...chatControls.requestParams,
-            }),
-          },
-          true,
-          API_TIMEOUTS.chat
-        );
-
-        if (!fetchRes.ok) {
-          const errText = await fetchRes.text().catch(() => '');
-          console.warn(`[simple-chat] upstream chat failed: model=${model}, provider=${provider.name}, status=${fetchRes.status}, body=${errText.slice(0, 200)}`);
-          failCurrentStep(`对话模型返回 ${fetchRes.status}`);
-          send({ type: 'error', error: describeUpstreamChatError(fetchRes.status, errText, model) });
-          controller.close();
-          return;
-        }
-
-        const reader = fetchRes.body?.getReader();
-        if (!reader) {
-          send({ type: 'error', error: '无法读取响应流' });
-          controller.close();
-          return;
-        }
-
-        const decoder = new TextDecoder();
-        let buffer = '';
-        const toolCalls: Record<number, { id: string; name: string; arguments: string }> = {};
+        // Agent 闭环：模型可多轮调用工具（web_search → 读结果 → 再决策 → 最终作答）。
+        // web_search 在循环内即时执行并把结果回灌给模型；generate_image 留给循环后的图像处理。
+        // 整个循环有最大轮次上限，防止模型无限兜圈。
+        const MAX_AGENT_ROUNDS = 5;
+        const searchCustomHeaders = { ...forwardHeaders } as Record<string, string>;
         let fullContent = '';
+        let imageToolArgs: string[] = [];
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+        for (let round = 0; round < MAX_AGENT_ROUNDS; round += 1) {
+          const fetchRes = await fetchWithV1Retry(
+            baseUrl,
+            '/chat/completions',
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${apiKey}`,
+              },
+              body: JSON.stringify({
+                model,
+                messages: fullMessages,
+                stream: true,
+                tools,
+                tool_choice: 'auto',
+                ...chatControls.requestParams,
+              }),
+            },
+            true,
+            API_TIMEOUTS.chat
+          );
 
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
+          if (!fetchRes.ok) {
+            const errText = await fetchRes.text().catch(() => '');
+            console.warn(`[simple-chat] upstream chat failed: model=${model}, provider=${provider.name}, status=${fetchRes.status}, body=${errText.slice(0, 200)}`);
+            failCurrentStep(`对话模型返回 ${fetchRes.status}`);
+            send({ type: 'error', error: describeUpstreamChatError(fetchRes.status, errText, model) });
+            controller.close();
+            return;
+          }
 
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed || !trimmed.startsWith('data:')) continue;
-            const jsonStr = trimmed.slice(5).trim();
-            if (jsonStr === '[DONE]') continue;
+          const reader = fetchRes.body?.getReader();
+          if (!reader) {
+            send({ type: 'error', error: '无法读取响应流' });
+            controller.close();
+            return;
+          }
 
-            try {
-              const parsed = JSON.parse(jsonStr);
-              const delta = parsed.choices?.[0]?.delta;
-              if (!delta) continue;
+          const decoder = new TextDecoder();
+          let buffer = '';
+          const roundToolCalls: Record<number, { id: string; name: string; arguments: string }> = {};
+          let reasoningEmitted = false;
 
-              // 文本内容
-              if (delta.content) {
-                if (!fullContent && steps[0]?.status === 'running') setStep(0, 'done');
-                fullContent += delta.content;
-                send({ type: 'text', content: delta.content });
-              }
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
 
-              // 工具调用
-              if (delta.tool_calls) {
-                for (const tc of delta.tool_calls) {
-                  const idx = tc.index ?? 0;
-                  if (!toolCalls[idx]) {
-                    toolCalls[idx] = { id: tc.id || '', name: tc.function?.name || '', arguments: '' };
-                  }
-                  if (tc.function?.name) toolCalls[idx].name = tc.function.name;
-                  if (tc.function?.arguments) toolCalls[idx].arguments += tc.function.arguments;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed || !trimmed.startsWith('data:')) continue;
+              const jsonStr = trimmed.slice(5).trim();
+              if (jsonStr === '[DONE]') continue;
+
+              try {
+                const parsed = JSON.parse(jsonStr);
+                const delta = parsed.choices?.[0]?.delta;
+                if (!delta) continue;
+
+                // 推理内容（DeepSeek: reasoning_content；其他: reasoning / thinking）
+                const reasoningDelta = extractReasoningDelta(delta);
+                if (reasoningDelta) {
+                  reasoningEmitted = true;
+                  send({ type: 'reasoning', content: reasoningDelta });
                 }
-              }
-            } catch { /* 忽略解析错误 */ }
+
+                // 文本内容
+                if (delta.content) {
+                  if (reasoningEmitted) { send({ type: 'reasoning_done' }); reasoningEmitted = false; }
+                  if (!fullContent && steps[0]?.status === 'running') setStep(0, 'done');
+                  fullContent += delta.content;
+                  send({ type: 'text', content: delta.content });
+                }
+
+                // 工具调用
+                if (delta.tool_calls) {
+                  for (const tc of delta.tool_calls) {
+                    const idx = tc.index ?? 0;
+                    if (!roundToolCalls[idx]) {
+                      roundToolCalls[idx] = { id: tc.id || '', name: tc.function?.name || '', arguments: '' };
+                    }
+                    if (tc.id) roundToolCalls[idx].id = tc.id;
+                    if (tc.function?.name) roundToolCalls[idx].name = tc.function.name;
+                    if (tc.function?.arguments) roundToolCalls[idx].arguments += tc.function.arguments;
+                  }
+                }
+              } catch { /* 忽略解析错误 */ }
+            }
+          }
+          if (reasoningEmitted) send({ type: 'reasoning_done' });
+
+          const roundCalls = Object.values(roundToolCalls);
+          const searchCalls = roundCalls.filter(t => t.name === 'web_search');
+          const imageCalls = roundCalls.filter(t => t.name === 'generate_image');
+
+          // 本轮没有搜索调用 → 结束 Agent 循环（可能带有 generate_image 或纯文本答复）。
+          if (searchCalls.length === 0) {
+            imageToolArgs = imageCalls.map(c => c.arguments);
+            break;
+          }
+
+          // 执行 web_search 工具调用，把结果回灌给模型后继续下一轮。
+          // 先把助手这轮的 tool_calls 作为一条 assistant 消息写回上下文。
+          fullMessages.push({
+            role: 'assistant',
+            content: fullContent || null,
+            tool_calls: roundCalls.map(c => ({
+              id: c.id || `call_${c.name}`,
+              type: 'function',
+              function: { name: c.name, arguments: c.arguments || '{}' },
+            })),
+          } as unknown as (typeof fullMessages)[number]);
+
+          for (const call of searchCalls) {
+            let q = '';
+            try { q = (JSON.parse(call.arguments || '{}').query || '').toString(); } catch { /* ignore */ }
+            send({ type: 'search_status', status: 'searching', query: q });
+            const result = await runWebSearch(q, searchCustomHeaders, 5);
+            if (result.ok && result.resultCount > 0) {
+              send({ type: 'search_status', status: 'completed', query: q, resultCount: result.resultCount, sources: result.items });
+            } else {
+              send({ type: 'search_status', status: 'failed', query: q, resultCount: 0, error: result.error || '未找到相关结果' });
+            }
+            fullMessages.push({
+              role: 'tool',
+              tool_call_id: call.id || `call_${call.name}`,
+              content: result.ok && result.modelText
+                ? result.modelText
+                : `联网搜索未返回有效结果${result.error ? `：${result.error}` : ''}。请基于你已有的知识谨慎作答，并说明可能不是最新信息。`,
+            } as unknown as (typeof fullMessages)[number]);
+          }
+          // 最后一轮仍想搜索则不再继续，交给模型基于已有结果作答。
+          if (round === MAX_AGENT_ROUNDS - 1) {
+            imageToolArgs = [];
           }
         }
 
         // 处理工具调用：模型可能一次返回多个 generate_image（如「分别画猫和狗」），逐个顺序执行，
         // 不再只取第一个而静默丢弃其余调用。
-        if (Object.keys(toolCalls).length > 0) {
-          const imageToolCalls = Object.values(toolCalls).filter(t => t.name === 'generate_image');
-          for (let callIdx = 0; callIdx < imageToolCalls.length; callIdx += 1) {
-            const tc = imageToolCalls[callIdx];
-            const callPrefix = imageToolCalls.length > 1 ? `第 ${callIdx + 1}/${imageToolCalls.length} 组 · ` : '';
+        if (imageToolArgs.length > 0) {
+          for (let callIdx = 0; callIdx < imageToolArgs.length; callIdx += 1) {
+            const callPrefix = imageToolArgs.length > 1 ? `第 ${callIdx + 1}/${imageToolArgs.length} 组 · ` : '';
             switchToImageSteps();
             setStep(0, 'done');
             send({ type: 'tool_status', tool: 'generating_image', status: 'generating', label: `${callPrefix}正在生成图片...` });
@@ -425,7 +488,7 @@ export async function POST(request: NextRequest) {
               prompt?: string; size?: string; aspect_ratio?: string; image_count?: number;
               use_reference_image?: boolean; reference_description?: string;
             } = {};
-            try { args = JSON.parse(tc.arguments); } catch { /* ignore */ }
+            try { args = JSON.parse(imageToolArgs[callIdx]); } catch { /* ignore */ }
 
             const imgPrompt = args.prompt || fullContent.slice(0, 500);
             const failImage = (reason: string) => {

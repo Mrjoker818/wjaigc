@@ -16,7 +16,7 @@ import { UsageStats } from "./usage-stats";
 import {
   SimpleChatProject, SimpleChatTask, SimpleChatMessage, SimpleChatAgent, ChatAttachment, ChatArtifact,
   ProjectInstructions, ProjectKnowledgeItem,
-  PRESET_SKILLS, PresetSkill, SimpleChatStep
+  PRESET_SKILLS, PresetSkill, SimpleChatStep, SimpleChatSource
 } from "./simple-chat-types";
 import { SIMPLE_CHAT_SKILLS } from "@/lib/simple-chat-skills";
 import { User } from "@/lib/user-types";
@@ -653,6 +653,7 @@ export default function ChatArea({
     // 提升作用域供 finally 中统计 token 用量
     let allMessages: Array<{ role: string; content: string; images?: string[] }> = [];
     let fullContent = "";
+    let fullReasoning = "";
 
     try {
       const systemMessages: Array<{ role: string; content: string }> = [];
@@ -781,47 +782,29 @@ export default function ChatArea({
                 setControlNotice(notices[0] || `已应用：推理 ${parsed.appliedReasoningEffort || '默认'}，速度 ${parsed.appliedResponseSpeed || '均衡'}`);
                 setAppliedChatControls(appliedControls);
               } else if (parsed.type === 'search_status') {
-                if (parsed.status === 'completed') {
+                // Agent 循环内模型自主发起的联网搜索：实时展示状态，并把来源挂到当前助手消息上。
+                if (parsed.status === 'searching') {
+                  setSearchStatus(parsed.query ? `正在联网搜索：${parsed.query}` : '正在联网搜索...');
+                } else if (parsed.status === 'completed') {
                   setSearchStatus(`搜索完成，找到 ${parsed.resultCount || 0} 条结果`);
-                } else if (parsed.status === 'failed' || parsed.status === 'error') {
-                  setSearchStatus(null);
+                  const sources = Array.isArray(parsed.sources) ? (parsed.sources as SimpleChatSource[]) : [];
+                  if (sources.length > 0) {
+                    setMessages(prev => prev.map(item => item.id === aiMsg.id
+                      ? { ...item, sources: [...(item.sources || []), ...sources] }
+                      : item));
+                  }
                 } else {
-                  setSearchStatus('正在搜索...');
+                  // failed / error
+                  setSearchStatus(null);
                 }
-                // 搜索完成后，添加一条系统消息展示搜索结果
-                if (parsed.status === 'completed' && parsed.resultCount > 0) {
-                  const searchMsg = {
-                    id: 'search-' + Math.random().toString(36).slice(2, 8),
-                    role: 'search' as const,
-                    content: parsed.searchResults || '',
-                    createdAt: Date.now(),
-                  };
-                  setMessages(prev => [...prev, searchMsg]);
-                } else if (parsed.status === 'completed' && parsed.resultCount === 0) {
-                  // 搜索无结果 — 显式失败
-                  setMessages(prev => {
-                    const updated = [...prev];
-                    updated.splice(updated.length - 1, 0, {
-                      id: 'search-' + Math.random().toString(36).slice(2, 8),
-                      role: 'system',
-                      content: `🌐 联网搜索未找到相关结果`,
-                      createdAt: Date.now(),
-                    });
-                    return updated;
-                  });
-                } else if (parsed.status === 'failed' || parsed.status === 'error') {
-                  // 搜索失败 — 显示错误信息
-                  setMessages(prev => {
-                    const updated = [...prev];
-                    updated.splice(updated.length - 1, 0, {
-                      id: 'search-' + Math.random().toString(36).slice(2, 8),
-                      role: 'system',
-                      content: `🌐 联网搜索失败：${parsed.error || '服务暂时不可用'}`,
-                      createdAt: Date.now(),
-                    });
-                    return updated;
-                  });
-                }
+              } else if (parsed.type === 'reasoning' && parsed.content) {
+                // 推理过程增量（DeepSeek reasoning_content / 其他 reasoning / thinking）
+                fullReasoning += parsed.content;
+                setMessages(prev => prev.map(item => item.id === aiMsg.id
+                  ? { ...item, reasoning: fullReasoning }
+                  : item));
+              } else if (parsed.type === 'reasoning_done') {
+                // 推理阶段结束，正文即将开始，无需额外处理（reasoning 已保留用于展示）
               } else if (parsed.type === 'tool_status') {
                 setSearchStatus(null);
                 const isFailed = parsed.status === 'failed';
@@ -1462,6 +1445,12 @@ export default function ChatArea({
                     </div>
                   ) : msg.role === 'assistant' ? (
                     <>
+                      {msg.reasoning && msg.reasoning.trim() && (
+                        <details className="mb-3 rounded-lg border border-border bg-muted/40 p-3 text-xs" open={isStreaming && msg.id === messages[messages.length - 1]?.id}>
+                          <summary className="cursor-pointer font-medium text-muted-foreground select-none">思考过程</summary>
+                          <div className="mt-2 whitespace-pre-wrap text-muted-foreground/80 leading-relaxed">{msg.reasoning}</div>
+                        </details>
+                      )}
                       {msg.steps && msg.steps.length > 0 && (
                         <div className="mb-3 rounded-lg border border-border bg-muted/40 p-3 text-xs" data-testid="chat-steps">
                           <div className="font-medium text-foreground">
@@ -1495,6 +1484,22 @@ export default function ChatArea({
                         </div>
                       )}
                       <MarkdownRenderer content={msg.content} />
+                      {msg.sources && msg.sources.length > 0 && (
+                        <div className="mt-3 rounded-lg border border-border bg-muted/40 p-3 text-xs">
+                          <div className="font-medium text-foreground mb-2">联网来源</div>
+                          <ol className="space-y-1.5">
+                            {msg.sources.map((src) => (
+                              <li key={`${msg.id}-src-${src.index}`} className="flex gap-1.5">
+                                <span className="shrink-0 text-muted-foreground/70">[{src.index}]</span>
+                                <a href={src.url} target="_blank" rel="noopener noreferrer"
+                                  className="min-w-0 text-primary hover:underline break-all" title={src.snippet}>
+                                  {src.title || src.url}
+                                </a>
+                              </li>
+                            ))}
+                          </ol>
+                        </div>
+                      )}
                     </>
                   ) : editingMessageId === msg.id ? (
                     <div className="space-y-2 min-w-[280px]">
