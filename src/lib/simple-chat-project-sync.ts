@@ -130,6 +130,7 @@ export const SIMPLE_CHAT_SYNC_LIMITS = {
   idCharacters: 256,
   nameCharacters: 512,
   messageContentBytes: 512 * 1024,
+  messageReasoningBytes: 32 * 1024,
   largeTextBytes: 2 * 1024 * 1024,
   jsonDepth: 16,
 } as const;
@@ -3631,6 +3632,14 @@ function validateMessageEntity(value: Record<string, unknown>): SimpleChatProjec
   const contentBytes = utf8Bytes(value.content as string);
   if (contentBytes > SIMPLE_CHAT_SYNC_LIMITS.messageContentBytes) {
     return limitValidation('message.content', SIMPLE_CHAT_SYNC_LIMITS.messageContentBytes, contentBytes);
+  }
+  if (value.reasoning !== undefined) {
+    const reasoningResult = validateRequiredString(value, 'reasoning');
+    if (reasoningResult) return reasoningResult;
+    const reasoningBytes = utf8Bytes(value.reasoning as string);
+    if (reasoningBytes > SIMPLE_CHAT_SYNC_LIMITS.messageReasoningBytes) {
+      return limitValidation('message.reasoning', SIMPLE_CHAT_SYNC_LIMITS.messageReasoningBytes, reasoningBytes);
+    }
   }
   return firstValidation(
     validateRequiredId(value, 'id'),

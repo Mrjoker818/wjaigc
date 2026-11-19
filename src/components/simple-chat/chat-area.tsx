@@ -393,8 +393,8 @@ function SearchResultsCard({ content }: { content: string }) {
             {parsed.items.map((item) => (
               <a
                 key={item.idx}
-                href={item.url && item.url !== '无' ? item.url : undefined}
-                target={item.url && item.url !== '无' ? '_blank' : undefined}
+                href={/^https?:\/\//i.test(item.url) ? item.url : undefined}
+                target={/^https?:\/\//i.test(item.url) ? '_blank' : undefined}
                 rel="noopener noreferrer"
                 className="block p-3 rounded-xl bg-background/50 hover:bg-background/80 border border-border/50 hover:border-border transition-all"
               >
@@ -1629,6 +1629,7 @@ export default function ChatArea({
         ? {
           ...message,
           content: '',
+          reasoning: undefined,
           images: [],
           imageRefs: [],
           attachments: [],
@@ -1668,6 +1669,7 @@ export default function ChatArea({
       },
     ];
     let fullContent = '';
+    let reasoningContent = '';
     let streamError: string | null = null;
 
     const markStopped = () => {
@@ -1861,6 +1863,14 @@ export default function ChatArea({
               : '未知错误';
             setSearchStatus(null);
             failMessage(streamError, `请求失败：${streamError}\n\n建议：尝试切换模型或稍后重试。`);
+          } else if (parsed.type === 'reasoning' && parsed.content) {
+            // Stored up to the sync limit; the start of the reasoning is the useful part.
+            reasoningContent = `${reasoningContent}${parsed.content}`.slice(0, 16_000);
+            updateRequestMessages(previous => previous.map(message => (
+              message.id === context.assistantMessageId
+                ? { ...message, reasoning: reasoningContent }
+                : message
+            )));
           } else if (parsed.type === 'text' && parsed.content) {
             setSearchStatus(null);
             fullContent += parsed.content;
@@ -3065,6 +3075,17 @@ export default function ChatArea({
                     ? 'bg-primary text-primary-foreground rounded-br-md'
                     : 'bg-card border border-border rounded-bl-md'
                 }`}>
+                  {msg.role === 'assistant' && msg.reasoning ? (
+                    <details
+                      className="mb-2 rounded-lg border border-border/60 bg-muted/30 text-xs text-muted-foreground"
+                      open={msg.status === 'streaming' && !msg.content}
+                    >
+                      <summary className="cursor-pointer select-none rounded-lg px-3 py-1.5 font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+                        思考过程
+                      </summary>
+                      <div className="max-h-60 overflow-y-auto whitespace-pre-wrap px-3 pb-2 [overflow-wrap:anywhere]">{msg.reasoning}</div>
+                    </details>
+                  ) : null}
                   {msg.role === 'assistant' && !msg.content && msg.status === 'streaming' ? (
                     <div className="flex items-center gap-1 py-1">
                       <div className="w-2 h-2 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: '0ms' }} />

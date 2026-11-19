@@ -207,6 +207,84 @@ describe('simple-chat retry idempotency boundary', () => {
     expect(event.searchResults).toContain('[1] Line one line two\nURL: https://a.example\n摘要: First second\nAI摘要: S1 S2');
   });
 
+  it('runs a web_search tool round, pairs every result and keys each round separately', async () => {
+    mocks.webSearch
+      .mockResolvedValueOnce({ web_items: [{ title: 'First', url: 'https://a.example', snippet: 'one' }] })
+      .mockResolvedValueOnce({ web_items: [{ title: 'Second', url: 'javascript:alert(1)', snippet: 'two' }] });
+    const searchCall = JSON.stringify({ choices: [{ delta: {
+      reasoning_content: 'need fresher data',
+      tool_calls: [{ index: 0, id: 'call-search', function: { name: 'web_search', arguments: '{"query":"latest"}' } }],
+    } }] });
+    mocks.fetchWithTimeout
+      .mockResolvedValueOnce(new Response(`data: ${searchCall}\n\ndata: [DONE]\n\n`, { status: 200 }))
+      .mockResolvedValueOnce(chatProviderResponse());
+
+    const response = await chatPost(new NextRequest('http://localhost/api/simple-chat/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'turn-a' },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: 'Hello' }],
+        model: 'chat-model',
+        providerId: 'provider-a',
+        webSearch: true,
+        idempotencyKey: 'turn-a',
+      }),
+    }));
+    const events = (await response.text()).split('\n')
+      .filter(line => line.startsWith('data: '))
+      .map(line => JSON.parse(line.slice(6)));
+
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(2);
+    const [first, second] = mocks.fetchWithTimeout.mock.calls.map(call => call[1] as RequestInit);
+    expect((first.headers as Record<string, string>)['Idempotency-Key']).toBe('turn-a');
+    expect((second.headers as Record<string, string>)['Idempotency-Key']).toBe('turn-a:round-1');
+    const secondBody = JSON.parse(String(second.body));
+    const toolNames = (body: { tools: Array<{ function: { name: string } }> }) => body.tools.map(tool => tool.function.name);
+    expect(toolNames(JSON.parse(String(first.body)))).toContain('web_search');
+    expect(secondBody.messages.at(-2)).toMatchObject({ role: 'assistant', tool_calls: [{ id: 'call-search' }] });
+    expect(secondBody.messages.at(-1)).toMatchObject({ role: 'tool', tool_call_id: 'call-search' });
+    expect(secondBody.messages.at(-1).content).toContain('[2] Second');
+
+    const lastCard = events.filter(event => event.type === 'search_status' && event.status === 'completed').at(-1);
+    expect(lastCard).toMatchObject({ resultCount: 2 });
+    expect(lastCard.searchResults).toContain('[2] Second\nURL: 无');
+    expect(lastCard.searchResults).not.toContain('javascript:');
+    expect(events).toContainEqual({ type: 'reasoning', content: 'need fresher data' });
+    expect(events.filter(event => event.type === 'text').map(event => event.content).join('')).toBe('ok');
+  });
+
+  it('offers no search tool in the last round so the model has to answer', async () => {
+    mocks.webSearch.mockResolvedValue({ web_items: [{ title: 'T', url: 'https://a.example', snippet: 's' }] });
+    const searchCall = (id: string) => new Response(`data: ${JSON.stringify({ choices: [{ delta: {
+      tool_calls: [{ index: 0, id, function: { name: 'web_search', arguments: '{"query":"q"}' } }],
+    } }] })}\n\ndata: [DONE]\n\n`, { status: 200 });
+    mocks.fetchWithTimeout
+      .mockResolvedValueOnce(searchCall('s1'))
+      .mockResolvedValueOnce(searchCall('s2'))
+      .mockResolvedValueOnce(chatProviderResponse());
+
+    const response = await chatPost(new NextRequest('http://localhost/api/simple-chat/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'Hello' }], model: 'chat-model', providerId: 'provider-a', webSearch: true }),
+    }));
+    await response.text();
+
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(3);
+    const lastBody = JSON.parse(String((mocks.fetchWithTimeout.mock.calls[2][1] as RequestInit).body));
+    expect(lastBody.tools.map((tool: { function: { name: string } }) => tool.function.name)).toEqual(['generate_image']);
+  });
+
+  it('keeps a single request without the search tool when web search is off', async () => {
+    mocks.fetchWithTimeout.mockResolvedValue(chatProviderResponse());
+    const response = await chatPost(chatRequest(undefined));
+    await response.text();
+
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(String((mocks.fetchWithTimeout.mock.calls[0][1] as RequestInit).body));
+    expect(body.tools.map((tool: { function: { name: string } }) => tool.function.name)).toEqual(['generate_image']);
+  });
+
   it('derives stable Deep Research phase keys', async () => {
     const response = await deepResearchPost(deepResearchRequest('research-a'));
     await response.text();

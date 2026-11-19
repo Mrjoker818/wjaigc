@@ -51,6 +51,8 @@ export interface SimpleChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system' | 'search';
   content: string;
+  /** The model's streamed reasoning, shown folded above the answer. */
+  reasoning?: string;
   images?: string[];
   imageRefs?: WorkspaceAssetReference[];
   attachments?: ChatAttachment[];

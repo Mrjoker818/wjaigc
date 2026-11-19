@@ -4,13 +4,20 @@ import { NextRequest } from 'next/server';
 import { findProviderById, findProviderForModel } from '@/lib/server-api-config';
 import type { ApiKind } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
-import { SearchClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
+import { HeaderUtils } from 'coze-coding-dev-sdk';
 import { fetchWithTimeout, getInternalApiUrl, shouldSkipV1Retry } from '@/lib/api-helpers';
 import { assertSafeProviderUrl, PoisonedApiHostError } from '@/lib/poisoned-api-host';
 import { resolveChatControls } from '@/lib/chat-generation-controls';
 import { IMAGE_ASPECT_RATIOS, describeUpstreamChatError, resolveToolAspectRatio } from '@/lib/simple-chat-upstream';
 import { toProviderMediaUrl } from '@/lib/provider-media-url';
 import { describeFittedParams, fitImageParams, parseImageRequest, planImageToolJobs } from '@/lib/simple-chat-image-params';
+import {
+  extractReasoningDelta,
+  formatSearchDisplay,
+  formatSearchForModel,
+  runWebSearch,
+  type WebSearchSource,
+} from '@/lib/simple-chat-tools';
 import { getInternalRequestHeaders } from '@/lib/api-auth';
 import { AssetServiceError, createAssetService } from '@/lib/asset-core/service';
 import { parseWorkspaceSourceTrace, type WorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
@@ -835,38 +842,30 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // 联网搜索
+  // 联网搜索：先按用户最后一句话搜一次；之后模型还能用 web_search 工具补充搜索。
+  // 同一轮的所有搜索共用一张结果卡片，来源编号连续。
+  const searchQueries: string[] = [];
+  const searchSources: WebSearchSource[] = [];
+  const searchSummaries: string[] = [];
+  const searchHeaders = webSearch ? HeaderUtils.extractForwardHeaders(request.headers) : undefined;
   let searchResults: string | null = null;
   if (webSearch) {
-    try {
-      // 取最后一条用户消息作为搜索 query
-      const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
-      const searchQuery = lastUserMsg?.content || '';
-      if (searchQuery) {
-        const customHeaders = HeaderUtils.extractForwardHeaders(request.headers);
-        const searchClient = new SearchClient(new Config(), customHeaders);
-        const searchResp = await searchClient.webSearch(searchQuery, 5, true);
-
-        if (searchResp.web_items && searchResp.web_items.length > 0) {
-          // The client parses one line per field, so provider text must not carry line breaks.
-          const oneLine = (value: string | undefined) => (value || '').replace(/\s*[\r\n]+\s*/g, ' ').trim();
-          const items = searchResp.web_items.slice(0, 5).map((item, i) =>
-            `[${i + 1}] ${oneLine(item.title)}\nURL: ${oneLine(item.url) || '无'}\n摘要: ${oneLine(item.snippet)}${item.summary ? '\nAI摘要: ' + oneLine(item.summary) : ''}`
-          ).join('\n\n');
-
-          searchResults = `## 联网搜索结果\n搜索关键词: "${searchQuery}"\n\n${items}`;
-          if (searchResp.summary) {
-            searchResults += `\n\n## AI 搜索摘要\n${searchResp.summary}`;
-          }
-          enhancedSystemPrompt += `\n\n${searchResults}\n\n请基于以上联网搜索结果回答用户问题。如有引用，请标注来源编号（如 [1]、[2]）。`;
-        } else {
-          enhancedSystemPrompt += `\n\n(联网搜索未找到相关结果，请基于已有知识回答)`;
-        }
+    const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+    const searchQuery = lastUserMsg?.content || '';
+    if (searchQuery) {
+      const outcome = await runWebSearch(searchQuery, searchHeaders);
+      if (outcome.ok && outcome.sources.length > 0) {
+        searchQueries.push(outcome.query);
+        searchSources.push(...outcome.sources);
+        if (outcome.summary) searchSummaries.push(outcome.summary);
+        searchResults = formatSearchDisplay(searchQueries, searchSources, searchSummaries);
+        enhancedSystemPrompt += `\n\n${searchResults}\n\n请基于以上联网搜索结果回答用户问题。如有引用，请标注来源编号（如 [1]、[2]）。`;
+      } else if (outcome.ok) {
+        enhancedSystemPrompt += `\n\n(联网搜索未找到相关结果，请基于已有知识回答)`;
+      } else {
+        console.error('Web search failed:', outcome.error);
+        enhancedSystemPrompt += `\n\n(联网搜索暂时不可用: ${outcome.error})`;
       }
-    } catch (e: unknown) {
-      const message = errorMessage(e, 'Web search unavailable');
-      console.error('Web search failed:', message);
-      enhancedSystemPrompt += `\n\n(联网搜索暂时不可用: ${message})`;
     }
   }
 
@@ -1051,87 +1050,187 @@ export async function POST(request: NextRequest) {
           },
         ];
 
-        const chatRequestInit: RequestInit = {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
-            ...(requestIdempotencyKey ? { 'Idempotency-Key': requestIdempotencyKey } : {}),
+        const webSearchTool = {
+          type: 'function',
+          function: {
+            name: 'web_search',
+            description: 'Search the web for real-time or up-to-date information (news, prices, recent events, facts you are unsure about). Results are numbered; cite them as [1], [2].',
+            parameters: {
+              type: 'object',
+              properties: {
+                query: { type: 'string', description: 'A concise search query.' },
+              },
+              required: ['query'],
+            },
           },
-          body: JSON.stringify({
-            model,
-            messages: fullMessages,
-            stream: true,
-            tools,
-            tool_choice: 'auto',
-            ...chatControls.requestParams,
-          }),
         };
-        let fetchRes = await fetchWithTimeout(apiUrl, chatRequestInit, 'chat');
-        // Gateways that only route /v1 answer 404. Retry only then: a streamed
-        // reply is not JSON, so a content-type based retry would send a second paid request.
-        if (fetchRes.status === 404 && !shouldSkipV1Retry(baseUrl)) {
-          await fetchRes.body?.cancel().catch(() => undefined);
-          fetchRes = await fetchWithTimeout(`${baseUrl}/v1/chat/completions`, chatRequestInit, 'chat');
-        }
 
-        if (!fetchRes.ok) {
-          const errText = await fetchRes.text().catch(() => '');
-          console.warn(`[simple-chat] upstream chat failed: model=${model}, provider=${provider.name}, status=${fetchRes.status}`);
-          send({ type: 'error', error: describeUpstreamChatError(fetchRes.status, errText, model) });
-          controller.close();
-          return;
-        }
-
-        const reader = fetchRes.body?.getReader();
-        if (!reader) {
-          send({ type: 'error', error: '无法读取响应流' });
-          controller.close();
-          return;
-        }
-
-        const decoder = new TextDecoder();
-        let buffer = '';
+        // Agent loop: with web search on, the model may call web_search, read the results and
+        // answer in a later round. The last round offers no search tool, so it has to answer.
+        // A round that asks for images ends the loop; the images are generated below.
+        const MAX_CHAT_ROUNDS = webSearch ? 3 : 1;
+        const MAX_TOOL_SEARCHES = 2;
+        let toolSearchCount = 0;
         const toolCalls: Record<number, { id: string; name: string; arguments: string }> = {};
         let fullContent = '';
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+        for (let round = 0; round < MAX_CHAT_ROUNDS; round += 1) {
+          const lastRound = round === MAX_CHAT_ROUNDS - 1;
+          // Every round is a separate paid request, so each one has its own idempotency key.
+          const roundIdempotencyKey = requestIdempotencyKey && round > 0
+            ? `${requestIdempotencyKey}:round-${round}`
+            : requestIdempotencyKey;
+          const chatRequestInit: RequestInit = {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${apiKey}`,
+              ...(roundIdempotencyKey ? { 'Idempotency-Key': roundIdempotencyKey } : {}),
+            },
+            body: JSON.stringify({
+              model,
+              messages: fullMessages,
+              stream: true,
+              tools: webSearch && !lastRound ? [...tools, webSearchTool] : tools,
+              tool_choice: 'auto',
+              ...chatControls.requestParams,
+            }),
+          };
+          let fetchRes = await fetchWithTimeout(apiUrl, chatRequestInit, 'chat');
+          // Gateways that only route /v1 answer 404. Retry only then: a streamed
+          // reply is not JSON, so a content-type based retry would send a second paid request.
+          if (fetchRes.status === 404 && !shouldSkipV1Retry(baseUrl)) {
+            await fetchRes.body?.cancel().catch(() => undefined);
+            fetchRes = await fetchWithTimeout(`${baseUrl}/v1/chat/completions`, chatRequestInit, 'chat');
+          }
 
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
+          if (!fetchRes.ok) {
+            const errText = await fetchRes.text().catch(() => '');
+            console.warn(`[simple-chat] upstream chat failed: model=${model}, provider=${provider.name}, status=${fetchRes.status}`);
+            send({ type: 'error', error: describeUpstreamChatError(fetchRes.status, errText, model) });
+            controller.close();
+            return;
+          }
 
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed || !trimmed.startsWith('data:')) continue;
-            const jsonStr = trimmed.slice(5).trim();
-            if (jsonStr === '[DONE]') continue;
+          const reader = fetchRes.body?.getReader();
+          if (!reader) {
+            send({ type: 'error', error: '无法读取响应流' });
+            controller.close();
+            return;
+          }
 
-            try {
-              const parsed = JSON.parse(jsonStr);
-              const delta = parsed.choices?.[0]?.delta;
-              if (!delta) continue;
+          const decoder = new TextDecoder();
+          let buffer = '';
+          const roundCalls: Record<number, { id: string; name: string; arguments: string }> = {};
+          let roundText = '';
 
-              // 文本内容
-              if (delta.content) {
-                fullContent += delta.content;
-                send({ type: 'text', content: delta.content });
-              }
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
 
-              // 工具调用
-              if (delta.tool_calls) {
-                for (const tc of delta.tool_calls) {
-                  const idx = tc.index ?? 0;
-                  if (!toolCalls[idx]) {
-                    toolCalls[idx] = { id: tc.id || '', name: tc.function?.name || '', arguments: '' };
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed || !trimmed.startsWith('data:')) continue;
+              const jsonStr = trimmed.slice(5).trim();
+              if (jsonStr === '[DONE]') continue;
+
+              try {
+                const parsed = JSON.parse(jsonStr);
+                const delta = parsed.choices?.[0]?.delta;
+                if (!delta) continue;
+
+                // 推理过程（DeepSeek: reasoning_content；其他: reasoning / thinking）
+                const reasoning = extractReasoningDelta(delta);
+                if (reasoning) send({ type: 'reasoning', content: reasoning });
+
+                // 文本内容；后一轮的回答和前一轮的文字之间空一行
+                if (delta.content) {
+                  if (!roundText && fullContent) {
+                    fullContent += '\n\n';
+                    send({ type: 'text', content: '\n\n' });
                   }
-                  if (tc.function?.name) toolCalls[idx].name = tc.function.name;
-                  if (tc.function?.arguments) toolCalls[idx].arguments += tc.function.arguments;
+                  roundText += delta.content;
+                  fullContent += delta.content;
+                  send({ type: 'text', content: delta.content });
                 }
+
+                // 工具调用
+                if (delta.tool_calls) {
+                  for (const tc of delta.tool_calls) {
+                    const idx = tc.index ?? 0;
+                    if (!roundCalls[idx]) {
+                      roundCalls[idx] = { id: tc.id || '', name: tc.function?.name || '', arguments: '' };
+                    }
+                    if (tc.function?.name) roundCalls[idx].name = tc.function.name;
+                    if (tc.function?.arguments) roundCalls[idx].arguments += tc.function.arguments;
+                  }
+                }
+              } catch { /* 忽略解析错误 */ }
+            }
+          }
+
+          const calls = Object.values(roundCalls);
+          const wantsSearch = calls.some(call => call.name === 'web_search');
+          const wantsImage = calls.some(call => call.name === 'generate_image');
+          if (!wantsSearch || wantsImage || lastRound) {
+            Object.assign(toolCalls, roundCalls);
+            break;
+          }
+
+          // Search round: every call gets a result so the next request is well-formed.
+          const callIds = calls.map((call, index) => call.id || `call_${round}_${index}`);
+          fullMessages.push({
+            role: 'assistant',
+            content: roundText || null,
+            tool_calls: calls.map((call, index) => ({
+              id: callIds[index],
+              type: 'function',
+              function: { name: call.name, arguments: call.arguments || '{}' },
+            })),
+          } as unknown as (typeof fullMessages)[number]);
+          for (const [index, call] of calls.entries()) {
+            let result: string;
+            if (call.name !== 'web_search') {
+              result = '这个工具在当前步骤不可用。';
+            } else if (toolSearchCount >= MAX_TOOL_SEARCHES) {
+              result = '本轮的搜索次数已用完，请基于已有结果作答。';
+            } else {
+              toolSearchCount += 1;
+              let query = '';
+              try {
+                const args: unknown = JSON.parse(call.arguments || '{}');
+                if (args && typeof args === 'object' && typeof (args as { query?: unknown }).query === 'string') {
+                  query = (args as { query: string }).query;
+                }
+              } catch { /* empty query */ }
+              send({ type: 'search_status', status: 'searching', query });
+              const outcome = await runWebSearch(query, searchHeaders, { startIndex: searchSources.length + 1 });
+              if (outcome.ok && outcome.sources.length > 0) {
+                searchQueries.push(outcome.query);
+                searchSources.push(...outcome.sources);
+                if (outcome.summary) searchSummaries.push(outcome.summary);
+                send({
+                  type: 'search_status',
+                  status: 'completed',
+                  resultCount: searchSources.length,
+                  searchResults: formatSearchDisplay(searchQueries, searchSources, searchSummaries),
+                });
+                result = formatSearchForModel(outcome);
+              } else {
+                // Keep an earlier result card; only report failure when nothing was found yet.
+                if (searchSources.length === 0) send({ type: 'search_status', status: 'failed', resultCount: 0 });
+                result = `联网搜索未返回有效结果${outcome.error ? `：${outcome.error}` : ''}。请基于已有知识谨慎作答，并说明信息可能不是最新的。`;
               }
-            } catch { /* 忽略解析错误 */ }
+            }
+            fullMessages.push({
+              role: 'tool',
+              tool_call_id: callIds[index],
+              content: result,
+            } as unknown as (typeof fullMessages)[number]);
           }
         }
 
