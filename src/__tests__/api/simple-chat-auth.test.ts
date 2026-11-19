@@ -639,6 +639,65 @@ describe('POST /api/simple-chat/chat', () => {
     ]);
   });
 
+  it('runs one image per tool call with its own idempotency key', async () => {
+    mocks.findProviderForModel.mockResolvedValue({
+      id: 'chat-provider', apiKey: 'chat-key', baseUrl: 'https://chat.example/v1', advancedParams: {},
+    });
+    const generateCalls: Array<{ key: string | null; body: Record<string, unknown> }> = [];
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === 'https://chat.example/v1/chat/completions') {
+        const chunk = JSON.stringify({ choices: [{ delta: { tool_calls: [
+          { index: 0, id: 'call-cat', function: { name: 'generate_image', arguments: JSON.stringify({ prompt: 'a cat' }) } },
+          { index: 1, id: 'call-dog', function: { name: 'generate_image', arguments: JSON.stringify({ prompt: 'a dog' }) } },
+        ] } }] });
+        return new Response(`data: ${chunk}\n\ndata: [DONE]\n\n`, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+      }
+      if (url === 'http://127.0.0.1:5000/api/generate') {
+        const body = JSON.parse(String(init?.body));
+        generateCalls.push({ key: new Headers(init?.headers).get('idempotency-key'), body });
+        return jsonResponse({ success: true, directImageUrls: [`/api/serve-upload/${body.prompt === 'a cat' ? 'cat' : 'dog'}.png`] });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    }));
+
+    const response = await POST(imageToolRequest('http://localhost', {
+      messages: [{ role: 'user', content: '分别画一只猫和一只狗' }],
+      taskId: 'chat-task',
+      responseMessageId: 'assistant-message',
+    }));
+    const events = await response.text();
+
+    expect(generateCalls.map(call => call.body.prompt).sort()).toEqual(['a cat', 'a dog']);
+    expect(new Set(generateCalls.map(call => call.key)).size).toBe(2);
+    expect(generateCalls.map(call => call.key)).toContain('simple-chat:chat-task:assistant-message:generate');
+    expect(events).toContain('/api/serve-upload/cat.png');
+    expect(events).toContain('/api/serve-upload/dog.png');
+  });
+
+  it('repeats a single image call as many times as the user asked, up to four', async () => {
+    mocks.findProviderForModel.mockResolvedValue({
+      id: 'chat-provider', apiKey: 'chat-key', baseUrl: 'https://chat.example/v1', advancedParams: {},
+    });
+    let generateCount = 0;
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async input => {
+      const url = String(input);
+      if (url === 'https://chat.example/v1/chat/completions') return imageToolCallResponse();
+      if (url === 'http://127.0.0.1:5000/api/generate') {
+        generateCount += 1;
+        return jsonResponse({ success: true, directImageUrls: [`/api/serve-upload/v${generateCount}.png`] });
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    }));
+
+    const response = await POST(imageToolRequest('http://localhost', {
+      messages: [{ role: 'user', content: '给我 3 张不同的灯塔方案' }],
+    }));
+    await response.text();
+
+    expect(generateCount).toBe(3);
+  });
+
   it('explains a relay rejection instead of echoing the raw JSON body', async () => {
     mocks.findProviderForModel.mockResolvedValue({
       id: 'chat-provider', name: 'Relay', apiKey: 'chat-key', baseUrl: 'https://chat.example/v1', advancedParams: {},

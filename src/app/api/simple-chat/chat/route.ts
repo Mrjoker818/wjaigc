@@ -10,6 +10,7 @@ import { assertSafeProviderUrl, PoisonedApiHostError } from '@/lib/poisoned-api-
 import { resolveChatControls } from '@/lib/chat-generation-controls';
 import { IMAGE_ASPECT_RATIOS, describeUpstreamChatError, resolveToolAspectRatio } from '@/lib/simple-chat-upstream';
 import { toProviderMediaUrl } from '@/lib/provider-media-url';
+import { describeFittedParams, fitImageParams, parseImageRequest, planImageToolJobs } from '@/lib/simple-chat-image-params';
 import { getInternalRequestHeaders } from '@/lib/api-auth';
 import { AssetServiceError, createAssetService } from '@/lib/asset-core/service';
 import { parseWorkspaceSourceTrace, type WorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
@@ -1035,6 +1036,14 @@ export async function POST(request: NextRequest) {
                     enum: [...IMAGE_ASPECT_RATIOS],
                     description: 'Aspect ratio of the image, default 1:1',
                   },
+                  use_reference_image: {
+                    type: 'boolean',
+                    description: 'True when the user uploaded an image in this conversation and wants the result based on it (edit, restyle, keep the product, continue the same design).',
+                  },
+                  reference_description: {
+                    type: 'string',
+                    description: 'When use_reference_image is true: a short factual description of the uploaded image subject.',
+                  },
                 },
                 required: ['prompt'],
               },
@@ -1126,24 +1135,54 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // 处理工具调用
-        if (Object.keys(toolCalls).length > 0) {
-          const tc = toolCalls[0];
-          if (tc.name === 'generate_image') {
-            send({ type: 'tool_status', tool: 'generating_image', status: 'generating', label: '正在生成图片...' });
-
-            let args: { prompt?: string; size?: string; aspect_ratio?: string } = {};
-            try { args = JSON.parse(tc.arguments); } catch { /* ignore */ }
+        // 处理工具调用：每个 generate_image 调用出一张图（「分别画猫和狗」是两次调用）；
+        // 只有一次调用时按用户写的张数重复。每轮最多 4 张，各自独立提交和轮询。
+        const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+        const userText = lastUserMsg?.content || '';
+        const imageJobs = planImageToolJobs(
+          Object.values(toolCalls).filter(call => call.name === 'generate_image'),
+          userText,
+        );
+        // The image model's spec decides which ratio / resolution / quality are valid.
+        let imageProvider: Awaited<ReturnType<typeof findProviderById>> | null = null;
+        if (imageJobs.length > 0 && imageProviderId) {
+          // Only a spec hint: a failed lookup falls back to the model ID alone.
+          try { imageProvider = await findProviderById(imageProviderId); } catch { imageProvider = null; }
+        }
+        const imageProviderHint = `${imageProviderId} ${imageProvider?.name || ''} ${imageProvider?.baseUrl || ''}`;
+        if (imageJobs.length > 0) {
+          await Promise.all(imageJobs.map(async ({ call: tc, args }, jobIndex) => {
+            const jobPrefix = imageJobs.length > 1 ? `第 ${jobIndex + 1}/${imageJobs.length} 张 · ` : '';
+            send({ type: 'tool_status', tool: 'generating_image', status: 'generating', label: `${jobPrefix}正在生成图片...` });
 
             const imgPrompt = args.prompt || fullContent.slice(0, 500);
-            const imgAspectRatio = resolveToolAspectRatio(args);
+            // The user's own words win over the model's arguments; then everything is fitted to the model.
+            const fitted = fitImageParams(
+              { ...parseImageRequest(imgPrompt), ...parseImageRequest(userText) },
+              resolveToolAspectRatio(args),
+              imageModel,
+              imageProviderHint,
+            );
+            if (jobIndex === 0 && fitted.notes.length > 0) {
+              send({
+                type: 'tool_status',
+                tool: 'generating_image',
+                status: 'generating',
+                label: `${[describeFittedParams(fitted), ...fitted.notes].join('；')}，正在生成图片...`,
+              });
+            }
 
-            // 图生图：用户上传了参考图且意图是"基于图片生成/调整"时，传入参考图
-            const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
-            const userImages = lastUserMsg?.images || [];
-            const userText = (lastUserMsg?.content || '').toLowerCase();
-            const i2iIntent = /(这张图|这张|此图|图片|参考|改成|调整|换成|基于|类似风格|同款|根据这)/.test(userText);
-            const referenceImage = userImages.length > 0 && i2iIntent ? userImages[0] : undefined;
+            // 图生图：模型用 use_reference_image 判断，关键词只作兜底，且只匹配明确的参考/修改说法。
+            // 普通对话里参考图可以来自更早的轮次（「再来一张」）；agent-v2 只用本轮授权过的图片。
+            const lastTurnImages = lastUserMsg?.images || [];
+            const earlierImages = agentRuntimeMode === 'agent-v2'
+              ? []
+              : [...messages].reverse().find(m => m.role === 'user' && m.images && m.images.length > 0)?.images || [];
+            const referenceSource = lastTurnImages.length > 0 ? lastTurnImages : earlierImages;
+            const i2iIntent = /(这张图|这张|此图|参考图|参考这|改成|换成|基于这|根据这张|同款|保持(这张|原图|参考)|再(生成|来|画|出)一?(张|幅|版))/.test(userText);
+            const wantsReference = typeof args.use_reference_image === 'boolean' ? args.use_reference_image : i2iIntent;
+            const referenceImage = referenceSource.length > 0 && wantsReference ? referenceSource[0] : undefined;
+            const referenceDescription = typeof args.reference_description === 'string' ? args.reference_description.trim().slice(0, 300) : '';
 
             // Without the exact provider, /api/generate may pick another model for the request.
             if (!imageModel || !imageProviderId) {
@@ -1151,11 +1190,12 @@ export async function POST(request: NextRequest) {
                 type: 'tool_status',
                 tool: 'generating_image',
                 status: 'failed',
-                label: '图片生成失败: 未选择图像模型，请在输入框上方选择一个图像模型后重试',
+                label: `${jobPrefix}图片生成失败: 未选择图像模型，请在输入框上方选择一个图像模型后重试`,
               });
             } else try {
               const internalHeaders = await getInternalRequestHeaders(user.id, user.role === 'admin' ? 'admin' : 'user');
-              const stableIdempotencyKey = `simple-chat:${body.taskId || body.projectId || 'chat'}:${body.responseMessageId || tc.id}:generate`;
+              // The first image keeps the original key so retries of older replies stay idempotent.
+              const stableIdempotencyKey = `simple-chat:${body.taskId || body.projectId || 'chat'}:${body.responseMessageId || tc.id}:generate${jobIndex > 0 ? `:${jobIndex}` : ''}`;
               const sourceVersionIds = Array.isArray(body.sourceVersionIds)
                 ? body.sourceVersionIds.filter((value): value is string => typeof value === 'string')
                 : [];
@@ -1194,7 +1234,9 @@ export async function POST(request: NextRequest) {
                   prompt: imgPrompt,
                   model: imageModel,
                   providerId: imageProviderId,
-                  aspectRatio: imgAspectRatio,
+                  aspectRatio: fitted.aspectRatio,
+                  ...(fitted.quality ? { quality: fitted.quality } : {}),
+                  ...(fitted.resolution ? { resolution: fitted.resolution } : {}),
                   outputCount: 1,
                   submitOnly: true,
                   projectId: body.assetProjectId,
@@ -1205,7 +1247,12 @@ export async function POST(request: NextRequest) {
                   assetSourceEntityId: body.responseMessageId,
                   assetParentVersionIds: sourceVersionIds,
                   ...(referenceImage
-                    ? { referenceImages: [referenceImage], referenceMode: 'reference', strength: i2iStrength }
+                    ? {
+                        referenceImages: [referenceImage],
+                        ...(referenceDescription ? { referenceDescriptions: [referenceDescription] } : {}),
+                        referenceMode: 'reference',
+                        strength: i2iStrength,
+                      }
                     : {}),
                 }),
               });
@@ -1243,7 +1290,7 @@ export async function POST(request: NextRequest) {
                   type: 'tool_status',
                   tool: 'generating_image',
                   status: 'failed',
-                  label: `图片生成失败: ${reason}`,
+                  label: `${jobPrefix}图片生成失败: ${reason}`,
                 });
               } else if (directUrls?.length && !imgData.taskIds?.length) {
                 await sendGeneratedImage(
@@ -1296,10 +1343,10 @@ export async function POST(request: NextRequest) {
                       break;
                     }
                     if (pollData.status === 'failed' || pollData.status === 'cancelled') {
-                      send({ type: 'tool_status', tool: 'generating_image', status: 'failed', label: '图片生成失败' });
+                      send({ type: 'tool_status', tool: 'generating_image', status: 'failed', label: `${jobPrefix}图片生成失败` });
                       break;
                     }
-                    send({ type: 'tool_status', tool: 'generating_image', status: 'polling', label: `图片生成中... ${pollData.progress || ''}`, taskId, progress: pollData.progress });
+                    send({ type: 'tool_status', tool: 'generating_image', status: 'polling', label: `${jobPrefix}图片生成中... ${pollData.progress || ''}`, taskId, progress: pollData.progress });
                     attempts++;
                   }
                 };
@@ -1350,16 +1397,16 @@ export async function POST(request: NextRequest) {
                   type: 'tool_status',
                   tool: 'generating_image',
                   status: 'polling',
-                  label: '图片生成中...',
+                  label: `${jobPrefix}图片生成中...`,
                   taskId,
                   ...(preparedAgentTask.runId ? { runId: preparedAgentTask.runId } : {}),
                 });
                 await preparedAgentTask.execute();
               }
             } catch (e: unknown) {
-              send({ type: 'tool_status', tool: 'generating_image', status: 'failed', label: `图片生成失败: ${errorMessage(e, '未知错误')}` });
+              send({ type: 'tool_status', tool: 'generating_image', status: 'failed', label: `${jobPrefix}图片生成失败: ${errorMessage(e, '未知错误')}` });
             }
-          }
+          }));
         }
 
         send({ type: 'done' });
