@@ -42,8 +42,10 @@ export function VoiceSampleField({ member }: { member: DramaCastMember }) {
         </button>
         {member.voiceSampleUrl ? (
           <>
-            <span className="min-w-0 flex-1 truncate text-xs" title={member.voiceSampleName}>
-              {member.voiceSampleName || '声音样本'}{member.voiceSampleSec ? ` · ${member.voiceSampleSec.toFixed(1)} 秒` : ''}
+            {/* The length stays visible when a long file name is cut. */}
+            <span className="flex min-w-0 flex-1 gap-1 text-xs">
+              <span className="truncate" title={member.voiceSampleName}>{member.voiceSampleName || '声音样本'}</span>
+              {member.voiceSampleSec ? <span className="shrink-0 tabular-nums">{member.voiceSampleSec.toFixed(1)} 秒</span> : null}
             </span>
             <button type="button" className="drama-btn drama-btn--quiet min-h-8 px-2" aria-label={`去掉${member.name}的声音样本`}
               onClick={() => set({ voiceSampleUrl: undefined, voiceSampleName: undefined, voiceSampleSec: undefined })}>
