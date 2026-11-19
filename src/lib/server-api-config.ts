@@ -1014,6 +1014,35 @@ export async function findProviderById(providerId: string): Promise<ApiProvider 
   return providers.find(p => p.id === providerId && p.isEnabled) || null;
 }
 
+/**
+ * 查找所有提供同一模型的已启用提供商，用于“同模型跨提供商自动切换”。
+ * 返回顺序：preferredProviderId（若命中）→ 默认提供商 → 其余，确保首选优先、失败可降级。
+ * 仅返回 baseUrl + apiKey 齐备、类型兼容且 selectedModels 精确包含该模型的提供商。
+ */
+export async function findProvidersForModel(
+  modelId: string,
+  modelType?: ApiKind,
+  preferredProviderId?: string,
+): Promise<ApiProvider[]> {
+  const providers = await getApiProviders();
+  const enabled = providers.filter(p => p.isEnabled && p.baseUrl && p.apiKey);
+  const isFlexibleType = !modelType || modelType === 'universal' || modelType === 'general';
+  const matchesType = (p: ApiProvider) =>
+    isFlexibleType || p.modelType === modelType || p.modelType === 'universal' || p.modelType === 'general';
+
+  const candidates = enabled.filter(
+    p => matchesType(p) && (p.selectedModels || []).includes(modelId),
+  );
+
+  candidates.sort((a, b) => {
+    const score = (p: ApiProvider) =>
+      (preferredProviderId && p.id === preferredProviderId ? 2 : 0) + (p.isDefault ? 1 : 0);
+    return score(b) - score(a);
+  });
+
+  return candidates;
+}
+
 /** 根据功能类型查找对应的 API 提供商（矢量化/分层/3D/聊天等） */
 export async function findProviderForFeature(feature: 'vectorize' | 'layer' | '3d' | 'imageEdit' | 'chat' | 'video' | 'vlm' | 'upscaler' | 'removebg' | 'audio' | 'image'): Promise<ApiProvider | null> {
   const kindMap: Record<string, ApiKind> = {

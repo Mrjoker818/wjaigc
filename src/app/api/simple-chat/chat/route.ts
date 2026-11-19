@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { findProviderForModel, findProviderById } from '@/lib/server-api-config';
+import { findProviderForModel, findProviderById, findProvidersForModel } from '@/lib/server-api-config';
 import { prepareChatVisionMessages } from '@/lib/chat-vision-image';
 import { buildSkillInstructions, selectSimpleChatSkill } from '@/lib/simple-chat-skills';
 import { describeFittedParams, fitImageParams, parseImageCount, parseImageRequest } from '@/lib/simple-chat-image-params';
@@ -106,6 +106,11 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: '未找到可用的 API 提供商' }, { status: 400 });
   }
 
+  // 同模型跨提供商自动切换：收集所有提供同一模型的已启用提供商作为备选链。
+  // 当首选提供商（中转站）临时不稳定（5xx/429/网络错误）时，自动切到下一个同模型提供商重试。
+  const fallbackProviders = await findProvidersForModel(model, 'chat' as ApiKind, providerId || undefined);
+  const providerChain = [provider, ...fallbackProviders.filter(p => p.id !== provider.id)];
+
   // 模型权限校验：非管理员用户需检查 chatModels 授权列表
   if (user.role !== 'admin') {
     const allowed = user.chatModels;
@@ -114,8 +119,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const apiKey = provider.apiKey;
-  const baseUrl = provider.baseUrl?.replace(/\/+$/, '') || '';
+  // 生成控制（推理档位/响应速度）按首选提供商解析，用于流开始前告知前端已应用的设置。
   const chatControls = resolveChatControls(model, provider, body.reasoningEffort, body.responseSpeed);
 
   // 构建增强的 system prompt（指令 + 知识库 + 联网搜索结果）
