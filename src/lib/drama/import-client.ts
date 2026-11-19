@@ -2,7 +2,7 @@
 import JSZip from 'jszip';
 import { MAX_DRAMA_CLIP_BYTES, PACKAGE_MANIFEST, packageMediaKind, readPackageManifest, replaceUrls, type PackageMediaKind } from './package';
 import type { DramaProjectRecord } from './types';
-import { createDramaProject, uploadDramaClip, uploadDramaMusic, uploadReferenceImage, type WorkbenchFetch } from './workbench-client';
+import { createDramaProject, IMAGE_TOO_BIG, uploadDramaClip, uploadDramaMusic, uploadReferenceImage, type WorkbenchFetch } from './workbench-client';
 
 const MIME: Record<string, string> = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp', avif: 'image/avif',
@@ -15,14 +15,40 @@ export interface ImportResult {
   failed: string[];
 }
 
+/** The default image edge limit of the upload route. */
+const UPLOAD_MAX_EDGE = 2048;
+
+type Shrink = (file: File, maxEdge: number) => Promise<File>;
+
 export interface ImportOptions {
   projectId?: string;
   fetch?: WorkbenchFetch;
   onProgress?: (done: number, total: number) => void;
+  /** Replaces the browser's canvas resize in tests. */
+  shrink?: Shrink;
 }
 
-function uploadMedia(kind: PackageMediaKind, file: File, fetcher?: WorkbenchFetch): Promise<string> {
-  if (kind === 'image') return uploadReferenceImage(file, fetcher);
+/** Redraws the image so its longer edge is at most `maxEdge`, as PNG. Generated 4K frames are bigger than uploads allow. */
+async function shrinkInBrowser(file: File, maxEdge: number): Promise<File> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
+  if (!blob) throw new Error(IMAGE_TOO_BIG);
+  return new File([blob], file.name.replace(/\.[a-z0-9]+$/iu, '.png'), { type: 'image/png' });
+}
+
+function uploadMedia(kind: PackageMediaKind, file: File, fetcher: WorkbenchFetch | undefined, shrink: Shrink): Promise<string> {
+  if (kind === 'image') {
+    return uploadReferenceImage(file, fetcher).catch(async (error: unknown) => {
+      if (!(error instanceof Error) || error.message !== IMAGE_TOO_BIG) throw error;
+      return uploadReferenceImage(await shrink(file, UPLOAD_MAX_EDGE), fetcher);
+    });
+  }
   if (kind === 'video') {
     if (file.size > MAX_DRAMA_CLIP_BYTES) return Promise.reject(new Error('视频超过 48MB'));
     return uploadDramaClip(file, fetcher);
@@ -57,7 +83,7 @@ export async function importDramaPackage(file: Blob, options: ImportOptions = {}
         const ext = job.name.split('.').pop()!.toLowerCase();
         const blob = await job.media.async('blob');
         const picked = new File([blob], job.name.split('/').pop()!, { type: MIME[ext] ?? '' });
-        urls.set(job.url, await uploadMedia(job.kind, picked, options.fetch));
+        urls.set(job.url, await uploadMedia(job.kind, picked, options.fetch, options.shrink ?? shrinkInBrowser));
       } catch {
         failed.push(job.name);
       }

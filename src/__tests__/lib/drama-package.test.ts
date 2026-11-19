@@ -118,6 +118,32 @@ describe('drama production package', () => {
     expect(result.record.doc.episodes[0].scenes[0].shots[0].takes[0].videoUrl).toBe('/v/a.mp4');
   });
 
+  it('shrinks an image that is over the upload edge limit and uploads it again', async () => {
+    const exported = await buildEpisodePackage(doc(), 'e2', { fetch: async url => new Response(`bytes:${url}`) });
+    const uploads: string[] = [];
+    const shrunk: Array<[string, number]> = [];
+    const result = await importDramaPackage(exported.blob, {
+      shrink: async (file, maxEdge) => { shrunk.push([file.name, maxEdge]); return new File(['small'], 'small.png', { type: 'image/png' }); },
+      fetch: async (url, init) => {
+        const file = init?.body instanceof FormData ? init.body.get('file') as File : undefined;
+        if (url === '/api/upload') {
+          uploads.push(file!.name);
+          if (file!.name === '01_首帧.png') return new Response(JSON.stringify({ error: 'Image dimensions exceed the 2048px maximum edge' }), { status: 400 });
+          return new Response(JSON.stringify({ url: `/u/${file!.name}` }));
+        }
+        if (url === '/api/drama/projects') {
+          const body = JSON.parse(String(init!.body));
+          return new Response(JSON.stringify({ project: { id: 'd', projectId: null, title: '', doc: body.doc, version: 1, createdAt: 1, updatedAt: 1 } }), { status: 201 });
+        }
+        return new Response(JSON.stringify({ videoUrl: '/c/x.mp4', audioUrl: '/api/serve-upload/generated-audio/x.mp3' }));
+      },
+    });
+    expect(shrunk).toEqual([['01_首帧.png', 2048]]);
+    expect(uploads.filter(name => name === 'small.png')).toHaveLength(1);
+    expect(result.failed).toEqual([]);
+    expect(result.record.doc.episodes[0].scenes[0].shots[0].firstFrameUrl).toBe('/u/small.png');
+  });
+
   it('says which file to choose when the ZIP is not a package', async () => {
     const zip = new JSZip();
     zip.file('剧本.txt', 'x');
