@@ -7,8 +7,34 @@ export const DRAMA_TRANSITIONS: readonly DramaTransition[] = ['cut', 'fade', 'fl
 export interface RenderClip {
   /** Input file path, relative to the ffmpeg working directory or absolute. */
   path: string;
+  /** Length of the source file. */
   durationSec: number;
   hasAudio: boolean;
+  /** Part of the source to keep, in source seconds; defaults to the whole file. The end is clamped to the file. */
+  trimStartSec?: number;
+  trimEndSec?: number;
+  /** Playback rate, 0.5 to 2; audio keeps its pitch. */
+  speed?: number;
+  /** Gain on the clip's own sound, 0 to 2. */
+  volume?: number;
+}
+
+/** Shortest piece of a clip a trim may leave. */
+export const MIN_CLIP_SEC = 0.2;
+export const CLIP_SPEED_RANGE = [0.5, 2] as const;
+export const CLIP_VOLUME_MAX = 2;
+
+/** Kept part of the source, after clamping the trim to the file. */
+function keptRange(clip: RenderClip): [number, number] {
+  const end = Math.min(clip.durationSec, clip.trimEndSec ?? clip.durationSec);
+  const start = Math.max(0, Math.min(clip.trimStartSec ?? 0, end));
+  return [start, end];
+}
+
+/** Seconds the clip lasts in the film, after trim and speed. */
+export function clipLength(clip: RenderClip): number {
+  const [start, end] = keptRange(clip);
+  return (end - start) / (clip.speed ?? 1);
 }
 
 /** A recorded line played from the start of a clip's visible part. */
@@ -85,7 +111,7 @@ function seconds(value: number): string {
 /** Transition length is clamped so it never consumes more than half of the shortest clip. */
 export function effectiveTransitionSec(clips: RenderClip[], transition: DramaTransition, requested = 0.5): number {
   if (transition === 'cut' || clips.length < 2) return 0;
-  const shortest = Math.min(...clips.map(clip => clip.durationSec));
+  const shortest = Math.min(...clips.map(clipLength));
   return Math.max(0, Math.min(requested, shortest / 2, 2));
 }
 
@@ -95,7 +121,7 @@ export function timelineStarts(clips: RenderClip[], transitionSec: number): numb
   let cursor = 0;
   clips.forEach((clip, index) => {
     starts.push(cursor);
-    cursor += clip.durationSec - (index < clips.length - 1 ? transitionSec : 0);
+    cursor += clipLength(clip) - (index < clips.length - 1 ? transitionSec : 0);
   });
   return starts;
 }
@@ -105,6 +131,11 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlan {
   if (clips.length < 1) throw new Error('DRAMA_RENDER_NO_CLIPS');
   for (const clip of clips) {
     if (!(clip.durationSec > 0) || !Number.isFinite(clip.durationSec)) throw new Error('DRAMA_RENDER_BAD_DURATION');
+    const speed = clip.speed ?? 1;
+    if (!(speed >= CLIP_SPEED_RANGE[0] && speed <= CLIP_SPEED_RANGE[1])) throw new Error('DRAMA_RENDER_BAD_SPEED');
+    const volume = clip.volume ?? 1;
+    if (!(volume >= 0 && volume <= CLIP_VOLUME_MAX)) throw new Error('DRAMA_RENDER_BAD_VOLUME');
+    if (!(clipLength(clip) * speed >= MIN_CLIP_SEC)) throw new Error('DRAMA_RENDER_BAD_TRIM');
   }
   if (input.subtitleFile !== undefined && !SAFE_SUBTITLE_FILE.test(input.subtitleFile)) {
     throw new Error('DRAMA_RENDER_BAD_SUBTITLE_FILE');
@@ -135,7 +166,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlan {
     if (clip.hasAudio) {
       audioInputs.push(-1);
     } else {
-      args.push('-f', 'lavfi', '-t', seconds(clip.durationSec), '-i', `anullsrc=channel_layout=stereo:sample_rate=${SAMPLE_RATE}`);
+      args.push('-f', 'lavfi', '-t', seconds(clipLength(clip)), '-i', `anullsrc=channel_layout=stereo:sample_rate=${SAMPLE_RATE}`);
       audioInputs.push(nextInput);
       nextInput += 1;
     }
@@ -151,12 +182,18 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlan {
 
   const filters: string[] = [];
   clips.forEach((clip, index) => {
-    const dur = seconds(clip.durationSec);
-    filters.push(`[${index}:v]trim=0:${dur},setpts=PTS-STARTPTS,scale=${width}:${height}:force_original_aspect_ratio=decrease,`
+    const [start, end] = keptRange(clip);
+    const speed = clip.speed ?? 1;
+    const dur = seconds(clipLength(clip));
+    const pts = speed === 1 ? 'PTS-STARTPTS' : `(PTS-STARTPTS)/${seconds(speed)}`;
+    filters.push(`[${index}:v]trim=${seconds(start)}:${seconds(end)},setpts=${pts},scale=${width}:${height}:force_original_aspect_ratio=decrease,`
       + `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${fps},format=yuv420p[v${index}]`);
-    const audioSource = audioInputs[index] === -1 ? `${index}:a` : `${audioInputs[index]}:a`;
-    filters.push(`[${audioSource}]aresample=${SAMPLE_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,`
-      + `apad,atrim=0:${dur},asetpts=PTS-STARTPTS${voiced.has(index) ? `,volume=${UNDER_VOICEOVER_VOLUME}` : ''}[a${index}]`);
+    const own = audioInputs[index] === -1;
+    // The source's own sound gets the same trim and speed as its picture; atempo keeps the pitch.
+    const shape = own ? `atrim=${seconds(start)}:${seconds(end)},asetpts=PTS-STARTPTS,${speed === 1 ? '' : `atempo=${seconds(speed)},`}` : '';
+    const gain = (clip.volume ?? 1) * (voiced.has(index) ? UNDER_VOICEOVER_VOLUME : 1);
+    filters.push(`[${own ? `${index}:a` : `${audioInputs[index]}:a`}]aresample=${SAMPLE_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,`
+      + `${shape}apad,atrim=0:${dur},asetpts=PTS-STARTPTS${gain === 1 ? '' : `,volume=${seconds(gain)}`}[a${index}]`);
   });
 
   const clipStarts = timelineStarts(clips, transitionSec);
@@ -182,7 +219,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlan {
     voiceovers.forEach((voiceover, k) => {
       const i = voiceover.clipIndex;
       const startSec = clipStarts[i] + (i > 0 ? transitionSec : 0);
-      const lengthSec = Math.max(0.1, clips[i].durationSec - (i > 0 ? transitionSec : 0) - (i < clips.length - 1 ? transitionSec : 0));
+      const lengthSec = Math.max(0.1, clipLength(clips[i]) - (i > 0 ? transitionSec : 0) - (i < clips.length - 1 ? transitionSec : 0));
       const delayMs = Math.round(startSec * 1000);
       filters.push(`[${voiceoverInputs[k]}:a]aresample=${SAMPLE_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,`
         + `atrim=0:${seconds(lengthSec)},asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1[vo${k}]`);
@@ -191,7 +228,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlan {
     audioOut = 'amix';
   }
   const last = clips.length - 1;
-  const durationSec = clipStarts[last] + clips[last].durationSec;
+  const durationSec = clipStarts[last] + clipLength(clips[last]);
   if (music) {
     const fade = Math.min(MUSIC_FADE_SEC, durationSec / 4);
     filters.push(`[${musicInput}:a]aresample=${SAMPLE_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,`

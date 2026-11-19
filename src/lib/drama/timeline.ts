@@ -1,6 +1,6 @@
 /** Pure helpers that turn an episode into render inputs: the selected take of every shot and dialogue subtitles. */
-import type { SubtitleCue } from './render';
-import { activeTake, type DramaProjectV1 } from './types';
+import { clipLength, type SubtitleCue } from './render';
+import { activeTake, type DramaClipEdit, type DramaProjectV1, type DramaShot } from './types';
 import { currentVoiceover } from './voiceover';
 
 export interface TimelineClip {
@@ -9,6 +9,12 @@ export interface TimelineClip {
   dialogue?: string;
   /** Voiceover recorded from the current line; a stale one is left out. */
   voiceoverUrl?: string;
+  edit?: DramaClipEdit;
+}
+
+/** Planned seconds the shot fills in the film: its planned length, trimmed and sped up or slowed down. */
+export function shotFilmLength(shot: Pick<DramaShot, 'durationSec' | 'clipEdit'>): number {
+  return clipLength({ path: '', hasAudio: false, durationSec: shot.durationSec, ...shot.clipEdit });
 }
 
 export interface EpisodeTimeline {
@@ -29,6 +35,7 @@ export function collectEpisodeTimeline(doc: DramaProjectV1, episodeId: string): 
       shotId: shot.id, videoUrl: take.videoUrl,
       ...(shot.dialogue?.trim() ? { dialogue: shot.dialogue.trim() } : {}),
       ...(voiceoverUrl ? { voiceoverUrl } : {}),
+      ...(shot.clipEdit ? { edit: shot.clipEdit } : {}),
     });
   }
   return { clips, missingShotIds };
@@ -55,14 +62,15 @@ export function buildTimeline(doc: DramaProjectV1, episodeId: string): TimelineB
   if (!episode) return [];
   const shots = episode.scenes.flatMap((scene, sceneIndex) => scene.shots.map(shot => ({ shot, sceneNumber: sceneIndex + 1 })));
   const overlap = doc.timeline.transition === 'cut' || shots.length < 2 ? 0
-    : Math.max(0, Math.min(doc.timeline.transitionSec, Math.min(...shots.map(item => item.shot.durationSec)) / 2, 2));
+    : Math.max(0, Math.min(doc.timeline.transitionSec, Math.min(...shots.map(item => shotFilmLength(item.shot))) / 2, 2));
   let cursor = 0;
   return shots.map(({ shot, sceneNumber }, i) => {
     const take = activeTake(shot);
     const startSec = cursor;
-    cursor += shot.durationSec - (i < shots.length - 1 ? overlap : 0);
+    const length = shotFilmLength(shot);
+    cursor += length - (i < shots.length - 1 ? overlap : 0);
     return {
-      shotId: shot.id, sceneNumber, shotNumber: i + 1, startSec, endSec: startSec + shot.durationSec, durationSec: shot.durationSec,
+      shotId: shot.id, sceneNumber, shotNumber: i + 1, startSec, endSec: startSec + length, durationSec: length,
       hasTake: Boolean(take?.videoUrl),
       ...(take?.thumbnailUrl ? { thumbnailUrl: take.thumbnailUrl } : {}),
       ...(doc.timeline.subtitles && shot.dialogue?.trim() ? { subtitle: shot.dialogue.trim() } : {}),

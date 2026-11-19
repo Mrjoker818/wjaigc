@@ -180,4 +180,23 @@ describe('drama workbench', () => {
     fireEvent.click(screen.getByRole('button', { name: '去掉背景音乐' }));
     await waitFor(() => expect(saved?.timeline).not.toHaveProperty('music'), { timeout: 3000 });
   });
+
+  it('trims and speeds up the selected take for the film and can undo it', async () => {
+    render(<DramaWorkbench dramaId="drama_1" projectId="p1" onDramaIdChange={() => undefined} onExit={() => undefined} />);
+    await screen.findByRole('heading', { name: /咖啡馆·内·夜/ });
+    fireEvent.click(screen.getByRole('button', { name: '镜头 1，场 1，5 秒，已有视频' }));
+    const panel = within(await screen.findByRole('region', { name: '剪辑' }));
+    expect(panel.getByText('成片里约 5 秒 · 原片 5 秒')).toBeTruthy();
+    fireEvent.change(panel.getByRole('spinbutton', { name: '入点 秒' }), { target: { value: '1' } });
+    fireEvent.click(panel.getByRole('button', { name: '2×' }));
+    expect(panel.getByText('成片里约 2 秒 · 原片 5 秒')).toBeTruthy();
+    // The timeline follows the cut length.
+    expect(screen.getByRole('button', { name: '镜头 1，场 1，2 秒，已有视频' })).toBeTruthy();
+    await waitFor(() => expect(saved?.episodes[0].scenes[0].shots[0].clipEdit).toEqual({ trimStartSec: 1, speed: 2 }), { timeout: 3000 });
+    fireEvent.click(panel.getByRole('button', { name: '还原' }));
+    await waitFor(() => expect(saved?.episodes[0].scenes[0].shots[0]).not.toHaveProperty('clipEdit'), { timeout: 3000 });
+    // A shot without a video has nothing to cut.
+    fireEvent.click(screen.getByRole('button', { name: /^镜头 2，/ }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: '剪辑' })).toBeNull());
+  });
 });

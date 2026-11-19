@@ -3,7 +3,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { buildRenderPlan, buildSrt, effectiveTransitionSec, timelineStarts, type RenderClip } from '@/lib/drama/render';
+import { buildRenderPlan, buildSrt, clipLength, effectiveTransitionSec, timelineStarts, type RenderClip } from '@/lib/drama/render';
 
 function hasBinary(name: string): boolean {
   try { execFileSync(name, ['-version'], { stdio: 'ignore' }); return true; } catch { return false; }
@@ -78,6 +78,34 @@ describe('drama render plan', () => {
       .toThrow('DRAMA_RENDER_BAD_MUSIC');
   });
 
+  it('trims, retimes and turns down a clip, and lays the timeline out by the cut length', () => {
+    const edited: RenderClip[] = [
+      { path: 'a.mp4', durationSec: 5, hasAudio: true, trimStartSec: 1, trimEndSec: 4, speed: 1.5, volume: 0.5 },
+      { path: 'b.mp4', durationSec: 3, hasAudio: false, trimEndSec: 9, speed: 0.5 },
+    ];
+    expect(clipLength(edited[0])).toBe(2);
+    // The out point is clamped to the file, so the 3-second clip at half speed lasts 6 seconds.
+    expect(clipLength(edited[1])).toBe(6);
+    const plan = buildRenderPlan({ clips: edited, width: 640, height: 360, outputPath: 'o.mp4' });
+    expect(plan.clipStarts).toEqual([0, 2]);
+    expect(plan.durationSec).toBe(8);
+    const filter = plan.args[plan.args.indexOf('-filter_complex') + 1];
+    expect(filter).toContain('[0:v]trim=1:4,setpts=(PTS-STARTPTS)/1.5,');
+    expect(filter).toContain('atrim=1:4,asetpts=PTS-STARTPTS,atempo=1.5,apad,atrim=0:2,asetpts=PTS-STARTPTS,volume=0.5[a0]');
+    expect(filter).toContain('[1:v]trim=0:3,setpts=(PTS-STARTPTS)/0.5,');
+    // The silent clip's stand-in audio is generated at the cut length, so it is not trimmed or retimed again.
+    expect(plan.args).toContain('6');
+    expect(filter).not.toMatch(/\[2:a\][^;]*atempo/);
+  });
+
+  it('rejects speeds, volumes and trims out of range', () => {
+    const base = { path: 'a.mp4', durationSec: 5, hasAudio: true };
+    const plan = (clip: RenderClip) => () => buildRenderPlan({ clips: [clip], width: 640, height: 360, outputPath: 'o.mp4' });
+    expect(plan({ ...base, speed: 3 })).toThrow('DRAMA_RENDER_BAD_SPEED');
+    expect(plan({ ...base, volume: 2.5 })).toThrow('DRAMA_RENDER_BAD_VOLUME');
+    expect(plan({ ...base, trimStartSec: 4.95 })).toThrow('DRAMA_RENDER_BAD_TRIM');
+  });
+
   it('writes SRT cues and collapses blank lines inside a cue', () => {
     expect(buildSrt([
       { startSec: 0, endSec: 1.5, text: '你好' },
@@ -113,6 +141,34 @@ describe('drama render plan', () => {
         streams: Array<{ codec_type: string }>; format: { duration: string };
       };
       expect(probe.streams.map(stream => stream.codec_type).sort()).toEqual(['audio', 'video']);
+      expect(Math.abs(Number(probe.format.duration) - plan.durationSec)).toBeLessThan(0.25);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it.skipIf(!hasBinary('ffmpeg') || !hasBinary('ffprobe'))('renders a trimmed, sped-up clip next to a slowed silent one', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'drama-edit-'));
+    try {
+      for (const [name, seconds, audio] of [['a.mp4', 4, true], ['b.mp4', 2, false]] as const) {
+        execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y',
+          '-f', 'lavfi', '-i', `color=c=gray:s=320x240:d=${seconds}:r=25`,
+          ...(audio ? ['-f', 'lavfi', '-i', `sine=frequency=440:duration=${seconds}`] : []),
+          '-c:v', 'libx264', '-pix_fmt', 'yuv420p', ...(audio ? ['-c:a', 'aac', '-shortest'] : []),
+          join(dir, name)], { stdio: 'ignore' });
+      }
+      const plan = buildRenderPlan({
+        clips: [
+          { path: 'a.mp4', durationSec: 4, hasAudio: true, trimStartSec: 0.5, trimEndSec: 3.5, speed: 2, volume: 0.6 },
+          { path: 'b.mp4', durationSec: 2, hasAudio: false, speed: 0.5 },
+        ],
+        width: 320, height: 240, transition: 'fade', transitionSec: 0.5, outputPath: 'out.mp4',
+      });
+      expect(plan.durationSec).toBe(5);
+      execFileSync('ffmpeg', ['-loglevel', 'error', ...plan.args], { cwd: dir, stdio: 'pipe' });
+      const probe = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'json', join(dir, 'out.mp4')], { encoding: 'utf8' })) as {
+        format: { duration: string };
+      };
       expect(Math.abs(Number(probe.format.duration) - plan.durationSec)).toBeLessThan(0.25);
     } finally {
       rmSync(dir, { recursive: true, force: true });

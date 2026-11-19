@@ -12,11 +12,11 @@ import { isSafeVideoSource } from '@/lib/api-validator';
 import { isGeneratedAudioLocation, readGeneratedAudioFromUrl } from '@/lib/generated-audio-storage';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import {
-  buildRenderPlan, buildSrt, DRAMA_TRANSITIONS, effectiveTransitionSec, timelineStarts, type DramaTransition, type RenderMusic, type RenderVoiceover,
+  buildRenderPlan, buildSrt, clipLength, DRAMA_TRANSITIONS, MIN_CLIP_SEC, effectiveTransitionSec, timelineStarts, type DramaTransition, type RenderMusic, type RenderVoiceover,
 } from '@/lib/drama/render';
 import { getDramaProject } from '@/lib/drama/store';
 import { collectEpisodeTimeline, dialogueCues } from '@/lib/drama/timeline';
-import { MAX_SHOTS_PER_EPISODE, type DramaMusic } from '@/lib/drama/types';
+import { MAX_SHOTS_PER_EPISODE, type DramaClipEdit, type DramaMusic } from '@/lib/drama/types';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { downloadToBuffer, probeRenderClip } from '@/lib/video-media-io';
 
@@ -45,7 +45,7 @@ async function fileExists(file: string): Promise<boolean> {
 interface RenderJob {
   taskId: string;
   userId: string;
-  clips: Array<{ videoUrl: string; dialogue?: string; voiceoverUrl?: string }>;
+  clips: Array<{ videoUrl: string; dialogue?: string; voiceoverUrl?: string; edit?: DramaClipEdit }>;
   transition: DramaTransition;
   transitionSec: number;
   subtitles: boolean;
@@ -90,10 +90,12 @@ async function renderEpisode(job: RenderJob): Promise<void> {
       await writeFile(path.join(workDir, name), audio.buffer);
       music = { path: name, volume: job.music.volume, ducking: job.music.ducking };
     }
-    const renderClips = probed.map(({ path: clipPath, durationSec, hasAudio }) => ({ path: clipPath, durationSec, hasAudio }));
+    const renderClips = probed.map(({ path: clipPath, durationSec, hasAudio }, i) => ({ path: clipPath, durationSec, hasAudio, ...job.clips[i].edit }));
+    const tooShort = renderClips.findIndex(clip => clipLength(clip) * (clip.speed ?? 1) < MIN_CLIP_SEC);
+    if (tooShort >= 0) throw new Error(`第 ${tooShort + 1} 个镜头裁剪后不到 ${MIN_CLIP_SEC} 秒，请在检查器里调整入点和出点后再渲染。`);
     const transitionSec = effectiveTransitionSec(renderClips, job.transition, job.transitionSec);
     const cues = job.subtitles
-      ? dialogueCues(job.clips, timelineStarts(renderClips, transitionSec), renderClips.map(clip => clip.durationSec), transitionSec)
+      ? dialogueCues(job.clips, timelineStarts(renderClips, transitionSec), renderClips.map(clipLength), transitionSec)
       : [];
     let subtitleFont: { dir: string; family: string } | undefined;
     if (cues.length) {

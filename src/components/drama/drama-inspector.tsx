@@ -1,8 +1,11 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ImagePlus, Loader2, Mic, RotateCcw, Stethoscope, X } from 'lucide-react';
+import { ImagePlus, Loader2, Mic, RotateCcw, Scissors, Stethoscope, X } from 'lucide-react';
 import { mentionCandidates, mergeMentionIds } from '@/lib/drama/mentions';
+import { CLIP_SPEED_RANGE, CLIP_VOLUME_MAX, MIN_CLIP_SEC } from '@/lib/drama/render';
+import { shotFilmLength } from '@/lib/drama/timeline';
+import { activeTake, type DramaClipEdit, type DramaShot } from '@/lib/drama/types';
 import { chooseFirstFrame, chooseLastFrame, shotReferenceImages } from '@/lib/drama/shot-runner';
 import { applyRetakeSuggestion, estimateShots } from '@/lib/drama/workbench-client';
 import { currentVoiceover, shotSpeaker } from '@/lib/drama/voiceover';
@@ -85,6 +88,7 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
         <textarea className="drama-input min-h-14 resize-y" maxLength={2000} value={shot.dialogue ?? ''} onChange={event => set({ dialogue: event.target.value })} />
       </label>
       {shot.dialogue?.trim() ? <VoiceoverPanel shotId={shot.id} busy={voiceoverShotIds.has(shot.id)} onRecord={() => void generateVoiceovers([shot.id])} /> : null}
+      <ClipEditPanel shotId={shot.id} />
 
       <div className="grid grid-cols-2 gap-3">
         <label className="col-span-2 flex flex-col gap-1">
@@ -210,6 +214,94 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
         <RotateCcw className="h-4 w-4" />{shot.takes.length ? '按当前设置重拍' : '生成这个镜头'}
       </button>
     </div>
+  );
+}
+
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
+const round1 = (value: number) => Math.round(value * 10) / 10;
+const withoutClipEdit = (item: DramaShot): DramaShot => {
+  const next = { ...item };
+  delete next.clipEdit;
+  return next;
+};
+
+/** Cut of the selected take in the film: in and out points taken from the preview, speed and the take's own volume. Free of credits. */
+function ClipEditPanel({ shotId }: { shotId: string }) {
+  const { doc, update } = useDrama();
+  const video = useRef<HTMLVideoElement>(null);
+  const [fileSec, setFileSec] = useState<number | null>(null);
+  const shot = findShot(doc, shotId)?.shot;
+  const take = shot ? activeTake(shot) : undefined;
+  if (!shot || !take?.videoUrl) return null;
+  const edit = shot.clipEdit ?? {};
+  const total = fileSec ?? shot.durationSec;
+  const start = Math.min(edit.trimStartSec ?? 0, total);
+  const end = Math.min(edit.trimEndSec ?? total, total);
+  const speed = edit.speed ?? 1;
+  const volume = edit.volume ?? 1;
+  const edited = start > 0 || end < total || speed !== 1 || volume !== 1;
+  const setEdit = (patch: DramaClipEdit) => update(current => updateShot(current, shotId, item => {
+    const next = { ...item.clipEdit, ...patch };
+    // Defaults are dropped so an untouched shot keeps no clipEdit at all.
+    if (!next.trimStartSec) delete next.trimStartSec;
+    if (next.trimEndSec === undefined || next.trimEndSec >= total) delete next.trimEndSec;
+    if (next.speed === 1) delete next.speed;
+    if (next.volume === 1) delete next.volume;
+    return Object.keys(next).length ? { ...item, clipEdit: next } : withoutClipEdit(item);
+  }));
+  const mark = (which: 'in' | 'out') => {
+    const at = round1(video.current?.currentTime ?? 0);
+    if (which === 'in') {
+      if (end - at < MIN_CLIP_SEC) return;
+      setEdit({ trimStartSec: at });
+    } else {
+      if (at - start < MIN_CLIP_SEC) return;
+      setEdit({ trimEndSec: at });
+    }
+  };
+
+  return (
+    <section className="drama-panel flex flex-col gap-2 p-3" aria-labelledby="drama-clip-edit">
+      <h3 id="drama-clip-edit" className="flex items-center gap-1.5 text-sm font-semibold"><Scissors className="h-4 w-4" />剪辑</h3>
+      <video ref={video} src={take.videoUrl} poster={take.thumbnailUrl} controls preload="metadata" className="w-full rounded bg-[var(--drama-ink)]"
+        aria-label="选用的视频" onLoadedMetadata={event => { const d = event.currentTarget.duration; if (Number.isFinite(d) && d > 0) setFileSec(round1(d)); }} />
+      <div className="grid grid-cols-2 gap-2">
+        <button type="button" className="drama-btn px-2 text-xs" onClick={() => mark('in')}>入点设在当前位置</button>
+        <button type="button" className="drama-btn px-2 text-xs" onClick={() => mark('out')}>出点设在当前位置</button>
+        <label className="flex items-center gap-1.5 text-xs">
+          <span className="drama-label shrink-0">入点</span>
+          <input className="drama-input min-w-0 font-mono" type="number" min={0} max={round1(end - MIN_CLIP_SEC)} step={0.1} value={round1(start)} aria-label="入点 秒"
+            onChange={event => setEdit({ trimStartSec: Math.max(0, Math.min(end - MIN_CLIP_SEC, Number(event.target.value) || 0)) })} />
+        </label>
+        <label className="flex items-center gap-1.5 text-xs">
+          <span className="drama-label shrink-0">出点</span>
+          <input className="drama-input min-w-0 font-mono" type="number" min={round1(start + MIN_CLIP_SEC)} max={total} step={0.1} value={round1(end)} aria-label="出点 秒"
+            onChange={event => setEdit({ trimEndSec: Math.min(total, Math.max(start + MIN_CLIP_SEC, Number(event.target.value) || total)) })} />
+        </label>
+      </div>
+      <fieldset className="flex flex-col gap-1">
+        <legend className="drama-label mb-1">速度</legend>
+        <div className="flex flex-wrap gap-1">
+          {SPEEDS.filter(value => value >= CLIP_SPEED_RANGE[0] && value <= CLIP_SPEED_RANGE[1]).map(value => (
+            <button key={value} type="button" className="drama-btn min-h-8 px-2 font-mono text-xs" aria-pressed={speed === value} onClick={() => setEdit({ speed: value })}>{value}×</button>
+          ))}
+        </div>
+      </fieldset>
+      <label className="flex items-center gap-2 text-xs">
+        <span className="drama-label shrink-0">原声音量</span>
+        <input type="range" min={0} max={CLIP_VOLUME_MAX * 100} step={10} value={Math.round(volume * 100)} aria-label="原声音量" className="min-w-0 flex-1"
+          onChange={event => setEdit({ volume: Number(event.target.value) / 100 })} />
+        <span className="w-10 font-mono text-[var(--drama-muted)]">{Math.round(volume * 100)}%</span>
+      </label>
+      <div className="flex items-center gap-2">
+        <span className="drama-label flex-1 font-mono">成片里约 {round1(shotFilmLength({ durationSec: total, clipEdit: shot.clipEdit }))} 秒 · 原片 {round1(total)} 秒</span>
+        {edited ? (
+          <button type="button" className="drama-btn drama-btn--quiet px-2 text-xs"
+            onClick={() => update(current => updateShot(current, shotId, withoutClipEdit))}>还原</button>
+        ) : null}
+      </div>
+      <p className="drama-label">只影响渲染出的成片，不扣积分，原视频不变。重拍后入点出点沿用到新的视频上。</p>
+    </section>
   );
 }
 

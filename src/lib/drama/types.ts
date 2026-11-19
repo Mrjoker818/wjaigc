@@ -25,6 +25,16 @@ export interface DramaTake {
   providerId?: string;
 }
 
+/** How the selected take is cut into the film. Seconds are on the take's own clock; the render clamps them to the file. */
+export interface DramaClipEdit {
+  trimStartSec?: number;
+  trimEndSec?: number;
+  /** 0.5 to 2. */
+  speed?: number;
+  /** Gain on the take's own sound, 0 to 2. */
+  volume?: number;
+}
+
 export interface DramaShot extends VideoShotPlan {
   /** Spoken line, burned as a subtitle and optionally voiced. */
   dialogue?: string;
@@ -39,6 +49,7 @@ export interface DramaShot extends VideoShotPlan {
   providerId?: string;
   takes: DramaTake[];
   selectedTakeId?: string;
+  clipEdit?: DramaClipEdit;
 }
 
 export interface DramaSceneBlock {

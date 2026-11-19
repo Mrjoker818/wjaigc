@@ -36,7 +36,7 @@ export function DramaTimeline() {
                   <div className="flex flex-col gap-0.5" style={{ width: Math.max(MIN_BLOCK_PX, block.durationSec * PX_PER_SEC) }}>
                     <button
                       type="button" aria-pressed={selected}
-                      aria-label={`镜头 ${block.shotNumber}，场 ${block.sceneNumber}，${block.durationSec} 秒${block.hasTake ? '，已有视频' : running ? '，生成中' : '，待拍'}`}
+                      aria-label={`镜头 ${block.shotNumber}，场 ${block.sceneNumber}，${Number(block.durationSec.toFixed(1))} 秒${block.hasTake ? '，已有视频' : running ? '，生成中' : '，待拍'}`}
                       onClick={() => selectShot(block.shotId)}
                       className={`relative h-9 overflow-hidden rounded-sm border text-left font-mono text-[10px] ${selected ? 'border-[var(--drama-gold)]' : 'border-transparent'} ${block.hasTake ? 'bg-[var(--drama-panel)]' : 'bg-[var(--drama-graphite)]'}`}
                     >

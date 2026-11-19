@@ -40,6 +40,12 @@ const shot = z.looseObject({
   firstFrameUrl: text(4096).optional(),
   lastFrameUrl: text(4096).optional(),
   propIds: z.array(id).max(50).optional(),
+  clipEdit: z.object({
+    trimStartSec: z.number().min(0).max(60).optional(),
+    trimEndSec: z.number().positive().max(60).optional(),
+    speed: z.number().min(0.5).max(2).optional(),
+    volume: z.number().min(0).max(2).optional(),
+  }).optional(),
 });
 
 const sceneBlock = z.looseObject({
