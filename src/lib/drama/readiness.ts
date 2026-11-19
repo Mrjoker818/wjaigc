@@ -1,5 +1,5 @@
 import { chooseFirstFrame, type ShotModelCapability } from './shot-runner';
-import { activeTake, type DramaEpisode, type DramaProjectV1, type DramaShot } from './types';
+import { shotSource, type DramaEpisode, type DramaProjectV1, type DramaShot } from './types';
 import { currentVoiceover } from './voiceover';
 import { fitDuration, orderedPrevious } from './workbench-state';
 
@@ -74,7 +74,7 @@ export function shotReadiness(doc: DramaProjectV1, episodeId: string, shot: Dram
       '没有关键帧、场景图或上一镜头可接，会只按文字生成，构图不可控');
   }
 
-  add({ key: 'video', ok: Boolean(activeTake(shot)), required: true, label: '选用的视频', step: 'shots' },
+  add({ key: 'video', ok: Boolean(shotSource(shot)), required: true, label: '选用的视频', step: 'shots' },
     shot.takes.at(-1)?.status === 'failed' ? '最近一次生成失败，重拍后才能进成片' : '还没有生成视频');
 
   if (shot.dialogue?.trim()) {

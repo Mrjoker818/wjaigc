@@ -1,7 +1,7 @@
 'use client';
 
 import { ImagePlus, Loader2, Play, RotateCcw, Square, X } from 'lucide-react';
-import { activeTake } from '@/lib/drama/types';
+import { activeTake, shotSource } from '@/lib/drama/types';
 import { failedShots, pendingShots, selectTake, updateShot } from '@/lib/drama/workbench-state';
 import { useDrama } from './drama-context';
 import { ShotReadinessBadge } from './drama-readiness';
@@ -93,6 +93,7 @@ export function DramaShotsStep() {
               const shotNumber = sceneStarts[sceneIndex] + shotIndex + 1;
               const running = runningShotIds.has(shot.id);
               const take = activeTake(shot);
+              const still = shotSource(shot)?.kind === 'still';
               const latest = shot.takes.at(-1);
               const selected = selectedShotId === shot.id;
               const drawing = keyframeShotIds.has(shot.id);
@@ -102,7 +103,7 @@ export function DramaShotsStep() {
                     <DramaSlate sceneNumber={sceneIndex + 1} shotNumber={shotNumber} shot={shot} running={running} durationSec={shot.durationSec} />
                   </button>
                   <div className="relative bg-[var(--drama-ink)]" style={{ aspectRatio: doc.aspectRatio.replace(':', ' / ') }}>
-                    {take?.videoUrl ? (
+                    {take?.videoUrl && !still ? (
                       <video src={take.videoUrl} poster={take.thumbnailUrl ?? shot.firstFrameUrl} controls preload="metadata" className="h-full w-full object-contain" />
                     ) : shot.firstFrameUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -112,8 +113,8 @@ export function DramaShotsStep() {
                         {running ? <><Loader2 className="mr-2 h-4 w-4 animate-spin motion-reduce:animate-none" />正在生成</> : latest?.status === 'failed' ? latest.error || '生成失败' : '还没有生成'}
                       </span>
                     )}
-                    {shot.firstFrameUrl && !take?.videoUrl ? (
-                      <span className="absolute left-1.5 top-1.5 rounded bg-[var(--drama-gold)] px-1.5 py-0.5 text-[11px] font-semibold text-[var(--drama-ink)]">关键帧</span>
+                    {shot.firstFrameUrl && (still || !take?.videoUrl) ? (
+                      <span className="absolute left-1.5 top-1.5 rounded bg-[var(--drama-gold)] px-1.5 py-0.5 text-[11px] font-semibold text-[var(--drama-ink)]">{still ? '静帧镜头' : '关键帧'}</span>
                     ) : null}
                     {drawing ? (
                       <span className="absolute inset-0 flex items-center justify-center bg-black/55 text-xs" role="status">
@@ -153,7 +154,7 @@ export function DramaShotsStep() {
                       </button>
                       {shot.firstFrameUrl ? (
                         <button type="button" className="drama-btn px-2" aria-label={`清除镜头 ${shotNumber} 的关键帧`} disabled={drawing}
-                          onClick={() => update(current => updateShot(current, shot.id, { firstFrameUrl: undefined }))}>
+                          onClick={() => update(current => updateShot(current, shot.id, { firstFrameUrl: undefined, still: undefined }))}>
                           <X className="h-3.5 w-3.5" />
                         </button>
                       ) : null}

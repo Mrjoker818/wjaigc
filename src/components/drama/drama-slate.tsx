@@ -1,13 +1,13 @@
 'use client';
 
 import type { DramaShot } from '@/lib/drama/types';
-import { activeTake } from '@/lib/drama/types';
+import { shotSource } from '@/lib/drama/types';
 
 export type SlateState = 'idle' | 'generating' | 'selected' | 'failed';
 
 export function slateState(shot: DramaShot, running: boolean): SlateState {
   if (running || shot.takes.some(take => take.status === 'submitted' || take.status === 'generating')) return 'generating';
-  if (activeTake(shot)) return 'selected';
+  if (shotSource(shot)) return 'selected';
   if (shot.takes.at(-1)?.status === 'failed') return 'failed';
   return 'idle';
 }

@@ -2,7 +2,7 @@
 import {
   CAST_IMAGE_RATIO, castImagePrompt, locationImagePrompt, locationImageRatio, PROP_IMAGE_RATIO, propImagePrompt,
 } from './reference-prompts';
-import { activeTake, type DramaCastMember, type DramaLocation, type DramaProjectV1, type DramaProp, type DramaShot } from './types';
+import { shotSource, type DramaCastMember, type DramaLocation, type DramaProjectV1, type DramaProp, type DramaShot } from './types';
 import { shotsNeedingVoiceover } from './voiceover';
 import { updateCastMember, updateLocation, updateProp } from './workbench-state';
 
@@ -49,7 +49,7 @@ export function autopilotPlan(
   const propIds = new Set(shots.flatMap(shot => shot.propIds ?? []));
   const gap = (kind: BibleGap['kind'], item: { id: string; name: string }): BibleGap =>
     ({ key: `bible:${kind}:${item.id}`, kind, id: item.id, name: item.name || item.id });
-  const pending = shots.filter(shot => !activeTake(shot));
+  const pending = shots.filter(shot => !shotSource(shot));
   return {
     scenes: scenes.filter(scene => scene.shots.length === 0).map(scene => scene.id),
     bible: [

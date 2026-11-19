@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ImagePlus, Loader2, Mic, RotateCcw, Scissors, Stethoscope, X } from 'lucide-react';
+import { Film, ImagePlus, Loader2, Mic, RotateCcw, Scissors, Stethoscope, X } from 'lucide-react';
 import { mentionCandidates, mergeMentionIds } from '@/lib/drama/mentions';
-import { CLIP_SPEED_RANGE, CLIP_VOLUME_MAX, MIN_CLIP_SEC } from '@/lib/drama/render';
+import { CLIP_SPEED_RANGE, CLIP_VOLUME_MAX, MIN_CLIP_SEC, STILL_MOTIONS, type StillMotion } from '@/lib/drama/render';
 import { shotFilmLength } from '@/lib/drama/timeline';
 import { activeTake, type DramaClipEdit, type DramaShot } from '@/lib/drama/types';
 import { chooseFirstFrame, chooseLastFrame, shotReferenceImages } from '@/lib/drama/shot-runner';
@@ -88,6 +88,7 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
         <textarea className="drama-input min-h-14 resize-y" maxLength={2000} value={shot.dialogue ?? ''} onChange={event => set({ dialogue: event.target.value })} />
       </label>
       {shot.dialogue?.trim() ? <VoiceoverPanel shotId={shot.id} busy={voiceoverShotIds.has(shot.id)} onRecord={() => void generateVoiceovers([shot.id])} /> : null}
+      <StillPanel shotId={shot.id} />
       <ClipEditPanel shotId={shot.id} />
 
       <div className="grid grid-cols-2 gap-3">
@@ -164,7 +165,7 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
         <h3 id="drama-keyframe" className="text-sm font-semibold">关键帧</h3>
         <div className="grid grid-cols-2 gap-2">
           <FrameTile label="首帧" alt="这一镜的关键帧" url={shot.firstFrameUrl} ratio={ratio}
-            busy={keyframeShotIds.has(shot.id)} onDraw={() => void generateKeyframes([shot.id])} onClear={() => set({ firstFrameUrl: undefined })} />
+            busy={keyframeShotIds.has(shot.id)} onDraw={() => void generateKeyframes([shot.id])} onClear={() => set({ firstFrameUrl: undefined, still: undefined })} />
           <FrameTile label="尾帧" alt="这一镜的尾帧" url={shot.lastFrameUrl} ratio={ratio}
             busy={keyframeShotIds.has(`${shot.id}:last`)} onDraw={() => void generateKeyframes([shot.id], 'last')} onClear={() => set({ lastFrameUrl: undefined })} />
         </div>
@@ -225,6 +226,47 @@ const withoutClipEdit = (item: DramaShot): DramaShot => {
   return next;
 };
 
+const MOTION_LABEL: Record<StillMotion, string> = { 'push-in': '推近', 'pull-out': '拉远', 'pan-left': '左移', 'pan-right': '右移' };
+
+/**
+ * Use the first frame in the film instead of a video: a slow camera move over the still. Free of credits,
+ * so a shot can go into the film before (or instead of) paying for its video.
+ */
+function StillPanel({ shotId }: { shotId: string }) {
+  const { doc, update } = useDrama();
+  const shot = findShot(doc, shotId)?.shot;
+  if (!shot?.firstFrameUrl) return null;
+  const motion = shot.still?.motion;
+  const hasVideo = Boolean(activeTake(shot));
+  const set = (next: StillMotion | undefined) => update(current => updateShot(current, shotId, item => {
+    const copy = { ...item };
+    if (next) copy.still = { motion: next }; else delete copy.still;
+    return copy;
+  }));
+  return (
+    <section className="drama-panel flex flex-col gap-2 p-3" aria-labelledby="drama-still">
+      <h3 id="drama-still" className="flex items-center gap-1.5 text-sm font-semibold"><Film className="h-4 w-4" />静帧镜头</h3>
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={Boolean(motion)} onChange={event => set(event.target.checked ? 'push-in' : undefined)} />
+        成片里用首帧加运镜代替视频
+      </label>
+      {motion ? (
+        <div className="flex flex-wrap gap-1" role="group" aria-label="运镜">
+          {STILL_MOTIONS.map(value => (
+            <button key={value} type="button" className="drama-btn min-h-8 px-2 text-xs" aria-pressed={motion === value} onClick={() => set(value)}>
+              {MOTION_LABEL[value]}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <p className="drama-label">
+        不扣积分，按这一镜的时长（{shot.durationSec} 秒）渲染。{motion && hasVideo ? '已生成的视频保留着，取消勾选就换回视频。' : ''}
+        {!motion && !hasVideo ? '还没有视频时，用它先把整集拼出来看节奏。' : ''}
+      </p>
+    </section>
+  );
+}
+
 /** Cut of the selected take in the film: in and out points taken from the preview, speed and the take's own volume. Free of credits. */
 function ClipEditPanel({ shotId }: { shotId: string }) {
   const { doc, update } = useDrama();
@@ -232,7 +274,7 @@ function ClipEditPanel({ shotId }: { shotId: string }) {
   const [fileSec, setFileSec] = useState<number | null>(null);
   const shot = findShot(doc, shotId)?.shot;
   const take = shot ? activeTake(shot) : undefined;
-  if (!shot || !take?.videoUrl) return null;
+  if (!shot || !take?.videoUrl || shot.still) return null;
   const edit = shot.clipEdit ?? {};
   const total = fileSec ?? shot.durationSec;
   const start = Math.min(edit.trimStartSec ?? 0, total);

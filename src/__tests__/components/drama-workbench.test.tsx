@@ -199,4 +199,31 @@ describe('drama workbench', () => {
     fireEvent.click(screen.getByRole('button', { name: /^镜头 2，/ }));
     await waitFor(() => expect(screen.queryByRole('region', { name: '剪辑' })).toBeNull());
   });
+
+  it('puts a shot with only a first frame into the film as a moving still', async () => {
+    const base = globalThis.fetch;
+    // s2 has a keyframe but no video yet.
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const response = await base(url, init);
+      if (url !== '/api/drama/projects/drama_1' || init?.method) return response;
+      const data = await response.json();
+      data.project.doc.episodes[0].scenes[0].shots[1].firstFrameUrl = '/f/2.png';
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }));
+    render(<DramaWorkbench dramaId="drama_1" projectId="p1" onDramaIdChange={() => undefined} onExit={() => undefined} />);
+    await screen.findByRole('heading', { name: /咖啡馆·内·夜/ });
+    fireEvent.click(screen.getByRole('button', { name: '镜头 2，场 1，5 秒，待拍' }));
+    const panel = within(await screen.findByRole('region', { name: '静帧镜头' }));
+    fireEvent.click(panel.getByRole('checkbox', { name: '成片里用首帧加运镜代替视频' }));
+    fireEvent.click(panel.getByRole('button', { name: '左移' }));
+    expect(screen.getByRole('button', { name: '镜头 2，场 1，5 秒，静帧' })).toBeTruthy();
+    await waitFor(() => expect(saved?.episodes[0].scenes[0].shots[1].still).toEqual({ motion: 'pan-left' }), { timeout: 3000 });
+
+    goTo(/^5\s*成片/);
+    expect((screen.getByRole('button', { name: '渲染成片' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByText(/个镜头没有可用的视频/)).toBeNull();
+
+    fireEvent.click(panel.getByRole('checkbox', { name: '成片里用首帧加运镜代替视频' }));
+    await waitFor(() => expect(saved?.episodes[0].scenes[0].shots[1]).not.toHaveProperty('still'), { timeout: 3000 });
+  });
 });

@@ -21,6 +21,7 @@ export function DramaTimeline() {
         <span className="text-[var(--drama-paper)]">{formatTimecode(totalSec)}</span>
         <span>{blocks.length} 个镜头</span>
         <span>{blocks.filter(block => block.hasTake).length} 个已有视频</span>
+        {blocks.some(block => block.still) ? <span>其中 {blocks.filter(block => block.still).length} 个是静帧</span> : null}
       </div>
       {blocks.length === 0 ? (
         <p className="drama-label py-2">镜头会按顺序排在这里。</p>
@@ -36,7 +37,7 @@ export function DramaTimeline() {
                   <div className="flex flex-col gap-0.5" style={{ width: Math.max(MIN_BLOCK_PX, block.durationSec * PX_PER_SEC) }}>
                     <button
                       type="button" aria-pressed={selected}
-                      aria-label={`镜头 ${block.shotNumber}，场 ${block.sceneNumber}，${Number(block.durationSec.toFixed(1))} 秒${block.hasTake ? '，已有视频' : running ? '，生成中' : '，待拍'}`}
+                      aria-label={`镜头 ${block.shotNumber}，场 ${block.sceneNumber}，${Number(block.durationSec.toFixed(1))} 秒${block.still ? '，静帧' : block.hasTake ? '，已有视频' : running ? '，生成中' : '，待拍'}`}
                       onClick={() => selectShot(block.shotId)}
                       className={`relative h-9 overflow-hidden rounded-sm border text-left font-mono text-[10px] ${selected ? 'border-[var(--drama-gold)]' : 'border-transparent'} ${block.hasTake ? 'bg-[var(--drama-panel)]' : 'bg-[var(--drama-graphite)]'}`}
                     >

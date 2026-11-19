@@ -1,4 +1,7 @@
-/** Background episode render: stitches the selected take of every shot, keeps audio, adds transitions, subtitles, voiceovers and music. Free of credits. */
+/**
+ * Background episode render: stitches the selected take of every shot (or its first frame as a moving still),
+ * keeps audio, adds transitions, subtitles, voiceovers and music. Free of credits.
+ */
 import { after, NextRequest, NextResponse } from 'next/server';
 import { copyFile, mkdir, mkdtemp, rm, stat, writeFile } from 'fs/promises';
 import path from 'path';
@@ -12,11 +15,11 @@ import { isSafeVideoSource } from '@/lib/api-validator';
 import { isGeneratedAudioLocation, readGeneratedAudioFromUrl } from '@/lib/generated-audio-storage';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import {
-  buildRenderPlan, buildSrt, clipLength, DRAMA_TRANSITIONS, MIN_CLIP_SEC, effectiveTransitionSec, timelineStarts, type DramaTransition, type RenderMusic, type RenderVoiceover,
+  buildRenderPlan, buildSrt, buildStillClipArgs, clipLength, DRAMA_TRANSITIONS, MIN_CLIP_SEC, stillFrameSize, effectiveTransitionSec, timelineStarts, type DramaTransition, type RenderMusic, type RenderVoiceover,
 } from '@/lib/drama/render';
 import { getDramaProject } from '@/lib/drama/store';
-import { collectEpisodeTimeline, dialogueCues } from '@/lib/drama/timeline';
-import { MAX_SHOTS_PER_EPISODE, type DramaClipEdit, type DramaMusic } from '@/lib/drama/types';
+import { collectEpisodeTimeline, dialogueCues, type TimelineClip } from '@/lib/drama/timeline';
+import { MAX_SHOTS_PER_EPISODE, type DramaMusic } from '@/lib/drama/types';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { downloadToBuffer, probeRenderClip } from '@/lib/video-media-io';
 
@@ -45,7 +48,9 @@ async function fileExists(file: string): Promise<boolean> {
 interface RenderJob {
   taskId: string;
   userId: string;
-  clips: Array<{ videoUrl: string; dialogue?: string; voiceoverUrl?: string; edit?: DramaClipEdit }>;
+  clips: Array<Omit<TimelineClip, 'shotId'>>;
+  /** Frame size for stills when no clip in the episode is a video. */
+  aspectRatio: string;
   transition: DramaTransition;
   transitionSec: number;
   subtitles: boolean;
@@ -60,16 +65,36 @@ async function renderEpisode(job: RenderJob): Promise<void> {
   const thumbnailName = outputName.replace(/\.mp4$/i, '.jpg');
   try {
     await mkdir(videoDir, { recursive: true });
-    const probed = [];
+    const probed: Array<Awaited<ReturnType<typeof probeRenderClip>>> = [];
+    const progress = (i: number, label: string) => updateTaskProgress(job.taskId, {
+      progress: Math.round(5 + (i + 1) / job.clips.length * 45), label: `成片渲染 · ${label} ${i + 1}/${job.clips.length}`,
+    });
+    // Videos first: their frame size is the film's, and the stills are drawn to match it.
     for (let i = 0; i < job.clips.length; i += 1) {
+      const url = job.clips[i].videoUrl;
+      if (!url) continue;
       const name = `clip-${i}.mp4`;
-      await writeFile(path.join(workDir, name), await downloadToBuffer(job.clips[i].videoUrl));
-      const clip = await probeRenderClip(path.join(workDir, name));
-      probed.push({ ...clip, path: name });
-      updateTaskProgress(job.taskId, {
-        progress: Math.round(5 + (i + 1) / job.clips.length * 45),
-        label: `成片渲染 · 读取镜头 ${i + 1}/${job.clips.length}`,
-      });
+      await writeFile(path.join(workDir, name), await downloadToBuffer(url));
+      probed[i] = { ...await probeRenderClip(path.join(workDir, name)), path: name };
+      progress(i, '读取镜头');
+    }
+    const firstVideo = probed.find(Boolean);
+    const frame = firstVideo ? { width: firstVideo.width, height: firstVideo.height } : stillFrameSize(job.aspectRatio);
+    for (let i = 0; i < job.clips.length; i += 1) {
+      const still = job.clips[i].still;
+      if (!still) continue;
+      const image = `still-${i}`;
+      const name = `clip-${i}.mp4`;
+      try {
+        await writeFile(path.join(workDir, image), await downloadToBuffer(still.url));
+        await execFileAsync('ffmpeg', buildStillClipArgs({ imagePath: image, outputPath: name, ...frame, durationSec: still.durationSec, motion: still.motion }),
+          { cwd: workDir, timeout: RENDER_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 });
+      } catch (error) {
+        console.error({ code: 'DRAMA_RENDER_STILL_FAILED', taskId: job.taskId, clip: i, error });
+        throw new Error(`第 ${i + 1} 个镜头的首帧图读不到或无法做成静帧，请在检查器里重新画首帧，或改用视频后再渲染。`);
+      }
+      probed[i] = { ...await probeRenderClip(path.join(workDir, name)), path: name };
+      progress(i, '制作静帧镜头');
     }
     const voiceovers: RenderVoiceover[] = [];
     for (let i = 0; i < job.clips.length; i += 1) {
@@ -90,6 +115,9 @@ async function renderEpisode(job: RenderJob): Promise<void> {
       await writeFile(path.join(workDir, name), audio.buffer);
       music = { path: name, volume: job.music.volume, ducking: job.music.ducking };
     }
+    // probed is filled by index, so check every index rather than relying on map/some, which skip holes.
+    const hole = job.clips.findIndex((_, i) => !probed[i]);
+    if (hole >= 0) throw new Error(`第 ${hole + 1} 个镜头既没有视频也没有首帧，请先补齐后再渲染。`);
     const renderClips = probed.map(({ path: clipPath, durationSec, hasAudio }, i) => ({ path: clipPath, durationSec, hasAudio, ...job.clips[i].edit }));
     const tooShort = renderClips.findIndex(clip => clipLength(clip) * (clip.speed ?? 1) < MIN_CLIP_SEC);
     if (tooShort >= 0) throw new Error(`第 ${tooShort + 1} 个镜头裁剪后不到 ${MIN_CLIP_SEC} 秒，请在检查器里调整入点和出点后再渲染。`);
@@ -107,7 +135,7 @@ async function renderEpisode(job: RenderJob): Promise<void> {
       }
     }
     const plan = buildRenderPlan({
-      clips: renderClips, width: probed[0].width, height: probed[0].height,
+      clips: renderClips, ...frame,
       transition: job.transition, transitionSec, outputPath,
       ...(voiceovers.length ? { voiceovers } : {}),
       ...(music ? { music } : {}),
@@ -151,7 +179,7 @@ function settingsFromUrls(body: Record<string, unknown>): RenderSettings | NextR
     return NextResponse.json({ error: '镜头视频地址无效，请重新生成对应镜头' }, { status: 400 });
   }
   const transition = DRAMA_TRANSITIONS.find(value => value === body.transition) ?? 'cut';
-  return { clips: (urls as string[]).map(videoUrl => ({ videoUrl })), transition, transitionSec: 0.5, subtitles: false };
+  return { clips: (urls as string[]).map(videoUrl => ({ videoUrl })), aspectRatio: '16:9', transition, transitionSec: 0.5, subtitles: false };
 }
 
 async function settingsFromProject(userId: string, body: Record<string, unknown> | null): Promise<RenderSettings | NextResponse> {
@@ -179,8 +207,8 @@ async function settingsFromProject(userId: string, body: Record<string, unknown>
     }, { status: 409 });
   }
   if (timeline.clips.length === 0) return NextResponse.json({ error: '这一集还没有镜头' }, { status: 409 });
-  if (timeline.clips.some(clip => !allowedSource(clip.videoUrl))) {
-    return NextResponse.json({ error: '镜头视频地址无效，请重新生成对应镜头' }, { status: 400 });
+  if (timeline.clips.some(clip => (clip.videoUrl ? !allowedSource(clip.videoUrl) : !clip.still || !allowedSource(clip.still.url)))) {
+    return NextResponse.json({ error: '镜头视频或首帧地址无效，请重新生成对应镜头' }, { status: 400 });
   }
   if (timeline.clips.some(clip => clip.voiceoverUrl && !isGeneratedAudioLocation(clip.voiceoverUrl))) {
     return NextResponse.json({ error: '配音地址无效，请重新生成对应镜头的配音' }, { status: 400 });
@@ -190,7 +218,8 @@ async function settingsFromProject(userId: string, body: Record<string, unknown>
     return NextResponse.json({ error: '背景音乐地址无效，请在成片步骤重新上传音乐' }, { status: 400 });
   }
   return {
-    clips: timeline.clips,
+    clips: timeline.clips.map(({ shotId: _shot, ...clip }) => { void _shot; return clip; }),
+    aspectRatio: doc.aspectRatio,
     transition: doc.timeline.transition, transitionSec: doc.timeline.transitionSec, subtitles: doc.timeline.subtitles,
     ...(music ? { music } : {}),
   };

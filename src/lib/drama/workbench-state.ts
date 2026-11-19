@@ -1,6 +1,6 @@
 /** Pure edits on a drama document for the workbench. Every function returns a new document and leaves the input untouched. */
 import {
-  activeTake, MAX_SHOTS_PER_EPISODE,
+  activeTake, MAX_SHOTS_PER_EPISODE, shotSource,
   type DramaCastMember, type DramaEpisode, type DramaLocation, type DramaProjectV1, type DramaProp, type DramaSceneBlock, type DramaShot, type DramaTake,
 } from './types';
 
@@ -175,7 +175,7 @@ export function formatTimecode(totalSec: number): string {
 
 /** Shots that still need a usable take, in timeline order. */
 export function pendingShots(episode: DramaEpisode | undefined): DramaShot[] {
-  return episode ? episode.scenes.flatMap(scene => scene.shots).filter(shot => !activeTake(shot)) : [];
+  return episode ? episode.scenes.flatMap(scene => scene.shots).filter(shot => !shotSource(shot)) : [];
 }
 
 /** Shots whose newest take failed and that have no usable take to fall back on. */

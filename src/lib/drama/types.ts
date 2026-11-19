@@ -1,7 +1,7 @@
 /** Drama project document: script → episodes → scenes → shots, plus the cast/location/prop bible and timeline. */
 import type { DirectorStyle } from '@/lib/video-director/director-styles';
 import type { VideoCharacter, VideoProp, VideoScene, VideoShotPlan } from '@/lib/video-director/continuity';
-import type { DramaTransition } from './render';
+import type { DramaTransition, StillMotion } from './render';
 
 export const DRAMA_PROJECT_SCHEMA_ID = 'drama-project-v1';
 export const MAX_SHOTS_PER_EPISODE = 120;
@@ -50,6 +50,8 @@ export interface DramaShot extends VideoShotPlan {
   takes: DramaTake[];
   selectedTakeId?: string;
   clipEdit?: DramaClipEdit;
+  /** Use the first frame in the film instead of a video, moved by a slow camera move. Needs `firstFrameUrl`. */
+  still?: { motion: StillMotion };
 }
 
 export interface DramaSceneBlock {
@@ -169,6 +171,17 @@ export function activeTake(shot: Pick<DramaShot, 'takes' | 'selectedTakeId'>): D
   const selected = shot.takes.find(take => take.id === shot.selectedTakeId && take.status === 'completed' && take.videoUrl);
   if (selected) return selected;
   return [...shot.takes].reverse().find(take => take.status === 'completed' && take.videoUrl);
+}
+
+/** What a shot puts in the film: its first frame as a moving still when the user chose that, else its active take. */
+export type ShotSource =
+  | { kind: 'video'; take: DramaTake }
+  | { kind: 'still'; imageUrl: string; motion: StillMotion };
+
+export function shotSource(shot: Pick<DramaShot, 'takes' | 'selectedTakeId' | 'still' | 'firstFrameUrl'>): ShotSource | undefined {
+  if (shot.still && shot.firstFrameUrl) return { kind: 'still', imageUrl: shot.firstFrameUrl, motion: shot.still.motion };
+  const take = activeTake(shot);
+  return take ? { kind: 'video', take } : undefined;
 }
 
 export function episodeShots(episode: DramaEpisode): DramaShot[] {

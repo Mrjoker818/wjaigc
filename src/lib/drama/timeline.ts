@@ -1,11 +1,13 @@
 /** Pure helpers that turn an episode into render inputs: the selected take of every shot and dialogue subtitles. */
-import { clipLength, type SubtitleCue } from './render';
-import { activeTake, type DramaClipEdit, type DramaProjectV1, type DramaShot } from './types';
+import { clipLength, type StillMotion, type SubtitleCue } from './render';
+import { shotSource, type DramaClipEdit, type DramaProjectV1, type DramaShot } from './types';
 import { currentVoiceover } from './voiceover';
 
+/** One shot in the film: a video take, or a still image with a camera move (then `videoUrl` is absent). */
 export interface TimelineClip {
   shotId: string;
-  videoUrl: string;
+  videoUrl?: string;
+  still?: { url: string; motion: StillMotion; durationSec: number };
   dialogue?: string;
   /** Voiceover recorded from the current line; a stale one is left out. */
   voiceoverUrl?: string;
@@ -13,7 +15,9 @@ export interface TimelineClip {
 }
 
 /** Planned seconds the shot fills in the film: its planned length, trimmed and sped up or slowed down. */
-export function shotFilmLength(shot: Pick<DramaShot, 'durationSec' | 'clipEdit'>): number {
+export function shotFilmLength(shot: Pick<DramaShot, 'durationSec' | 'clipEdit'> & Partial<Pick<DramaShot, 'still' | 'firstFrameUrl'>>): number {
+  // A still is drawn at the planned length; trim and speed belong to video takes.
+  if (shot.still && shot.firstFrameUrl) return shot.durationSec;
   return clipLength({ path: '', hasAudio: false, durationSec: shot.durationSec, ...shot.clipEdit });
 }
 
@@ -28,14 +32,16 @@ export function collectEpisodeTimeline(doc: DramaProjectV1, episodeId: string): 
   const clips: TimelineClip[] = [];
   const missingShotIds: string[] = [];
   for (const shot of episode ? episode.scenes.flatMap(scene => scene.shots) : []) {
-    const take = activeTake(shot);
-    if (!take?.videoUrl) { missingShotIds.push(shot.id); continue; }
+    const source = shotSource(shot);
+    if (!source) { missingShotIds.push(shot.id); continue; }
     const voiceoverUrl = currentVoiceover(shot);
     clips.push({
-      shotId: shot.id, videoUrl: take.videoUrl,
+      shotId: shot.id,
+      ...(source.kind === 'video'
+        ? { videoUrl: source.take.videoUrl!, ...(shot.clipEdit ? { edit: shot.clipEdit } : {}) }
+        : { still: { url: source.imageUrl, motion: source.motion, durationSec: shot.durationSec } }),
       ...(shot.dialogue?.trim() ? { dialogue: shot.dialogue.trim() } : {}),
       ...(voiceoverUrl ? { voiceoverUrl } : {}),
-      ...(shot.clipEdit ? { edit: shot.clipEdit } : {}),
     });
   }
   return { clips, missingShotIds };
@@ -48,7 +54,10 @@ export interface TimelineBlock {
   startSec: number;
   endSec: number;
   durationSec: number;
+  /** The shot has a video take or a still in the film. */
   hasTake: boolean;
+  /** The shot is a still with a camera move. */
+  still?: boolean;
   thumbnailUrl?: string;
   subtitle?: string;
 }
@@ -65,14 +74,15 @@ export function buildTimeline(doc: DramaProjectV1, episodeId: string): TimelineB
     : Math.max(0, Math.min(doc.timeline.transitionSec, Math.min(...shots.map(item => shotFilmLength(item.shot))) / 2, 2));
   let cursor = 0;
   return shots.map(({ shot, sceneNumber }, i) => {
-    const take = activeTake(shot);
+    const source = shotSource(shot);
     const startSec = cursor;
     const length = shotFilmLength(shot);
     cursor += length - (i < shots.length - 1 ? overlap : 0);
     return {
       shotId: shot.id, sceneNumber, shotNumber: i + 1, startSec, endSec: startSec + length, durationSec: length,
-      hasTake: Boolean(take?.videoUrl),
-      ...(take?.thumbnailUrl ? { thumbnailUrl: take.thumbnailUrl } : {}),
+      hasTake: Boolean(source),
+      ...(source?.kind === 'still' ? { still: true, thumbnailUrl: source.imageUrl } : {}),
+      ...(source?.kind === 'video' && source.take.thumbnailUrl ? { thumbnailUrl: source.take.thumbnailUrl } : {}),
       ...(doc.timeline.subtitles && shot.dialogue?.trim() ? { subtitle: shot.dialogue.trim() } : {}),
     };
   });

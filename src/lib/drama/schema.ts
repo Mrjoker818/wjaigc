@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import { DIRECTOR_STYLE_IDS } from '@/lib/video-director/director-styles';
 import { MAX_IMAGE_HISTORY } from './bible-images';
-import { DRAMA_TRANSITIONS } from './render';
+import { DRAMA_TRANSITIONS, STILL_MOTIONS } from './render';
 import { DRAMA_PROJECT_SCHEMA_ID, MAX_SHOTS_PER_EPISODE, type DramaProjectV1 } from './types';
 
 export const MAX_DRAMA_DOC_BYTES = 2 * 1024 * 1024;
@@ -46,6 +46,7 @@ const shot = z.looseObject({
     speed: z.number().min(0.5).max(2).optional(),
     volume: z.number().min(0).max(2).optional(),
   }).optional(),
+  still: z.object({ motion: z.enum(STILL_MOTIONS) }).optional(),
 });
 
 const sceneBlock = z.looseObject({

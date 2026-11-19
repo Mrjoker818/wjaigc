@@ -44,6 +44,64 @@ export interface RenderVoiceover {
   path: string;
 }
 
+/** Camera moves for a still shot: push in, pull out, or pan across the picture. */
+export const STILL_MOTIONS = ['push-in', 'pull-out', 'pan-left', 'pan-right'] as const;
+export type StillMotion = typeof STILL_MOTIONS[number];
+
+export interface StillClipInput {
+  /** Image inside the ffmpeg working directory; ffmpeg reads the format from the bytes. */
+  imagePath: string;
+  outputPath: string;
+  width: number;
+  height: number;
+  durationSec: number;
+  motion: StillMotion;
+  fps?: number;
+}
+
+/** Zoom at the far end of a push or pull, and the fixed zoom that leaves room to pan. */
+const STILL_ZOOM = 1.2;
+const STILL_PAN_ZOOM = 1.15;
+
+/**
+ * Args for turning one image into a silent clip with a slow camera move (Ken Burns).
+ * The image is first scaled to twice the output size so the move does not step from pixel to pixel.
+ */
+export function buildStillClipArgs(input: StillClipInput): string[] {
+  if (!STILL_MOTIONS.includes(input.motion)) throw new Error('DRAMA_RENDER_BAD_MOTION');
+  if (!(input.durationSec > 0 && input.durationSec <= 60)) throw new Error('DRAMA_RENDER_BAD_DURATION');
+  const width = even(input.width);
+  const height = even(input.height);
+  const fps = input.fps ?? 30;
+  const frames = Math.max(2, Math.round(input.durationSec * fps));
+  const progress = `on/${frames - 1}`;
+  const centerX = 'iw/2-(iw/zoom/2)';
+  const centerY = 'ih/2-(ih/zoom/2)';
+  const move = {
+    'push-in': { z: `1+${seconds(STILL_ZOOM - 1)}*${progress}`, x: centerX, y: centerY },
+    'pull-out': { z: `${STILL_ZOOM}-${seconds(STILL_ZOOM - 1)}*${progress}`, x: centerX, y: centerY },
+    'pan-left': { z: String(STILL_PAN_ZOOM), x: `(iw-iw/zoom)*(1-${progress})`, y: centerY },
+    'pan-right': { z: String(STILL_PAN_ZOOM), x: `(iw-iw/zoom)*${progress}`, y: centerY },
+  }[input.motion];
+  const big = `${width * 2}:${height * 2}`;
+  return [
+    '-hide_banner', '-y', '-i', input.imagePath,
+    '-vf', `scale=${big}:force_original_aspect_ratio=increase,crop=${big},`
+      + `zoompan=z='${move.z}':x='${move.x}':y='${move.y}':d=${frames}:s=${width}x${height}:fps=${fps},setsar=1,format=yuv420p`,
+    '-frames:v', String(frames), '-an', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p',
+    input.outputPath,
+  ];
+}
+
+/** Frame size for an episode with no video clip to copy it from. */
+export function stillFrameSize(aspectRatio: string): { width: number; height: number } {
+  const sizes: Record<string, [number, number]> = {
+    '9:16': [720, 1280], '16:9': [1280, 720], '1:1': [1080, 1080], '3:4': [960, 1280], '4:3': [1280, 960], '21:9': [1680, 720],
+  };
+  const [width, height] = sizes[aspectRatio] ?? [720, 1280];
+  return { width, height };
+}
+
 /** Background music looped under the whole film. */
 export interface RenderMusic {
   /** Audio file path inside the ffmpeg working directory. */
