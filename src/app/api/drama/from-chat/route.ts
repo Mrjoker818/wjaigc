@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { videoForbidden } from '@/lib/drama/access';
 import { authorizeGenerationProject, GenerationProjectAccessError } from '@/lib/collaboration/generation-project-access';
 import { dramaPlannerConfig, writeDramaScript } from '@/lib/drama/draft';
 import { DramaPlannerError } from '@/lib/drama/planner';
@@ -26,6 +27,8 @@ const HANDOFF_ERRORS: Record<SimpleChatWorkspaceHandoffError['code'], string> = 
 export async function POST(request: NextRequest) {
   const auth = await requireApiAuthOrReject(request);
   if (auth instanceof NextResponse) return auth;
+  const denied = videoForbidden(auth.user);
+  if (denied) return denied;
   const intent = parseSimpleChatWorkspaceHandoffBody(await request.json().catch(() => null));
   if (!intent) return NextResponse.json({ error: '对话发送信息不完整，请返回对话重新发送', code: 'INVALID_HANDOFF' }, { status: 400 });
   try {

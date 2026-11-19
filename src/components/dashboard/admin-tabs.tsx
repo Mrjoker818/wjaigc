@@ -1327,6 +1327,7 @@ export default function AdminTabs(props: AdminTabsProps) {
                   <div className="space-y-2">
                     {[
                       { key: 'canvas', label: '无限画布', desc: 'AI图像生成与协作平台' },
+                      { key: 'video', label: '视频创作', desc: '短剧工作台：剧本、分镜、镜头与成片' },
                       { key: 'chat', label: '智能对话', desc: 'AI对话与图像生成助手' },
                     ].map(({ key, label, desc }) => {
                       const productType = detailUser.productType || '';

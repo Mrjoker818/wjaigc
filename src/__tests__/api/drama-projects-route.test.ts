@@ -3,13 +3,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   userId: 'user-a' as string | null,
+  productType: 'canvas,video' as string,
   rows: new Map<string, { id: string; user_id: string; project_id: string | null; title: string; doc: unknown; version: number; created_at: number; updated_at: number }>(),
 }));
 
 vi.mock('server-only', () => ({}));
 vi.mock('@/lib/api-auth', () => ({
   requireApiAuthOrReject: async () => (mocks.userId
-    ? { authenticated: true, userId: mocks.userId, userRole: 'user' }
+    ? { authenticated: true, userId: mocks.userId, userRole: 'user', user: { id: mocks.userId, role: 'user', productType: mocks.productType } }
     : NextResponse.json({ error: 'Authentication required' }, { status: 401 })),
 }));
 vi.mock('@/lib/collaboration/generation-project-access', () => ({
@@ -56,6 +57,7 @@ const ctx = (id: string) => ({ params: Promise.resolve({ id }) });
 
 beforeEach(() => {
   mocks.userId = 'user-a';
+  mocks.productType = 'canvas,video';
   mocks.rows.clear();
 });
 
@@ -91,5 +93,14 @@ describe('drama project routes', () => {
   it('requires authentication', async () => {
     mocks.userId = null;
     expect((await create(request('POST', {}))).status).toBe(401);
+  });
+
+  it('refuses users without the video platform', async () => {
+    mocks.productType = 'canvas,chat';
+    const denied = await create(request('POST', {}));
+    expect(denied.status).toBe(403);
+    expect((await denied.json()).code).toBe('VIDEO_PLATFORM_FORBIDDEN');
+    expect((await read(request('GET'), ctx('drama_x'))).status).toBe(403);
+    expect(mocks.rows.size).toBe(0);
   });
 });

@@ -240,7 +240,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const contentType = request.headers.get('content-type') || '';
   const isFormSubmission = contentType.includes('application/x-www-form-urlencoded')
     || contentType.includes('multipart/form-data');
-  let formProductType: 'canvas' | 'chat' = 'canvas';
+  let formProductType: 'canvas' | 'video' | 'chat' = 'canvas';
 
   try {
     let rawBody: unknown;
@@ -254,7 +254,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const body = rawBody && typeof rawBody === 'object'
       ? rawBody as Record<string, unknown>
       : {};
-    formProductType = body.productType === 'chat' ? 'chat' : 'canvas';
+    formProductType = body.productType === 'chat' || body.productType === 'video' ? body.productType : 'canvas';
 
     if (!isValidLoginInput(body)) {
       const response = isFormSubmission
@@ -325,7 +325,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const nextPath = body.next === '/simple-chat' ? '/simple-chat' : '/';
     const successPath = formProductType === 'chat'
       ? '/simple-chat'
-      : `${nextPath}?loginMode=canvas`;
+      : formProductType === 'video'
+        ? '/video'
+        : `${nextPath}?loginMode=canvas`;
     const response = isFormSubmission
       ? redirectToPublicPath(request, successPath)
       : NextResponse.json({ success: true, user });

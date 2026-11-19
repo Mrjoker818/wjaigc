@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  dramaIdFromSearch, isWorkspacePath, platformForPath, platformHref, platformRedirect, platformsForUser,
+  dramaIdFromSearch, isWorkspacePath, normalizeProductType, platformForPath, platformHref, platformRedirect, platformsForUser,
   workspaceAddress, workspaceModeForPath,
 } from '@/lib/platform-routes';
 
@@ -10,13 +10,20 @@ const at = (href: string) => {
 };
 
 describe('platform routes', () => {
-  it('opens every platform for admins and empty grants, and video with a canvas grant', () => {
+  it('opens every platform for admins and empty grants, and each other platform only when granted', () => {
     expect(platformsForUser(null)).toEqual([]);
     expect(platformsForUser({ role: 'admin', productType: 'chat' })).toEqual(['canvas', 'video', 'chat']);
     expect(platformsForUser({ productType: '' })).toEqual(['canvas', 'video', 'chat']);
     expect(platformsForUser({ productType: 'chat' })).toEqual(['chat']);
-    expect(platformsForUser({ productType: 'canvas' })).toEqual(['canvas', 'video']);
-    expect(platformsForUser({ productType: ' canvas , chat ' })).toEqual(['canvas', 'video', 'chat']);
+    expect(platformsForUser({ productType: 'canvas' })).toEqual(['canvas']);
+    expect(platformsForUser({ productType: 'video' })).toEqual(['video']);
+    expect(platformsForUser({ productType: ' canvas , chat ' })).toEqual(['canvas', 'chat']);
+  });
+
+  it('keeps only known platforms in a fixed order', () => {
+    expect(normalizeProductType('chat, canvas,video,admin')).toBe('canvas,video,chat');
+    expect(normalizeProductType('bogus')).toBe('');
+    expect(normalizeProductType(undefined)).toBe('');
   });
 
   it('maps paths to platforms and builds platform links', () => {
@@ -54,6 +61,7 @@ describe('platform routes', () => {
 
   it('sends single-platform users to their platform only', () => {
     expect(platformRedirect(['chat'], '/')).toBe('/chat');
+    expect(platformRedirect(['video'], '/canvas')).toBe('/video');
     expect(platformRedirect(['chat'], '/simple-chat')).toBeNull();
     expect(platformRedirect(['canvas', 'video'], '/')).toBeNull();
   });

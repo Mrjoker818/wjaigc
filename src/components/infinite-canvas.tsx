@@ -13476,6 +13476,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
               <HelpCircle className={`h-3.5 w-3.5 ${mIcon.helpCircle}`} />
               <span>使用说明</span>
             </button>
+            {onSwitchToDrama && (<>
             {/* Divider */}
             <div className={ltDividerCls} />
             {/* Short-drama workbench */}
@@ -13487,6 +13488,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
               <Film className={`h-3.5 w-3.5 ${mIcon.workflow}`} />
               <span>短剧工作台</span>
             </button>
+            </>)}
             {/* Divider */}
             <div className={ltDividerCls} />
             {/* Collapse button */}
@@ -13545,6 +13547,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
             >
               {isMonochrome ? <Palette className="w-4 h-4" /> : <Contrast className="w-4 h-4" />}
             </button>
+            {onSwitchToDrama && (<>
             <div className={`w-5 my-1 h-px ${isMonochrome ? 'bg-gray-200' : 'bg-white/[0.06]'}`} />
             <button
               onClick={onSwitchToDrama}
@@ -13554,6 +13557,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
             >
               <Film className={`w-4 h-4 ${mIcon.workflow}`} />
             </button>
+            </>)}
             <div className={`w-5 my-1 h-px ${isMonochrome ? 'bg-gray-200' : 'bg-white/[0.06]'}`} />
             <button
               onClick={() => setLeftToolbarExpanded(true)}

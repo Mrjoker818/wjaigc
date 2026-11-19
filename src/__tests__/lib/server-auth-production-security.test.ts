@@ -336,7 +336,7 @@ describe.sequential('server authentication production security', () => {
     })).resolves.toMatchObject({
       name: 'bootstrap-admin',
       role: 'admin',
-      productType: 'canvas,chat',
+      productType: 'canvas,video,chat',
     });
 
     const persisted = JSON.parse(
@@ -373,7 +373,7 @@ describe.sequential('server authentication production security', () => {
     })).resolves.toMatchObject({
       name: 'canvas-user',
       role: 'user',
-      productType: 'canvas,chat',
+      productType: 'canvas,video,chat',
     });
 
     const persisted = JSON.parse(

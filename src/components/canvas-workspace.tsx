@@ -7231,6 +7231,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
     if (next !== `${window.location.pathname}${window.location.search}${window.location.hash}`) replaceWorkspaceHistoryState(window, next);
   }, [appMode, currentProject?.id, activeDramaId]);
   const userPlatforms = useMemo(() => platformsForUser(currentUser), [currentUser]);
+  const videoEnabled = userPlatforms.includes('video');
+  // A /video address or an old link can still ask for the workbench; without video the canvas or project list opens.
+  useEffect(() => {
+    if (appMode === 'drama' && currentUser && !videoEnabled) setAppMode(currentProject ? 'canvas' : 'dashboard');
+  }, [appMode, currentUser, currentProject, videoEnabled]);
   // Canvas and video share this page, so switching between them keeps the loaded project; chat is another page.
   const navigatePlatform = useCallback((platform: 'canvas' | 'video' | 'chat'): boolean => {
     if (platform === 'video') { safeSwitchMode('drama'); return true; }
@@ -7847,7 +7852,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
           onAnnotationsChange={handleAnnotationsChange}
           annotationExecutionContext={annotationExecutionContext}
           onRequestTaskPoll={requestCanvasTaskPoll}
-          onSwitchToDrama={() => safeSwitchMode('drama')}
+          onSwitchToDrama={videoEnabled ? () => safeSwitchMode('drama') : undefined}
           onSwitchToDashboard={() => safeSwitchMode('dashboard')}
           initialViewState={viewStateRef.current || undefined}
           isPanelCollapsed={panelCollapsed}
@@ -8161,7 +8166,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
               </div>
             </div>
             <div className={activePanel === 'chat' ? 'flex-1 overflow-hidden' : 'hidden'}>
-              <ChatPanel isVisible={!panelCollapsed && activePanel === 'chat'} canvasAuthority={collaborativeCanvas.authority==='unknown'?'pending':collaborativeCanvas.authority} themeStyle={themeStyle} projectId={currentProject?.id} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} onAddGeneratedImage={handleAddEmbeddedChatImage} onAddGeneratedImages={handleAddEmbeddedChatImages} canvasImages={images} selectedCanvasImage={selectedImage} onResolveCanvasImageForChat={resolveCanvasImageForChat} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage?.scope === canvasChatScopeRef.current.epoch ? chatInitialImage.image : null} chatInitialImageResolved onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} onGenerateImage={handleChatGenerateImage} externalPrompt={externalChatPrompt} onExternalPromptConsumed={() => setExternalChatPrompt(undefined)} onOpenDrama={dramaId => { setActiveDramaId(dramaId); safeSwitchMode('drama'); }} />
+              <ChatPanel isVisible={!panelCollapsed && activePanel === 'chat'} canvasAuthority={collaborativeCanvas.authority==='unknown'?'pending':collaborativeCanvas.authority} themeStyle={themeStyle} projectId={currentProject?.id} onAddToPrompt={handleAddToPrompt} onAddImages={handleAddImages} onAddGeneratedImage={handleAddEmbeddedChatImage} onAddGeneratedImages={handleAddEmbeddedChatImages} canvasImages={images} selectedCanvasImage={selectedImage} onResolveCanvasImageForChat={resolveCanvasImageForChat} onChatModelChange={setCurrentChatModelInfo} chatInitialImage={chatInitialImage?.scope === canvasChatScopeRef.current.epoch ? chatInitialImage.image : null} chatInitialImageResolved onChatInitialImageConsumed={() => setChatInitialImage(null)} chatTabOpen={chatTabOpen} onChatTabOpenChange={setChatTabOpen} onNavigateToImage={(id: string) => setNavigateToImageId(id)} onGenerateImage={handleChatGenerateImage} externalPrompt={externalChatPrompt} onExternalPromptConsumed={() => setExternalChatPrompt(undefined)} onOpenDrama={videoEnabled ? dramaId => { setActiveDramaId(dramaId); safeSwitchMode('drama'); } : undefined} />
             </div>
 
             {/* 固定在底部的开始生成按钮 */}

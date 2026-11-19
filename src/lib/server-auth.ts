@@ -562,7 +562,7 @@ function normalizeStoredUserAt(user: StoredUser, now: number): StoredUser {
     ...user,
     role: user.role || 'user',
     status: user.status || 'active',
-    productType: user.productType || (hasDefaultAdminProducts ? 'canvas,chat' : undefined),
+    productType: user.productType || (hasDefaultAdminProducts ? 'canvas,video,chat' : undefined),
     groupId: user.groupId || undefined,
     chatModels: user.chatModels || undefined,
     imageModels: user.imageModels || undefined,
@@ -783,7 +783,7 @@ async function createDefaultAdministrator() {
     credentialHash: await createScryptCredential(password),
     role: 'admin',
     status: 'active',
-    productType: 'canvas,chat',
+    productType: 'canvas,video,chat',
     apiPermissions: defaultApiPermissions(),
     storageFolder: storageFolder(DEFAULT_ADMIN_ID),
     createdAt: now,
@@ -799,7 +799,7 @@ function normalizeDefaultAdministrator(file: StoredUsersFile): void {
     ...admin,
     role: 'admin',
     status: admin.status || 'active',
-    productType: admin.productType || 'canvas,chat',
+    productType: admin.productType || 'canvas,video,chat',
     apiPermissions: admin.apiPermissions || defaultApiPermissions(),
     storageFolder: storageFolder(admin.id),
   };
@@ -1056,7 +1056,7 @@ export async function authenticateUser(input: {
       credentialHash: await createScryptCredential(password),
       role: 'admin',
       status: input.profile?.status || 'active',
-      productType: 'canvas,chat', // default admin has all access
+      productType: 'canvas,video,chat', // default admin has all access
       apiPermissions: input.profile?.apiPermissions || defaultApiPermissions(),
       storageFolder: storageFolder(id),
       email: input.profile?.email,
@@ -1070,8 +1070,8 @@ export async function authenticateUser(input: {
   const user = file.users[index];
   if (user.status === 'disabled') return null;
 
-  // Check product_type authorization
-  if (input.productType) {
+  // Check product_type authorization; admins may enter every platform.
+  if (input.productType && user.role !== 'admin') {
     const userProductTypes = (user.productType || '').split(',').map(s => s.trim()).filter(Boolean);
     if (!userProductTypes.includes(input.productType)) {
       return null;
@@ -1108,7 +1108,7 @@ export async function authenticateUser(input: {
       name,
       role: 'admin',
       status: user.status || 'active',
-      productType: user.productType || 'canvas,chat',
+      productType: user.productType || 'canvas,video,chat',
       apiPermissions: user.apiPermissions || defaultApiPermissions(),
       storageFolder: storageFolder(user.id),
     }, {
@@ -1278,7 +1278,7 @@ export async function createManagedUser(input: {
     credentialHash: await createScryptCredential(password),
     role: 'user',
     status: 'active',
-    productType: input.productType === undefined ? 'canvas,chat' : input.productType || undefined,
+    productType: input.productType === undefined ? 'canvas,video,chat' : input.productType || undefined,
     groupId: input.groupId || undefined,
     chatModels: input.chatModels || undefined,
     imageModels: input.imageModels || undefined,

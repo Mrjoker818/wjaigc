@@ -7,6 +7,7 @@ import { tmpdir } from 'os';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { videoForbidden } from '@/lib/drama/access';
 import { isSafeVideoSource } from '@/lib/api-validator';
 import { isGeneratedAudioLocation, readGeneratedAudioFromUrl } from '@/lib/generated-audio-storage';
 import { getServerDataRoot } from '@/lib/server-data-root';
@@ -185,6 +186,8 @@ async function settingsFromProject(userId: string, body: Record<string, unknown>
 export async function POST(request: NextRequest) {
   const auth = await requireApiAuthOrReject(request);
   if (auth instanceof NextResponse) return auth;
+  const denied = videoForbidden(auth.user);
+  if (denied) return denied;
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   const settings = body && Array.isArray(body.videoUrls)
     ? settingsFromUrls(body)

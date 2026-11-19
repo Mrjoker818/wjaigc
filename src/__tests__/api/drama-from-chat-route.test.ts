@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   userId: 'user-a' as string | null,
+  productType: 'canvas,video' as string,
   handoff: { text: '雨夜收到一封信' as string | null } as Record<string, unknown>,
   handoffError: null as Error | null,
   config: { baseUrl: 'https://llm.example.com/v1', apiKey: 'k', modelId: 'chat-1' } as Record<string, unknown> | null,
@@ -13,7 +14,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('server-only', () => ({}));
 vi.mock('@/lib/api-auth', () => ({
   requireApiAuthOrReject: async () => (mocks.userId
-    ? { authenticated: true, userId: mocks.userId, userRole: 'user' }
+    ? { authenticated: true, userId: mocks.userId, userRole: 'user', user: { id: mocks.userId, role: 'user', productType: mocks.productType } }
     : NextResponse.json({ error: 'Authentication required' }, { status: 401 })),
 }));
 vi.mock('@/lib/simple-chat-workspace-handoff-server', () => {
@@ -56,6 +57,7 @@ const post = (body: unknown) => new NextRequest('http://localhost/api/drama/from
 
 beforeEach(() => {
   mocks.userId = 'user-a';
+  mocks.productType = 'canvas,video';
   mocks.handoff = { text: '雨夜收到一封信' };
   mocks.handoffError = null;
   mocks.config = { baseUrl: 'https://llm.example.com/v1', apiKey: 'k', modelId: 'chat-1' };

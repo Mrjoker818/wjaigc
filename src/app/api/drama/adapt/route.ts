@@ -2,6 +2,7 @@
 import { after, NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { videoForbidden } from '@/lib/drama/access';
 import { authorizeGenerationProject, GenerationProjectAccessError } from '@/lib/collaboration/generation-project-access';
 import {
   ADAPT_MAX_CHARS, ADAPT_MIN_CHARS, buildAdaptChunkPrompt, mergeAdaptedChunk, splitSourceText, type AdaptSettings,
@@ -83,6 +84,8 @@ async function adapt(job: AdaptJob): Promise<void> {
 export async function POST(request: NextRequest) {
   const auth = await requireApiAuthOrReject(request);
   if (auth instanceof NextResponse) return auth;
+  const denied = videoForbidden(auth.user);
+  if (denied) return denied;
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   const text = typeof body?.text === 'string' ? body.text.trim() : '';
   if (text.length < ADAPT_MIN_CHARS) return NextResponse.json({ error: `原文至少 ${ADAPT_MIN_CHARS} 字。短的创意请用「一句话开始」` }, { status: 400 });

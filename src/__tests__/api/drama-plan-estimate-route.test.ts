@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   userId: 'user-a' as string | null,
+  productType: 'canvas,video' as string,
   provider: { baseUrl: 'https://llm.example.com/v1', apiKey: 'k', selectedModels: ['chat-1'] } as Record<string, unknown> | null,
   replies: [] as string[],
   llmCalls: 0,
@@ -13,7 +14,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('server-only', () => ({}));
 vi.mock('@/lib/api-auth', () => ({
   requireApiAuthOrReject: async () => (mocks.userId
-    ? { authenticated: true, userId: mocks.userId, userRole: 'user' }
+    ? { authenticated: true, userId: mocks.userId, userRole: 'user', user: { id: mocks.userId, role: 'user', productType: mocks.productType } }
     : NextResponse.json({ error: 'Authentication required' }, { status: 401 })),
 }));
 vi.mock('@/lib/server-api-config', () => ({ findProviderForFeature: async () => mocks.provider }));
@@ -46,6 +47,7 @@ const script = JSON.stringify({
 
 beforeEach(() => {
   mocks.userId = 'user-a';
+  mocks.productType = 'canvas,video';
   mocks.provider = { baseUrl: 'https://llm.example.com/v1', apiKey: 'k', selectedModels: ['chat-1'] };
   mocks.replies = [];
   mocks.llmCalls = 0;

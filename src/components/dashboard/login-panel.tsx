@@ -26,7 +26,7 @@ interface LoginPanelProps {
   onLogin: (user: User, productType: string) => void;
 }
 
-type LoginMode = 'canvas' | 'chat';
+type LoginMode = 'canvas' | 'video' | 'chat';
 type ViewState = 'select-mode' | 'login-form' | 'register-form';
 
 export function LoginPanel({ onLogin }: LoginPanelProps) {
@@ -313,7 +313,7 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
                       <div className="flex-1 min-w-0">
                         <h3 className="text-lg font-semibold text-foreground mb-1">无限画布</h3>
                         <p className="text-xs text-muted-foreground leading-relaxed">
-                          AI 图像生成 · 视频导演 · 短剧工作台 · 3D模型 · 无限画布创作
+                          AI 图像生成 · 视频导演 · 3D模型 · 无限画布创作
                         </p>
                       </div>
                       <div className="text-primary opacity-0 group-hover:opacity-100 transition-opacity">
@@ -336,6 +336,28 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
                         <h3 className="text-lg font-semibold text-foreground mb-1">智能对话</h3>
                         <p className="text-xs text-muted-foreground leading-relaxed">
                           AI 智能对话 · 图片理解 · 文生图 · 会话管理 · 模型切换
+                        </p>
+                      </div>
+                      <div className="text-primary opacity-0 group-hover:opacity-100 transition-opacity">
+                        <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" /></svg>
+                      </div>
+                    </div>
+                  </button>
+
+                  {/* 视频创作卡片 */}
+                  <button
+                    type="button"
+                    onClick={() => selectMode('video')}
+                    className="block w-full text-left p-5 rounded-xl border border-border/40 bg-muted/30 hover:border-primary/50 hover:bg-muted/50 transition-all group cursor-pointer"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-lg bg-accent flex items-center justify-center shrink-0 group-hover:shadow-[0_0_20px_rgba(212,175,55,0.2)] transition-shadow">
+                        <Clapperboard className="w-6 h-6 text-primary" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-lg font-semibold text-foreground mb-1">视频创作</h3>
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          一句话写剧本 · 角色定妆 · 分镜拆解 · 逐镜生成 · 成片导出
                         </p>
                       </div>
                       <div className="text-primary opacity-0 group-hover:opacity-100 transition-opacity">
@@ -517,6 +539,11 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
                       <>
                         <PanelLeft className="w-4 h-4 text-primary" />
                         <span className="text-sm font-medium text-foreground">无限画布</span>
+                      </>
+                    ) : selectedMode === 'video' ? (
+                      <>
+                        <Clapperboard className="w-4 h-4 text-primary" />
+                        <span className="text-sm font-medium text-foreground">视频创作</span>
                       </>
                     ) : (
                       <>

@@ -12,7 +12,7 @@ export interface User {
   password?: string;
   role?: 'admin' | 'user';
   status?: 'active' | 'disabled';
-  productType?: string; // 'canvas' | 'chat' | 'canvas,chat' | null
+  productType?: string; // comma-separated 'canvas' | 'video' | 'chat'; empty means all
   groupId?: string; // group ID reference
   chatModels?: string[]; // authorized chat model IDs
   imageModels?: string[]; // authorized image model IDs

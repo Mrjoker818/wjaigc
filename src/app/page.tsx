@@ -86,6 +86,12 @@ function HomeContent() {
       return;
     }
 
+    // Video mode: the drama workbench has its own address
+    if (productType === 'video') {
+      window.location.href = '/video';
+      return;
+    }
+
     if (simpleCreateTarget) {
       window.location.replace(simpleCreateTarget);
       return;

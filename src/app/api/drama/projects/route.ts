@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { videoForbidden } from '@/lib/drama/access';
 import { authorizeGenerationProject, GenerationProjectAccessError } from '@/lib/collaboration/generation-project-access';
 import { DramaDocumentError, parseDramaProject } from '@/lib/drama/schema';
 import { createDramaProject, listDramaProjects } from '@/lib/drama/store';
@@ -22,6 +23,8 @@ async function resolveProjectId(userId: string, projectId: unknown): Promise<str
 export async function GET(request: NextRequest) {
   const auth = await requireApiAuthOrReject(request);
   if (auth instanceof NextResponse) return auth;
+  const denied = videoForbidden(auth.user);
+  if (denied) return denied;
   try {
     const projectId = request.nextUrl.searchParams.get('projectId') || undefined;
     return NextResponse.json({ success: true, projects: await listDramaProjects(auth.userId, projectId) });
@@ -34,6 +37,8 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const auth = await requireApiAuthOrReject(request);
   if (auth instanceof NextResponse) return auth;
+  const denied = videoForbidden(auth.user);
+  if (denied) return denied;
   try {
     const body = await request.json().catch(() => null) as Record<string, unknown> | null;
     if (!body) return NextResponse.json({ error: '请求内容不是有效的 JSON' }, { status: 400 });

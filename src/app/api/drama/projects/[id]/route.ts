@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { videoForbidden } from '@/lib/drama/access';
 import { DramaDocumentError, parseDramaProject } from '@/lib/drama/schema';
 import { deleteDramaProject, DramaVersionConflictError, getDramaProject, saveDramaProject } from '@/lib/drama/store';
 
@@ -16,6 +17,8 @@ function validId(id: string): boolean {
 export async function GET(request: NextRequest, context: Context) {
   const auth = await requireApiAuthOrReject(request);
   if (auth instanceof NextResponse) return auth;
+  const denied = videoForbidden(auth.user);
+  if (denied) return denied;
   const { id } = await context.params;
   if (!validId(id)) return NextResponse.json(NOT_FOUND, { status: 404 });
   try {
@@ -32,6 +35,8 @@ export async function GET(request: NextRequest, context: Context) {
 export async function PUT(request: NextRequest, context: Context) {
   const auth = await requireApiAuthOrReject(request);
   if (auth instanceof NextResponse) return auth;
+  const denied = videoForbidden(auth.user);
+  if (denied) return denied;
   const { id } = await context.params;
   if (!validId(id)) return NextResponse.json(NOT_FOUND, { status: 404 });
   try {
@@ -68,6 +73,8 @@ export async function PUT(request: NextRequest, context: Context) {
 export async function DELETE(request: NextRequest, context: Context) {
   const auth = await requireApiAuthOrReject(request);
   if (auth instanceof NextResponse) return auth;
+  const denied = videoForbidden(auth.user);
+  if (denied) return denied;
   const { id } = await context.params;
   if (!validId(id)) return NextResponse.json(NOT_FOUND, { status: 404 });
   try {

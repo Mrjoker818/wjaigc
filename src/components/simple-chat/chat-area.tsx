@@ -59,6 +59,7 @@ import {
   type SimpleChatRetryContextV1,
 } from '@/lib/simple-chat-retry';
 import { buildSimpleChatWorkspaceHandoffUrl } from '@/lib/simple-chat-workspace-handoff';
+import { platformsForUser } from '@/lib/platform-routes';
 import { buildSimpleChatCanvasTransferIdentity } from '@/lib/simple-chat-workspace-handoff-client';
 import { MultiPlatformExportCard } from './multi-platform-export-card';
 import { resolveSimpleChatExportRequestContext } from '@/lib/multi-platform-export/simple-chat-intent';
@@ -191,6 +192,8 @@ interface SimpleChatWorkspaceActionsProps {
   onSendToCanvas: (message: SimpleChatMessage) => void;
   onNotice: (notice: string) => void;
   navigate?: (url: string) => void;
+  /** False hides「发送到短剧工作台」for users without the video platform. */
+  dramaEnabled?: boolean;
 }
 
 export function simpleChatMessagesMatch(
@@ -249,6 +252,7 @@ export function SimpleChatWorkspaceActions({
   onSendToCanvas,
   onNotice,
   navigate = url => window.location.assign(url),
+  dramaEnabled = true,
 }: SimpleChatWorkspaceActionsProps) {
   const canSendToDrama = canSendSimpleChatMessageToDrama(message);
   const canSendToCanvas = canTransferSimpleChatMedia(message.images || [], message.imageRefs || []);
@@ -288,6 +292,7 @@ export function SimpleChatWorkspaceActions({
           <Send className="w-3 h-3" />
         </button>
       )}
+      {dramaEnabled && (
       <button
         onClick={sendToDrama}
         disabled={!canSendToDrama}
@@ -301,6 +306,7 @@ export function SimpleChatWorkspaceActions({
       >
         <Clapperboard className="w-3 h-3" />
       </button>
+      )}
     </div>
   );
 }
@@ -414,6 +420,7 @@ export default function ChatArea({
   onUpdateAgent, onDeleteAgent, onSkillToAgent,
   onLogout, onBackToWorkspace, sidebarOpen, onToggleSidebar
 }: ChatAreaProps) {
+  const dramaEnabled = platformsForUser(user).includes('video');
   const { theme, toggleTheme } = useTheme();
 
   // Local state
@@ -3196,7 +3203,7 @@ export default function ChatArea({
                       isStreaming={isStreaming}
                       selectedCanvasProjectId={selectedCanvasProjectId}
                       canvasTransferPending={canvasTransferMessageId === msg.id}
-                      onSendToCanvas={(message) => { void sendImagesToCanvas(message); }}
+                      onSendToCanvas={(message) => { void sendImagesToCanvas(message); }} dramaEnabled={dramaEnabled}
                       onNotice={setControlNotice}
                     />
                     {/* 回复评分 */}
@@ -3224,7 +3231,7 @@ export default function ChatArea({
                     isStreaming={isStreaming}
                     selectedCanvasProjectId={selectedCanvasProjectId}
                     canvasTransferPending={canvasTransferMessageId === msg.id}
-                    onSendToCanvas={(message) => { void sendImagesToCanvas(message); }}
+                    onSendToCanvas={(message) => { void sendImagesToCanvas(message); }} dramaEnabled={dramaEnabled}
                     onNotice={setControlNotice}
                   />
                 )}

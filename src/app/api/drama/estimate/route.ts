@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { videoForbidden } from '@/lib/drama/access';
 import { calculateConfiguredCreditCost } from '@/lib/credits';
 import { loadCreditPricingConfig } from '@/lib/credit-pricing';
 import { dbGetCredits } from '@/lib/db-storage';
@@ -45,6 +46,8 @@ function readShot(value: unknown): ShotEstimateInput | null {
 export async function POST(request: NextRequest) {
   const auth = await requireApiAuthOrReject(request);
   if (auth instanceof NextResponse) return auth;
+  const denied = videoForbidden(auth.user);
+  if (denied) return denied;
   const body = await request.json().catch(() => null) as { shots?: unknown } | null;
   if (!body || !Array.isArray(body.shots) || body.shots.length > MAX_SHOTS_PER_EPISODE) {
     return NextResponse.json({ error: `一次最多估算 ${MAX_SHOTS_PER_EPISODE} 个镜头` }, { status: 400 });

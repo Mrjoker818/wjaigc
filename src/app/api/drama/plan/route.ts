@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
+import { videoForbidden } from '@/lib/drama/access';
 import { dramaPlannerConfig, withPlanRetry, writeDramaScript } from '@/lib/drama/draft';
 import { buildDramaShotMessages, callDramaLlm, DramaPlannerError, parseDramaShotResponse } from '@/lib/drama/planner';
 import { DramaDocumentError, parseDramaProject } from '@/lib/drama/schema';
@@ -36,6 +37,8 @@ function plannerError(error: unknown): NextResponse {
 export async function POST(request: NextRequest) {
   const auth = await requireApiAuthOrReject(request);
   if (auth instanceof NextResponse) return auth;
+  const denied = videoForbidden(auth.user);
+  if (denied) return denied;
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   if (!body || (body.action !== 'script' && body.action !== 'shots')) {
     return NextResponse.json({ error: '请求内容不正确，请刷新后重试' }, { status: 400 });

@@ -10,16 +10,19 @@ export const PLATFORMS: ReadonlyArray<{ id: Platform; label: string; path: strin
 const ALL: Platform[] = ['canvas', 'video', 'chat'];
 const DRAMA_ID = /^[A-Za-z0-9_-]{1,100}$/;
 
-/**
- * Platforms a user may open. An empty productType has always meant "everything", and admins see everything.
- * Until video is granted on its own, a canvas grant also opens video, because video used to live inside the canvas.
- */
+/** Platforms a user may open. An empty productType has always meant "everything", and admins see everything. */
 export function platformsForUser(user: { productType?: string | null; role?: string } | null | undefined): Platform[] {
   if (!user) return [];
   if (user.role === 'admin') return [...ALL];
   const types = (user.productType ?? '').split(',').map(type => type.trim()).filter(Boolean);
   if (types.length === 0) return [...ALL];
-  return ALL.filter(platform => types.includes(platform) || (platform === 'video' && types.includes('canvas')));
+  return ALL.filter(platform => types.includes(platform));
+}
+
+/** A submitted productType reduced to known platforms in a fixed order; '' when none are known. */
+export function normalizeProductType(value: unknown): string {
+  const types = typeof value === 'string' ? value.split(',').map(type => type.trim()) : [];
+  return ALL.filter(platform => types.includes(platform)).join(',');
 }
 
 /** Platform a path belongs to; `/` and `/simple-chat` are the older entries. */

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { platformsForUser } from '@/lib/platform-routes';
 import { toUserFacingError } from '@/lib/api-error-translate';
 import { randomUUID } from 'node:crypto';
 import { appendUserJsonl } from '@/lib/server-user-storage';
@@ -318,18 +319,22 @@ export async function POST(request: NextRequest) {
       : (intentLevel === 'extremely_vague' && !isAgentMode) ? false : enableTools;
     
     // Filter tools based on agent's allowed tools
-    const availableTools = agentTools && agentTools.length > 0
+    const agentAllowedTools = agentTools && agentTools.length > 0
       ? CHAT_TOOLS.filter(t => agentTools.includes(t.function.name))
       : CHAT_TOOLS;
     
     sessionUser = await getSessionUser(request);
+    // A drama draft opens in the video workbench, so only users with the video platform get the tool.
+    const availableTools = sessionUser && !platformsForUser(sessionUser).includes('video')
+      ? agentAllowedTools.filter(t => t.function.name !== 'create_drama_draft')
+      : agentAllowedTools;
     const userId = sessionUser?.id ?? requestUserId ?? "anonymous";
     const runtimeActor: User = sessionUser || {
       id: userId,
       name: userId,
       role: authResult.userRole === 'admin' ? 'admin' : 'user',
       status: 'active',
-      productType: 'canvas,chat',
+      productType: 'canvas,video,chat',
       createdAt: 0,
       updatedAt: 0,
     };

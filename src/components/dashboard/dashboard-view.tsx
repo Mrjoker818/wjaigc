@@ -301,6 +301,10 @@ interface PromptEntry {
   projectName: string;
 }
 
+const PRODUCT_TYPES = ['canvas', 'video', 'chat'];
+const PRODUCT_LABELS: Record<string, string> = { canvas: '无限画布', video: '视频创作', chat: '智能对话' };
+const PRODUCT_SHORT_LABELS: Record<string, string> = { canvas: '画布', video: '视频', chat: '对话' };
+
 export default function DashboardView({ user, onOpenProject, onNewProject, onLogout, isMonochrome, onSetIsMonochrome, themePreference, onSetThemePreference, onSetFavoriteParams, renameDraftStore: externalRenameDraftStore }: DashboardViewProps) {
   const dashboardFormId = useId();
   const isAdmin = user.role === 'admin';
@@ -451,7 +455,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   }>): void => {
     const actor = groupWriteActor.current;
     if (!actor) return;
-    const draft = groupDrafts.current.get(actor) ?? { name: '', productTypes: ['canvas'], creditQuota: 0 };
+    const draft = groupDrafts.current.get(actor) ?? { name: '', productTypes: ['canvas', 'video'], creditQuota: 0 };
     groupDrafts.current.set(actor, { ...draft, ...patch });
   };
   const updateEditingGroupDraft = (patch: Partial<NonNullable<ReturnType<typeof groupDrafts.current.get>>['edit']>): void => {
@@ -462,7 +466,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
   useLayoutEffect(() => {
     const draft = isAdmin ? groupDrafts.current.get(user.id) : undefined;
     setNewGroupName(draft?.name ?? '');
-    setNewGroupProductTypes(draft?.productTypes ?? ['canvas']);
+    setNewGroupProductTypes(draft?.productTypes ?? ['canvas', 'video']);
     setNewGroupCreditQuota(draft?.creditQuota ?? 0);
     setEditingGroupId(draft?.edit?.id ?? null);
     setEditGroupName(draft?.edit?.name ?? '');
@@ -3241,9 +3245,9 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                 <div>
                   <span id="admin-group-products-label" className="text-sm text-muted-foreground block mb-1">产品权限</span>
                   <div role="group" aria-labelledby="admin-group-products-label" className="flex flex-wrap gap-2">
-                    {['canvas', 'chat'].map(pt => (
+                    {PRODUCT_TYPES.map(pt => (
                       <button key={pt} aria-pressed={newGroupProductTypes.includes(pt)} onClick={() => { const current = groupDrafts.current.get(user.id)?.productTypes ?? newGroupProductTypes; const next = current.includes(pt) ? current.filter(p => p !== pt) : [...current, pt]; newGroupDraftRevision.current++; updateGroupDraft({ productTypes: next }); setNewGroupProductTypes(next); }} className={`min-h-[44px] min-w-[44px] px-3 py-2.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${newGroupProductTypes.includes(pt) ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'}`}>
-                        {pt === 'canvas' ? '无限画布' : '智能对话'}
+                        {PRODUCT_LABELS[pt] ?? pt}
                       </button>
                     ))}
                   </div>
@@ -3260,7 +3264,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                     if (!await submitAdminGroup({ action: 'create', name: newGroupName.trim(), productTypes: newGroupProductTypes, creditQuota: newGroupCreditQuota, isActive: true })) return;
                     if (!scope || groupViewScope.current !== scope) return;
                     if (newGroupDraftRevision.current === revision) {
-                      updateGroupDraft({ name: '', productTypes: ['canvas'], creditQuota: 0 });
+                      updateGroupDraft({ name: '', productTypes: ['canvas', 'video'], creditQuota: 0 });
                       setNewGroupName(''); setNewGroupProductTypes(['canvas']); setNewGroupCreditQuota(0);
                     }
                     await refreshAdmin();
@@ -3294,9 +3298,9 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                       <>
                         <input aria-label="分组名称（编辑）" type="text" value={editGroupName} onChange={e => { editGroupDraftRevision.current++; updateEditingGroupDraft({ name: e.target.value }); setEditGroupName(e.target.value); }} className={`px-3 py-2 rounded-lg text-base md:text-sm min-h-[44px] w-full min-w-0 lg:flex-1 border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30`} />
                         <div role="group" aria-label="编辑分组产品权限" className="flex shrink-0 flex-wrap gap-2">
-                          {['canvas', 'chat'].map(pt => (
+                          {PRODUCT_TYPES.map(pt => (
                             <button key={pt} aria-pressed={editGroupProductTypes.includes(pt)} onClick={() => { const current = groupDrafts.current.get(user.id)?.edit?.productTypes ?? editGroupProductTypes; const next = current.includes(pt) ? current.filter(p => p !== pt) : [...current, pt]; editGroupDraftRevision.current++; updateEditingGroupDraft({ productTypes: next }); setEditGroupProductTypes(next); }} className={`min-h-[44px] min-w-[44px] px-3 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${editGroupProductTypes.includes(pt) ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
-                              {pt === 'canvas' ? '画布' : '对话'}
+                              {PRODUCT_SHORT_LABELS[pt]}
                             </button>
                           ))}
                         </div>
@@ -3325,7 +3329,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
                           <div className="flex min-w-0 flex-wrap items-center gap-2 mt-1">
                             <span className="text-[11px] text-muted-foreground">产品：</span>
                             {group.product_types && group.product_types.length > 0 ? group.product_types.map(pt => (
-                              <span key={pt} className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{pt === 'canvas' ? '无限画布' : '智能对话'}</span>
+                              <span key={pt} className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{PRODUCT_LABELS[pt] ?? pt}</span>
                             )) : <span className="text-[10px] text-muted-foreground">未设置</span>}
                             <span className="text-[11px] text-muted-foreground ml-2">积分配额：{group.credit_quota || '无限制'}</span>
                             <span className="text-[10px] text-muted-foreground ml-2">用户数：{adminUsers.filter(u => u.groupId === group.id).length}</span>

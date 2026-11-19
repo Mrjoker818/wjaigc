@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { normalizeProductType } from '@/lib/platform-routes';
 import { createManagedUser } from '@/lib/server-auth';
 import { getRuntimeSettings } from '@/lib/runtime-settings';
 import { createSessionToken, WUJIE_SESSION_COOKIE, WUJIE_SESSION_TTL_SECONDS } from '@/lib/server-auth';
@@ -165,7 +166,9 @@ export async function POST(request: NextRequest) {
     const password = String(body.password || '').trim();
     const confirmPassword = String(body.confirmPassword || '').trim();
     const email = String(body.email || '').trim();
-    const productType = body.productType || 'canvas,chat';
+    // A canvas sign-up keeps video, which used to live inside the canvas; nothing chosen means every platform.
+    const requestedProducts = normalizeProductType(body.productType);
+    const productType = requestedProducts === 'canvas' ? 'canvas,video' : requestedProducts || 'canvas,video,chat';
 
     // 5. 用户名格式校验
     const usernameValidation = validateUsername(username);
