@@ -11,20 +11,33 @@ export function sniffAudioFormat(bytes: Uint8Array): GeneratedAudioFormat | null
   return null;
 }
 
-/** Length in seconds read by ffprobe from stdin, or null when ffprobe cannot tell. */
+/**
+ * Length in seconds read by ffprobe from stdin, or null when ffprobe cannot tell.
+ * ffprobe gives no format duration for a pipe it cannot seek, so this takes the end of the last packet.
+ */
 export function probeAudioSeconds(bytes: Uint8Array, format: GeneratedAudioFormat): Promise<number | null> {
   return new Promise(resolve => {
     const child = spawn('ffprobe', ['-v', 'error', '-protocol_whitelist', 'pipe', '-f', format, '-i', 'pipe:0',
-      '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1'], {
+      '-select_streams', 'a:0', '-show_entries', 'packet=pts_time,duration_time', '-of', 'csv=p=0'], {
       windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'], timeout: 15000, killSignal: 'SIGKILL',
     });
-    let out = '';
-    child.stdout.on('data', (chunk: Buffer) => { if (out.length < 256) out += chunk.toString('utf8'); });
+    // Only the end of the furthest packet matters; long files print one line per packet.
+    let end = 0;
+    let rest = '';
+    const take = (line: string) => {
+      const [pts, duration] = line.split(',').map(value => Number.parseFloat(value));
+      if (Number.isFinite(pts)) end = Math.max(end, pts + (Number.isFinite(duration) ? duration : 0));
+    };
+    child.stdout.on('data', (chunk: Buffer) => {
+      const lines = (rest + chunk.toString('utf8')).split('\n');
+      rest = lines.pop() ?? '';
+      lines.forEach(take);
+    });
     child.on('error', () => resolve(null));
     child.stdin.on('error', () => undefined);
     child.once('close', code => {
-      const seconds = Number.parseFloat(out.trim());
-      resolve(code === 0 && Number.isFinite(seconds) && seconds > 0 ? seconds : null);
+      take(rest);
+      resolve(code === 0 && end > 0 ? end : null);
     });
     child.stdin.end(Buffer.from(bytes));
   });
