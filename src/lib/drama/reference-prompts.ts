@@ -5,12 +5,26 @@ import type { DramaCastMember, DramaLocation, DramaProjectV1, DramaProp, DramaSh
 
 const clean = (parts: Array<string | undefined>) => parts.map(part => part?.trim()).filter(Boolean).join(', ');
 
-export function castImagePrompt(member: DramaCastMember, view: 'front' | 'side', style: DirectorStyle): string {
-  const angle = view === 'front'
-    ? 'front view, facing camera, bust portrait, centered, frontal eye-level angle'
-    : '3/4 side view, bust portrait, side angle';
+/** Angles drawn for each character, in the order the bible shows them. */
+export const CAST_VIEWS = ['front', 'side', 'back', 'face'] as const;
+export type CastView = typeof CAST_VIEWS[number];
+
+const CAST_ANGLE: Record<CastView, string> = {
+  front: 'front view, facing camera, bust portrait, centered, frontal eye-level angle',
+  side: '3/4 side view, bust portrait, side angle',
+  back: 'back view, seen from behind, upper body, same outfit and hairstyle from the back',
+  face: 'face close-up, head and shoulders, detailed facial features, neutral expression, facing camera',
+};
+
+/**
+ * `fromReference` says the image model also gets an existing view of this character,
+ * so the new angle must keep that face, hair and outfit.
+ */
+export function castImagePrompt(member: DramaCastMember, view: CastView, style: DirectorStyle, fromReference = false): string {
+  const angle = CAST_ANGLE[view];
   return clean([
     'character design reference sheet',
+    fromReference ? 'the same character as the reference image, keep the face, hair and outfit identical' : undefined,
     member.name, member.age, member.gender,
     member.frontPrompt && view === 'front' ? member.frontPrompt : member.appearance,
     member.costume ? `wearing ${member.costume}` : undefined,

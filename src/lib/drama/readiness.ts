@@ -29,7 +29,7 @@ export interface ReadinessModel {
 }
 
 const castHasImage = (member: DramaProjectV1['cast'][number]) =>
-  Boolean(member.lockedImageUrl || member.imageUrlFront || member.frontUrl || member.imageUrlSide || member.sideUrl || member.imageUrlFull);
+  Boolean(member.lockedImageUrl || member.imageUrlFront || member.frontUrl || member.imageUrlSide || member.sideUrl || member.imageUrlFace || member.imageUrlBack || member.imageUrlFull);
 
 function names<T extends { id: string; name: string }>(ids: string[] | undefined, items: T[], hasImage: (item: T) => boolean) {
   const shown = (ids ?? []).map(id => items.find(item => item.id === id)).filter((item): item is T => Boolean(item));

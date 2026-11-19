@@ -4,22 +4,23 @@ import { useRef, useState } from 'react';
 import { History, ImagePlus, Loader2, Lock, LockOpen, Plus, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import {
-  CAST_IMAGE_RATIO, castImagePrompt, locationImagePrompt, locationImageRatio, PROP_IMAGE_RATIO, propImagePrompt,
+  CAST_IMAGE_RATIO, CAST_VIEWS, castImagePrompt, locationImagePrompt, locationImageRatio, PROP_IMAGE_RATIO, propImagePrompt,
+  type CastView,
 } from '@/lib/drama/reference-prompts';
 import type { DramaCastMember, DramaLocation, DramaProp } from '@/lib/drama/types';
 import { DEFAULT_VOICE, DRAMA_VOICES } from '@/lib/drama/voiceover';
-import { setSlotImage, slotHistory, type BibleSlot } from '@/lib/drama/bible-images';
+import { castViewImage, setSlotImage, slotHistory, type BibleSlot } from '@/lib/drama/bible-images';
 import { generateReferenceImage, persistImage, REFERENCE_IMAGE_TYPES, uploadReferenceImage } from '@/lib/drama/workbench-client';
 import {
   nextBibleId, removeCastMember, removeLocation, removeProp, updateCastMember, updateLocation, updateProp,
 } from '@/lib/drama/workbench-state';
 import { useDrama } from './drama-context';
 
-type CastView = 'front' | 'side';
+const VIEW_LABEL: Record<CastView, string> = { front: '正面', side: '侧面', back: '背面', face: '面部' };
 
 /** Step 2: cast and location cards. The locked image is the reference every shot uses. */
 export function DramaBibleStep() {
-  const { doc, update, setStep } = useDrama();
+  const { doc, update, setStep, imageModel } = useDrama();
   const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set());
   const mark = (key: string, on: boolean) => setPending(previous => {
     const next = new Set(previous);
@@ -40,13 +41,22 @@ export function DramaBibleStep() {
       mark(slotKey(slot), false);
     }
   };
-  const makeImage = (slot: BibleSlot, prompt: string, aspectRatio: string) =>
-    fillSlot(slot, '设定图生成失败', async () => persistImage(await generateReferenceImage(prompt, aspectRatio)));
+  const makeImage = (slot: BibleSlot, prompt: string, aspectRatio: string, referenceImages: string[] = []) =>
+    fillSlot(slot, '设定图生成失败', async () => persistImage(await generateReferenceImage(prompt, aspectRatio,
+      referenceImages.length && imageModel ? { model: imageModel.key, providerId: imageModel.providerId, referenceImages } : {})));
   const uploadImage = (slot: BibleSlot, file: File) => fillSlot(slot, '图片上传失败', () => uploadReferenceImage(file));
   const restoreImage = (slot: BibleSlot, url: string) => update(current => setSlotImage(current, slot, url));
 
-  const castImage = (member: DramaCastMember, view: CastView) =>
-    makeImage({ kind: 'cast', id: member.id, view }, castImagePrompt(member, view, doc.style), CAST_IMAGE_RATIO);
+  // Other angles are drawn from the locked or front image when the image model takes references, so they show the same person.
+  const angleReference = (member: DramaCastMember, view: CastView): string | undefined => {
+    if (view === 'front' || !imageModel?.maxReferenceImages) return undefined;
+    return member.lockedImageUrl || castViewImage(member, 'front');
+  };
+  const castImage = (member: DramaCastMember, view: CastView) => {
+    const reference = angleReference(member, view);
+    return makeImage({ kind: 'cast', id: member.id, view }, castImagePrompt(member, view, doc.style, Boolean(reference)), CAST_IMAGE_RATIO,
+      reference ? [reference] : []);
+  };
   const locationImage = (location: DramaLocation) =>
     makeImage({ kind: 'location', id: location.id, view: 'plate' }, locationImagePrompt(location, doc.style), locationImageRatio(doc.aspectRatio));
   const propImage = (prop: DramaProp) =>
@@ -60,7 +70,7 @@ export function DramaBibleStep() {
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-8">
-      <p className="drama-label">生成的定妆图按图像模型价格扣费，上传自己的图不扣积分。锁定一张后，所有出场镜头都用它做角色参考或首帧。换掉的图留在下方，可以随时换回。</p>
+      <p className="drama-label">生成的定妆图按图像模型价格扣费，上传自己的图不扣积分。锁定一张后，所有出场镜头都用它做角色参考或首帧。换掉的图留在下方，可以随时换回。{imageModel?.maxReferenceImages ? '先画正面，侧面、背面和面部会照着正面画，长相更一致。' : ''}</p>
 
       <section aria-labelledby="drama-cast" className="flex flex-col gap-3">
         <div className="flex items-center gap-3">
@@ -94,11 +104,11 @@ export function DramaBibleStep() {
                 </select>
               </label>
               <div className="grid grid-cols-2 gap-2">
-                {(['front', 'side'] as const).map(view => (
+                {CAST_VIEWS.map(view => (
                   <ReferenceTile
-                    key={view} label={view === 'front' ? '正面' : '侧面'} ratio="2 / 3"
-                    url={view === 'front' ? member.imageUrlFront : member.imageUrlSide}
-                    locked={Boolean(member.lockedImageUrl) && member.lockedImageUrl === (view === 'front' ? member.imageUrlFront : member.imageUrlSide)}
+                    key={view} label={VIEW_LABEL[view]} ratio="2 / 3"
+                    url={castViewImage(member, view)}
+                    locked={Boolean(member.lockedImageUrl) && member.lockedImageUrl === castViewImage(member, view)}
                     {...tileActions({ kind: 'cast', id: member.id, view })}
                     disabled={!member.appearance.trim() && !member.name.trim()}
                     onGenerate={() => void castImage(member, view)}

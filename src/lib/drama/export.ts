@@ -85,7 +85,13 @@ export function episodePackageMedia(doc: DramaProjectV1, episodeId: string): Pac
     add(shot.lastFrameUrl, `镜头/${number}_尾帧`, 'png');
     add(currentVoiceover(shot), `配音/${number}`, 'mp3');
   });
-  for (const member of doc.cast) add(member.lockedImageUrl || member.imageUrlFront, `设定/角色_${safeFileName(member.name, member.id)}`, 'png');
+  for (const member of doc.cast) {
+    const name = safeFileName(member.name, member.id);
+    add(member.lockedImageUrl || member.imageUrlFront, `设定/角色_${name}`, 'png');
+    add(member.imageUrlSide, `设定/角色_${name}_侧面`, 'png');
+    add(member.imageUrlBack, `设定/角色_${name}_背面`, 'png');
+    add(member.imageUrlFace, `设定/角色_${name}_面部`, 'png');
+  }
   for (const location of doc.locations) add(location.lockedImageUrl || location.imageUrl, `设定/场景_${safeFileName(location.name, location.id)}`, 'png');
   for (const prop of doc.props) add(prop.lockedImageUrl || prop.imageUrl, `设定/道具_${safeFileName(prop.name, prop.id)}`, 'png');
   return out;

@@ -23,7 +23,7 @@ export interface FirstFrameChoice {
 function castImage(member: DramaCastMember): string[] {
   const locked = member.lockedImageUrl;
   if (locked) return [locked];
-  return [member.imageUrlFront || member.frontUrl, member.imageUrlSide || member.sideUrl, member.imageUrlFull]
+  return [member.imageUrlFront || member.frontUrl, member.imageUrlFace, member.imageUrlSide || member.sideUrl, member.imageUrlBack, member.imageUrlFull]
     .filter((url): url is string => Boolean(url));
 }
 

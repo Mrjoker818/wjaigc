@@ -32,7 +32,7 @@ export interface AutopilotPlan {
 }
 
 const castHasImage = (member: DramaCastMember) =>
-  Boolean(member.lockedImageUrl || member.imageUrlFront || member.frontUrl || member.imageUrlSide || member.sideUrl || member.imageUrlFull);
+  Boolean(member.lockedImageUrl || member.imageUrlFront || member.frontUrl || member.imageUrlSide || member.sideUrl || member.imageUrlFace || member.imageUrlBack || member.imageUrlFull);
 const hasImage = (item: DramaLocation | DramaProp) => Boolean(item.lockedImageUrl || item.imageUrl);
 
 /** `needsKeyframe` leaves out shots whose model cannot start from an image, so no keyframe is paid for in vain. */

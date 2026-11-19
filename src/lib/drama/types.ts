@@ -76,7 +76,7 @@ export interface DramaEpisode {
 }
 
 /** Which image of a bible item: a cast member's front or side view, a location plate or a prop sheet. */
-export type BibleView = 'front' | 'side' | 'plate' | 'sheet';
+export type BibleView = 'front' | 'side' | 'back' | 'face' | 'plate' | 'sheet';
 
 /** Earlier versions of each image of a bible item, newest first, so a replaced image can be restored. */
 export type BibleImageHistory = Partial<Record<BibleView, string[]>>;
@@ -84,6 +84,10 @@ export type BibleImageHistory = Partial<Record<BibleView, string[]>>;
 /** Character with turnaround images. `lockedImageUrl` is the one used as reference for every shot. */
 export interface DramaCastMember extends VideoCharacter {
   imageUrlFull?: string;
+  /** Seen from behind, for shots that follow the character. */
+  imageUrlBack?: string;
+  /** Face close-up, the strongest identity reference. */
+  imageUrlFace?: string;
   lockedImageUrl?: string;
   imageHistory?: BibleImageHistory;
   /** Text-to-speech voice id for this character's lines. */

@@ -69,7 +69,7 @@ const episode = z.looseObject({
   message: 'DRAMA_TOO_MANY_SHOTS',
 });
 
-const imageHistory = z.partialRecord(z.enum(['front', 'side', 'plate', 'sheet']), z.array(text(4096)).max(MAX_IMAGE_HISTORY)).optional();
+const imageHistory = z.partialRecord(z.enum(['front', 'side', 'back', 'face', 'plate', 'sheet']), z.array(text(4096)).max(MAX_IMAGE_HISTORY)).optional();
 const castMember = z.looseObject({ id, name: text(200), appearance: text(4000), voice: text(128).optional(), imageHistory });
 const location = z.looseObject({ id, name: text(200), imageHistory });
 const prop = z.looseObject({ id, name: text(200), imageHistory });

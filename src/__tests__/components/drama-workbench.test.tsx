@@ -55,6 +55,7 @@ beforeEach(() => {
     if (url === '/api/drama/from-chat') return json({ success: true, project: { id: 'drama_1', projectId: 'p1', title: doc.title, doc, version: 1, createdAt: 1, updatedAt: 1 } }, 201);
     if (url === '/api/drama/projects' && init?.method === 'POST') return json({ success: true, project: { id: 'drama_1', projectId: 'p1', title: body.doc.title, doc: body.doc, version: 1, createdAt: 1, updatedAt: 1 } }, 201);
     if (url === '/api/drama/estimate') return json({ success: true, total: 50, perShot: { s2: 50 }, balance: 20 });
+    if (url === '/api/generate') return json({ success: true, imageUrl: `/g/${body.aspectRatio === '2:3' ? 'cast' : 'other'}-${requests.filter(r => r.url === '/api/generate').length}.png` });
     if (url === '/api/drama/music') return json({ success: true, audioUrl: '/api/serve-upload/generated-audio/tts_1.mp3', name: '雨夜.mp3' });
     if (url === '/api/upload') return json({ success: true, url: `/u/upload-${requests.filter(r => r.url === '/api/upload').length}.png` });
     return json({ error: 'unexpected' }, 500);
@@ -166,6 +167,27 @@ describe('drama workbench', () => {
     await waitFor(() => expect(saved?.cast[0].imageUrlFront).toBe('/u/upload-1.png'), { timeout: 3000 });
     expect(saved?.cast[0].imageHistory).toEqual({ front: ['/u/upload-2.png'] });
     expect(requests.some(r => r.url === '/api/generate')).toBe(false);
+  });
+
+  it('shows four angles per character and draws the others from the front image', async () => {
+    render(<DramaWorkbench dramaId="drama_1" projectId="p1" onDramaIdChange={() => undefined} onExit={() => undefined} />);
+    await screen.findByRole('heading', { name: /咖啡馆·内·夜/ });
+    goTo(/^2\s*设定/);
+    for (const label of ['生成正面', '生成侧面', '生成背面', '生成面部']) expect(screen.getByRole('button', { name: label })).toBeTruthy();
+    // Without a front image the side view is drawn from the description alone.
+    fireEvent.click(screen.getByRole('button', { name: '生成侧面' }));
+    expect(await screen.findByRole('img', { name: '侧面定妆图' })).toBeTruthy();
+    expect((requests.find(r => r.url === '/api/generate')?.body as { referenceImages?: string[] }).referenceImages).toBeUndefined();
+    const input = document.querySelectorAll<HTMLInputElement>('input[type="file"]')[0];
+    fireEvent.change(input, { target: { files: [new File([new Uint8Array([1])], 'front.png', { type: 'image/png' })] } });
+    expect(await screen.findByRole('img', { name: '正面定妆图' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '生成背面' }));
+    expect(await screen.findByRole('img', { name: '背面定妆图' })).toBeTruthy();
+    const back = requests.filter(r => r.url === '/api/generate').at(-1)?.body as { prompt: string; referenceImages?: string[]; model?: string };
+    expect(back.referenceImages).toEqual(['/u/upload-1.png']);
+    expect(back.model).toBe('pear::kling');
+    expect(back.prompt).toContain('back view');
+    await waitFor(() => expect(saved?.cast[0]).toMatchObject({ imageUrlFront: '/u/upload-1.png', imageUrlBack: '/g/cast-2.png' }), { timeout: 3000 });
   });
 
   it('adds background music with a level and ducking, and removes it again', async () => {
