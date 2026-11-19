@@ -9,13 +9,15 @@ export const DRAMA_RATIOS = ['9:16', '16:9', '1:1'] as const;
 const LENGTHS = [30, 60, 90, 180];
 
 /** "Start a drama from one sentence": the empty state of the workbench. */
-export function DramaIdeaForm({ busy, error, onGenerate, onBlank }: {
+export function DramaIdeaForm({ busy, error, initialIdea, onGenerate, onBlank }: {
   busy: string | null;
   error: string | null;
+  /** Idea carried over from the canvas. */
+  initialIdea?: string;
   onGenerate: (input: ScriptRequest) => void;
   onBlank: (input: ScriptRequest) => void;
 }) {
-  const [idea, setIdea] = useState('');
+  const [idea, setIdea] = useState(initialIdea ?? '');
   const [title, setTitle] = useState('');
   const [style, setStyle] = useState<DirectorStyle>('cinematic');
   const [aspectRatio, setAspectRatio] = useState<string>('9:16');

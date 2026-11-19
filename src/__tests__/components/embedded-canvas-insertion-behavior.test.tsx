@@ -509,23 +509,6 @@ it('waits for actual video insertion before reporting finished message state', a
   expect(wasEarly).toBe(false); expect(messagesBefore).toBe(0); expect(messages).toHaveLength(1);
 });
 
-function actualJsxInsertion(component: string, bindings: Record<string, unknown>, source = workspace): (...args: unknown[]) => unknown {
-  let expression: ts.Expression | undefined;
-  const visit = (node: ts.Node): void => {
-    if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && node.tagName.getText(source) === component) {
-      for (const prop of node.attributes.properties) {
-        if (ts.isJsxAttribute(prop) && prop.name.getText(source) === 'onAddImages'
-          && prop.initializer && ts.isJsxExpression(prop.initializer)) expression = prop.initializer.expression;
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(source); if (!expression) throw new Error('Actual insertion prop missing: ' + component);
-  const js = ts.transpileModule('const callback = ' + expression.getText(source) + ';',
-    { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
-  return new Function(...Object.keys(bindings), js + '; return callback;')(...Object.values(bindings));
-}
-
 it('reports actual Markdown insertion rejection once instead of leaving a floating Promise', async () => {
   const f = fixture(); f.config.reject = true;
   const pending: Promise<void>[] = [];
@@ -551,18 +534,6 @@ it('reports actual Markdown insertion rejection once instead of leaving a floati
   };
   visit(chat); expect(callback).toBeTypeOf('function');
   callback!('/local.png'); await Promise.allSettled(pending); await Promise.resolve(); await Promise.resolve();
-  expect(f.errors).toHaveLength(1); expect(f.successes).toEqual([]);
-});
-
-it('reports actual VideoGenerationPanel void adapter rejection once', async () => {
-  const f = fixture(); f.config.reject = true; const pending: Promise<void>[] = [];
-  const handleAddImages = (urls: string[]): Promise<void> => {
-    const op = f.sink(urls); pending.push(op); void op.catch(() => undefined); return op;
-  };
-  const bindings = { handleAddImages, toast: { error: (s: string): void => { f.errors.push(s); } } };
-  const handleAddImagesFromUi = actual('handleAddImagesFromUi', bindings, workspace, true);
-  const callback = actualJsxInsertion('VideoGenerationPanel', { ...bindings, handleAddImagesFromUi });
-  callback(['/local.png']); await Promise.allSettled(pending); await Promise.resolve(); await Promise.resolve();
   expect(f.errors).toHaveLength(1); expect(f.successes).toEqual([]);
 });
 

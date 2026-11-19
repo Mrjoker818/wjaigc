@@ -13,7 +13,6 @@ const workspacePath = resolve(process.cwd(), 'src/components/canvas-workspace.ts
 const CAPABILITY_UI_CONSUMERS = [
   'src/components/generation-panel.tsx',
   'src/components/infinite-canvas.tsx',
-  'src/components/video-generation-panel.tsx',
 ];
 const LEGACY_CAPABILITY_INFERENCE = /getProviderAspectRatios|getQualityLevelOptions|getResolutionTierOptions|getVideoModelInfo/;
 

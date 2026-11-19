@@ -1,5 +1,6 @@
 /** Browser calls made by the drama workbench. Every failure throws an Error whose message can be shown to the user. */
 import type { SimpleChatWorkspaceHandoffIntent } from '@/lib/simple-chat-workspace-handoff';
+import type { PolishedShot } from './polish';
 import type { DramaProjectRecord, DramaProjectV1, DramaShot, DramaTake } from './types';
 
 export type WorkbenchFetch = (input: string, init?: RequestInit) => Promise<Response>;
@@ -155,6 +156,19 @@ export async function planSceneShots(
   const data = await readJson(response);
   if (!response.ok || !Array.isArray(data.shots)) fail(data, '分镜拆解失败，请稍后重试');
   return data.shots as DramaShot[];
+}
+
+/** Asks the chat model to rewrite one shot's description with shot size, camera move, light and sound. */
+export async function polishShotPrompt(
+  doc: DramaProjectV1, shotId: string, fetcher: WorkbenchFetch = defaultFetch, signal?: AbortSignal,
+): Promise<PolishedShot> {
+  const response = await fetcher('/api/drama/plan', {
+    method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ action: 'polish', doc, shotId }), signal,
+  });
+  const data = await readJson(response);
+  const shot = data.shot as PolishedShot | undefined;
+  if (!response.ok || typeof shot?.prompt !== 'string') fail(data, '润色失败，请稍后重试');
+  return shot;
 }
 
 export interface ShotEstimateRequest {

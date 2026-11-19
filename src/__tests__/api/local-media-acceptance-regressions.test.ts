@@ -1,6 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { NextRequest } from 'next/server';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -12,7 +10,6 @@ vi.mock('@/lib/api-auth', () => ({
 
 import { GET as getGalleryImage } from '@/app/api/font-design/gallery-image/route';
 import { POST as extractText } from '@/app/api/knowledge/extract-text/route';
-import { POST as extractFrames } from '@/app/api/video/extract-frames/route';
 
 function jsonRequest(route: string, body: object): NextRequest {
   return new NextRequest(`http://localhost/api/${route}`, {
@@ -44,31 +41,4 @@ describe('packaged media acceptance regressions', () => {
     expect(result.text === text).toBe(true);
   });
 
-  it('extracts six JPEGs from a one-second source when asked to sample uniformly', async () => {
-    const dataRoot = await mkdtemp(path.join(tmpdir(), 'wujie-batch-frames-test-'));
-    getServerDataRoot.mockReturnValue(dataRoot);
-    try {
-      const uploads = path.join(dataRoot, 'uploads');
-      await mkdir(uploads);
-      await writeFile(path.join(uploads, 'owned-one-second.mp4'), await readFile('tests/fixtures/owned-one-second.mp4'));
-
-      const response = await extractFrames(jsonRequest('video/extract-frames', {
-        videoUrl: '/api/serve-upload/owned-one-second.mp4',
-        mode: 'uniform',
-        count: 6,
-      }));
-
-      expect(response.status).toBe(200);
-      const result = await response.json();
-      expect(result.frameCount).toBe(6);
-      expect(result.frames).toHaveLength(6);
-      expect(result.videoInfo).toEqual({ duration: 1, width: 160, height: 90 });
-      for (const url of result.frames) {
-        const frame = await readFile(path.join(uploads, 'video-frames', path.basename(url)));
-        expect([...frame.subarray(0, 2)]).toEqual([0xff, 0xd8]);
-      }
-    } finally {
-      await rm(dataRoot, { recursive: true, force: true });
-    }
-  }, 20_000);
 });

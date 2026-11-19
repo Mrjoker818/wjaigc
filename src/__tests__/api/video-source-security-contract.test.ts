@@ -6,7 +6,6 @@ const routeFiles = [
   'src/app/api/video/download/route.ts',
   'src/app/api/video/tools/route.ts',
   'src/app/api/video/extract-frame/route.ts',
-  'src/app/api/video/extract-frames/route.ts',
 ];
 
 describe('video remote source security contract', () => {

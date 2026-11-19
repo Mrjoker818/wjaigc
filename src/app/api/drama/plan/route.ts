@@ -3,8 +3,9 @@ import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { videoForbidden } from '@/lib/drama/access';
 import { dramaPlannerConfig, withPlanRetry, writeDramaScript } from '@/lib/drama/draft';
 import { buildDramaShotMessages, callDramaLlm, DramaPlannerError, parseDramaShotResponse } from '@/lib/drama/planner';
+import { buildPolishMessages, parsePolishResponse } from '@/lib/drama/polish';
 import { DramaDocumentError, parseDramaProject } from '@/lib/drama/schema';
-import { normalizeDirectorStyle } from '@/lib/video-director/director-styles';
+import { DIRECTOR_STYLES, normalizeDirectorStyle } from '@/lib/video-director/director-styles';
 
 export const dynamic = 'force-dynamic';
 // One planner call may take 90s and is retried once when the reply cannot be parsed.
@@ -33,6 +34,7 @@ function plannerError(error: unknown): NextResponse {
  * POST /api/drama/plan
  * { action: 'script', idea, title?, genre?, style?, aspectRatio?, episodeCount?, episodeDurationSec? } → { doc }
  * { action: 'shots', doc, episodeId, sceneId, shotCount?, shotDurationSec? } → { shots }
+ * { action: 'polish', doc, shotId } → { shot: { prompt, shotSize?, cameraMotion?, lighting?, audioCues? } }
  */
 export async function POST(request: NextRequest) {
   const auth = await requireApiAuthOrReject(request);
@@ -40,7 +42,7 @@ export async function POST(request: NextRequest) {
   const denied = videoForbidden(auth.user);
   if (denied) return denied;
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
-  if (!body || (body.action !== 'script' && body.action !== 'shots')) {
+  if (!body || (body.action !== 'script' && body.action !== 'shots' && body.action !== 'polish')) {
     return NextResponse.json({ error: '请求内容不正确，请刷新后重试' }, { status: 400 });
   }
   const config = await dramaPlannerConfig(request.signal);
@@ -64,6 +66,14 @@ export async function POST(request: NextRequest) {
         episodeDurationSec: Number(body.episodeDurationSec) || 60,
       };
       return NextResponse.json({ success: true, doc: await writeDramaScript(config, input) });
+    }
+
+    if (body.action === 'polish') {
+      const doc = parseDramaProject(body.doc);
+      const messages = buildPolishMessages(doc, typeof body.shotId === 'string' ? body.shotId : '');
+      const temperature = DIRECTOR_STYLES[normalizeDirectorStyle(doc.style)].temperature;
+      const shot = await withPlanRetry(async () => parsePolishResponse(await callDramaLlm(config, messages, temperature)));
+      return NextResponse.json({ success: true, shot });
     }
 
     const input = {

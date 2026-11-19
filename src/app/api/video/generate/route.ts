@@ -36,7 +36,6 @@ import {
   type VideoGenerateParams,
 } from '@/lib/video-api';
 import { PEAR_VIDEO_GENERATE_OPERATIONS } from '@/lib/pear-video-models';
-import { buildDirectorPrompt, type VideoDirectorMode } from '@/lib/video-director';
 import { getInternalRequestHeaders, requireApiAuthOrReject } from '@/lib/api-auth';
 import { calculateConfiguredCreditCost, InsufficientCreditsError } from '@/lib/credits';
 import { logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
@@ -53,7 +52,6 @@ import {
   updateCloudTask,
 } from '@/lib/cloud-task-storage';
 import type { User } from '@/lib/user-types';
-import type { VideoReferenceBinding } from '@/lib/video-director/prompt-compiler';
 import { getRuntimeSettings } from '@/lib/runtime-settings';
 import { canPublishProviderMedia, toProviderMediaUrl } from '@/lib/provider-media-url';
 import {
@@ -216,9 +214,6 @@ export async function POST(request: NextRequest) {
       motionBrush,
       characterReferences,
       motionStrength,
-      useDirector,
-      directorMode,
-      directorIntent,
       shotId,
       assetWorkspace,
       assetWorkspaceId,
@@ -462,66 +457,9 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // 4. 构建请求参数
-    // 4.1 如果启用导演增强，在服务端本地"增强"提示词（拼合导演风格/参考/负向等，不依赖额外 LLM 调用，避免失败）
-    let finalPrompt = prompt;
-    let finalNegativePrompt = negativePrompt;
-    if (useDirector !== false) { // 默认启用
-      try {
-        const refs: VideoReferenceBinding[] = [];
-        if (resolvedImageUrl) refs.push({ id: 'first', url: resolvedImageUrl, role: 'first-frame' });
-        if (resolvedLastFrameUrl) refs.push({ id: 'last', url: resolvedLastFrameUrl, role: 'last-frame' });
-        (resolvedRefs || []).forEach((u: string, i: number) => refs.push({ id: `ref${i}`, url: u, role: 'style' }));
-        (characterReferences || []).forEach((u: string, i: number) => refs.push({ id: `char${i}`, url: u, role: 'identity' }));
-        const compiledMode: VideoDirectorMode = imageUrl
-          ? (lastFrameImageUrl ? 'image2video-firstlast' : 'image2video-first')
-          : 'text2video';
-        const directorMsg = buildDirectorPrompt({
-          userPrompt: prompt,
-          mode: compiledMode,
-          modelId: pureModel,
-          model: pureModel,
-          style: directorMode || 'cinematic',
-          aspectRatio,
-          duration,
-          firstFrameNote: resolvedImageUrl ? '首帧图片由用户提供' : undefined,
-          lastFrameNote: resolvedLastFrameUrl ? '尾帧图片由用户提供' : undefined,
-          imageUrl: resolvedImageUrl,
-          lastFrameUrl: resolvedLastFrameUrl,
-          references: refs,
-          audio: generateAudio,
-          camera: cameraControl?.type,
-          includeNegative: true,
-          verbosity: 'standard',
-        });
-        // 真正把导演编译器输出拼入 prompt（directorMsg.user 是结构化指导段）
-        const guidance: string[] = [];
-        if (cameraControl?.type) {
-          const camLabel: Record<string, string> = {
-            push_in: '缓慢推进', push_out: '缓慢拉出', pan_left: '左摇', pan_right: '右摇',
-            tilt_up: '上仰', tilt_down: '下俯', orbit_left: '左环绕', orbit_right: '右环绕',
-            zoom_in: '放大', zoom_out: '缩小', tracking: '跟拍', static: '静止机位',
-            crane_up: '摇臂升起', crane_down: '摇臂降下', handheld: '手持', dolly: '滑轨平移',
-          };
-          guidance.push(`运镜：${camLabel[cameraControl.type] || cameraControl.type}，强度${cameraControl.intensity || 50}%`);
-        }
-        if (directorIntent) guidance.push(`镜头意图：${directorIntent}`);
-        const directorSection = directorMsg.user || '';
-        finalPrompt = [
-          directorSection ? `【导演编排】\n${directorSection}` : '',
-          guidance.length ? `【导演指导】${guidance.join('；')}。` : '',
-          `【画面描述】${prompt}`,
-        ].filter(Boolean).join('\n\n');
-        // negative 保持原样，模型不支持时适配器会过滤（LLM 增强时由 directorResult.negative 提供，此处本地编译不覆盖）
-        finalNegativePrompt = negativePrompt;
-        console.log(`[video/generate] Director user-message length=${directorMsg.user.length}, mode=${compiledMode}, finalPrompt length=${finalPrompt.length}`);
-      } catch (e) {
-        console.warn('[video/generate] Director compile failed, falling back to raw prompt:', e);
-      }
-    }
-
+    // 4. 构建请求参数。提示词原样发给模型，镜头、运镜等由调用方写进提示词或高级参数。
     const videoParams: VideoGenerateParams = {
-      prompt: finalPrompt,
+      prompt,
       model: pureModel,
       imageUrl: resolvedImageUrl,
       lastFrameImageUrl: resolvedLastFrameUrl,
@@ -530,7 +468,7 @@ export async function POST(request: NextRequest) {
       duration,
       mode,
       generateAudio,
-      negativePrompt: finalNegativePrompt,
+      negativePrompt,
       seed,
       apiKey,
       baseUrl,

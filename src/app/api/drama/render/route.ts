@@ -15,11 +15,11 @@ import { isSafeVideoSource } from '@/lib/api-validator';
 import { isGeneratedAudioLocation, readGeneratedAudioFromUrl } from '@/lib/generated-audio-storage';
 import { getServerDataRoot } from '@/lib/server-data-root';
 import {
-  buildRenderPlan, buildSrt, buildStillClipArgs, clipLength, DRAMA_TRANSITIONS, MIN_CLIP_SEC, stillFrameSize, effectiveTransitionSec, timelineStarts, type DramaTransition, type RenderMusic, type RenderVoiceover,
+  buildRenderPlan, buildSrt, buildStillClipArgs, clipLength, MIN_CLIP_SEC, stillFrameSize, effectiveTransitionSec, timelineStarts, type DramaTransition, type RenderMusic, type RenderVoiceover,
 } from '@/lib/drama/render';
 import { getDramaProject } from '@/lib/drama/store';
 import { collectEpisodeTimeline, dialogueCues, type TimelineClip } from '@/lib/drama/timeline';
-import { MAX_SHOTS_PER_EPISODE, type DramaMusic } from '@/lib/drama/types';
+import type { DramaMusic } from '@/lib/drama/types';
 import { registerTask, updateTaskProgress } from '@/lib/task-registry';
 import { downloadToBuffer, probeRenderClip } from '@/lib/video-media-io';
 
@@ -169,19 +169,6 @@ async function renderEpisode(job: RenderJob): Promise<void> {
 
 type RenderSettings = Omit<RenderJob, 'taskId' | 'userId'>;
 
-/** The canvas video panel renders its finished shots in order, without a saved drama project. */
-function settingsFromUrls(body: Record<string, unknown>): RenderSettings | NextResponse {
-  const urls = body.videoUrls as unknown[];
-  if (urls.length < 2 || urls.length > MAX_SHOTS_PER_EPISODE) {
-    return NextResponse.json({ error: `请选择 2 至 ${MAX_SHOTS_PER_EPISODE} 个镜头视频` }, { status: 400 });
-  }
-  if (urls.some(url => typeof url !== 'string' || !allowedSource(url))) {
-    return NextResponse.json({ error: '镜头视频地址无效，请重新生成对应镜头' }, { status: 400 });
-  }
-  const transition = DRAMA_TRANSITIONS.find(value => value === body.transition) ?? 'cut';
-  return { clips: (urls as string[]).map(videoUrl => ({ videoUrl })), aspectRatio: '16:9', transition, transitionSec: 0.5, subtitles: false };
-}
-
 async function settingsFromProject(userId: string, body: Record<string, unknown> | null): Promise<RenderSettings | NextResponse> {
   const dramaId = typeof body?.dramaId === 'string' ? body.dramaId : '';
   const episodeId = typeof body?.episodeId === 'string' ? body.episodeId : '';
@@ -227,7 +214,7 @@ async function settingsFromProject(userId: string, body: Record<string, unknown>
 
 /**
  * POST /api/drama/render → 202 { taskId }; poll progress with /api/poll-task.
- * Body is either { dramaId, episodeId } for a saved project, or { videoUrls, transition? } from the canvas panel.
+ * Body: { dramaId, episodeId } of a saved project.
  */
 export async function POST(request: NextRequest) {
   const auth = await requireApiAuthOrReject(request);
@@ -235,9 +222,7 @@ export async function POST(request: NextRequest) {
   const denied = videoForbidden(auth.user);
   if (denied) return denied;
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
-  const settings = body && Array.isArray(body.videoUrls)
-    ? settingsFromUrls(body)
-    : await settingsFromProject(auth.userId, body);
+  const settings = await settingsFromProject(auth.userId, body);
   if (settings instanceof NextResponse) return settings;
   const running = activeRenders.get(auth.userId);
   if (running) {

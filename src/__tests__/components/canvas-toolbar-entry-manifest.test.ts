@@ -19,7 +19,7 @@ const videoTools = ['视频抽帧', 'AI配音', '转 GIF', '视频压缩', '下�
 const model3DTools = ['下载'] as const;
 
 const drawerSections = {
-  'ai-creation': ['图转3D工厂', '语言修图', 'Agent编排', '视频生成'],
+  'ai-creation': ['图转3D工厂', '语言修图', 'Agent编排', '打开短剧工作台'],
   'brand-design': [
     '品牌电商', '精修引擎', '人物精修大师', '字境大师', '品牌工厂',
     '品牌IP设计工场', 'Logo生成器 Pro',

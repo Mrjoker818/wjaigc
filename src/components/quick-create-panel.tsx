@@ -60,7 +60,8 @@ interface QuickCreatePanelProps {
   onGenerate: (request: QuickCreateRequest) => Promise<boolean>;
   onOpenProfessional: (prompt?: string) => void;
   onOpenChat: (prompt?: string) => void;
-  onOpenVideo: (prompt?: string, mode?: 'generate' | 'extend') => void;
+  /** Opens the drama workbench with the prompt as the story idea. */
+  onOpenVideo: (prompt?: string) => void;
 }
 
 type GoalGroup = '热门创作' | '品牌识别' | '商业营销' | '空间美陈' | '内容出版' | '数字创意';
@@ -297,7 +298,7 @@ function recommendParameters(prompt: string, intent: ClassifiedIntent): Paramete
 }
 
 function getRouteLabel(intent: ClassifiedIntent): string {
-  if (intent.action === 'video' || intent.action === 'video_extend') return '视频导演';
+  if (intent.action === 'video' || intent.action === 'video_extend') return '短剧工作台';
   if (intent.action === '3d') return '3D 创作';
   if (intent.category === 'operate') return '智能图片编辑';
   if (intent.category === 'analyze' || intent.category === 'chat') return 'AI 助手';
@@ -476,7 +477,7 @@ export function QuickCreatePanel({
     if (!trimmedPrompt || isSubmitting) return;
 
     if (intent.action === 'video' || intent.action === 'video_extend') {
-      onOpenVideo(trimmedPrompt, intent.action === 'video_extend' ? 'extend' : 'generate');
+      onOpenVideo(trimmedPrompt);
       return;
     }
     if (intent.action === '3d' || intent.category === 'operate' || intent.category === 'analyze' || intent.category === 'chat') {
@@ -676,7 +677,7 @@ export function QuickCreatePanel({
 
       <section className="mt-3 rounded-2xl border border-border bg-muted/40 p-4">
         <div className="flex items-center gap-2">
-          {recommendation.route === '视频导演' ? <Film className="h-4 w-4 text-primary" aria-hidden="true" /> : recommendation.route === '3D 创作' ? <Box className="h-4 w-4 text-primary" aria-hidden="true" /> : <Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />}
+          {recommendation.route === '短剧工作台' ? <Film className="h-4 w-4 text-primary" aria-hidden="true" /> : recommendation.route === '3D 创作' ? <Box className="h-4 w-4 text-primary" aria-hidden="true" /> : <Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />}
           <h3 className="text-xs font-semibold text-foreground">系统已理解</h3>
           <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">自动匹配，可调整</span>
         </div>
@@ -903,7 +904,7 @@ export function QuickCreatePanel({
           <div className="mt-2 flex flex-wrap gap-2">
             <button type="button" onClick={() => onOpenProfessional(prompt)} className="min-h-9 cursor-pointer rounded-lg bg-background px-2.5 text-xs text-foreground transition-colors hover:bg-muted">生成同系列</button>
             <button type="button" onClick={() => onOpenChat(`请基于刚才的创作继续优化：${prompt}`)} className="min-h-9 cursor-pointer rounded-lg bg-background px-2.5 text-xs text-foreground transition-colors hover:bg-muted">继续优化</button>
-            <button type="button" onClick={() => onOpenVideo(prompt)} className="min-h-9 cursor-pointer rounded-lg bg-background px-2.5 text-xs text-foreground transition-colors hover:bg-muted">生成视频</button>
+            <button type="button" onClick={() => onOpenVideo(prompt)} className="min-h-9 cursor-pointer rounded-lg bg-background px-2.5 text-xs text-foreground transition-colors hover:bg-muted">做成短剧</button>
           </div>
         </section>
       )}
@@ -916,7 +917,7 @@ export function QuickCreatePanel({
           className="flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-card transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Sparkles className="h-4 w-4" aria-hidden="true" />
-          {compileState.isCompiling || isSubmitting ? '正在编译专业方案' : recommendation.route === '视频导演' ? '打开视频创作' : recommendation.route === 'AI 助手' || recommendation.route === '智能图片编辑' || recommendation.route === '3D 创作' ? '交给 AI 助手' : `生成 ${recommendation.outputCount} 张`}
+          {compileState.isCompiling || isSubmitting ? '正在编译专业方案' : recommendation.route === '短剧工作台' ? '去短剧工作台' : recommendation.route === 'AI 助手' || recommendation.route === '智能图片编辑' || recommendation.route === '3D 创作' ? '交给 AI 助手' : `生成 ${recommendation.outputCount} 张`}
           <ArrowRight className="h-4 w-4" aria-hidden="true" />
         </button>
         <p className="mt-2 text-center text-[11px] text-muted-foreground">系统会先自动理解参数，你也可以调整或进入专业模式</p>

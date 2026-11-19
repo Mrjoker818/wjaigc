@@ -182,38 +182,9 @@ async function assertInlineVideoPointerRouting(): Promise<void> {
 }
 
 describe('video terminal state contract', () => {
-  it('keeps failed video placeholders instead of deleting them from the canvas', () => {
-    const handlerStart = workspaceSource.indexOf('const handleVideoGenerate = useCallback');
-    const handlerEnd = workspaceSource.indexOf('const handleAnalyzeImage', handlerStart);
-    const handlerSource = workspaceSource.slice(handlerStart, handlerEnd);
-
-    expect(handlerSource).toContain('const markVideoPlaceholderFailed');
-    expect((handlerSource.match(/markVideoPlaceholderFailed\(/g) || []).length).toBeGreaterThanOrEqual(4);
-    expect(handlerSource).not.toContain('setImages(prev => prev.filter(img => img.id !== phId))');
-  });
-
-  it('stores a retry payload when it creates a video processing placeholder', () => {
-    const handlerStart = workspaceSource.indexOf('const handleVideoGenerate = useCallback');
-    const handlerEnd = workspaceSource.indexOf('const handleAnalyzeImage', handlerStart);
-    const handlerSource = workspaceSource.slice(handlerStart, handlerEnd);
-
-    expect(handlerSource).toContain('retryPayload: createVideoRetryPayload(params)');
-  });
-
-  it('renders terminal failures with retry and remove actions instead of progress controls', () => {
+  it('renders terminal failures with a remove action instead of progress controls', () => {
     expect(canvasSource).toContain('isTerminalProcessingFailure(image.processing)');
-    expect(canvasSource).toContain('onRetryProcessing?.(image)');
-    expect(canvasSource).toContain('重新生成');
     expect(canvasSource).toContain('移除');
-  });
-
-  it('uses the completed-video media normalizer and never treats the video URL as a poster', () => {
-    const handlerStart = workspaceSource.indexOf('const handleVideoGenerate = useCallback');
-    const handlerEnd = workspaceSource.indexOf('const handleAnalyzeImage', handlerStart);
-    const handlerSource = workspaceSource.slice(handlerStart, handlerEnd);
-
-    expect(handlerSource).toContain('buildCompletedVideoCanvasMedia');
-    expect(handlerSource).not.toContain('const rawThumbnailUrl = pollData.thumbnailUrl || pollData.url');
   });
 
   it('normalizes resumed completed videos with their provider thumbnail', () => {

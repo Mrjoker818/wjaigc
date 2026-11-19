@@ -8,6 +8,8 @@ import {
 import { shotCapabilityFromDescriptor } from '@/components/drama/drama-models';
 import type { TaskModelDescriptor } from '@/lib/task-core/model-capability-contract';
 import { collectEpisodeTimeline, dialogueCues } from '@/lib/drama/timeline';
+import { buildPolishMessages, parsePolishResponse } from '@/lib/drama/polish';
+import { chosenShotValue, shotLanguageText } from '@/lib/drama/shot-language';
 import { activeTake, MAX_SHOTS_PER_EPISODE, type DramaProjectV1, type DramaShot } from '@/lib/drama/types';
 
 const scriptJson = JSON.stringify({
@@ -185,9 +187,35 @@ describe('shot runner choices', () => {
       capability, firstFrameUrl: '/f.png',
     });
     expect(body).toMatchObject({ model: 'm', providerId: 'p', imageUrl: '/f.png', mode: 'image2video-first', duration: 6,
-      directorMode: 'music-video', generateAudio: true, shotId: 's1', useDirector: false });
+      generateAudio: true, shotId: 's1' });
+    expect(body).not.toHaveProperty('useDirector');
     expect(String(body.prompt)).toContain('台词：「你好」');
     expect(String(body.prompt)).toContain('【连贯要求】');
+  });
+
+  it('adds the chosen shot size, camera move, light and sound after the description', () => {
+    const doc = plannedDoc();
+    const directed = shot({ id: 's1', prompt: '林夏拆信', shotSize: '近景', cameraMotion: 'static', cameraMove: '缓慢推进', lighting: '窗侧冷光', audioCues: '雨声' });
+    const lines = String(buildShotGenerateRequest({ doc, shot: directed, modelId: 'm', capability }).prompt).split('\n');
+    expect(lines.slice(0, 2)).toEqual(['林夏拆信', '镜头：近景，缓慢推进。光线：窗侧冷光。声音：雨声。']);
+    // The planner's placeholders were never chosen, so they add nothing.
+    expect(shotLanguageText({ shotSize: 'medium', cameraMotion: 'static', lighting: ' ' })).toBe('');
+    expect(chosenShotValue('medium')).toBe('');
+  });
+
+  it('asks the polish model for one shot with its scene, cast and current settings', () => {
+    const doc = plannedDoc();
+    const scene = doc.episodes[0].scenes[0];
+    scene.shots = [shot({ id: 'p1', prompt: '@林夏 拆信', characterIds: ['lin'], sceneId: 'cafe', shotSize: '特写', dialogue: '是你？' })];
+    const [system, user] = buildPolishMessages(doc, 'p1');
+    expect(system.content).toContain('只输出一个 JSON 对象');
+    expect(user.content).toContain('原画面描述：@林夏 拆信');
+    expect(user.content).toContain('出场角色：林夏（短发，黑色风衣）');
+    expect(user.content).toContain('现在的镜头设置：镜头：特写。');
+    expect(user.content).toContain('台词：「是你？」');
+    expect(() => buildPolishMessages(doc, 'nope')).toThrow(DramaPlannerError);
+    expect(parsePolishResponse('{"prompt":"  新描述 ","shotSize":3,"lighting":"顶光"}')).toEqual({ prompt: '新描述', lighting: '顶光' });
+    expect(() => parsePolishResponse('{"prompt":""}')).toThrow('DRAMA_PLAN_INVALID');
   });
 
   it('writes continuity from the bible and the previous shot in the same scene', () => {

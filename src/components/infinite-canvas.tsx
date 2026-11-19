@@ -20,7 +20,6 @@ import { normalizeCanvasViewState, resolveCanvasUsableViewportSize } from '@/lib
 import { buildFailedProcessingFrame, extractImageEditErrorMessage } from '@/lib/image-processing-state';
 import {
   applyPersistedVideoMediaUrl,
-  buildCompletedVideoCanvasMedia,
   isTerminalProcessingFailure,
   type VideoRetryPayload,
 } from '@/lib/video-processing-state';
@@ -213,7 +212,6 @@ import dynamic from 'next/dynamic';
 
 const ModelViewer3D = dynamic(() => import('@/components/model-viewer-3d'), { ssr: false });
 const VideoPlayer = dynamic(() => import('@/components/video-player'), { ssr: false });
-const VideoEditPanel = dynamic(() => import('@/components/video-edit-panel').then(m => ({ default: m.VideoEditPanel })), { ssr: false });
 const VideoCompareDialog = dynamic(() => import('@/components/video-compare-dialog'), { ssr: false });
 const PanoramaViewer = dynamic(() => import('@/components/panorama-viewer'), { ssr: false });
 const MultiAngleSpherePreview = dynamic(() => import('@/components/canvas/MultiAngleSpherePreview').then(m => ({ default: m.MultiAngleSpherePreview })), { ssr: false });
@@ -654,10 +652,8 @@ interface InfiniteCanvasProps {
   onSendToChat?: (image: CanvasImage) => void;
   /** 树状版本历史管理器（P1功能） */
   versionHistoryManager?: import('@/lib/canvas-tree-history').TreeHistoryManager;
-  /** Open floating video generation panel */
-  onOpenVideoPanel?: () => void;
-  /** Re-submit a terminal video task using its persisted input payload. */
-  onRetryProcessing?: (image: CanvasImage) => void;
+  /** Opens the drama workbench, where videos are made. */
+  onOpenVideoWorkbench?: () => void;
   projectId?: string;
   /** Identity used to isolate the canvas generator draft and upload callbacks. */
   canvasGeneratorActorId?: string | null;
@@ -850,7 +846,7 @@ const TOOL_MODEL_KINDS: Record<string, TaskModelDescriptor['kind'][]> = {
   'Agent编排': ['chat'], '视频生成': ['video'],
 };
 
-export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, taskModelCatalog = [], taskModelOptions = [], catalogStatus = { loading: false, error: null }, images, onImagesChange, onRenameLayer, selectedImage, onSelectImage, onPreviewImage, onGenerateVariation, onExtractKeywords, onAddImages, captureDisplay3dInsertion, captureVideoToolInsertion, onUploadFiles, uploadAuthority, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, renderOhMyPromptExternally = false, onCloseOhMyPrompt, onInsertPrompt, onInsertVisionPrompt, visionScopeKey, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onCanvasToolActivated, onCaptureCropHistory, onUndo, onRedo, mobileCanUndo, mobileCanRedo, onHistoryTransactionBegin, onHistoryTransactionCommit, onHistoryTransactionRollback, isHistoryTransitionPending = false, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onDeleteImages, canRetryPendingDelete, onUploadEffectReverseSource, captureEffectReverseInsertion, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToDrama, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoPanel, onRetryProcessing, projectId, canvasGeneratorActorId, initialAnnotations = [], onAnnotationsChange, documentMetadataMode = false, annotationExecutionContext, onRequestTaskPoll }: InfiniteCanvasProps) {
+export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, taskModelCatalog = [], taskModelOptions = [], catalogStatus = { loading: false, error: null }, images, onImagesChange, onRenameLayer, selectedImage, onSelectImage, onPreviewImage, onGenerateVariation, onExtractKeywords, onAddImages, captureDisplay3dInsertion, captureVideoToolInsertion, onUploadFiles, uploadAuthority, referenceIds = [], isGenerating = false, generationProgress = undefined, themeStyle = 'gold', onVisionPrompt, visionPromptEnabled = false, onToggleVisionPrompt, ohMyPromptOpen = false, renderOhMyPromptExternally = false, onCloseOhMyPrompt, onInsertPrompt, onInsertVisionPrompt, visionScopeKey, ohMyPromptThemeStyle = 'gold', isVisionAnalyzing = false, visionResult = null, ompActiveTab = 'agent', ompVisionImageUrl = null, onToggleSettings, onToggleTheme, onToggleUserManager, onToggleAdminSystem, onToggleProjectData, isAdmin = false, onToggleHelp, isPanelCollapsed = false, onCanvasToolActivated, onCaptureCropHistory, onUndo, onRedo, mobileCanUndo, mobileCanRedo, onHistoryTransactionBegin, onHistoryTransactionCommit, onHistoryTransactionRollback, isHistoryTransitionPending = false, navigateToImageId, onNavigateToImageComplete, onGroupsChange, initialGroups, altRefMarkerIds = [], onForceSave, onDeleteImages, canRetryPendingDelete, onUploadEffectReverseSource, captureEffectReverseInsertion, onEditImage, onViewStateChange, initialViewState, onAddToFavorites, onToggleFavorites, onTogglePromptTemplate, brandProject, onSwitchToDrama, onSwitchToDashboard, onSendToChat, connections, onConnectionsChange, versionHistoryManager, onOpenVideoWorkbench, projectId, canvasGeneratorActorId, initialAnnotations = [], onAnnotationsChange, documentMetadataMode = false, annotationExecutionContext, onRequestTaskPoll }: InfiniteCanvasProps) {
   const effectiveUploadAuthority = uploadAuthority ?? (projectId ? 'unknown' : 'legacy');
   const isMonochrome = themeStyle === 'monochrome';
   const taskModelCatalogIndex = useMemo(
@@ -2500,9 +2496,6 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   const [inlineVideoDuration, setInlineVideoDuration] = useState<Record<string, number>>({});
   const [inlineVideoPaused, setInlineVideoPaused] = useState<Record<string, boolean>>({});
   const inlineVideoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
-  const [showVideoEditPanel, setShowVideoEditPanel] = useState(false);
-  const [videoEditTarget, setVideoEditTarget] = useState<CanvasImage | null>(null);
-  const [videoEditTab, setVideoEditTab] = useState<'edit' | 'extend'>('edit');
   // AI视频配音
   const [showVideoDubPanel, setShowVideoDubPanel] = useState(false);
   const [videoDubTarget, setVideoDubTarget] = useState<CanvasImage | null>(null);
@@ -2570,7 +2563,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
 
   // Whether any floating panel is open (used to auto-hide connections & image toolbar)
   const localMediaToolWindowOpen = showRemoveBgPicker || showDisplayDecomposePanel || show3DModal || showVideoExtractPanel || showPsdEditor;
-  const anyPanelOpen = showSvgTracePanel || showAgentEditor || showBrandEcommerce || showFontDesign || showBrandFactory || showBrandIp || showSceneStudio || showBrandPackaging || showDisplay3D || showEffectReverse || showSketchToCode || showVideoEditPanel || showCanvasGenerator || showRefineEngine || showHumanRepair || showLogoSkill || showAiPsd || showStickerAssistant || showVideoDubPanel || localMediaToolWindowOpen;
+  const anyPanelOpen = showSvgTracePanel || showAgentEditor || showBrandEcommerce || showFontDesign || showBrandFactory || showBrandIp || showSceneStudio || showBrandPackaging || showDisplay3D || showEffectReverse || showSketchToCode || showCanvasGenerator || showRefineEngine || showHumanRepair || showLogoSkill || showAiPsd || showStickerAssistant || showVideoDubPanel || localMediaToolWindowOpen;
 
   // Video tools handler
   const handleVideoTool = async (action: 'to-gif' | 'extract-cover' | 'compress', image: CanvasImage) => {
@@ -2755,7 +2748,6 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     setShowRemoveBgPicker(false);
     setShow3DModal(false);
     setShow3DViewer(false);
-    setShowVideoEditPanel(false);
     setShowVideoDubPanel(false);
     setShowLayerPanel(false);
     setShowVersionHistory(false);
@@ -4364,10 +4356,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
             return;
           case 'Digit4':
             e.preventDefault();
-            onOpenVideoPanel?.();
-            if (typeof window !== 'undefined') {
-              window.dispatchEvent(new Event('wujie:open-video-panel'));
-            }
+            onOpenVideoWorkbench?.();
             return;
           case 'Digit5':
             e.preventDefault();
@@ -4559,7 +4548,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       keyup: handleKeyUp,
       paste: handlePaste,
     };
-  }, [selectedIds, selectedImageData, setSelectedIds, images, onImagesChange, selectImage, editMode, onUndo, zoom, viewOffset, isKeyboardEventFromOverlay, isInputFocused, isTextEditingTarget, annotationMode, onRedo, handleCreateGroup, compareSelecting, agentSelectingImage, showSvgTracePanel, editImageId, handleToggleCanvasAnnotation, selectAnnotationV2Tool, annotationV2State.tool, annotationV2State.gesture.kind, escapeAnnotationV2, setAnnotationV2Mode, requestDeleteImages, zoomViewportAtPoint, isHistoryTransitionPending, canRetryPendingDelete, activateCanvasToolSession, selectedImage, onEditImage, onOpenVideoPanel, commandPaletteOpen]);
+  }, [selectedIds, selectedImageData, setSelectedIds, images, onImagesChange, selectImage, editMode, onUndo, zoom, viewOffset, isKeyboardEventFromOverlay, isInputFocused, isTextEditingTarget, annotationMode, onRedo, handleCreateGroup, compareSelecting, agentSelectingImage, showSvgTracePanel, editImageId, handleToggleCanvasAnnotation, selectAnnotationV2Tool, annotationV2State.tool, annotationV2State.gesture.kind, escapeAnnotationV2, setAnnotationV2Mode, requestDeleteImages, zoomViewportAtPoint, isHistoryTransitionPending, canRetryPendingDelete, activateCanvasToolSession, selectedImage, onEditImage, onOpenVideoWorkbench, commandPaletteOpen]);
 
   // Stable Canvas keyboard listeners remain attached for the component lifetime. React commits only
   // refresh the ref above, so delete/restore renders cannot create an input gap.
@@ -12920,17 +12909,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     { label: '下载', action: () => { handleOpenDownload(); } },
     ...(selectedImageData?.threeDModelUrl ? [{ label: '3D 预览', action: () => { setViewer3DModelUrl(selectedImageData.threeDModelUrl || ''); setViewer3DPreviewUrl(selectedImageData.url); setViewer3DModelUrls(selectedImageData.threeDModelUrls || {}); setViewer3DThumbnailUrls(selectedImageData.threeDThumbnailUrls || {}); setViewer3DTextureUrls(selectedImageData.threeDTextureUrls || []); setViewer3DModelInfo(selectedImageData.threeDModelInfo || {}); setShow3DViewer(true); } }] : []),
     ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '播放视频', action: () => { setVideoPlayerUrl(selectedImageData.videoUrl!); setVideoPlayerVisible(true); } }] : []),
-    ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '视频编辑', action: () => { setVideoEditTarget(selectedImageData); setVideoEditTab('edit'); setShowVideoEditPanel(true); } }] : []),
-    ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '视频延长', action: () => { setVideoEditTarget(selectedImageData); setShowVideoEditPanel(true); setVideoEditTab('extend'); } }] : []),
     ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{ label: '视频对比', action: () => { const img = selectedImageData; if (img?.videoUrl) setCompareVideos({ a: { url: img.videoUrl, label: img.prompt?.slice(0, 30) || '视频1' }, b: { url: img.videoUrl, label: '请选择第二个视频' } }); } }] : []),
-    ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [{
-      label: '提取帧生成视频',
-      action: async () => {
-        if (await handleVideoExtractFrames(selectedImageData, 'single', 1, 0)) {
-          toast.info('选中提取的帧后，可在视频面板中图生视频');
-        }
-      },
-    }] : []),
     // 视频工具集
     ...(selectedImageData?.mediaType === 'video' && selectedImageData?.videoUrl ? [
       { label: '─'.repeat(15), action: () => {} }, // 分隔线
@@ -12965,7 +12944,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     : imageContextMenuItems.filter(item => {
       if (['复制', '下载', '删除', '发送到聊天修改', '加入收藏夹'].includes(item.label)) return true;
       if (selectedMediaType === '3d') return item.label === '3D 预览';
-      return item.label.startsWith('─') || ['播放视频', '视频编辑', '视频延长', '视频对比', '提取帧生成视频', '转 GIF', '提取封面', '批量抽帧(均匀5帧)', '批量抽帧(关键帧)', 'AI配音合成', '提取帧', '视频压缩'].includes(item.label);
+      return item.label.startsWith('─') || ['播放视频', '视频对比', '转 GIF', '提取封面', '批量抽帧(均匀5帧)', '批量抽帧(关键帧)', 'AI配音合成', '提取帧', '视频压缩'].includes(item.label);
     });
 
   // Floating panel style helpers
@@ -13120,7 +13099,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     { id: 'image-to-3d', label: '图转3D工厂', group: 'AI 创作', icon: <BoxIcon className="h-4 w-4" />, active: show3DModal, onActivate: () => handleOpen3D(true) },
     { id: 'language-edit', label: '语言修图', group: 'AI 创作', icon: <Pencil className="h-4 w-4" />, onActivate: () => onEditImage?.(null) },
     { id: 'agent', label: 'Agent编排', group: 'AI 创作', icon: <Bot className="h-4 w-4" />, onActivate: () => { if (!activateCanvasToolSession('agent', 'bottom-toolbar', [])) return; setAgentEditImage(null); setShowAgentEditor(true); } },
-    { id: 'video', label: '视频生成', group: 'AI 创作', icon: <Film className="h-4 w-4" />, onActivate: () => { onOpenVideoPanel?.(); window.dispatchEvent(new Event('wujie:open-video-panel')); } },
+    { id: 'video', label: '短剧工作台', group: 'AI 创作', icon: <Film className="h-4 w-4" />, onActivate: () => onOpenVideoWorkbench?.() },
     { id: 'brand-ecommerce', label: '品牌电商', group: '品牌设计', icon: <ShoppingBag className="h-4 w-4" />, onActivate: () => { if (activateCanvasToolSession('brand-ecommerce', 'bottom-toolbar', [])) setShowBrandEcommerce(true); } },
     { id: 'product-refine', label: '精修引擎', group: '品牌设计', icon: <Scan className="h-4 w-4" />, onActivate: () => { if (!activateCanvasToolSession('product-refine', 'bottom-toolbar', [])) return; setRefineEngineImageUrl(''); setShowRefineEngine(true); } },
     { id: 'human-refine', label: '人物精修', group: '品牌设计', icon: <UserRoundCheck className="h-4 w-4" />, onActivate: () => { const image = selectedImageData || selectedImage; if (!activateCanvasToolSession('human-refine', 'bottom-toolbar', image ? [image.id] : [])) return; setHumanRepairImageUrl(image?.url || ''); setShowHumanRepair(true); } },
@@ -13900,17 +13879,6 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                             </span>
                           )}
                           <div data-popup="task-failure-actions" className="pointer-events-auto flex shrink-0 items-center gap-2">
-                            {image.processing.retryable && onRetryProcessing && (
-                              <button
-                                className={`min-h-11 min-w-11 px-3 py-1 text-xs font-medium transition-colors md:min-h-0 md:min-w-0 ${isMonochrome ? 'bg-gray-900 text-white hover:bg-gray-700' : 'bg-gold text-black hover:bg-gold-light'}`}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onRetryProcessing?.(image);
-                                }}
-                              >
-                                重新生成
-                              </button>
-                            )}
                             <button
                               className="min-h-11 min-w-11 px-3 py-1 bg-red-600 text-xs font-medium text-white transition-colors hover:bg-red-500 md:min-h-0 md:min-w-0"
                               onClick={(e) => {
@@ -17528,249 +17496,6 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           );
         })()}
 
-        {/* ====== VIDEO EDIT PANEL ====== */}
-        {showVideoEditPanel && videoEditTarget && (
-          <VideoEditPanel
-            key={videoEditTarget.id}
-            isOpen={showVideoEditPanel}
-            videoUrl={videoEditTarget.videoUrl || videoEditTarget.url}
-            thumbnailUrl={videoEditTarget.videoThumbnailUrl || videoEditTarget.url}
-            originalPrompt={videoEditTarget.prompt}
-            initialTab={videoEditTab}
-            themeStyle={isMonochrome ? 'monochrome' : 'gold'}
-            selectedVideoModel={videoEditTarget.modelName || ''}
-            selectedVideoProviderId={videoEditTarget.apiProvider || ''}
-            onClose={() => { setShowVideoEditPanel(false); setVideoEditTarget(null); setVideoEditTab('edit'); }}
-            onEdit={async (params) => {
-              // 视频编辑：通过视频生成API重新生成
-              try {
-                const res = await fetch('/api/video/generate', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    prompt: params.prompt,
-                    model: params.model || undefined,
-                    providerId: params.providerId || undefined,
-                    imageUrl: params.thumbnailUrl || videoEditTarget.url,
-                    mode: 'image2video',
-                  }),
-                });
-                const data = await res.json().catch(() => null);
-                const taskId = data?.taskId;
-                if (res.ok && data?.success !== false && typeof taskId === 'string' && taskId.trim()) {
-                  // 创建processing frame
-                  const sourceId = videoEditTarget?.id;
-                  const frameId = `processing-video-edit-${Date.now()}`;
-                  const frame = {
-                    id: frameId,
-                    url: '',
-                    x: videoEditTarget ? videoEditTarget.x + (videoEditTarget.width || 300) + 30 : 100,
-                    y: videoEditTarget?.y || 100,
-                    width: videoEditTarget?.width || 300,
-                    height: videoEditTarget?.height || 200,
-                    isProcessing: true,
-                    processingLabel: '视频编辑中...',
-                    prompt: params.prompt,
-                  };
-                  onImagesChange([...imagesRef.current, frame]);
-                  // 使用视频模型的model/providerId，而非图片模型的
-                  const videoModel = params.model || '';
-                  const videoProviderId = params.providerId || '';
-                  // 轮询任务结果（最多5分钟）
-                  let videoEditPollCount = 0;
-                  const pollInterval = setInterval(async () => {
-                    videoEditPollCount++;
-                    if (videoEditPollCount >= 100) { clearInterval(pollInterval); activeIntervalsRef.current.delete(pollInterval); toast.error('视频编辑超时'); onImagesChange(imagesRef.current.filter((img: CanvasImage) => img.id !== frameId)); return; }
-                    try {
-                      const pollRes = await onRequestTaskPollRef.current({
-                        taskId,
-                        model: videoModel,
-                        providerId: videoProviderId,
-                      });
-                      const pollData = await pollRes.json();
-                      const resultUrl = pollData.imageUrl || pollData.result?.url || pollData.result?.imageUrl || (pollData.result?.image as Record<string, unknown>)?.url || (pollData.result?.images as Array<Record<string, unknown>>)?.[0]?.url;
-                      if (pollData.status === 'completed' && resultUrl) {
-                        clearInterval(pollInterval);
-                        activeIntervalsRef.current.delete(pollInterval);
-                        const rawVideoUrl = pollData.videoUrl || resultUrl;
-                        const rawThumbUrl = pollData.videoThumbnailUrl || pollData.thumbnailUrl;
-                        // ★ 持久化视频URL，防止第三方URL过期消失
-                        Promise.all([
-                          rawThumbUrl ? awaitStableImageUrl(rawThumbUrl, 30000, { isVideo: false }) : Promise.resolve(''),
-                          awaitStableImageUrl(rawVideoUrl, 120000, { isVideo: true }),
-                        ]).then(([stableThumb, stableVideo]) => {
-                          const completedMedia = buildCompletedVideoCanvasMedia({
-                            videoUrl: stableVideo || rawVideoUrl,
-                            thumbnailUrl: stableThumb || rawThumbUrl || undefined,
-                          });
-                          onImagesChange(imagesRef.current.map((img: CanvasImage) =>
-                            img.id === frameId
-                              ? {
-                                  ...img,
-                                  ...completedMedia,
-                                  mediaType: 'video' as const,
-                                  isProcessing: false,
-                                  processingLabel: undefined,
-                                  generatedFromImageId: sourceId,
-                                  relationType: 'edit' as const,
-                                }
-                              : img
-                          ));
-                        }).catch(() => {
-                          // 持久化失败兜底：直接用原始URL
-                          onImagesChange(imagesRef.current.map((img: CanvasImage) =>
-                            img.id === frameId
-                              ? {
-                                  ...img,
-                                  url: rawThumbUrl,
-                                  videoUrl: rawVideoUrl,
-                                  mediaType: 'video' as const,
-                                  isProcessing: false,
-                                  processingLabel: undefined,
-                                  generatedFromImageId: sourceId,
-                                  relationType: 'edit' as const,
-                                }
-                              : img
-                          ));
-                        });
-                      } else if (pollData.status === 'failed' || pollData.status === 'cancelled') {
-                        clearInterval(pollInterval);
-                        activeIntervalsRef.current.delete(pollInterval);
-                        toast.error(pollData.error || '视频编辑失败');
-                        onImagesChange(imagesRef.current.filter((img: CanvasImage) => img.id !== frameId));
-                      } else {
-                        // ★ P1: 处理中时若后端附带预计剩余时间，更新占位框文案
-                        const est = typeof pollData.estimatedRemainingSeconds === 'number' ? pollData.estimatedRemainingSeconds : undefined;
-                        if (est !== undefined) {
-                          const label = est > 0 ? `视频编辑中... · 预计还需 ${est}s` : '视频编辑中... · 即将完成';
-                          onImagesChange(imagesRef.current.map((img: CanvasImage) => img.id === frameId ? { ...img, processingLabel: label } : img));
-                        }
-                      }
-                    } catch { /* ignore poll errors */ }
-                  }, 3000);
-                  activeIntervalsRef.current.add(pollInterval); // P2-4: 追踪interval以备unmount清理
-                } else {
-                  throw new Error(typeof data?.error === 'string' && data.error.trim() ? data.error : '视频编辑请求未受理，请重试');
-                }
-              } catch (err) {
-                throw err instanceof Error && !(err instanceof TypeError) ? err : new Error('视频编辑请求失败');
-              }
-            }}
-            onExtend={async (params) => {
-              // 视频延长：调用视频延长API
-              try {
-                const res = await fetch('/api/video/extend', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    videoUrl: params.videoUrl,
-                    prompt: params.prompt || undefined,
-                    extendDuration: params.duration || 5,
-                    model: params.model || undefined,
-                    providerId: params.providerId || undefined,
-                  }),
-                });
-                const data = await res.json().catch(() => null);
-                const taskId = data?.taskId;
-                if (res.ok && data?.success !== false && typeof taskId === 'string' && taskId.trim()) {
-                  const sourceId = videoEditTarget?.id;
-                  const frameId = `processing-video-extend-${Date.now()}`;
-                  const frame = {
-                    id: frameId,
-                    url: '',
-                    x: videoEditTarget ? videoEditTarget.x + (videoEditTarget.width || 300) + 30 : 100,
-                    y: videoEditTarget?.y || 100,
-                    width: videoEditTarget?.width || 300,
-                    height: videoEditTarget?.height || 200,
-                    isProcessing: true,
-                    processingLabel: '视频延长中...',
-                    prompt: params.prompt,
-                  };
-                  onImagesChange([...imagesRef.current, frame]);
-                  const videoModel = params.model || '';
-                  const videoProviderId = params.providerId || '';
-                  let videoExtendPollCount = 0;
-                  const pollInterval = setInterval(async () => {
-                    videoExtendPollCount++;
-                    if (videoExtendPollCount >= 100) { clearInterval(pollInterval); activeIntervalsRef.current.delete(pollInterval); toast.error('视频延长超时'); onImagesChange(imagesRef.current.filter((img: CanvasImage) => img.id !== frameId)); return; }
-                    try {
-                      const pollRes = await onRequestTaskPollRef.current({
-                        taskId,
-                        model: videoModel,
-                        providerId: videoProviderId,
-                      });
-                      const pollData = await pollRes.json();
-                      const resultUrl = pollData.imageUrl || pollData.result?.url || pollData.result?.imageUrl || (pollData.result?.image as Record<string, unknown>)?.url || (pollData.result?.images as Array<Record<string, unknown>>)?.[0]?.url;
-                      if (pollData.status === 'completed' && resultUrl) {
-                        clearInterval(pollInterval);
-                        activeIntervalsRef.current.delete(pollInterval);
-                        const rawVideoUrl = pollData.videoUrl || resultUrl;
-                        const rawThumbUrl = pollData.videoThumbnailUrl || pollData.thumbnailUrl;
-                        // ★ 持久化视频URL，防止第三方URL过期消失
-                        Promise.all([
-                          rawThumbUrl ? awaitStableImageUrl(rawThumbUrl, 30000, { isVideo: false }) : Promise.resolve(''),
-                          awaitStableImageUrl(rawVideoUrl, 120000, { isVideo: true }),
-                        ]).then(([stableThumb, stableVideo]) => {
-                          const completedMedia = buildCompletedVideoCanvasMedia({
-                            videoUrl: stableVideo || rawVideoUrl,
-                            thumbnailUrl: stableThumb || rawThumbUrl || undefined,
-                          });
-                          onImagesChange(imagesRef.current.map((img: CanvasImage) =>
-                            img.id === frameId
-                              ? {
-                                  ...img,
-                                  ...completedMedia,
-                                  mediaType: 'video' as const,
-                                  isProcessing: false,
-                                  processingLabel: undefined,
-                                  generatedFromImageId: sourceId,
-                                  relationType: 'edit' as const,
-                                }
-                              : img
-                          ));
-                        }).catch(() => {
-                          // 持久化失败兜底：直接用原始URL
-                          onImagesChange(imagesRef.current.map((img: CanvasImage) =>
-                            img.id === frameId
-                              ? {
-                                  ...img,
-                                  url: rawThumbUrl,
-                                  videoUrl: rawVideoUrl,
-                                  mediaType: 'video' as const,
-                                  isProcessing: false,
-                                  processingLabel: undefined,
-                                  generatedFromImageId: sourceId,
-                                  relationType: 'edit' as const,
-                                }
-                              : img
-                          ));
-                        });
-                      } else if (pollData.status === 'failed' || pollData.status === 'cancelled') {
-                        clearInterval(pollInterval);
-                        activeIntervalsRef.current.delete(pollInterval);
-                        toast.error(pollData.error || '视频延长失败');
-                        onImagesChange(imagesRef.current.filter((img: CanvasImage) => img.id !== frameId));
-                      } else {
-                        // ★ P1: 处理中时若后端附带预计剩余时间，更新占位框文案
-                        const est = typeof pollData.estimatedRemainingSeconds === 'number' ? pollData.estimatedRemainingSeconds : undefined;
-                        if (est !== undefined) {
-                          const label = est > 0 ? `视频延长中... · 预计还需 ${est}s` : '视频延长中... · 即将完成';
-                          onImagesChange(imagesRef.current.map((img: CanvasImage) => img.id === frameId ? { ...img, processingLabel: label } : img));
-                        }
-                      }
-                    } catch { /* ignore poll errors */ }
-                  }, 3000);
-                  activeIntervalsRef.current.add(pollInterval); // P2-4: 追踪interval以备unmount清理
-                } else {
-                  throw new Error(typeof data?.error === 'string' && data.error.trim() ? data.error : '视频延长请求未受理，请重试');
-                }
-              } catch (err) {
-                throw err instanceof Error && !(err instanceof TypeError) ? err : new Error('视频延长请求失败');
-              }
-            }}
-          />
-        )}
-
         {/* ====== AI 视频配音面板 ====== */}
         {showVideoDubPanel && videoDubTarget && (
           <div
@@ -19926,20 +19651,15 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
             <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">Agent</span>
           </button>)}
 
-          {/* Video Generation - Floating Panel */}
+          {/* Videos are made in the drama workbench */}
           {isToolConfigured('视频生成') && (<button
-            aria-label="视频生成"
-            onClick={() => {
-              onOpenVideoPanel?.();
-              if (typeof window !== 'undefined') {
-                window.dispatchEvent(new Event('wujie:open-video-panel'));
-              }
-            }}
+            aria-label="打开短剧工作台"
+            onClick={() => onOpenVideoWorkbench?.()}
             className={`p-2 rounded-full transition-transform duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transform-none motion-reduce:transition-none relative group hover:scale-110 active:scale-95 whitespace-nowrap shrink-0 ${isMonochrome ? 'text-blue-500 hover:text-blue-600 hover:bg-blue-50' : 'text-blue-400 hover:text-blue-300 hover:bg-blue-500/10'}`}
-            title="视频生成"
+            title="打开短剧工作台"
           >
             <Film className="h-4 w-4" />
-            <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">视频生成</span>
+            <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-nowrap pointer-events-none z-[60] bg-black/90 text-white">短剧工作台</span>
           </button>)}
 
           </section>

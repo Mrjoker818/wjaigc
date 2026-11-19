@@ -7,7 +7,6 @@ const readSource = (path: string) => readFileSync(resolve(process.cwd(), path), 
 const canvasSource = readSource('src/components/infinite-canvas.tsx');
 const videoToolsSource = readSource('src/app/api/video/tools/route.ts');
 const videoMediaIoSource = readSource('src/lib/video-media-io.ts');
-const videoEditPanelSource = readSource('src/components/video-edit-panel.tsx');
 const serveUploadSource = readSource('src/app/api/serve-upload/[...path]/route.ts');
 const videoDownloadSource = readSource('src/app/api/video/download/route.ts');
 
@@ -69,12 +68,6 @@ describe('media toolbar video contracts', () => {
     expect(canvasSource).toContain('/api/video/download?url=${encodeURIComponent(image.videoUrl)}');
     expect(canvasSource).toContain("format === 'video'");
     // Actual popup/filename/byte behavior is covered by canvas-video-download.test.tsx.
-  });
-
-  it('regenerates an edited video from its thumbnail image, not the video URL', () => {
-    expect(videoEditPanelSource).toContain('thumbnailUrl: thumbnailUrl || undefined');
-    expect(canvasSource).toContain('imageUrl: params.thumbnailUrl || videoEditTarget.url');
-    expect(canvasSource).not.toContain('imageUrl: params.videoUrl');
   });
 
   it('hides the image toolbar while every local media tool window is open', () => {

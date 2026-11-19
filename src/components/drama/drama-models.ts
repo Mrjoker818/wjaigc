@@ -7,7 +7,7 @@ import { taskModelKey, type TaskModelDescriptor } from '@/lib/task-core/model-ca
 
 /** One video model the workbench can generate shots with, with the limits the engine needs. */
 export interface DramaModelOption {
-  /** `providerId::modelId`, the same key the canvas video panel uses. */
+  /** `providerId::modelId`, the same key the video model catalog uses. */
   key: string;
   modelId: string;
   providerId: string;

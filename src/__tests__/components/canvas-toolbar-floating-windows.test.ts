@@ -13,7 +13,6 @@ const humanRepairSource = readSource('src/components/human-repair-panel.tsx');
 const layerPanelSource = readSource('src/components/layer-panel.tsx');
 const versionHistorySource = readSource('src/components/version-history-panel.tsx');
 const imageEditorSource = readSource('src/components/image-editor.tsx');
-const videoPanelSource = readSource('src/components/video-generation-panel.tsx');
 const globalsSource = readSource('src/app/globals.css');
 const imageToolbarSource = readSource('src/components/canvas/CanvasImageActionToolbar.tsx');
 const upscaleSvgPanelSource = readSource('src/components/canvas/CanvasEditUpscaleSvgPanel.tsx');
@@ -214,7 +213,6 @@ describe('canvas toolbar floating windows', () => {
     expect(canvasWorkspaceSource).toContain("window.addEventListener('wujie:canvas-tool-opened'");
     expect(canvasWorkspaceSource).toContain("new Event('wujie:close-canvas-tool-panels')");
     expect(imageEditorSource).toContain("if (event.key === 'Escape' && !event.defaultPrevented)");
-    expect(videoPanelSource).toContain('fixed z-[210]');
   });
 
   it('treats reverse engineering as an isolated floating canvas tool', () => {

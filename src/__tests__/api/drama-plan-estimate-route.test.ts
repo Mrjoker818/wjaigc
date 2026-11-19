@@ -76,6 +76,24 @@ describe('POST /api/drama/plan', () => {
     expect(data.shots[0]).toMatchObject({ dialogue: '是你？', characterIds: ['lin'], takes: [] });
   });
 
+  it('polishes one shot and keeps only the fields the model filled in', async () => {
+    mocks.replies = [script];
+    const { doc } = await (await plan(post('/api/drama/plan', { action: 'script', idea: 'x' }))).json();
+    mocks.replies = [JSON.stringify({ shots: [{ prompt: '@林夏 拆信', duration: 5 }] })];
+    const scene = doc.episodes[0].scenes[0];
+    const { shots } = await (await plan(post('/api/drama/plan', { action: 'shots', doc, episodeId: doc.episodes[0].id, sceneId: scene.id }))).json();
+    scene.shots = shots;
+    mocks.replies = ['好的：{"prompt":"窗侧冷光里，@林夏 低头撕开信封","shotSize":"近景","cameraMotion":"缓慢推进","lighting":"","audioCues":"雨打窗户"}'];
+    const response = await plan(post('/api/drama/plan', { action: 'polish', doc, shotId: shots[0].id }));
+    const data = await response.json();
+    expect(response.status).toBe(200);
+    expect(data.shot).toEqual({ prompt: '窗侧冷光里，@林夏 低头撕开信封', shotSize: '近景', cameraMotion: '缓慢推进', audioCues: '雨打窗户' });
+
+    mocks.replies = ['不是 JSON', '还是不是'];
+    expect((await plan(post('/api/drama/plan', { action: 'polish', doc, shotId: shots[0].id }))).status).toBe(502);
+    expect((await plan(post('/api/drama/plan', { action: 'polish', doc, shotId: 'missing' }))).status).toBe(400);
+  });
+
   it('explains what to do when no chat model is configured or the input is empty', async () => {
     mocks.provider = null;
     const missing = await plan(post('/api/drama/plan', { action: 'script', idea: 'x' }));

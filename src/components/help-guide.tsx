@@ -31,7 +31,7 @@ const SECTIONS: SectionDef[] = [
   { id: 'canvas', label: '无限画布', icon: <Move size={14} />, group: '使用说明' },
   { id: 'generate', label: '图像生成', icon: <Sparkles size={14} />, group: '使用说明' },
   { id: 'img2img', label: '图生图', icon: <ImagePlus size={14} />, group: '使用说明' },
-  { id: 'video', label: '视频生成', icon: <FileBox size={14} />, group: '使用说明' },
+  { id: 'video', label: '视频创作', icon: <FileBox size={14} />, group: '使用说明' },
   { id: 'tools', label: '图片编辑工具', icon: <Pencil size={14} />, group: '使用说明' },
   { id: 'svg-trace', label: 'SVG 智能描摹', icon: <PenTool size={14} />, group: '使用说明' },
   { id: 'lang-edit', label: '语言修图', icon: <Wand2 size={14} />, group: '使用说明' },
@@ -102,7 +102,7 @@ function CanvasSection() {
       <FeatureItem>扩展画面、图生图、裁切、下载（PNG / SVG / PSD）</FeatureItem>
       <SubTitle>视频支持</SubTitle>
       <FeatureItem>视频图片显示播放按钮覆盖层，点击播放或右键菜单操作</FeatureItem>
-      <FeatureItem>视频编辑 / 视频延长 / 视频压缩</FeatureItem>
+      <FeatureItem>转 GIF / 提取封面 / 抽帧 / AI 配音 / 视频压缩</FeatureItem>
       <SubTitle>下载格式</SubTitle>
       <FeatureItem>PSD：Basic / Pro / Studio 三种导出模式</FeatureItem>
       <FeatureItem>SVG：Fast / Pro / Studio 三种矢量化精度</FeatureItem>
@@ -497,7 +497,7 @@ function ShortcutsSection() {
             <FeatureItem><KeyBadge>Shift+1</KeyBadge> 3D 模型</FeatureItem>
             <FeatureItem><KeyBadge>Shift+2</KeyBadge> 图片编辑</FeatureItem>
             <FeatureItem><KeyBadge>Shift+3</KeyBadge> Agent 编排</FeatureItem>
-            <FeatureItem><KeyBadge>Shift+4</KeyBadge> 视频面板</FeatureItem>
+            <FeatureItem><KeyBadge>Shift+4</KeyBadge> 短剧工作台</FeatureItem>
             <FeatureItem><KeyBadge>Shift+5</KeyBadge> 品牌电商</FeatureItem>
             <FeatureItem><KeyBadge>Shift+6</KeyBadge> 精修引擎</FeatureItem>
             <FeatureItem><KeyBadge>Shift+7</KeyBadge> 人物精修大师</FeatureItem>
@@ -534,29 +534,22 @@ function TipsSection() {
 function VideoSection() {
   return (
     <div>
-      <h3 className="text-sm font-bold text-[var(--color-on-surface)] mb-2">视频生成</h3>
+      <h3 className="text-sm font-bold text-[var(--color-on-surface)] mb-2">视频创作</h3>
       <p className="text-xs text-[var(--color-on-surface-variant)] mb-3">
-        支持 20+ 视频模型的视频生成与编辑功能，6 种 API 协议自动适配。
+        视频在短剧工作台里制作。画布负责放置、播放和处理已有的视频。
       </p>
-      <SubTitle>生成模式</SubTitle>
-      <FeatureItem>文生视频：纯文字描述生成视频，支持画面比例 / 时长 / 质量选择</FeatureItem>
-      <FeatureItem>图生视频 - 首帧驱动：上传首帧图片，AI 生成后续视频内容</FeatureItem>
-      <FeatureItem>图生视频 - 首尾帧驱动：上传首帧 + 尾帧图片，AI 生成中间过渡</FeatureItem>
-      <FeatureItem>图生视频 - 多参考图：上传多张参考图，AI 综合参考生成</FeatureItem>
-      <SubTitle>视频编辑</SubTitle>
-      <FeatureItem>视频延长：在现有视频末尾继续生成内容（支持可灵 V3 / Seedance 等）</FeatureItem>
-      <FeatureItem>音效生成：生成视频时可选同时生成音效</FeatureItem>
-      <FeatureItem>视频播放器：黑金主题，进度条 / 音量 / 倍速（0.5x ~ 2x） / 全屏</FeatureItem>
       <SubTitle>短剧工作台</SubTitle>
       <FeatureItem>五个步骤：剧本 → 设定（角色 / 场景定妆图）→ 分镜 → 镜头生成与重拍 → 成片</FeatureItem>
       <FeatureItem>逐镜头生成：自动接上一镜头的尾帧，出场角色的定妆图作为参考图</FeatureItem>
       <FeatureItem>成片：保留每段音轨，可选硬切 / 淡入淡出 / 闪白转场，台词烧成字幕</FeatureItem>
-      <FeatureItem>视频面板的多镜头分镜可以“发送到短剧工作台”继续精修</FeatureItem>
+      <FeatureItem>画面描述可以一键润色：按导演写法补上景别、运镜、光线和声音，不扣积分</FeatureItem>
+      <FeatureItem>镜头、定妆图、成片都可以放到画布</FeatureItem>
       <SubTitle>入口</SubTitle>
-      <FeatureItem>右侧面板图像 / 视频 Tab 切换到视频生成</FeatureItem>
-      <FeatureItem>画布底部工具栏“短剧工作台”</FeatureItem>
-      <FeatureItem>画布右键菜单“视频编辑” / “视频延长”</FeatureItem>
-      <FeatureItem>视频图片点击播放按钮覆盖层</FeatureItem>
+      <FeatureItem>顶部平台切换里的“视频”，或地址 /video</FeatureItem>
+      <FeatureItem>画布底部工具栏“短剧工作台”，快捷键 Shift+4</FeatureItem>
+      <FeatureItem>快速创作里写了视频需求时，点“去短剧工作台”会把这句话带进“一句话开始”</FeatureItem>
+      <SubTitle>画布里的视频</SubTitle>
+      <FeatureItem>点击播放按钮覆盖层播放；右键菜单可对比、转 GIF、提取封面、抽帧、AI 配音、压缩</FeatureItem>
     </div>
   );
 }

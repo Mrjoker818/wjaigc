@@ -1,5 +1,4 @@
 /** Browser side of /api/drama/render: start a background render and wait for its result. */
-import type { DramaTransition } from './render';
 
 export type RenderFetch = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -61,18 +60,4 @@ export async function waitForRender(taskId: string, options: RenderClientOptions
     if (typeof data.progress === 'number') options.onProgress?.(data.progress, text(data.label));
   }
   throw new Error('成片渲染超过 25 分钟仍未完成，请稍后在画布任务列表查看');
-}
-
-/** Stitches finished shot videos in order, keeping their audio. Free of credits. */
-export async function renderShotVideos(
-  videoUrls: string[], transition: DramaTransition, options: RenderClientOptions = {},
-): Promise<RenderResult> {
-  const fetcher = options.fetch ?? ((input, init) => fetch(input, init));
-  const response = await fetcher('/api/drama/render', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ videoUrls, transition }),
-  });
-  const data = await readJson(response);
-  const taskId = text(data.taskId);
-  if (!response.ok || !taskId) throw new Error(text(data.error) ?? '故事视频合成失败，请稍后重试');
-  return waitForRender(taskId, options);
 }

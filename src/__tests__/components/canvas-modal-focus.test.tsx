@@ -7,7 +7,6 @@ import { HelpGuide } from '@/components/help-guide';
 import { ImageCompareDialog } from '@/components/image-compare-dialog';
 import { ImagePreview } from '@/components/image-preview';
 import VideoCompareDialog from '@/components/video-compare-dialog';
-import { VideoEditPanel } from '@/components/video-edit-panel';
 import VideoPlayer from '@/components/video-player';
 import type { CanvasImage } from '@/components/infinite-canvas';
 
@@ -28,7 +27,6 @@ const cases: Array<[string, (close: () => void) => React.ReactNode]> = [
   ['关闭图片预览', onClose => <ImagePreview image={image} onClose={onClose} />],
   ['关闭视频对比', onClose => <VideoCompareDialog open videoA={videoA} videoB={videoB} onClose={onClose} />],
   ['关闭视频预览', onClose => <VideoPlayer videoUrl={videoA.url} onClose={onClose} />],
-  ['关闭视频编辑', onClose => <VideoEditPanel isOpen videoUrl={videoA.url} onEdit={() => {}} onClose={onClose} />],
 ];
 
 beforeEach(() => {
@@ -120,25 +118,6 @@ it('keeps the comparison slider and zoom keyboard controls working inside the tr
   expect(divider.getAttribute('aria-valuenow')).toBe('55');
   fireEvent.keyDown(divider, { key: '+' });
   expect(screen.getByAltText('A').style.transform).toContain('scale(1.1)');
-});
-
-it('keeps clipboard events from the canvas while allowing a modal text field to paste', () => {
-  render(<VideoEditPanel isOpen videoUrl={videoA.url} onEdit={() => {}} onClose={() => {}} />);
-  const canvasPaste = vi.fn();
-  window.addEventListener('paste', canvasPaste);
-  try {
-    const draft = screen.getByRole('textbox', { name: '编辑描述' });
-    draft.focus();
-    const paste = new Event('paste', { bubbles: true, cancelable: true });
-    fireEvent(draft, paste);
-    expect(paste.defaultPrevented).toBe(false);
-    const outsidePaste = new Event('paste', { bubbles: true, cancelable: true });
-    fireEvent(document.body, outsidePaste);
-    expect(outsidePaste.defaultPrevented).toBe(true);
-    expect(canvasPaste).not.toHaveBeenCalled();
-  } finally {
-    window.removeEventListener('paste', canvasPaste);
-  }
 });
 
 it('describes canvas edit capabilities conditionally and preserves the changelog', () => {

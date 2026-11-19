@@ -64,20 +64,20 @@ function readToolEffect():string {
   return result.outputText;
 }
 interface EffectHarness {
-  state:{collapsed:boolean;imageEditorOpen:boolean;videoPanelOpen:boolean;session:CanvasToolSession;toasts:string[];diagnostics:string[]};
+  state:{collapsed:boolean;imageEditorOpen:boolean;session:CanvasToolSession;toasts:string[];diagnostics:string[]};
   window:EventTarget&{innerWidth:number};
   openTool(toolId?:string,entryPoint?:CanvasToolEntryPoint):boolean;
   notifyClose():void;
   dispose():void;
 }
 function mountToolEffect(width:number,collapsed=false,activationFault?:Error):EffectHarness {
-  const state={collapsed,imageEditorOpen:true,videoPanelOpen:true,session:CLOSED_CANVAS_TOOL_SESSION,toasts:[] as string[],diagnostics:[] as string[]};
+  const state={collapsed,imageEditorOpen:true,session:CLOSED_CANVAS_TOOL_SESSION,toasts:[] as string[],diagnostics:[] as string[]};
   const window=Object.assign(new EventTarget(),{innerWidth:width});
   let cleanup:(()=>void)|undefined;
   const effect=(setup:()=>void|(()=>void)):void=>{const value=setup();if(typeof value==='function')cleanup=value;};
-  new Function('useEffect','window','setShowImageEditor','setShowVideoPanel','setPanelCollapsed',
+  new Function('useEffect','window','setShowImageEditor','setPanelCollapsed',
     'shouldInitiallyCollapseWorkspacePanel',readToolEffect())(
-    effect,window,(next:boolean):void=>{state.imageEditorOpen=next;},(next:boolean):void=>{state.videoPanelOpen=next;},
+    effect,window,(next:boolean):void=>{state.imageEditorOpen=next;},
     (next:boolean):void=>{state.collapsed=next;},shouldInitiallyCollapseWorkspacePanel);
   const notifyClose=():void=>{window.dispatchEvent(new Event('wujie:canvas-tool-opened'));};
   const bound=boundActivation({window,shouldInitiallyCollapseWorkspacePanel,
@@ -103,7 +103,7 @@ for(const width of [320,375,390,767]){
     try{
       expect(harness.state.collapsed).toBe(false);
       harness.openTool();
-      expect(harness.state).toMatchObject({collapsed:true,imageEditorOpen:false,videoPanelOpen:false});
+      expect(harness.state).toMatchObject({collapsed:true,imageEditorOpen:false});
       expect(harness.state.session.status).toBe('open');
     }finally{harness.dispose();}
   });
@@ -113,7 +113,7 @@ for(const width of [768,1024]){
     const harness=mountToolEffect(width);
     try{
       harness.openTool();
-      expect(harness.state).toMatchObject({collapsed:false,imageEditorOpen:false,videoPanelOpen:false});
+      expect(harness.state).toMatchObject({collapsed:false,imageEditorOpen:false});
       expect(harness.state.session.status).toBe('open');
     }finally{harness.dispose();}
   });
@@ -136,20 +136,20 @@ it('workspace tool handoff does not reopen an already collapsed mobile panel',()
 it('workspace tool handoff removes its original event listener on cleanup',():void=>{
   const harness=mountToolEffect(390);
   harness.dispose();harness.notifyClose();
-  expect(harness.state).toMatchObject({collapsed:false,imageEditorOpen:true,videoPanelOpen:true});
+  expect(harness.state).toMatchObject({collapsed:false,imageEditorOpen:true});
 });
 it('workspace tool handoff ignores the existing close notification',():void=>{
   const harness=mountToolEffect(390);
   try{
     harness.notifyClose();
-    expect(harness.state).toMatchObject({collapsed:false,imageEditorOpen:false,videoPanelOpen:false});
+    expect(harness.state).toMatchObject({collapsed:false,imageEditorOpen:false});
   }finally{harness.dispose();}
 });
 it('workspace tool handoff does not collapse a panel when tool selection is rejected',():void=>{
   const harness=mountToolEffect(390);
   try{
     expect(harness.openTool('erase','image-toolbar')).toBe(false);
-    expect(harness.state).toMatchObject({collapsed:false,imageEditorOpen:true,videoPanelOpen:true});
+    expect(harness.state).toMatchObject({collapsed:false,imageEditorOpen:true});
     expect(harness.state.session.status).toBe('closed');
   }finally{harness.dispose();}
 });

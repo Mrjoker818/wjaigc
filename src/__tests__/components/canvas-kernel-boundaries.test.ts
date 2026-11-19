@@ -53,7 +53,7 @@ describe('canvas kernel component boundaries', () => {
 
     expect(boundaries.infiniteCanvas).toContain('<CanvasSurface');
     expect(boundaries.infiniteCanvas).toContain('<CanvasToolHost');
-    expect(boundaries.workspace).toContain('VideoGenerationPanel');
+    expect(boundaries.workspace).toContain('<DramaWorkbench');
     expect(boundaries.workspace).toContain('VectorDesignPanel');
   });
 

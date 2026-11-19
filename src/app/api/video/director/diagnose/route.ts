@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { diagnoseFailure, listFailureTypes } from '@/lib/video-director';
+import { diagnoseFailure, listFailureTypes } from '@/lib/video-director/retake-diagnosis';
 
 export async function POST(req: NextRequest) {
   try {

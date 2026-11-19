@@ -1,5 +1,6 @@
-/** One implementation of per-shot generation, shared by the drama workbench and the canvas video panel. */
+/** One implementation of per-shot generation for the drama workbench. */
 import { DIRECTOR_STYLES, normalizeDirectorStyle } from '@/lib/video-director/director-styles';
+import { shotLanguageText } from './shot-language';
 import { stripMentions } from './mentions';
 import { activeTake, type DramaCastMember, type DramaLocation, type DramaProjectV1, type DramaProp, type DramaShot, type DramaTake } from './types';
 
@@ -194,6 +195,7 @@ export function buildShotGenerateRequest(context: ShotRequestContext): Record<st
   const characterReferences = shotReferenceImages(shot, doc.cast, capability, [context.firstFrameUrl, context.lastFrameUrl], doc.props);
   const prompt = [
     stripMentions(shot.directedPrompt || shot.prompt, doc),
+    shotLanguageText(shot),
     shot.dialogue ? `台词：「${shot.dialogue}」` : '',
     shotContinuityText(doc, shot, context.previous, context.firstFrameSource),
   ].filter(Boolean).join('\n');
@@ -212,9 +214,6 @@ export function buildShotGenerateRequest(context: ShotRequestContext): Record<st
     ...(context.quality ? { quality: context.quality } : {}),
     ...(context.resolution ? { resolution: context.resolution } : {}),
     generateAudio: context.generateAudio ?? Boolean(shot.dialogue || shot.audioCues),
-    // The prompt above is complete; the route's director wrapper would add text written for a language model.
-    useDirector: false,
-    directorMode: doc.style,
     shotId: shot.id,
     ...(context.projectId ? { projectId: context.projectId } : {}),
   };

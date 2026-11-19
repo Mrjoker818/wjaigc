@@ -10,12 +10,7 @@ import OhMyPrompt from '@/components/oh-my-prompt';
 import { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo, type CSSProperties } from 'react';
 import dynamic from 'next/dynamic';
 import { getResumedTaskPollingOutcome, RESUMED_TASK_MAX_POLL_ATTEMPTS, shouldStartResumedTaskPolling } from '@/lib/resumed-task-polling';
-import { hasDirectVideoPollingTimedOut } from '@/lib/video-task-polling';
-import {
-  buildCompletedVideoCanvasMedia,
-  buildVideoFailureProcessing,
-  createVideoRetryPayload,
-} from '@/lib/video-processing-state';
+import { buildCompletedVideoCanvasMedia } from '@/lib/video-processing-state';
 import {
   applyCanvasTaskEventToProcessingPlaceholders,
   applyGenerationSlotsToProcessingPlaceholders,
@@ -40,7 +35,6 @@ import {
   type RecoverableLegacyTask,
 } from '@/lib/legacy-task-recovery';
 import type { CanvasImage, ImageGroup, AnnotationExecutionContext } from '@/components/infinite-canvas';
-import type { DramaProjectV1 } from '@/lib/drama/types';
 import { readAnnotationCanonicalReference } from '@/features/annotations/annotation-task-client';
 import { PresenceIndicator } from '@/components/collaboration/presence-indicator';
 import { createLatestProjectLoadGate } from '@/lib/collaboration/project-load-gate';
@@ -80,7 +74,6 @@ import { createAutoConnection, type ConnectionRelationType } from '@/lib/canvas-
 import type { GenerationParams, CtrlRefSelection } from '@/components/generation-panel';
 import { useTaskModelCatalog } from '@/hooks/use-task-model-catalog';
 import { useWorkspaceTheme } from '@/hooks/use-workspace-theme';
-import type { VideoGenerationPanelHandle } from '@/components/video-generation-panel';
 import type { QuickCreateCompileViewState, QuickCreateRequest } from '@/components/quick-create-panel';
 import type { VectorDesignAsset } from '@/components/vector-design/vector-editor-dialog';
 import {
@@ -176,7 +169,7 @@ import {
 import { parseSimpleChatWorkspaceHandoffIntent, type SimpleChatWorkspaceHandoffIntent } from '@/lib/simple-chat-workspace-handoff';
 import { dramaIdFromSearch, isWorkspacePath, platformsForUser, workspaceAddress, workspaceModeForPath } from '@/lib/platform-routes';
 import { PlatformSwitcher } from '@/components/platform/platform-switcher';
-import { toStableImageUrl, awaitStableImageUrl } from '@/lib/stable-image-url';
+import { toStableImageUrl } from '@/lib/stable-image-url';
 import { APP_FULL_VERSION_LABEL, APP_NAME } from '@/config/app-meta';
 import { fetchSessionPayload, resolveSessionUser } from '@/lib/auth-session';
 import {
@@ -214,7 +207,6 @@ import {
 // Heavy components — lazy-loaded to keep initial JS bundle small.
 const InfiniteCanvas = dynamic(() => import('@/components/infinite-canvas').then(m => m.InfiniteCanvas), { loading: () => null });
 const GenerationPanel = dynamic(() => import('@/components/generation-panel').then(m => m.GenerationPanel), { loading: () => null });
-const VideoGenerationPanel = dynamic(() => import('@/components/video-generation-panel'), { loading: () => null });
 const ImagePreview = dynamic(() => import('@/components/image-preview').then(m => m.ImagePreview), { loading: () => null });
 const ChatPanel = dynamic(() => import('@/components/chat-panel').then(m => m.ChatPanel), { loading: () => null });
 const QuickCreatePanel = dynamic(() => import('@/components/quick-create-panel').then(m => m.QuickCreatePanel), { loading: () => null });
@@ -1263,24 +1255,12 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
   const [showImageEditor, setShowImageEditor] = useState(false);
   const [editingImage, setEditingImage] = useState<CanvasImage | null>(null);
 
-  // Floating video panel state
-  const [showVideoPanel, setShowVideoPanel] = useState(false);
-  const [externalVideoPrompt, setExternalVideoPrompt] = useState<string>();
-  const [externalVideoMode, setExternalVideoMode] = useState<'generate' | 'extend'>('generate');
-
-  useEffect(() => {
-    const openVideoPanel = () => {
-      setShowImageEditor(false);
-      setShowVideoPanel(true);
-    };
-    window.addEventListener('wujie:open-video-panel', openVideoPanel);
-    return () => window.removeEventListener('wujie:open-video-panel', openVideoPanel);
-  }, []);
+  // An idea typed on the canvas before opening the drama workbench; it fills the "start from one sentence" form.
+  const [dramaIdea, setDramaIdea] = useState<string>();
 
   useEffect(() => {
     const closeExternalToolPanels = () => {
       setShowImageEditor(false);
-      setShowVideoPanel(false);
     };
     window.addEventListener('wujie:canvas-tool-opened', closeExternalToolPanels);
     return () => window.removeEventListener('wujie:canvas-tool-opened', closeExternalToolPanels);
@@ -1813,8 +1793,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
     }
   }, [resolveCanvasImageForChat]);
 
-  const videoPanelRef = useRef<VideoGenerationPanelHandle>(null);
-  const shotTaskIdMapRef = useRef<Map<string, string>>(new Map());
   const groupsRef = useRef<ImageGroupData[]>([]);
   const [annotationRevision, setAnnotationRevision] = useState(0);
 
@@ -4841,22 +4819,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
     }
   }, [captureVideoToolInsertion]);
 
-  // 视频面板的分镜保存为剧本草稿，再切到短剧工作台打开
-  const handleSendToDrama = useCallback(async (draft: DramaProjectV1): Promise<void> => {
-    const response = await fetch('/api/drama/projects', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ doc: draft, ...(currentProjectRef.current?.id ? { projectId: currentProjectRef.current.id } : {}) }),
-    });
-    const data = await response.json().catch(() => ({})) as { project?: { id?: unknown }; error?: unknown };
-    if (!response.ok || typeof data.project?.id !== 'string') {
-      throw new Error(typeof data.error === 'string' && data.error ? data.error : '剧本草稿保存失败，请稍后重试');
-    }
-    setActiveDramaId(data.project.id);
-    setShowVideoPanel(false);
-    toast.success('剧本草稿已保存', { description: '正在打开短剧工作台' });
-    safeSwitchMode('drama');
-  }, [safeSwitchMode]);
-
   useEffect(() => {
     if (appMode !== 'canvas' || !pendingCanvasFilm) return;
     const film = pendingCanvasFilm;
@@ -5686,499 +5648,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
     activePreviewRef.current = instance;
     setPreviewState(instance);
   }, [previewScope]);
-
-  // 视频生成处理
-  const handleVideoGenerate = useCallback(async (params: {
-    prompt: string;
-    model: string;
-    imageUrl?: string;
-    mode: 'text2video' | 'image2video-first' | 'image2video-firstlast' | 'image2video-ref' | 'video-extend' | 'multi-shot';
-    aspectRatio: string;
-    duration: number;
-    quality: string;
-    videoUrl?: string;
-    extendDuration?: number;
-    generateAudio?: boolean;
-    providerId?: string;
-    firstFrameUrl?: string;
-    lastFrameUrl?: string;
-    referenceImages?: string[];
-    resolution?: string;
-    // 新增高级参数
-    cameraControl?: { type: string; angle?: number; speed?: number };
-    motionBrush?: { maskDataUrl: string; trajectories: Array<{ startX: number; startY: number; endX: number; endY: number; speed?: number }> };
-    characterReferences?: string[];
-    motionStrength?: number;
-    seed?: number;
-    negativePrompt?: string;
-    // 导演增强
-    useDirector?: boolean;
-    directorStyle?: string;
-    compiledPrompt?: string;
-    compiledNegative?: string;
-    shotPlan?: unknown[];
-    shotId?: string;
-    shotIndex?: number;
-    directorMode?: boolean;
-    directorIntent?: string;
-    _vgenReqId?: string;
-  }) => {
-    const actorId = currentUserRef.current?.id;
-    const projectId = currentProjectRef.current?.id;
-    const authority = collaborativeCanvasRef.current;
-    const epoch = historyTransitionEpochRef.current;
-    const documentMode = authority?.projectId === projectId && authority?.authority === 'document';
-    const authorityKind = authority?.authority;
-    const historyGeneration = authority?.recordMediaHistory;
-    const refreshGeneration = authority?.refreshMedia;
-    const isCurrentVideoScope = (): boolean => !!actorId && !!projectId && isMountedRef.current
-      && currentUserRef.current?.id === actorId && currentProjectRef.current?.id === projectId
-      && historyProjectIdRef.current === projectId && historyTransitionEpochRef.current === epoch
-      && collaborativeCanvasRef.current?.projectId === projectId
-      && collaborativeCanvasRef.current?.authority === authorityKind
-      && collaborativeCanvasRef.current?.recordMediaHistory === historyGeneration
-      && collaborativeCanvasRef.current?.refreshMedia === refreshGeneration && !historyLifecyclePendingRef.current
-      && !isDocumentHistoryRecoveryPending();
-    const assertVideoScope = (): void => {
-      if (!isCurrentVideoScope()) throw new Error('视频生成作用域已失效');
-    };
-    const assertVideoWritable = (): void => {
-      assertVideoScope();
-      if (documentMode ? !collaborativeCanvasRef.current?.isWritable() : authorityKind !== 'legacy') {
-        throw new Error('当前画布不可提交视频任务');
-      }
-    };
-    assertVideoWritable();
-    const setVideoImages: typeof setImages = update => {
-      if (!isCurrentVideoScope() || documentMode) return false;
-      return setImages(update);
-    };
-    const videoFetch: typeof fetch = async (...args) => {
-      assertVideoScope();
-      const response = await fetch(...args);
-      assertVideoScope();
-      const json = response.json.bind(response);
-      response.json = async () => { const value: unknown = await json(); assertVideoScope(); return value; };
-      return response;
-    };
-    const managedVideoFrames = new Map<string, CanvasImage>();
-    const bindVideoRequest = (body: Record<string, unknown>): Record<string, unknown> => {
-      assertVideoWritable();
-      if (!documentMode) return { ...body, projectId };
-      const urls = [body.imageUrl, body.lastFrameImageUrl, body.videoUrl,
-        ...(Array.isArray(body.referenceImages) ? body.referenceImages : []),
-        ...(Array.isArray(body.characterReferences) ? body.characterReferences : [])]
-        .filter((value): value is string => typeof value === 'string' && !!value);
-      const sources = [...new Set(urls)].map(url => {
-        const candidates = managedVideoFrames.has(url) ? [managedVideoFrames.get(url)!] : latestImagesRef.current;
-        const matches = candidates.filter(image =>
-          (image.url === url || image.videoUrl === url) && image.assetVersionId && image.placementId);
-        if (matches.length !== 1) throw new Error('视频来源尚未取得权威版本身份');
-        return matches[0];
-      });
-      return { ...body, projectId, assetWorkspace: 'canvas', assetWorkspaceId: projectId,
-        assetParentVersionIds: [...new Set(sources.map(source => source.assetVersionId!))],
-        assetSelectedEntityIds: [...new Set(sources.map(source => source.id))] };
-    };
-    const confirmDocumentVideo = async (taskId: string): Promise<CanvasImage> => {
-      assertVideoScope();
-      if (!documentMode || !authority || !actorId || !projectId) throw new Error('视频文档身份未就绪');
-      const response = await videoFetch('/api/video/generate', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-wujie-expected-actor-id': actorId },
-        body: JSON.stringify({ action: 'publish-canvas-task', taskId, projectId }),
-      });
-      const receipt = await response.json();
-      if (!response.ok || !receipt.success || receipt.projectId !== projectId || receipt.taskId !== taskId
-        || !Number.isSafeInteger(receipt.documentSequence) || receipt.documentSequence < 0
-        || !receipt.placementId || !receipt.assetVersionId || receipt.assetReference?.kind !== 'video'
-        || receipt.assetReference.placementId !== receipt.placementId
-        || receipt.assetReference.assetVersionId !== receipt.assetVersionId) throw new Error(receipt.error || '视频发布未获权威确认');
-      const media = await authority.refreshMedia({ projectId, documentSequence: receipt.documentSequence, requireDirectorySequence: true });
-      assertVideoWritable();
-      const matches = media.filter(image => image.id === receipt.assetReference.entityId
-        && image.assetId === receipt.assetReference.assetId && image.assetVersionId === receipt.assetVersionId
-        && image.placementId === receipt.placementId && image.mediaType === 'video'
-        && image.videoUrl === receipt.assetReference.url && [image.width, image.height, image.originalWidth, image.originalHeight]
-          .every(value => typeof value === 'number' && Number.isFinite(value) && value > 0));
-      if (matches.length !== 1) throw new Error('视频权威目录读回不完整');
-      let placementId: string = receipt.placementId;
-      let removalOperationId: string | undefined;
-      let restorationOperationId: string | undefined;
-      let annotationIds: Record<string, string> | undefined;
-      const boundary = { actorId, projectId, storage: localStorage, locks: navigator.locks,
-        isCurrent: isCurrentVideoScope, refreshMedia: authority.refreshMedia };
-      authority.recordMediaHistory({
-        undo: async (): Promise<void> => {
-          assertVideoWritable();
-          removalOperationId ??= crypto.randomUUID();
-          const item = await runDocumentHistoryCommand({ ...boundary, operationId: removalOperationId,
-            command: { action: 'remove', placementId, expectedAssetVersionId: receipt.assetVersionId } });
-          assertVideoWritable();
-          if (item.state !== 'confirmed' || !item.receipt?.removeSnapshot) throw new Error('视频撤回未确认');
-          restorationOperationId = undefined; annotationIds = undefined;
-        },
-        redo: async (): Promise<void> => {
-          assertVideoWritable();
-          if (!removalOperationId) throw new Error('视频恢复缺少撤回身份');
-          restorationOperationId ??= crypto.randomUUID();
-          const input = { ...boundary, operationId: restorationOperationId, removalOperationId, annotationIds };
-          const restored = await runDocumentHistoryRestoration(input); assertVideoScope();
-          annotationIds = restored.annotationIds;
-          const nextPlacementId = restored.item.receipt!.placementId;
-          const binding = { previousPlacementId: placementId, nextPlacementId, assetVersionId: receipt.assetVersionId,
-            ...(restored.item.command.action === 'attach' && restored.item.command.name !== undefined ? { nameRestoredOnAttach: true as const } : {}),
-            removal: { projectId, snapshot: restored.removalSnapshot, annotationIds: restored.annotationIds } };
-          authority.restorePlacementHistoryMetadata(binding);
-          const documentSequence = await authority.waitForPendingUpdates(); assertVideoScope();
-          await confirmDocumentHistoryRestorationMetadata({ ...input, annotationIds, documentSequence }); assertVideoWritable();
-          authority.rebindPlacementHistory(binding);
-          placementId = nextPlacementId; removalOperationId = undefined;
-        },
-      });
-      assertVideoWritable();
-      return matches[0];
-    };
-    const markVideoPlaceholderFailed = (
-      placeholderId: string,
-      message: string | null | undefined,
-      label = '视频生成失败',
-    ) => {
-      if (!isCurrentVideoScope()) return;
-      setVideoImages(prev => prev.map((image): CanvasImage => (
-        image.id === placeholderId
-          ? {
-            ...image,
-            isProcessingPlaceholder: true,
-            processing: buildVideoFailureProcessing(image.processing, message, label),
-          }
-          : image
-      )));
-    };
-
-    // A first frame the panel extracted from the previous shot is not on the canvas yet. In document
-    // mode every source needs an authoritative version, so adopt it as a managed canvas image first.
-    // Returns the URL to submit: the managed copy's URL, or the input when no adoption is needed.
-    const adoptDocumentFrame = async (url: string): Promise<string> => {
-      if (!documentMode || !authority || !actorId || !projectId) return url;
-      if (latestImagesRef.current.some(image => (image.url === url || image.videoUrl === url) && image.assetVersionId && image.placementId)) return url;
-      const frameResponse = await videoFetch(url);
-      if (!frameResponse.ok) throw new Error('首帧图片读取失败');
-      const mime = frameResponse.headers.get('content-type')?.split(';')[0];
-      if (!mime || !mime.startsWith('image/')) throw new Error('首帧不是图像');
-      const bytes = await frameResponse.arrayBuffer(); assertVideoWritable();
-      const file = new File([bytes], 'video-first-frame.png', { type: mime });
-      const previewUrl = URL.createObjectURL(file);
-      let dimensions: { width: number; height: number };
-      try { dimensions = await loadCanvasImageSize(previewUrl); }
-      finally { URL.revokeObjectURL(previewUrl); }
-      assertVideoWritable();
-      const display = getCanvasImageDisplaySize(dimensions.width, dimensions.height);
-      let confirmed: CanvasImage | undefined;
-      await commitDocumentCanvasFile({ file, expectedActorId: actorId, projectId,
-        isCurrentProject: isCurrentVideoScope,
-        isWritableProject: () => isCurrentVideoScope() && !!collaborativeCanvasRef.current?.isWritable(),
-        transform: { x: 0, y: 0, width: display.width, height: display.height, rotation: 0,
-          zIndex: Math.max(0, ...latestImagesRef.current.map(image => image.zIndex ?? 0)) + 1 },
-        refreshMedia: async (documentSequence, receipt): Promise<void> => {
-          assertVideoScope();
-          const media = await authority.refreshMedia({ projectId, documentSequence, requireDirectorySequence: true });
-          assertVideoScope();
-          confirmed = media.find(image => image.id === receipt.assetReference.entityId
-            && image.assetId === receipt.assetReference.assetId && image.placementId === receipt.placementId
-            && image.assetVersionId === receipt.assetVersionId && image.url === receipt.assetReference.url
-            && receipt.assetReference.kind === 'image');
-          if (!confirmed) throw new Error('首帧权威读回不完整');
-        } });
-      assertVideoWritable();
-      if (!confirmed) throw new Error('首帧未受控采纳');
-      managedVideoFrames.set(confirmed.url, confirmed);
-      return confirmed.url;
-    };
-
-    setActiveGenerationCount(prev => prev + 1);
-
-    const placeholderBaseSize = 400;
-    const aspectRatio = params.aspectRatio || '16:9';
-    const [arW, arH] = aspectRatio.split(':').map(Number);
-    const arRatio = (arW || 16) / (arH || 9);
-    const phWidth = arRatio >= 1 ? placeholderBaseSize : Math.round(placeholderBaseSize * arRatio);
-    const phHeight = arRatio >= 1 ? Math.round(placeholderBaseSize / arRatio) : placeholderBaseSize;
-
-    const phId = `vid-ph-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const canvasEl = document.querySelector('[data-canvas-viewport]') as HTMLElement | null;
-    const viewportWidth = canvasEl ? canvasEl.clientWidth : 1200;
-    const viewportHeight = canvasEl ? canvasEl.clientHeight : 800;
-    let viewOffsetX = 0, viewOffsetY = 0, currentZoom = 1;
-    const transformLayer = canvasEl?.querySelector('[style*="transform"]') as HTMLElement | null;
-    if (transformLayer) {
-      const match = transformLayer.style.transform?.match(/translate\(([^,]+)px,\s*([^)]+)px\)\s*scale\(([^)]+)\)/);
-      if (match) { viewOffsetX = parseFloat(match[1]); viewOffsetY = parseFloat(match[2]); currentZoom = parseFloat(match[3]); }
-    }
-    const canvasCenterX = (viewportWidth / 2 - viewOffsetX) / currentZoom;
-    const canvasCenterY = (viewportHeight / 2 - viewOffsetY) / currentZoom;
-
-    setVideoImages(prev => [...prev, {
-      id: phId,
-      url: '',
-      x: canvasCenterX - phWidth / 2,
-      y: canvasCenterY - phHeight / 2,
-      width: phWidth, height: phHeight,
-      originalWidth: phWidth * 2, originalHeight: phHeight * 2,
-      isProcessingPlaceholder: true,
-      processing: {
-        label: params.mode === 'video-extend' ? '视频延长中' : '视频生成中',
-        status: 'submitting',
-        progress: 5,
-        startTime: Date.now(),
-        retryPayload: createVideoRetryPayload(params),
-      },
-      aspectRatio: params.aspectRatio,
-      model: params.model,
-      prompt: params.prompt,
-      createdAt: Date.now(),
-      mediaType: 'video' as const,
-    }]);
-
-    try {
-      // 视频延长使用 /api/video/extend，其他使用 /api/video/generate
-      const isExtend = params.mode === 'video-extend';
-      const apiEndpoint = isExtend ? '/api/video/extend' : '/api/video/generate';
-      const requestBody = isExtend ? {
-        videoUrl: params.videoUrl,
-        prompt: params.prompt,
-        model: params.model,
-        extendDuration: params.extendDuration || params.duration,
-        generateAudio: params.generateAudio,
-        providerId: params.providerId,
-        useDirector: params.useDirector,
-        directorStyle: params.directorStyle || params.directorMode,
-        negativePrompt: params.compiledNegative || params.negativePrompt,
-        cameraControl: params.cameraControl,
-        seed: params.seed,
-        directorIntent: params.directorIntent,
-      } : {
-        prompt: params.compiledPrompt || params.prompt,
-        model: params.model,
-        imageUrl: params.firstFrameUrl || params.imageUrl,
-        lastFrameImageUrl: params.lastFrameUrl,
-        referenceImages: params.referenceImages,
-        mode: params.mode,
-        aspectRatio: params.aspectRatio,
-        duration: params.duration,
-        quality: params.quality,
-        generateAudio: params.generateAudio,
-        providerId: params.providerId,
-        resolution: params.resolution,
-        cameraControl: params.cameraControl,
-        motionBrush: params.motionBrush,
-        characterReferences: params.characterReferences,
-        motionStrength: params.motionStrength,
-        seed: params.seed,
-        negativePrompt: params.compiledNegative || params.negativePrompt,
-        useDirector: params.useDirector,
-        directorMode: params.directorStyle || params.directorMode,
-        directorIntent: params.directorIntent,
-        shotId: params.shotId,
-        _vgenReqId: phId,
-      };
-
-      const firstFrameSource = params.firstFrameUrl || params.imageUrl;
-      const submitBody = !isExtend && firstFrameSource
-        ? { ...requestBody, imageUrl: await adoptDocumentFrame(firstFrameSource) }
-        : requestBody;
-      const res = await videoFetch(apiEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'idempotency-key': `canvas-video:${phId}`,
-          ...(documentMode ? { 'x-wujie-expected-actor-id': actorId! } : {}) },
-        body: JSON.stringify(bindVideoRequest(submitBody)),
-      });
-      const data = await res.json();
-      if (!res.ok || data.error) {
-        throw new Error(data.error || '视频生成提交失败');
-      }
-
-      const taskId = data.taskId;
-      if (params.shotId && taskId) {
-        shotTaskIdMapRef.current.set(params.shotId, taskId);
-      }
-      setVideoImages(prev => prev.map(img =>
-        img.id === phId ? {
-          ...img,
-          processing: { ...img.processing, status: 'processing' as const, progress: 10, taskId },
-        } as CanvasImage : img
-      ));
-
-      // 渐进式轮询视频任务（与图片生成一致，SSE加速 + 渐进间隔）
-      const videoPollStartTime = Date.now();
-      const pollVideoResult = async (attempt = 0): Promise<void> => {
-        // ★ 组件卸载后立即终止递归轮询
-        if (!isCurrentVideoScope()) return;
-        if (hasDirectVideoPollingTimedOut(attempt, Date.now() - videoPollStartTime)) {
-          markVideoPlaceholderFailed(phId, '已超过最大等待时间', '视频生成超时');
-          toast.error('视频生成超时', { description: '已超过最大等待时间', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
-          if (isCurrentVideoScope()) setActiveGenerationCount(prev => Math.max(0, prev - 1));
-          return;
-        }
-        // 渐进式间隔：1s → 1.5s → 2s → 3s（视频生成通常较慢，间隔不宜过短）
-        const getVideoPollInterval = (a: number) => {
-          if (a < 3) return 1000;    // 前3次：1秒（快速检测早期完成）
-          if (a < 8) return 1500;    // 3-8次：1.5秒
-          if (a < 20) return 2000;   // 8-20次：2秒
-          return 3000;               // 20次后：3秒
-        };
-
-        try {
-          // 首次轮询立即执行（不等待间隔），后续轮询SSE加速 + 渐进间隔
-          if (attempt > 0) {
-            // SSE加速：同时等待SSE事件和定时器，哪个先到用哪个
-            const ssePromise = new Promise<void>((resolve) => {
-              let resolved = false;
-              const handler = (event: { taskId?: string; task?: { status?: string } }) => {
-                if (event.taskId === taskId && !resolved) {
-                  resolved = true;
-                  unsub();
-                  resolve();
-                }
-              };
-              const unsub = taskEventsClient.onTaskEvent(handler);
-              // 5秒后移除监听，避免内存泄漏
-              setTimeout(() => {
-                if (!resolved) { resolved = true; unsub(); resolve(); }
-              }, 5000);
-            });
-
-            const pollPromise = (async () => {
-              const interval = getVideoPollInterval(attempt);
-              await new Promise(r => setTimeout(r, interval));
-            })();
-
-            await Promise.race([ssePromise, pollPromise]);
-          }
-
-          const pollRes = await videoFetch('/api/poll-task', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ taskId, model: params.model, providerId: params.providerId }),
-          });
-          const pollData = await pollRes.json();
-
-          if (pollData.status === 'completed') {
-            if (!isCurrentVideoScope()) return; // 组件已卸载，停止轮询
-            if (documentMode) {
-              const canonical = await confirmDocumentVideo(taskId);
-              assertVideoWritable();
-              try { UserManagerCore.getInstance().recordUsage('video'); } catch {}
-              if (params.shotId) videoPanelRef.current?.notifyShotVideoGenerated?.({
-                shotId: params.shotId, videoUrl: canonical.videoUrl!, thumbnailUrl: canonical.url,
-              });
-              setActiveGenerationCount(prev => Math.max(0, prev - 1));
-              return;
-            }
-            const rawVideoUrl = pollData.videoUrl || pollData.url;
-            const rawThumbnailUrl = pollData.videoThumbnailUrl || pollData.thumbnailUrl;
-            if (rawVideoUrl) {
-              // ★ 持久化远程URL到本地，防止过期后图片/视频消失
-              const [stableThumbnail, stableVideo] = await Promise.all([
-                rawThumbnailUrl
-                  ? awaitStableImageUrl(rawThumbnailUrl, 30000, { isVideo: false })
-                  : Promise.resolve(''),
-                awaitStableImageUrl(rawVideoUrl, 120000, { isVideo: true }),
-              ]);
-              const completedMedia = buildCompletedVideoCanvasMedia({
-                videoUrl: stableVideo || rawVideoUrl,
-                thumbnailUrl: stableThumbnail || rawThumbnailUrl || undefined,
-              });
-              if (!isCurrentVideoScope()) return; // 持久化期间组件可能卸载
-              setVideoImages(prev => prev.map(img =>
-                img.id === phId ? {
-                  ...img,
-                  ...completedMedia,
-                  videoDuration: params.duration,
-                  mediaType: 'video' as const,
-                  originalWidth: pollData.width || 1920,
-                  originalHeight: pollData.height || 1080,
-                  isProcessingPlaceholder: false,
-                  processing: undefined,
-                  prompt: params.prompt,
-                  modelName: params.model,
-                  apiProvider: params.providerId || undefined,
-                } as CanvasImage : img
-              ));
-              // Track video usage
-              try { UserManagerCore.getInstance().recordUsage('video'); } catch {}
-              // 通知视频面板回填镜头结果（用于多镜头尾帧接力串行流水线）
-              try {
-                const shotId = params.shotId;
-                if (shotId && videoPanelRef.current?.notifyShotVideoGenerated) {
-                  videoPanelRef.current.notifyShotVideoGenerated({
-                    shotId,
-                    videoUrl: stableVideo || rawVideoUrl,
-                    thumbnailUrl: stableThumbnail || rawThumbnailUrl || undefined,
-                  });
-                }
-              } catch {}
-            } else {
-              markVideoPlaceholderFailed(phId, '未获取到视频地址');
-              toast.error('视频生成失败', { description: '未获取到视频地址', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
-            }
-            if (isCurrentVideoScope()) setActiveGenerationCount(prev => Math.max(0, prev - 1));
-          } else if (pollData.status === 'failed') {
-            markVideoPlaceholderFailed(phId, pollData.error || '未知错误');
-            toast.error('视频生成失败', { description: pollData.error || '未知错误', className: themeStyle === 'monochrome' ? 'bg-white border border-gray-200 text-gray-900' : 'bg-[#141414] border-[#2a2a2a] text-white' });
-            if (isCurrentVideoScope()) setActiveGenerationCount(prev => Math.max(0, prev - 1));
-            // 通知视频面板：shot 失败（解开 waitForShotTask 的等待）
-            try {
-                const shotId = params.shotId;
-              if (shotId && videoPanelRef.current?.notifyShotVideoFailed) {
-                videoPanelRef.current.notifyShotVideoFailed({ shotId, error: pollData.error || '视频生成失败' });
-              }
-            } catch {}
-          } else {
-            // 更新进度，继续轮询
-            if (!isCurrentVideoScope()) return;
-            const progress = pollData.progress || 0;
-            setVideoImages(prev => prev.map(img =>
-              img.id === phId ? {
-                ...img,
-                processing: { ...img.processing, progress: Math.max(10, progress), status: 'processing' as const, label: pollData.label || '视频生成中' },
-              } as CanvasImage : img
-            ));
-            // 递归继续轮询
-            if (isCurrentVideoScope()) pollVideoResult(attempt + 1);
-          }
-        } catch {
-          // 轮询错误，继续尝试
-          if (isCurrentVideoScope()) pollVideoResult(attempt + 1);
-        }
-      };
-
-      // 立即开始第一次轮询（不等待间隔）
-      pollVideoResult(0);
-
-    } catch (err: unknown) {
-      if (!isCurrentVideoScope()) return;
-      const errorMsg = err instanceof Error ? err.message : '视频生成失败';
-      markVideoPlaceholderFailed(phId, errorMsg);
-      toast.error('视频生成失败', {
-        description: errorMsg,
-        className: themeStyle === 'monochrome'
-          ? 'bg-white border border-gray-200 text-gray-900'
-          : 'bg-[#141414] border-[#2a2a2a] text-white',
-      });
-      if (isCurrentVideoScope()) setActiveGenerationCount(prev => Math.max(0, prev - 1));
-    }
-  }, [setImages, themeStyle, isDocumentHistoryRecoveryPending]);
-
-  const handleRetryVideoProcessing = useCallback((image: CanvasImage) => {
-    const retryPayload = image.processing?.retryPayload;
-    if (!retryPayload) {
-      toast.error('无法重新生成', { description: '该任务没有可恢复的原始参数' });
-      return;
-    }
-
-    setImages(prev => prev.filter(candidate => candidate.id !== image.id));
-    void handleVideoGenerate(retryPayload);
-  }, [handleVideoGenerate, setImages]);
 
   const handleAnalyzeImage = useCallback(async (imageData: string): Promise<string> => {
     try {
@@ -7082,18 +6551,19 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
   // Language-based image editing handler
   const handleEditImage = useCallback((image: CanvasImage | null) => {
     window.dispatchEvent(new Event('wujie:close-canvas-tool-panels'));
-    setShowVideoPanel(false);
     setEditingImage(image);
     setShowImageEditor(true);
   }, []);
 
-  const handleOpenVideoPanel = useCallback((prompt?: string, mode: 'generate' | 'extend' = 'generate') => {
-    window.dispatchEvent(new Event('wujie:close-canvas-tool-panels'));
-    setShowImageEditor(false);
-    setExternalVideoPrompt(prompt?.trim() || undefined);
-    setExternalVideoMode(mode);
-    setShowVideoPanel(true);
-  }, []);
+  // Videos are made in the drama workbench; the canvas video entries open it and carry over a typed idea.
+  const handleOpenVideoWorkbench = useCallback((prompt?: string) => {
+    const idea = prompt?.trim();
+    if (idea) {
+      setDramaIdea(idea);
+      setActiveDramaId(null);
+    }
+    safeSwitchMode('drama');
+  }, [safeSwitchMode]);
 
   const handleOpenQuickProfessional = useCallback((prompt?: string): void => {
     if (prompt?.trim()) setExternalPrompt(prompt.trim());
@@ -7349,8 +6819,9 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
             : undefined}
           dramaId={activeDramaId}
           projectId={currentProject?.id}
-          onDramaIdChange={setActiveDramaId}
+          onDramaIdChange={id => { if (id) setDramaIdea(undefined); setActiveDramaId(id); }}
           onOpenDramaProject={setDramaProjectId}
+          initialIdea={dramaIdea}
           onExit={() => setAppMode('canvas')}
           // Without a loaded canvas project there is no canvas to place into.
           onPlaceOnCanvas={currentProject ? film => { setPendingCanvasFilm(film); setAppMode('canvas'); } : undefined}
@@ -7938,8 +7409,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
           connections={canvasConnections}
           onConnectionsChange={setCanvasConnections}
           versionHistoryManager={treeHistoryRef.current}
-          onOpenVideoPanel={handleOpenVideoPanel}
-          onRetryProcessing={handleRetryVideoProcessing}
+          onOpenVideoWorkbench={handleOpenVideoWorkbench}
         />
       </div>
       {ohMyPromptOpen && (
@@ -8148,7 +7618,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
                     onGenerate={handleQuickGenerate}
                     onOpenProfessional={handleOpenQuickProfessional}
                     onOpenChat={handleOpenQuickChat}
-                    onOpenVideo={handleOpenVideoPanel}
+                    onOpenVideo={handleOpenVideoWorkbench}
                   />
                 ) : createMode === 'vector' ? (
                   <VectorDesignPanel
@@ -8253,39 +7723,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
           handleEditImage(previewState.image);
         }}
       />
-
-      {/* Floating Video Generation Panel */}
-      {showVideoPanel && (
-        <VideoGenerationPanel
-          ref={videoPanelRef}
-          floating
-          onVideoGenerate={async (params) => {
-            await handleVideoGenerate(params);
-            return {};
-          }}
-          onAddImages={handleAddImagesFromUi}
-          onStoryVideoComposed={result => { void handleStoryVideoComposed(result); }}
-          onSendToDrama={handleSendToDrama}
-          onClose={() => setShowVideoPanel(false)}
-          externalPrompt={externalVideoPrompt}
-          externalPromptMode={externalVideoMode}
-          onExternalPromptConsumed={() => {
-            setExternalVideoPrompt(undefined);
-            setExternalVideoMode('generate');
-          }}
-          onError={(error: string) => {
-            toast.error('视频生成失败', {
-              description: error,
-              className: themeStyle === 'monochrome'
-                ? 'bg-white border border-gray-200 text-gray-900'
-                : 'bg-[#141414] border-[#2a2a2a] text-white',
-            });
-          }}
-          themeStyle={themeStyle}
-          selectedImageUrl={selectedImage?.mediaType !== 'video' ? selectedImage?.url : undefined}
-          selectedVideoUrl={selectedImage?.mediaType === 'video' ? selectedImage?.videoUrl : undefined}
-        />
-      )}
 
       {/* Toast */}
       <Toaster

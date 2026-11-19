@@ -16,6 +16,7 @@ import { useDrama } from './drama-context';
 import { DramaLibraryPicker } from './drama-library-picker';
 import { MentionTextarea } from './mention-textarea';
 import { ShotReadinessList } from './drama-readiness';
+import { PolishButton, ShotLanguageFields, usePromptPolish } from './drama-shot-language';
 
 const FIRST_FRAME_TEXT = {
   user: '首帧：这一镜的关键帧',
@@ -48,6 +49,12 @@ export function DramaInspector() {
 }
 
 function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => void }) {
+  const { doc } = useDrama();
+  const found = findShot(doc, shotId);
+  return found ? <InspectorFields found={found} onClose={onClose} /> : null;
+}
+
+function InspectorFields({ found, onClose }: { found: NonNullable<ReturnType<typeof findShot>>; onClose: () => void }) {
   const {
     doc, update, models, modelForShot, generateShots, runningShotIds, batchRunning, generateAudio,
     keyframeShotIds, generateKeyframes, imageModel, voiceoverShotIds, generateVoiceovers,
@@ -55,9 +62,8 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
   const [failure, setFailure] = useState<VideoFailureType | ''>('');
   const [uploading, setUploading] = useState<ReadonlySet<'first' | 'last'>>(() => new Set());
   const [picking, setPicking] = useState<'first' | 'last' | null>(null);
-  const found = findShot(doc, shotId);
-  if (!found) return null;
   const { shot, episode } = found;
+  const polish = usePromptPolish(shot);
   const model = modelForShot(shot);
   const previous = orderedPrevious(doc, episode.id, shot.id);
   const location = doc.locations.find(item => item.id === shot.sceneId);
@@ -94,11 +100,21 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
       <ShotReadinessList episodeId={episode.id} shot={shot} />
 
       <div className="flex flex-col gap-1">
-        <span className="drama-label" id="drama-prompt-label">画面提示词（输入 @ 引用角色或道具）</span>
+        <div className="flex items-center gap-2">
+          <span className="drama-label" id="drama-prompt-label">画面提示词（输入 @ 引用角色或道具）</span>
+          <span className="ml-auto"><PolishButton busy={polish.busy} onPolish={() => void polish.polish()} /></span>
+        </div>
         <MentionTextarea className="drama-input min-h-28 w-full resize-y" maxLength={8000} value={shot.prompt} ariaLabel="画面提示词"
           candidates={mentionCandidates(doc)}
-          onChange={prompt => update(current => updateShot(current, shot.id, item => ({ ...item, prompt, ...mergeMentionIds(item, prompt, current) })))} />
+          onChange={prompt => {
+            polish.dropUndo();
+            update(current => updateShot(current, shot.id, item => ({ ...item, prompt, directedPrompt: undefined, ...mergeMentionIds(item, prompt, current) })));
+          }} />
+        <p className="drama-label" aria-live="polite">
+          {polish.canUndo ? <>已按导演写法改写，并填好了下面的镜头语言。<button type="button" className="underline underline-offset-2" onClick={polish.restore}>恢复原来的</button></> : null}
+        </p>
       </div>
+      <ShotLanguageFields shot={shot} />
       <label className="flex flex-col gap-1">
         <span className="drama-label">台词</span>
         <textarea className="drama-input min-h-14 resize-y" maxLength={2000} value={shot.dialogue ?? ''} onChange={event => set({ dialogue: event.target.value })} />

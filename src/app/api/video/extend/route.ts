@@ -38,7 +38,6 @@ import {
   getVideoModelInfo,
   type VideoGenerateParams,
 } from '@/lib/video-api';
-import { buildDirectorPrompt, normalizeDirectorStyle } from '@/lib/video-director';
 import { recordVideoTaskRemotePolling, recordVideoTaskSubmitted } from '@/lib/cloud-task-persistence';
 import {
   chargeCloudTaskCredits,
@@ -153,9 +152,6 @@ export async function POST(request: NextRequest) {
       extendDuration = 5,
       generateAudio = false,
       providerId,
-      useDirector = true,
-      directorStyle,
-      directorMode,
       negativePrompt,
       cameraControl,
       seed,
@@ -251,52 +247,19 @@ export async function POST(request: NextRequest) {
     // 3.5 解析视频 URL（转换为第三方 API 可访问的格式：S3 预签名 / 签名公网链接 / 公网域名 / base64）
     const resolvedVideoUrl = await toProviderMediaUrl(videoUrl, { maxInlineBytes: 100 * 1024 * 1024 }) ?? videoUrl;
 
-    // 4. 构建请求参数（接入导演级提示词：本地规则增强，不依赖额外 LLM 调用）
+    // 4. 构建请求参数。这个接口不把运镜作为参数发给供应商，所以写进提示词。
     const safePrompt = rawPrompt && rawPrompt.trim() ? rawPrompt : '请延续视频内容和画面，保持角色和场景一致';
-    let finalPrompt = safePrompt;
-    let finalNegativePrompt = negativePrompt || '';
-    const resolvedStyle = normalizeDirectorStyle(directorStyle || directorMode);
-    if (useDirector !== false) {
-      try {
-        const directorMsg = buildDirectorPrompt({
-          userPrompt: safePrompt,
-          mode: 'extend',
-          modelId: pureModel,
-          model: pureModel,
-          duration: extendDuration,
-          audio: generateAudio,
-          style: resolvedStyle,
-          camera: typeof cameraControl === 'string' ? cameraControl : cameraControl?.type,
-          includeNegative: true,
-          verbosity: 'standard',
-        });
-        const guidance: string[] = ['从上一片段尾帧自然延续，保持角色外观、场景、光线、运动方向一致；避免突然跳切'];
-        if (cameraControl && typeof cameraControl !== 'string' && cameraControl.type) {
-          const camLabel: Record<string, string> = {
-            push_in: '缓慢推进', push_out: '缓慢拉出', pan_left: '左摇', pan_right: '右摇',
-            tilt_up: '上仰', tilt_down: '下俯', orbit_left: '左环绕', orbit_right: '右环绕',
-            zoom_in: '放大', zoom_out: '缩小', tracking: '跟拍', static: '静止机位',
-          };
-          guidance.push(`运镜：${camLabel[cameraControl.type] || cameraControl.type}`);
-        }
-        const directorSection = directorMsg.user || '';
-        finalPrompt = [
-          directorSection ? `【导演编排】\n${directorSection}` : '',
-          `【续写指导】${guidance.join('；')}。`,
-          `【内容要求】${safePrompt}`,
-        ].filter(Boolean).join('\n\n');
-        if (!finalNegativePrompt) {
-          finalNegativePrompt = 'blurry, distorted face, morphing identity, watermark, subtitle, text overlay, jitter, glitch, frame skip';
-        }
-        console.log(`[video/extend] Director enhance applied, style=${resolvedStyle}, promptLen=${finalPrompt.length}`);
-      } catch (e) {
-        console.warn('[video/extend] Director compile failed, using raw prompt:', e);
-      }
-    }
+    const cameraType = typeof cameraControl === 'string' ? cameraControl : cameraControl?.type;
+    const cameraLabel: Record<string, string> = {
+      push_in: '缓慢推进', push_out: '缓慢拉出', pan_left: '左摇', pan_right: '右摇',
+      tilt_up: '上仰', tilt_down: '下俯', orbit_left: '左环绕', orbit_right: '右环绕',
+      zoom_in: '放大', zoom_out: '缩小', tracking: '跟拍', static: '静止机位',
+    };
+    const finalPrompt = cameraType ? `${safePrompt}\n运镜：${cameraLabel[cameraType] || cameraType}` : safePrompt;
 
     const videoParams: VideoGenerateParams = {
       prompt: finalPrompt,
-      negativePrompt: finalNegativePrompt || undefined,
+      negativePrompt: negativePrompt || undefined,
       seed: typeof seed === 'number' ? seed : undefined,
       model: pureModel,
       videoUrl: resolvedVideoUrl,

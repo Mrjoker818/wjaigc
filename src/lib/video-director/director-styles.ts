@@ -1,4 +1,4 @@
-/** Single source of director styles shared by the video panel, director prompt and shot planner. */
+/** Single source of director styles shared by the drama planner, prompt polish and shot prompts. */
 export const DIRECTOR_STYLE_IDS = [
   'cinematic', 'documentary', 'commercial', 'music-video', 'anime',
   'minimal', 'realistic', 'vlog', 'artistic',
@@ -15,7 +15,7 @@ export interface DirectorStyleDefinition {
   hint: string;
   /** Shot-plan / story-asset style requirement. */
   planDescription: string;
-  /** LLM temperature for the director prompt. */
+  /** LLM temperature for prompt polish. */
   temperature: number;
   /** Rule-based fallback phrases when no LLM is configured. */
   rule: { opening: string; quality: string; mood: string };

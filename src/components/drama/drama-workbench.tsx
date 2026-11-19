@@ -35,6 +35,8 @@ export interface DramaWorkbenchProps {
   /** A message sent from simple chat; it is written into a new script draft once, then `onChatHandoffDone` clears it. */
   chatHandoff?: SimpleChatWorkspaceHandoffIntent | null;
   onChatHandoffDone?: () => void;
+  /** Idea typed on the canvas; it fills the "start from one sentence" form. */
+  initialIdea?: string;
 }
 
 type LoadState = { status: 'loading' } | { status: 'ready'; record: DramaProjectRecord } | { status: 'error'; message: string };
@@ -89,7 +91,7 @@ export default function DramaWorkbench(props: DramaWorkbenchProps) {
 }
 
 /** Empty state: start a new drama from one sentence, or reopen one of this canvas project's dramas. */
-function DramaStart({ projectId, onDramaIdChange, onExit, switcher, chatHandoff, onChatHandoffDone }: DramaWorkbenchProps) {
+function DramaStart({ projectId, onDramaIdChange, onExit, switcher, chatHandoff, onChatHandoffDone, initialIdea }: DramaWorkbenchProps) {
   const [projects, setProjects] = useState<DramaProjectSummary[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -180,7 +182,7 @@ function DramaStart({ projectId, onDramaIdChange, onExit, switcher, chatHandoff,
             <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />正在把对话内容写成分场剧本，约需 1 分钟
           </p>
         ) : null}
-        <DramaIdeaForm busy={busy} error={error} onGenerate={generate} onBlank={blank} />
+        <DramaIdeaForm key={initialIdea} busy={busy} error={error} initialIdea={initialIdea} onGenerate={generate} onBlank={blank} />
         <DramaAdaptForm busy={busy} progress={adaptProgress} onAdapt={adapt} />
         <section aria-labelledby="drama-import" className="drama-panel flex flex-col gap-3 p-4">
           <h2 id="drama-import" className="flex items-center gap-2 text-sm font-semibold"><FileArchive className="h-4 w-4" />导入制作包</h2>

@@ -5,8 +5,6 @@ import type {
   MotionBrushParams as VideoMotionBrushParams,
   MotionTrajectory,
 } from '../video-api';
-import type { VideoReferenceBinding as RefBinding } from './prompt-compiler';
-import type { FailureDiagnosis } from './retake-diagnosis';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -38,8 +36,18 @@ function parseJsonObject(text: string): JsonRecord {
 // 镜头状态
 export type ShotStatus = 'planned' | 'submitted' | 'generating' | 'completed' | 'ready' | 'failed' | 'accepted' | 'diagnosing';
 
-// 参考素材绑定（图、视频、音频）—— 复用 prompt-compiler 中的 VideoReferenceBinding
-export type { RefBinding as VideoReferenceBinding };
+// 参考素材绑定（图、视频、音频）
+export type VideoReferenceRole =
+  | 'identity' | 'character' | 'scene' | 'style' | 'composition' | 'motion' | 'camera' | 'lighting'
+  | 'first-frame' | 'last-frame' | 'audio' | 'reference';
+
+export interface VideoReferenceBinding {
+  id: string;
+  url: string;
+  role: VideoReferenceRole;
+  label?: string;
+  weight?: number;
+}
 
 // 兼容旧字段名：前端期望 cameraMove/camera/thumbnailUrl/videoUrl
 export interface VideoShotPlan {
@@ -65,7 +73,7 @@ export interface VideoShotPlan {
   firstFrameFromPrev?: boolean; // 是否从上一镜头尾帧取首帧
   duration: number;
   aspectRatio: string;
-  references: RefBinding[];
+  references: VideoReferenceBinding[];
   continuityNotes: string[];
   /** 该镜头的拍摄环境/场景描述（供场景图生成使用） */
   setting?: string;
@@ -205,18 +213,6 @@ export interface VideoProp {
   error?: string;
 }
 
-export interface ShotPlanInput {
-  storyIdea: string;
-  shotCount?: number; // 默认 3-5
-  duration?: number;
-  aspectRatio?: string;
-  style?: DirectorStyle;
-  characters?: string;
-  setting?: string;
-  model?: string;
-  withAssets?: boolean; // 是否额外生成 characters[] + scenes[] 设计稿
-}
-
 // === 多镜头续写状态工具 ===
 
 export function initShotFromPlan(
@@ -256,23 +252,6 @@ export function initShotFromPlan(
     retakeCount: plan.retakeCount ?? 0,
     endState: plan.endState,
   };
-}
-
-// 基于上一镜头结尾状态，构建下一镜头的首帧描述提示词
-export function buildNextShotFirstFramePrompt(prev: VideoShotPlan): string {
-  const st = prev.endState;
-  if (!st) return '';
-  const parts: string[] = [];
-  if (st.characterPose) parts.push(`人物姿态：${st.characterPose}`);
-  if (st.characterExpression) parts.push(`表情：${st.characterExpression}`);
-  if (st.characterCostume) parts.push(`服装：${st.characterCostume}`);
-  if (st.sceneState) parts.push(`场景状态：${st.sceneState}`);
-  if (st.lightingState) parts.push(`光线：${st.lightingState}`);
-  if (st.cameraFinalPosition) parts.push(`机位：${st.cameraFinalPosition}`);
-  if (st.objectPositions?.length) parts.push(`道具：${st.objectPositions.join('；')}`);
-  if (st.unresolvedActions) parts.push(`未完成动作：${st.unresolvedActions}`);
-  if (st.mood) parts.push(`情绪延续：${st.mood}`);
-  return parts.join('；');
 }
 
 // === 分镜规划 AI 交互消息构建 ===
@@ -419,51 +398,6 @@ export function buildShotPlanSystemPrompt(
 }`;
 }
 
-export function buildShotPlanUserMessage(input: ShotPlanInput): string {
-  const lines: string[] = [];
-  lines.push(`故事梗概：${input.storyIdea}`);
-  if (input.characters) lines.push(`角色：${input.characters}`);
-  if (input.setting) lines.push(`场景设定：${input.setting}`);
-  if (input.duration) lines.push(`单镜头默认时长：${input.duration}秒`);
-  if (input.aspectRatio) lines.push(`画面比例：${input.aspectRatio}`);
-  if (input.shotCount) lines.push(`期望镜头数：${input.shotCount}`);
-  lines.push('请按 system 要求拆分为结构化分镜并输出 JSON。');
-  return lines.join('\n');
-}
-
-export function parseShotPlanResponse(text: string, defaultDuration = 5, defaultAspectRatio = '16:9'): VideoShotPlan[] {
-  // 去除 markdown 代码块
-  let cleaned = text.trim();
-  const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenceMatch) cleaned = fenceMatch[1].trim();
-  if (!cleaned.includes('{')) return [];
-  try {
-    const obj = parseJsonObject(cleaned);
-    const shots = asJsonRecords(obj.shots);
-    return shots.map((s, i) =>
-      initShotFromPlan({
-        id: `shot-${Date.now()}-${i}`,
-        index: i,
-        title: String(s.title ?? `镜头 ${i + 1}`).slice(0, 20),
-        purpose: String(s.purpose ?? ''),
-        shotSize: String(s.shotSize ?? 'medium'),
-        cameraMotion: String(s.cameraMotion ?? 'static'),
-        actionBeat: String(s.actionBeat ?? ''),
-        lighting: String(s.lighting ?? ''),
-        audioCues: String(s.audioCues ?? ''),
-        prompt: String(s.prompt ?? ''),
-        duration: Number(s.duration) || defaultDuration,
-        aspectRatio: String(s.aspectRatio ?? defaultAspectRatio),
-        continuityNotes: asStrings(s.continuityNotes),
-        firstFrameFromPrev: i > 0,
-        status: 'planned',
-      }),
-    );
-  } catch {
-    return [];
-  }
-}
-
 export interface ShotPlanResult {
   shots: VideoShotPlan[];
   characters: VideoCharacter[];
@@ -517,22 +451,6 @@ export function parseShotPlanFullResponse(text: string, defaultDuration = 5, def
   return { shots, characters, scenes, props, totalDuration };
 }
 
-/** 从分镜 LLM 响应中解析角色列表（兼容旧版：appearancePrompt/visualPrompt 等别名） */
-export function parseShotPlanCharacters(text: string): VideoCharacter[] {
-  let cleaned = text.trim();
-  const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenceMatch) cleaned = fenceMatch[1].trim();
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  if (start < 0 || end < 0) return [];
-  try {
-    const obj = parseJsonObject(cleaned);
-    return parseShotPlanCharactersFromObj(obj, Date.now());
-  } catch {
-    return [];
-  }
-}
-
 function parseShotPlanCharactersFromObj(obj: JsonRecord, ts: number): VideoCharacter[] {
   const arr = asJsonRecords(obj.characters);
   return arr.map((c, i) => {
@@ -572,15 +490,6 @@ function parseShotPlanCharactersFromObj(obj: JsonRecord, ts: number): VideoChara
       error: undefined,
     };
   });
-}
-
-/** 从分镜 LLM 响应中解析场景列表（兼容旧版） */
-export function parseShotPlanScenes(text: string, shots: VideoShotPlan[]): VideoScene[] {
-  let cleaned = text.trim();
-  const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenceMatch) cleaned = fenceMatch[1].trim();
-  const obj = parseJsonObject(cleaned);
-  return parseShotPlanScenesFromObj(obj, shots, Date.now());
 }
 
 function parseShotPlanScenesFromObj(obj: JsonRecord, shots: VideoShotPlan[], ts: number): VideoScene[] {
@@ -637,15 +546,6 @@ function parseShotPlanScenesFromObj(obj: JsonRecord, shots: VideoShotPlan[], ts:
   });
 }
 
-/** 从分镜 LLM 响应中解析道具列表 */
-export function parseShotPlanProps(text: string, shots: VideoShotPlan[]): VideoProp[] {
-  let cleaned = text.trim();
-  const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenceMatch) cleaned = fenceMatch[1].trim();
-  const obj = parseJsonObject(cleaned);
-  return parseShotPlanPropsFromObj(obj, shots, Date.now());
-}
-
 function parseShotPlanPropsFromObj(obj: JsonRecord, shots: VideoShotPlan[], ts: number): VideoProp[] {
   const arr: JsonRecord[] = asJsonRecords(obj.props);
   // 从 scenes[].keyProps 派生兜底 props
@@ -698,141 +598,4 @@ function parseShotPlanPropsFromObj(obj: JsonRecord, shots: VideoShotPlan[], ts: 
       error: undefined,
     };
   });
-}
-
-// === 连续性账本与尾帧续写（保留骨架，供后续扩展） ===
-
-export interface ContinuityLedger {
-  projectId?: string;
-  shots: VideoShotPlan[];
-  globalRefs: RefBinding[];
-}
-
-export function createContinuityLedger(): ContinuityLedger {
-  return { shots: [], globalRefs: [] };
-}
-
-export function recordShotEndState(_shot: VideoShotPlan, _state: ShotContinuityState): VideoShotPlan {
-  // 简单占位：未来接入多模态模型自动分析尾帧状态
-  return { ..._shot, endState: _state };
-}
-
-export function buildContinuationPrompt(prev: VideoShotPlan, nextUserIdea: string): string {
-  const parts: string[] = [];
-  parts.push('【上一镜头结尾状态】');
-  parts.push(buildNextShotFirstFramePrompt(prev) || '（无记录）');
-  parts.push('');
-  parts.push('【下一镜头需求】');
-  parts.push(nextUserIdea);
-  parts.push('');
-  parts.push('请从首帧衔接上一镜头结尾，保持角色服装/光线/运动方向一致。');
-  return parts.join('\n');
-}
-
-// === 制片资产生成 Planner（/api/story-assets/plan） ===
-
-export interface StoryAssetsPlanRequest {
-  storyIdea: string;
-  shots: VideoShotPlan[];
-  characters?: VideoCharacter[];
-  scenes?: VideoScene[];
-  props?: VideoProp[];
-  style?: DirectorStyle;
-  aspectRatio?: string;
-}
-
-export interface StoryAssetGenTask {
-  id: string;
-  type: 'character-front' | 'character-side' | 'scene' | 'prop';
-  name: string;
-  targetId?: string;
-  prompt: string;
-  negativePrompt?: string;
-  aspectRatio?: string;
-  referenceUrls?: string[];
-}
-
-export interface StoryAssetsPlanResult {
-  prompts: StoryAssetGenTask[];
-  totalImages: number;
-}
-
-export function buildStoryAssetsPrompt(req: StoryAssetsPlanRequest): string {
-  const { storyIdea, shots, characters = [], scenes = [], props = [], style = 'cinematic' } = req;
-  const styleDesc = shotPlanStyleDescription(style);
-  return `你是电影美术指导与制片资产生成顾问。根据故事梗概、分镜、已有角色/场景/道具清单，输出需要用 AI 图像生成的资产任务列表（prompts[]）。
-
-【故事梗概】
-${storyIdea}
-
-【风格要求】${styleDesc}
-
-【已有分镜】
-${JSON.stringify(shots.map(s => ({
-  id: s.id, title: s.title, prompt: s.prompt, shotSize: s.shotSize,
-  cameraMotion: s.cameraMotion, setting: s.setting, lighting: s.lighting, characterIds: s.characterIds, sceneId: s.sceneId, propIds: s.propIds,
-})), null, 2)}
-
-【已有角色（缺 imageUrlFront / imageUrlSide 的需要生成）】
-${JSON.stringify(characters.map(c => ({
-  id: c.id, name: c.name, age: c.age, gender: c.gender, appearance: c.appearance,
-  costume: c.costume, hair: c.hair, accessories: c.accessories, keywords: c.keywords,
-  imageUrlFront: c.imageUrlFront, imageUrlSide: c.imageUrlSide,
-})), null, 2)}
-
-【已有场景（缺 imageUrl 的需要生成）】
-${JSON.stringify(scenes.map(s => ({
-  id: s.id, name: s.name, location: s.location, timeOfDay: s.timeOfDay, weather: s.weather,
-  lighting: s.lighting, mood: s.mood, keywords: s.keywords, imageUrl: s.imageUrl,
-})), null, 2)}
-
-【已有道具（缺 imageUrl 的需要生成）】
-${JSON.stringify(props.map(p => ({
-  id: p.id, name: p.name, category: p.category, description: p.description,
-  material: p.material, color: p.color, keywords: p.keywords, imageUrl: p.imageUrl,
-})), null, 2)}
-
-【输出要求】
-请严格输出单个 JSON（不要 markdown 包裹、不要解释）：
-{
-  "prompts": [
-    {
-      "id": "char-xxx-front",
-      "type": "character-front | character-side | scene | prop",
-      "name": "显示名",
-      "targetId": "关联的角色/场景/道具 id（场景/道具/角色必填）",
-      "prompt": "英文逗号分隔关键词，适合 text-to-image 模型，画面描述具体、风格明确。character-front 必须包含 front view, neutral pose, white studio background, character reference sheet；character-side 必须包含 side view/profile, same outfit, white background；scene 必须包含 cinematic establishing shot, wide angle, atmospheric, movie still, no people；prop 必须包含 product photography, white background, three-quarter view, studio lighting",
-      "negativePrompt": "可选，英文逗号分隔",
-      "aspectRatio": "1:1（角色/道具）或 16:9（场景）",
-      "referenceUrls": []
-    }
-  ]
-}
-
-规则：
-1. 只为 imageUrlFront/imageUrlSide/imageUrl 缺失的角色/场景/道具生成任务；已有 URL 的跳过。
-2. 每个缺图角色出 2 条任务（front + side），每个缺图场景 1 条，每个缺图道具 1 条。
-3. prompt 必须是**英文**，50-120 个关键词，风格、光线、画质、镜头构图都要明确；禁止出现文字/水印/模糊/变形。
-4. negativePrompt 默认填入 "low quality, blurry, deformed, distorted, extra limbs, bad anatomy, text, watermark, logo, signature"。
-5. 角色 prompt 必须包含服装+发型+年龄+性别+配饰+表情等一致性信息；场景 prompt 必须包含地点+时间+天气+光线+氛围；道具 prompt 必须包含材质+颜色+形状+风格。
-6. 不要输出任何 assets 数组以外的字段，totalImages 由调用方统计。`;
-}
-
-export function parseStoryAssetsResponse(text: string): StoryAssetsPlanResult {
-  let cleaned = text.trim();
-  const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenceMatch) cleaned = fenceMatch[1].trim();
-  const obj = parseJsonObject(cleaned);
-  const arr = asJsonRecords(obj.prompts);
-  const prompts: StoryAssetGenTask[] = arr.map((p, i) => ({
-    id: String(p.id ?? `asset-${Date.now()}-${i}`),
-    type: (['character-front', 'character-side', 'scene', 'prop'].includes(String(p.type)) ? String(p.type) : 'prop') as StoryAssetGenTask['type'],
-    name: String(p.name ?? `资产${i + 1}`),
-    targetId: p.targetId != null ? String(p.targetId) : undefined,
-    prompt: String(p.prompt ?? ''),
-    negativePrompt: p.negativePrompt != null ? String(p.negativePrompt) : undefined,
-    aspectRatio: p.aspectRatio != null ? String(p.aspectRatio) : undefined,
-    referenceUrls: asStrings(p.referenceUrls),
-  })).filter(t => t.prompt.length > 5);
-  return { prompts, totalImages: prompts.length };
 }
