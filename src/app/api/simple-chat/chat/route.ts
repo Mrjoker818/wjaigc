@@ -12,6 +12,7 @@ import { getInternalRequestHeaders } from '@/lib/api-auth';
 import { buildWorkModeInstructions, buildWorkPlan, normalizeWorkMode } from '@/lib/chatgpt-work-mode';
 import { IMAGE_ASPECT_RATIOS, describeUpstreamChatError, resolveToolAspectRatio } from '@/lib/simple-chat-upstream';
 import { runWebSearch, extractReasoningDelta, type WebSearchItem } from '@/lib/simple-chat-tools';
+import { orderProvidersByHealth, recordProviderSuccess, recordProviderFailure } from '@/lib/provider-health';
 
 const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手，具备自主使用工具的能力（类似 ChatGPT 的工作方式）：
 1. 回答用户的各种问题，支持多模态理解（图片识别）
@@ -109,7 +110,12 @@ export async function POST(request: NextRequest) {
   // 同模型跨提供商自动切换：收集所有提供同一模型的已启用提供商作为备选链。
   // 当首选提供商（中转站）临时不稳定（5xx/429/网络错误）时，自动切到下一个同模型提供商重试。
   const fallbackProviders = await findProvidersForModel(model, 'chat' as ApiKind, providerId || undefined);
-  const providerChain = [provider, ...fallbackProviders.filter(p => p.id !== provider.id)];
+  // 按优先级组装候选链（首选 + 同模型其他提供商），再按近期健康状态排序：
+  // 最近故障（冷却中）的中转站临时降级到后面，避免每次都先撞到不稳定的站浪费一次超时。
+  const providerChain = orderProvidersByHealth([
+    provider,
+    ...fallbackProviders.filter(p => p.id !== provider.id),
+  ]);
 
   // 模型权限校验：非管理员用户需检查 chatModels 授权列表
   if (user.role !== 'admin') {
@@ -339,33 +345,82 @@ export async function POST(request: NextRequest) {
         let imageToolArgs: string[] = [];
 
         for (let round = 0; round < MAX_AGENT_ROUNDS; round += 1) {
-          const fetchRes = await fetchWithV1Retry(
-            baseUrl,
-            '/chat/completions',
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${apiKey}`,
-              },
-              body: JSON.stringify({
-                model,
-                messages: fullMessages,
-                stream: true,
-                tools,
-                tool_choice: 'auto',
-                ...chatControls.requestParams,
-              }),
-            },
-            true,
-            API_TIMEOUTS.chat
-          );
+          // 遍历提供商链进行重试（可重试错误时自动切换）
+          let fetchRes: Response | null = null;
+          let lastError: { status: number; text: string } | null = null;
+          let usedProviderIndex = 0;
 
-          if (!fetchRes.ok) {
-            const errText = await fetchRes.text().catch(() => '');
-            console.warn(`[simple-chat] upstream chat failed: model=${model}, provider=${provider.name}, status=${fetchRes.status}, body=${errText.slice(0, 200)}`);
-            failCurrentStep(`对话模型返回 ${fetchRes.status}`);
-            send({ type: 'error', error: describeUpstreamChatError(fetchRes.status, errText, model) });
+          for (let pi = 0; pi < providerChain.length; pi += 1) {
+            const currentProvider = providerChain[pi];
+            const currentBaseUrl = currentProvider.baseUrl;
+            const currentApiKey = currentProvider.apiKey;
+            const currentControls = resolveChatControls(model, currentProvider, body.reasoningEffort, body.responseSpeed);
+
+            // 首次尝试或切换提供商时提示
+            if (pi > 0) {
+              setStep(0, 'running', `中转站 ${providerChain[pi - 1].name} 失败，切换至 ${currentProvider.name}`);
+            }
+
+            try {
+              fetchRes = await fetchWithV1Retry(
+                currentBaseUrl,
+                '/chat/completions',
+                {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${currentApiKey}`,
+                  },
+                  body: JSON.stringify({
+                    model,
+                    messages: fullMessages,
+                    stream: true,
+                    tools,
+                    tool_choice: 'auto',
+                    ...currentControls.requestParams,
+                  }),
+                },
+                true,
+                API_TIMEOUTS.chat
+              );
+
+              if (fetchRes.ok) {
+                // 成功：标记该中转站健康，记录使用的提供商索引并退出重试循环
+                recordProviderSuccess(currentProvider.id);
+                usedProviderIndex = pi;
+                break;
+              }
+
+              // 请求失败，判断是否可重试
+              const errText = await fetchRes.text().catch(() => '');
+              const status = fetchRes.status;
+              lastError = { status, text: errText };
+
+              console.warn(`[simple-chat] upstream chat failed: model=${model}, provider=${currentProvider.name}, status=${status}, body=${errText.slice(0, 200)}`);
+
+              // 可重试错误：5xx/429/524/504/超时，尝试下一个提供商
+              const isRetryable = status >= 500 || status === 429 || status === 524 || status === 504;
+              // 仅可重试类故障计入中转站不健康；业务错误（401/402/404 等）不降级该站。
+              if (isRetryable) recordProviderFailure(currentProvider.id);
+              if (!isRetryable || pi === providerChain.length - 1) {
+                // 不可重试或已是最后一个提供商，停止重试
+                break;
+              }
+            } catch (err) {
+              // 网络错误/超时，标记该中转站不健康，尝试下一个提供商
+              console.warn(`[simple-chat] fetch error: model=${model}, provider=${currentProvider.name}, error=${String(err).slice(0, 200)}`);
+              recordProviderFailure(currentProvider.id);
+              lastError = { status: 0, text: String(err) };
+              if (pi === providerChain.length - 1) break;
+            }
+          }
+
+          // 所有提供商都失败
+          if (!fetchRes || !fetchRes.ok) {
+            const finalStatus = lastError?.status || 500;
+            const finalText = lastError?.text || '所有中转站均不可用';
+            failCurrentStep(`对话模型返回 ${finalStatus}`);
+            send({ type: 'error', error: describeUpstreamChatError(finalStatus, finalText, model) });
             controller.close();
             return;
           }
