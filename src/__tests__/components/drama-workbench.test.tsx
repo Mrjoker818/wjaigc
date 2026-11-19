@@ -53,6 +53,7 @@ beforeEach(() => {
     if (url === '/api/drama/from-chat') return json({ success: true, project: { id: 'drama_1', projectId: 'p1', title: doc.title, doc, version: 1, createdAt: 1, updatedAt: 1 } }, 201);
     if (url === '/api/drama/projects' && init?.method === 'POST') return json({ success: true, project: { id: 'drama_1', projectId: 'p1', title: body.doc.title, doc: body.doc, version: 1, createdAt: 1, updatedAt: 1 } }, 201);
     if (url === '/api/drama/estimate') return json({ success: true, total: 50, perShot: { s2: 50 }, balance: 20 });
+    if (url === '/api/drama/music') return json({ success: true, audioUrl: '/api/serve-upload/generated-audio/tts_1.mp3', name: '雨夜.mp3' });
     if (url === '/api/upload') return json({ success: true, url: `/u/upload-${requests.filter(r => r.url === '/api/upload').length}.png` });
     return json({ error: 'unexpected' }, 500);
   }));
@@ -163,5 +164,20 @@ describe('drama workbench', () => {
     await waitFor(() => expect(saved?.cast[0].imageUrlFront).toBe('/u/upload-1.png'), { timeout: 3000 });
     expect(saved?.cast[0].imageHistory).toEqual({ front: ['/u/upload-2.png'] });
     expect(requests.some(r => r.url === '/api/generate')).toBe(false);
+  });
+
+  it('adds background music with a level and ducking, and removes it again', async () => {
+    render(<DramaWorkbench dramaId="drama_1" projectId="p1" onDramaIdChange={() => undefined} onExit={() => undefined} />);
+    await screen.findByRole('heading', { name: /咖啡馆·内·夜/ });
+    goTo(/^5\s*成片/);
+    const input = document.querySelector<HTMLInputElement>('input[type="file"][accept*="audio"]')!;
+    fireEvent.change(input, { target: { files: [new File([new Uint8Array([1])], '雨夜.mp3', { type: 'audio/mpeg' })] } });
+    expect(await screen.findByText('雨夜.mp3')).toBeTruthy();
+    await waitFor(() => expect(saved?.timeline.music).toEqual({ url: '/api/serve-upload/generated-audio/tts_1.mp3', name: '雨夜.mp3', volume: 0.3, ducking: true }), { timeout: 3000 });
+    fireEvent.change(screen.getByRole('slider', { name: '背景音乐音量' }), { target: { value: '60' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: '有台词和原声时自动压低音乐' }));
+    await waitFor(() => expect(saved?.timeline.music).toMatchObject({ volume: 0.6, ducking: false }), { timeout: 3000 });
+    fireEvent.click(screen.getByRole('button', { name: '去掉背景音乐' }));
+    await waitFor(() => expect(saved?.timeline).not.toHaveProperty('music'), { timeout: 3000 });
   });
 });

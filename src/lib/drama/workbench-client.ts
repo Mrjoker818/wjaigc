@@ -285,6 +285,21 @@ export async function uploadReferenceImage(file: File, fetcher: WorkbenchFetch =
   return data.url;
 }
 
+/** Uploads background music (MP3 or WAV) for the episode. Costs no credits. */
+export async function uploadDramaMusic(file: File, fetcher: WorkbenchFetch = defaultFetch): Promise<{ url: string; name: string }> {
+  const body = new FormData();
+  body.append('file', file);
+  let response: Response;
+  try {
+    response = await fetcher('/api/drama/music', { method: 'POST', body });
+  } catch {
+    throw new Error('网络中断，音乐没有上传，请重试');
+  }
+  const data = await readJson(response);
+  if (!response.ok || typeof data.audioUrl !== 'string' || !data.audioUrl) fail(data, '音乐上传失败，请稍后重试');
+  return { url: data.audioUrl, name: typeof data.name === 'string' && data.name ? data.name : file.name };
+}
+
 /** Records one line with the admin's text-to-speech model through /api/audio/generate. Costs no credits. */
 export async function generateVoiceover(text: string, voice: string, fetcher: WorkbenchFetch = defaultFetch): Promise<string> {
   const response = await fetcher('/api/audio/generate', {

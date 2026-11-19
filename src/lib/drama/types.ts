@@ -88,10 +88,21 @@ export interface DramaProp extends VideoProp {
   imageHistory?: BibleImageHistory;
 }
 
+/** Music under the whole episode. `url` points into the audio store, so only uploaded or generated audio is accepted. */
+export interface DramaMusic {
+  url: string;
+  name: string;
+  /** Linear gain, 0 to 1. */
+  volume: number;
+  /** Turn the music down while lines and the clips' own sound play. */
+  ducking: boolean;
+}
+
 export interface DramaTimeline {
   transition: DramaTransition;
   transitionSec: number;
   subtitles: boolean;
+  music?: DramaMusic;
   lastRender?: {
     taskId: string;
     episodeId?: string;

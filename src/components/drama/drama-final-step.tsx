@@ -1,13 +1,15 @@
 'use client';
 
-import { useState } from 'react';
-import { Download, FileArchive, FileSpreadsheet, Film, ImageDown, Loader2, Mic, Subtitles } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Download, FileArchive, FileSpreadsheet, Film, ImageDown, Loader2, Mic, Music, Subtitles, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { episodeSrt, shotListCsv } from '@/lib/drama/export';
 import { buildEpisodePackage, downloadBlob, downloadText, exportFileName } from '@/lib/drama/export-client';
 import { DRAMA_TRANSITIONS as TRANSITIONS, type DramaTransition } from '@/lib/drama/render';
 import { buildTimeline } from '@/lib/drama/timeline';
 import { currentVoiceover, shotsNeedingVoiceover } from '@/lib/drama/voiceover';
+import type { DramaMusic } from '@/lib/drama/types';
+import { uploadDramaMusic } from '@/lib/drama/workbench-client';
 import { pendingShots } from '@/lib/drama/workbench-state';
 import { DramaAutopilot } from './drama-autopilot';
 import { useDrama } from './drama-context';
@@ -67,6 +69,7 @@ export function DramaFinalStep() {
             <span className="drama-label font-mono">已配音 {voiced}/{spoken.length} · 不扣积分，渲染时混进成片</span>
           </div>
         ) : null}
+        <MusicSettings />
         {doc.timeline.subtitles ? (
           <div className="drama-paper flex min-h-16 items-end justify-center rounded-md px-6 pb-3 text-center font-serif text-sm leading-snug">
             {blocks.find(block => block.subtitle)?.subtitle ?? '（镜头里还没有台词）'}
@@ -102,6 +105,68 @@ export function DramaFinalStep() {
 
       <ExportPanel />
     </div>
+  );
+}
+
+const DEFAULT_MUSIC_VOLUME = 0.3;
+
+/** Background music under the whole episode: upload, level and ducking. Mixed at render time, free of credits. */
+function MusicSettings() {
+  const { doc, update } = useDrama();
+  const picker = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const music = doc.timeline.music;
+  const setMusic = (next: DramaMusic | undefined) => update(current => {
+    const timeline = { ...current.timeline, music: next };
+    if (!next) delete timeline.music;
+    return { ...current, timeline };
+  });
+  const pick = async (file: File) => {
+    setUploading(true);
+    try {
+      const stored = await uploadDramaMusic(file);
+      setMusic({ url: stored.url, name: stored.name, volume: music?.volume ?? DEFAULT_MUSIC_VOLUME, ducking: music?.ducking ?? true });
+      toast.success('背景音乐已添加', { description: '渲染时会循环铺满整集，开头结尾淡入淡出。' });
+    } catch (error) {
+      toast.error('音乐上传失败', { description: error instanceof Error && error.message ? error.message : '请稍后重试' });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <fieldset className="flex flex-col gap-2">
+      <legend className="drama-label mb-1.5">背景音乐</legend>
+      <input ref={picker} type="file" accept="audio/mpeg,audio/mp3,audio/wav,audio/x-wav,.mp3,.wav" className="sr-only" tabIndex={-1} aria-hidden="true"
+        onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void pick(file); }} />
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" className="drama-btn" disabled={uploading} onClick={() => picker.current?.click()}>
+          {uploading ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <Music className="h-4 w-4" />}
+          {uploading ? '正在上传音乐' : music ? '换一首' : '上传背景音乐'}
+        </button>
+        {music ? (
+          <>
+            <span className="min-w-0 max-w-56 truncate text-sm" title={music.name}>{music.name}</span>
+            <button type="button" className="drama-btn drama-btn--quiet" aria-label="去掉背景音乐" onClick={() => setMusic(undefined)}><Trash2 className="h-4 w-4" /></button>
+          </>
+        ) : <span className="drama-label">MP3 或 WAV，最大 25MB，不扣积分</span>}
+      </div>
+      {music ? (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <audio src={music.url} controls preload="none" className="h-8 max-w-full" />
+          <label className="flex items-center gap-2 text-sm">
+            <span className="drama-label">音量</span>
+            <input type="range" min={0} max={100} step={5} value={Math.round(music.volume * 100)} aria-label="背景音乐音量"
+              onChange={event => setMusic({ ...music, volume: Number(event.target.value) / 100 })} />
+            <span className="w-10 font-mono text-xs text-[var(--drama-muted)]">{Math.round(music.volume * 100)}%</span>
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={music.ducking} onChange={event => setMusic({ ...music, ducking: event.target.checked })} />
+            有台词和原声时自动压低音乐
+          </label>
+        </div>
+      ) : null}
+    </fieldset>
   );
 }
 

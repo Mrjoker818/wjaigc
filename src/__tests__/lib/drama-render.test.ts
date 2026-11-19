@@ -56,6 +56,27 @@ describe('drama render plan', () => {
       .toThrow('DRAMA_RENDER_BAD_DURATION');
   });
 
+  it('loops music under the film, fades it, ducks it under the foreground and normalises loudness', () => {
+    const plan = buildRenderPlan({ clips, width: 640, height: 360, music: { path: 'bgm.mp3', volume: 0.4, ducking: true }, outputPath: 'o.mp4' });
+    const loop = plan.args.indexOf('-stream_loop');
+    expect(plan.args.slice(loop, loop + 4)).toEqual(['-stream_loop', '-1', '-i', 'bgm.mp3']);
+    const filter = plan.args[plan.args.indexOf('-filter_complex') + 1];
+    // Inputs: three clips, one anullsrc for the silent clip, then the music.
+    expect(filter).toContain('[4:a]aresample=44100');
+    expect(filter).toContain('atrim=0:7,asetpts=PTS-STARTPTS,volume=0.4,afade=t=in:d=1.75,afade=t=out:st=5.25:d=1.75[bgm]');
+    expect(filter).toContain('[acat]asplit=2[fg][fgkey]');
+    expect(filter).toContain('[bgm][fgkey]sidechaincompress=');
+    expect(filter).toContain('loudnorm=I=-16');
+    expect(plan.args[plan.args.indexOf('-map', plan.args.indexOf('-map') + 1) + 1]).toBe('[amusic]');
+
+    const flat = buildRenderPlan({ clips, width: 640, height: 360, music: { path: 'bgm.mp3', volume: 0.2, ducking: false }, outputPath: 'o.mp4' });
+    const flatFilter = flat.args[flat.args.indexOf('-filter_complex') + 1];
+    expect(flatFilter).not.toContain('sidechaincompress');
+    expect(flatFilter).toContain('[acat][bgm]amix=inputs=2');
+    expect(() => buildRenderPlan({ clips, width: 640, height: 360, music: { path: 'bgm.mp3', volume: 2, ducking: false }, outputPath: 'o.mp4' }))
+      .toThrow('DRAMA_RENDER_BAD_MUSIC');
+  });
+
   it('writes SRT cues and collapses blank lines inside a cue', () => {
     expect(buildSrt([
       { startSec: 0, endSec: 1.5, text: '你好' },
@@ -91,6 +112,38 @@ describe('drama render plan', () => {
         streams: Array<{ codec_type: string }>; format: { duration: string };
       };
       expect(probe.streams.map(stream => stream.codec_type).sort()).toEqual(['audio', 'video']);
+      expect(Math.abs(Number(probe.format.duration) - plan.durationSec)).toBeLessThan(0.25);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it.skipIf(!hasBinary('ffmpeg') || !hasBinary('ffprobe'))('renders real clips with ducked music shorter than the film', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'drama-music-'));
+    try {
+      for (const [name, seconds, audio] of [['a.mp4', 2, true], ['b.mp4', 3, false]] as const) {
+        execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y',
+          '-f', 'lavfi', '-i', `color=c=gray:s=320x240:d=${seconds}:r=25`,
+          ...(audio ? ['-f', 'lavfi', '-i', `sine=frequency=440:duration=${seconds}`] : []),
+          '-c:v', 'libx264', '-pix_fmt', 'yuv420p', ...(audio ? ['-c:a', 'aac', '-shortest'] : []),
+          join(dir, name)], { stdio: 'ignore' });
+      }
+      // Two seconds of music for a five-second film, so it has to loop.
+      execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=220:duration=2',
+        '-c:a', 'libmp3lame', join(dir, 'bgm.mp3')], { stdio: 'ignore' });
+      const plan = buildRenderPlan({
+        clips: [{ path: 'a.mp4', durationSec: 2, hasAudio: true }, { path: 'b.mp4', durationSec: 3, hasAudio: false }],
+        width: 320, height: 240, transition: 'fade', transitionSec: 0.5,
+        music: { path: 'bgm.mp3', volume: 0.5, ducking: true }, outputPath: 'out.mp4',
+      });
+      execFileSync('ffmpeg', ['-loglevel', 'error', ...plan.args], { cwd: dir, stdio: 'pipe' });
+      const probe = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_entries',
+        'stream=codec_type,duration:format=duration', '-of', 'json', join(dir, 'out.mp4')], { encoding: 'utf8' })) as {
+        streams: Array<{ codec_type: string; duration?: string }>; format: { duration: string };
+      };
+      expect(probe.streams.map(stream => stream.codec_type).sort()).toEqual(['audio', 'video']);
+      const audio = probe.streams.find(stream => stream.codec_type === 'audio');
+      expect(Math.abs(Number(audio?.duration) - plan.durationSec)).toBeLessThan(0.25);
       expect(Math.abs(Number(probe.format.duration) - plan.durationSec)).toBeLessThan(0.25);
     } finally {
       rmSync(dir, { recursive: true, force: true });

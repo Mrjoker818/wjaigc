@@ -81,6 +81,7 @@ export const dramaProjectSchema = z.object({
     transition: z.enum(DRAMA_TRANSITIONS as [string, ...string[]]),
     transitionSec: z.number().min(0).max(2),
     subtitles: z.boolean(),
+    music: z.object({ url: text(4096), name: text(200), volume: z.number().min(0).max(1), ducking: z.boolean() }).optional(),
   }),
 });
 

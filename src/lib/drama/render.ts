@@ -1,4 +1,4 @@
-/** Pure ffmpeg planning for stitching shots: keeps audio, fills silence, optional transitions, burned subtitles and voiceovers. */
+/** Pure ffmpeg planning for stitching shots: keeps audio, fills silence, optional transitions, burned subtitles, voiceovers and music. */
 
 export type DramaTransition = 'cut' | 'fade' | 'flash';
 
@@ -16,6 +16,16 @@ export interface RenderVoiceover {
   clipIndex: number;
   /** Audio file path inside the ffmpeg working directory. */
   path: string;
+}
+
+/** Background music looped under the whole film. */
+export interface RenderMusic {
+  /** Audio file path inside the ffmpeg working directory. */
+  path: string;
+  /** Linear gain, 0 to 1. */
+  volume: number;
+  /** Turn the music down while dialogue, voiceovers or the clips' own sound play. */
+  ducking: boolean;
 }
 
 export interface SubtitleCue {
@@ -38,6 +48,7 @@ export interface RenderPlanInput {
   subtitleFont?: { dir: string; family: string };
   /** At most one per clip. The clip's own audio is turned down under its voiceover. */
   voiceovers?: RenderVoiceover[];
+  music?: RenderMusic;
   outputPath: string;
 }
 
@@ -54,6 +65,10 @@ const SAFE_FONT_DIR = /^[A-Za-z0-9_-]+$/;
 const SAFE_FONT_FAMILY = /^[A-Za-z0-9 ]+$/;
 /** Level of the clip's own sound (ambience, or a line the video model already spoke) under a voiceover. */
 const UNDER_VOICEOVER_VOLUME = 0.35;
+/** Music fades in and out over this long, or a quarter of the film when it is short. */
+const MUSIC_FADE_SEC = 2;
+/** Broadcast loudness for the finished mix, so music never drowns the lines or clips. */
+const LOUDNESS = 'loudnorm=I=-16:TP=-1.5:LRA=11';
 
 function even(value: number): number {
   const rounded = Math.max(2, Math.round(value));
@@ -101,6 +116,8 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlan {
       || voiced.has(voiceover.clipIndex) || !voiceover.path) throw new Error('DRAMA_RENDER_BAD_VOICEOVER');
     voiced.add(voiceover.clipIndex);
   }
+  const music = input.music;
+  if (music && (!music.path || !(music.volume >= 0 && music.volume <= 1))) throw new Error('DRAMA_RENDER_BAD_MUSIC');
   const width = even(input.width);
   const height = even(input.height);
   const fps = input.fps ?? 30;
@@ -125,6 +142,9 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlan {
     nextInput += 1;
     return nextInput - 1;
   });
+  // Looped forever and cut to the film's length in the filter graph.
+  const musicInput = music ? nextInput : -1;
+  if (music) args.push('-stream_loop', '-1', '-i', music.path);
 
   const filters: string[] = [];
   clips.forEach((clip, index) => {
@@ -167,6 +187,23 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlan {
     filters.push(`[${audioOut}]${voiceovers.map((_, k) => `[vo${k}]`).join('')}amix=inputs=${voiceovers.length + 1}:duration=first:normalize=0[amix]`);
     audioOut = 'amix';
   }
+  const last = clips.length - 1;
+  const durationSec = clipStarts[last] + clips[last].durationSec;
+  if (music) {
+    const fade = Math.min(MUSIC_FADE_SEC, durationSec / 4);
+    filters.push(`[${musicInput}:a]aresample=${SAMPLE_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,`
+      + `atrim=0:${seconds(durationSec)},asetpts=PTS-STARTPTS,volume=${seconds(music.volume)},`
+      + `afade=t=in:d=${seconds(fade)},afade=t=out:st=${seconds(durationSec - fade)}:d=${seconds(fade)}[bgm]`);
+    if (music.ducking) {
+      // The foreground keys a compressor on the music: it dips under speech and comes back within half a second.
+      filters.push(`[${audioOut}]asplit=2[fg][fgkey]`);
+      filters.push('[bgm][fgkey]sidechaincompress=threshold=0.02:ratio=8:attack=20:release=400[bgmd]');
+      filters.push(`[fg][bgmd]amix=inputs=2:duration=first:normalize=0,${LOUDNESS}[amusic]`);
+    } else {
+      filters.push(`[${audioOut}][bgm]amix=inputs=2:duration=first:normalize=0,${LOUDNESS}[amusic]`);
+    }
+    audioOut = 'amusic';
+  }
   if (input.subtitleFile) {
     const fontSize = Math.max(12, Math.round(Math.min(width, height) / 22));
     const font = input.subtitleFont
@@ -176,8 +213,6 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlan {
     videoOut = 'vsub';
   }
 
-  const last = clips.length - 1;
-  const durationSec = clipStarts[last] + clips[last].durationSec;
   args.push(
     '-filter_complex', filters.join(';'),
     '-map', `[${videoOut}]`, '-map', `[${audioOut}]`,
