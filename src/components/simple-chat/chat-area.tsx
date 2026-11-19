@@ -671,11 +671,12 @@ export default function ChatArea({
         } catch {}
       }
 
-      // 多轮图片上下文：仅保留最近 3 轮用户消息的图片（更早的图片会消耗大量 token）
+      // 多轮图片上下文：保留最近 3 轮用户图片（控制 token），并始终附带最早一次上传的参考图，
+      // 避免长对话中「再生成一张」时丢失初始参考图、导致画面偏移。
       const historyMsgs = (regen ? regen.history : messages).filter(m => m.role !== 'search');
-      const recentUserImageIds = new Set(
-        historyMsgs.filter(m => m.role === 'user' && m.images && m.images.length > 0).slice(-3).map(m => m.id)
-      );
+      const userImageMsgs = historyMsgs.filter(m => m.role === 'user' && m.images && m.images.length > 0);
+      const recentUserImageIds = new Set(userImageMsgs.slice(-3).map(m => m.id));
+      if (userImageMsgs.length > 0) recentUserImageIds.add(userImageMsgs[0].id);
       const collectedHistoryImages = historyMsgs
         .filter(m => recentUserImageIds.has(m.id))
         .flatMap(m => m.images || []);
@@ -869,19 +870,7 @@ export default function ChatArea({
           }
         }
       }
-    } catch (error: unknown) {
-      const reason = error instanceof Error && error.message ? error.message : '未知错误';
-      setMessages(prev => {
-        const updated = [...prev];
-        const last = updated[updated.length - 1];
-        if (last?.role === 'assistant') {
-          updated[updated.length - 1] = { ...last, content: `请求失败：${reason}\n\n建议：尝试切换模型或稍后重试。` };
-        }
-        return updated;
-      });
-    } finally {
-      setIsStreaming(false);
-      // 估算 token 用量（中文≈1.5字/token，英文≈4字符/token，取近似值）
+      // 估算 token 用量（中文≈1.5字/token，英文≈4字符/token，取近似值）——仅成功路径统计
       const estimateTokens = (text: string) => {
         const cn = (text.match(/[一-鿿]/g) || []).length;
         const en = text.length - cn;
@@ -894,8 +883,20 @@ export default function ChatArea({
         completionTokens: (prev?.completionTokens || 0) + completionEst,
         totalTokens: (prev?.totalTokens || 0) + promptEst + completionEst,
       }));
+    } catch (error: unknown) {
+      const reason = error instanceof Error && error.message ? error.message : '未知错误';
+      setMessages(prev => {
+        const updated = [...prev];
+        const last = updated[updated.length - 1];
+        if (last?.role === 'assistant') {
+          updated[updated.length - 1] = { ...last, content: `请求失败：${reason}\n\n建议：尝试切换模型或稍后重试。` };
+        }
+        return updated;
+      });
+    } finally {
+      setIsStreaming(false);
     }
-  }, [input, isStreaming, selectedModel, selectedProviderId, messages, project, task, uploadedImages, webSearch, memories, selectedImageModel, selectedImageProviderId, brandActive, workModeEnabled, selectedSkillId]);
+  }, [input, isStreaming, selectedModel, selectedProviderId, messages, project, task, uploadedImages, webSearch, memories, selectedImageModel, selectedImageProviderId, brandActive, workModeEnabled, selectedSkillId, knowledgeItems, reasoningEffort, responseSpeed]);
 
   // 供消息编辑后重新生成调用
   handleSendRef.current = handleSend;

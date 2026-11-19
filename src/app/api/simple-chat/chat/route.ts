@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
     taskId?: string;
     imageModel?: string;
     imageProviderId?: string;
-    memories?: string[];
+    memories?: Array<string | { category?: string; content?: string }>;
     deepAnalysis?: boolean;
     i2iStrength?: number;
     reasoningEffort?: string;
@@ -128,9 +128,21 @@ export async function POST(request: NextRequest) {
     if (skillSelection.source === 'command' && latestUser) latestUser.content = skillSelection.text || latestUser.content;
   }
 
-  // 用户记忆注入
-  if (memories.length > 0) {
-    const memoryContext = memories.slice(0, 20).map((m, i) => `${i + 1}. ${m}`).join('\n');
+  // 用户记忆注入（兼容字符串数组与 {category, content} 对象数组两种前端格式）
+  const memoryLines = memories
+    .slice(0, 20)
+    .map((m) => {
+      if (typeof m === 'string') return m.trim();
+      if (m && typeof m === 'object') {
+        const content = (m.content || '').trim();
+        if (!content) return '';
+        return m.category ? `【${m.category}】${content}` : content;
+      }
+      return '';
+    })
+    .filter((line) => line.length > 0);
+  if (memoryLines.length > 0) {
+    const memoryContext = memoryLines.map((line, i) => `${i + 1}. ${line}`).join('\n');
     enhancedSystemPrompt += `\n\n## 用户记忆\n以下是关于用户的长期记忆信息，请在回答时参考：\n${memoryContext}`;
   }
 
@@ -422,13 +434,16 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // 处理工具调用
+        // 处理工具调用：模型可能一次返回多个 generate_image（如「分别画猫和狗」），逐个顺序执行，
+        // 不再只取第一个而静默丢弃其余调用。
         if (Object.keys(toolCalls).length > 0) {
-          const tc = toolCalls[0];
-          if (tc.name === 'generate_image') {
+          const imageToolCalls = Object.values(toolCalls).filter(t => t.name === 'generate_image');
+          for (let callIdx = 0; callIdx < imageToolCalls.length; callIdx += 1) {
+            const tc = imageToolCalls[callIdx];
+            const callPrefix = imageToolCalls.length > 1 ? `第 ${callIdx + 1}/${imageToolCalls.length} 组 · ` : '';
             switchToImageSteps();
             setStep(0, 'done');
-            send({ type: 'tool_status', tool: 'generating_image', status: 'generating', label: '正在生成图片...' });
+            send({ type: 'tool_status', tool: 'generating_image', status: 'generating', label: `${callPrefix}正在生成图片...` });
 
             let args: {
               prompt?: string; size?: string; aspect_ratio?: string; image_count?: number;
@@ -457,7 +472,10 @@ export async function POST(request: NextRequest) {
             // requests stay anchored to the original reference instead of drifting away from it.
             const lastTurnImages = lastUserMsg?.images || [];
             const anyConversationImage = [...messages].reverse().find(m => m.role === 'user' && m.images && m.images.length > 0)?.images || [];
-            const i2iIntent = /(这张图|这张|此图|图片|参考|改成|调整|换成|基于|类似风格|同款|根据这|保持|不变|再(生成|来|画|出)|继续|还是)/.test(userText);
+            // Keep the keyword fallback narrow: only clear image-reference/edit intents. Broad words like
+            // "继续/还是/保持" previously turned any plain follow-up into an img2img call whenever the
+            // conversation happened to contain an image. The model's use_reference_image stays authoritative.
+            const i2iIntent = /(这张图|这张|此图|参考图|参考这|改成|换成|基于这|根据这张|同款|保持(这张|原图|参考)|再(生成|来|画|出)一?(张|幅|版))/.test(userText);
             const wantsReference = args.use_reference_image ?? (i2iIntent && anyConversationImage.length > 0);
             const referenceSource = lastTurnImages.length > 0 ? lastTurnImages : anyConversationImage;
             const referenceImage = referenceSource.length > 0 && wantsReference ? referenceSource[0] : undefined;
@@ -465,7 +483,9 @@ export async function POST(request: NextRequest) {
             const imageCount = Math.max(1, Math.min(4, args.image_count || parseImageCount(userText)));
             // The chat model has already looked at the image, so its description is passed along.
             // This lets /api/generate skip its own vision identification pass (20s+ in production logs).
-            const referenceDescription = (args.reference_description || '').trim() || imgPrompt.slice(0, 300);
+            // Only use a real description of the reference; never fall back to the target prompt, which
+            // describes what to generate (not the reference subject) and would mislead reference matching.
+            const referenceDescription = (args.reference_description || '').trim();
 
             if (!imageModel) {
               failImage('未选择图像模型，请在输入框上方选择一个图像模型后重试');
@@ -498,7 +518,7 @@ export async function POST(request: NextRequest) {
                   projectId: body.projectId,
                   ...(referenceImage ? {
                     referenceImages: [referenceImage],
-                    referenceDescriptions: [referenceDescription],
+                    ...(referenceDescription ? { referenceDescriptions: [referenceDescription] } : {}),
                     referenceMode: 'reference',
                     strength: i2iStrength,
                   } : {}),
@@ -512,8 +532,13 @@ export async function POST(request: NextRequest) {
               const taskIds = imgData.taskIds || (imgData.taskId ? [imgData.taskId] : []);
 
               // Poll one task to completion and stream its image; returns true once settled.
+              // Hard wall-clock cap (4 min) so the SSE connection can't hang indefinitely when the
+              // upstream provider stops responding without ever returning a terminal status.
+              const POLL_DEADLINE_MS = 4 * 60 * 1000;
               const pollOneTask = async (taskId: string, labelPrefix: string): Promise<boolean> => {
+                const startedAt = Date.now();
                 for (let attempt = 0; attempt < 200; attempt += 1) {
+                  if (Date.now() - startedAt > POLL_DEADLINE_MS) break;
                   await new Promise(r => setTimeout(r, attempt === 0 ? 500 : 2000));
                   const pollRes = await fetch(getInternalApiUrl('/api/poll-task'), {
                     method: 'POST',
