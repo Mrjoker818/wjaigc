@@ -102,7 +102,7 @@ function InspectorFields({ found, onClose }: { found: NonNullable<ReturnType<typ
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-2">
           <span className="drama-label" id="drama-prompt-label">画面提示词（输入 @ 引用角色或道具）</span>
-          <span className="ml-auto"><PolishButton busy={polish.busy} onPolish={() => void polish.polish()} /></span>
+          <span className="ml-auto shrink-0"><PolishButton busy={polish.busy} onPolish={() => void polish.polish()} /></span>
         </div>
         <MentionTextarea className="drama-input min-h-28 w-full resize-y" maxLength={8000} value={shot.prompt} ariaLabel="画面提示词"
           candidates={mentionCandidates(doc)}

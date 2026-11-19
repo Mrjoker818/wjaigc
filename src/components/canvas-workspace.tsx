@@ -6739,11 +6739,14 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
     });
     return () => { live = false; };
   }, [dramaProjectId, currentProject, currentUser, loadProjectById]);
+  // While the address's (or the open drama's) project is still loading, switching keeps that project.
+  const switcherProjectId = currentProject?.id
+    ?? new URLSearchParams(workspaceLocationSearch).get('projectId') ?? dramaProjectId;
   const navigatePlatform = useCallback((platform: 'canvas' | 'video' | 'chat'): boolean => {
     if (platform === 'video') { safeSwitchMode('drama'); return true; }
-    if (platform === 'canvas') { setAppMode(currentProject ? 'canvas' : 'dashboard'); return true; }
+    if (platform === 'canvas') { setAppMode(switcherProjectId ? 'canvas' : 'dashboard'); return true; }
     return false;
-  }, [currentProject, safeSwitchMode]);
+  }, [switcherProjectId, safeSwitchMode]);
   useEffect(() => {
     if (!currentProject?.id || !currentUser?.id || collaborativeCanvas.projectId !== currentProject.id
       || collaborativeCanvas.authority === 'unknown') return;
@@ -6815,7 +6818,7 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
       <>
         <DramaWorkbench
           switcher={userPlatforms.length > 1
-            ? <PlatformSwitcher current="video" platforms={userPlatforms} projectId={currentProject?.id} onNavigate={navigatePlatform} />
+            ? <PlatformSwitcher current="video" platforms={userPlatforms} projectId={switcherProjectId} onNavigate={navigatePlatform} />
             : undefined}
           dramaId={activeDramaId}
           projectId={currentProject?.id}

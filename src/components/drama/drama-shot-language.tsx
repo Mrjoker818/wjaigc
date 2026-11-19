@@ -66,7 +66,7 @@ export function usePromptPolish(shot: DramaShot) {
 
 export function PolishButton({ busy, onPolish }: { busy: boolean; onPolish: () => void }) {
   return (
-    <button type="button" className="drama-btn drama-btn--quiet min-h-8 gap-1 px-2 text-xs" disabled={busy} onClick={onPolish}
+    <button type="button" className="drama-btn drama-btn--quiet min-h-8 gap-1 whitespace-nowrap px-2 text-xs" disabled={busy} onClick={onPolish}
       title="用对话模型按导演写法改写，并填好景别、运镜、光线和声音。不扣积分。">
       {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden /> : <Sparkles className="h-3.5 w-3.5" aria-hidden />}
       {busy ? '润色中' : '润色'}
