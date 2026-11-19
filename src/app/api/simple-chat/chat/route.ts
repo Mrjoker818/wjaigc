@@ -267,16 +267,7 @@ export async function POST(request: NextRequest) {
         if (workPlan) send({ type: 'work_plan', workPlan });
         emitSteps();
 
-        // 先发送搜索结果（如果有联网搜索）
-        if (webSearch) {
-          if (searchResults) {
-            // 解析出搜索条目
-            const resultCount = (searchResults.match(/\[\d+\]/g)?.length || 0);
-            send({ type: 'search_status', status: 'completed', resultCount, searchResults });
-          } else {
-            send({ type: 'search_status', status: 'failed', resultCount: 0, error: searchError || '未找到相关结果' });
-          }
-        }
+        // 联网搜索现在是模型可自主调用的工具（web_search），结果通过下方 Agent 循环实时推送。
 
         // 添加工具定义
         const tools: Record<string, unknown>[] = [
