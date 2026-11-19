@@ -118,4 +118,29 @@ describe('drama workbench', () => {
     await act(async () => undefined);
     expect(requests.some(r => r.url === '/api/drama/render')).toBe(false);
   });
+
+  it('prices what one-click film would fill and will not start without enough credits', async () => {
+    render(<DramaWorkbench dramaId="drama_1" projectId="p1" onDramaIdChange={() => undefined} onExit={() => undefined} />);
+    await screen.findByRole('heading', { name: /咖啡馆·内·夜/ });
+    goTo(/^5\s*成片/);
+    fireEvent.click(screen.getByRole('button', { name: '清点还缺什么' }));
+    // The mock prices every stage at 50: bible images, s2's keyframe and s2's video.
+    const start = await screen.findByRole('button', { name: '花约 150 积分开始' });
+    const panel = within(screen.getByRole('region', { name: '一键成片' }));
+    // The cast member and the location have no image, s2 has no first frame or video, s1's line has no recording.
+    expect(panel.getByText('2 张')).toBeTruthy();
+    expect(panel.getByText('1 张')).toBeTruthy();
+    expect(panel.getByText('1 个')).toBeTruthy();
+    expect(panel.getByText('1 句')).toBeTruthy();
+    expect((start as HTMLButtonElement).disabled).toBe(true);
+    expect(panel.getByText(/还差 130，充值后再开始/)).toBeTruthy();
+    const priced = requests.filter(r => r.url === '/api/drama/estimate').map(r => (r.body as { shots: Array<{ shotId: string }> }).shots.map(item => item.shotId));
+    expect(priced).toContainEqual(['bible:cast:lin', 'bible:location:cafe']);
+    expect(requests.some(r => r.url === '/api/generate' || r.url === '/api/video/generate')).toBe(false);
+
+    // Leaving out the paid extras lowers the price to the shot videos alone.
+    fireEvent.click(panel.getAllByRole('checkbox', { name: '要做' })[0]);
+    fireEvent.click(panel.getAllByRole('checkbox', { name: '要做' })[1]);
+    expect(panel.getByRole('button', { name: '花约 50 积分开始' })).toBeTruthy();
+  });
 });

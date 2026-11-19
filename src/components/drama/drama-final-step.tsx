@@ -9,6 +9,7 @@ import { DRAMA_TRANSITIONS as TRANSITIONS, type DramaTransition } from '@/lib/dr
 import { buildTimeline } from '@/lib/drama/timeline';
 import { currentVoiceover, shotsNeedingVoiceover } from '@/lib/drama/voiceover';
 import { pendingShots } from '@/lib/drama/workbench-state';
+import { DramaAutopilot } from './drama-autopilot';
 import { useDrama } from './drama-context';
 import { EpisodeReadiness } from './drama-readiness';
 
@@ -31,6 +32,7 @@ export function DramaFinalStep() {
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-6">
+      <DramaAutopilot />
       <section className="drama-panel flex flex-col gap-4 p-4" aria-labelledby="drama-render-options">
         <h2 id="drama-render-options" className="text-sm font-semibold">成片设置</h2>
         <fieldset className="flex flex-col gap-1.5">

@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext } from 'react';
+import type { AutopilotChoices, AutopilotQuote, AutopilotRun } from '@/lib/drama/autopilot';
 import type { KeyframeKind } from '@/lib/drama/reference-prompts';
 import type { CreditEstimate } from '@/lib/drama/workbench-client';
 import type { DramaEpisode, DramaProjectV1, DramaShot } from '@/lib/drama/types';
@@ -39,8 +40,11 @@ export interface DramaWorkbenchApi {
   /** Shots with a take in flight. */
   runningShotIds: ReadonlySet<string>;
   batchRunning: boolean;
-  /** Generates the given shots one after another, so each can start from the previous shot's last frame. */
-  generateShots: (shotIds: string[]) => Promise<void>;
+  /**
+   * Generates the given shots one after another, so each can start from the previous shot's last frame.
+   * Resolves false when the batch was stopped, ran out of credits or had no model; failed shots alone do not count.
+   */
+  generateShots: (shotIds: string[]) => Promise<boolean>;
   stopGeneration: () => void;
   estimate: CreditEstimate | null;
   imageModels: DramaImageModelOption[];
@@ -52,8 +56,9 @@ export interface DramaWorkbenchApi {
   /**
    * Draws the opening frame of each shot with the image model; the video then starts from it.
    * With `kind: 'last'` it draws the closing frame, which models with first/last-frame support end on.
+   * After `stop` aborts, frames already being drawn finish and no new ones start. Resolves false when stopped or out of credits.
    */
-  generateKeyframes: (shotIds: string[], kind?: KeyframeKind) => Promise<void>;
+  generateKeyframes: (shotIds: string[], kind?: KeyframeKind, stop?: AbortSignal) => Promise<boolean>;
   /** Shots whose voiceover is being recorded. */
   voiceoverShotIds: ReadonlySet<string>;
   /** Records the line of each shot in its speaker's voice; free of credits. */
@@ -69,8 +74,15 @@ export interface DramaWorkbenchApi {
   saveState: SaveState;
   flushSave: () => Promise<boolean>;
   render: RenderState;
-  /** Saves, then renders the current episode in the background. */
-  renderEpisode: () => Promise<void>;
+  /** Saves, then renders the episode (the current one by default) in the background. */
+  renderEpisode: (episodeId?: string) => Promise<void>;
+  /** The one-click run in progress, or null. */
+  autopilot: AutopilotRun | null;
+  /** Splits scenes that have no shots (free), then prices what the current episode still lacks. Null when it could not start. */
+  quoteAutopilot: () => Promise<AutopilotQuote | null>;
+  /** Fills the quoted gaps stage by stage; refuses when the episode gained paid work since the quote. */
+  runAutopilot: (quote: AutopilotQuote, choices: AutopilotChoices) => Promise<void>;
+  stopAutopilot: () => void;
   onPlaceOnCanvas?: (result: { videoUrl: string; thumbnailUrl?: string; duration?: number; aspectRatio?: string }) => void;
 }
 
