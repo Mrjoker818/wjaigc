@@ -5,17 +5,23 @@ import { buildSkillInstructions, selectSimpleChatSkill } from '@/lib/simple-chat
 import { describeFittedParams, fitImageParams, parseImageCount, parseImageRequest } from '@/lib/simple-chat-image-params';
 import type { ApiKind } from '@/lib/server-api-config';
 import { getSessionUser } from '@/lib/server-auth';
-import { SearchClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
+import { HeaderUtils } from 'coze-coding-dev-sdk';
 import { fetchWithV1Retry, API_TIMEOUTS, getInternalApiUrl } from '@/lib/api-helpers';
 import { resolveChatControls } from '@/lib/chat-generation-controls';
 import { getInternalRequestHeaders } from '@/lib/api-auth';
 import { buildWorkModeInstructions, buildWorkPlan, normalizeWorkMode } from '@/lib/chatgpt-work-mode';
 import { IMAGE_ASPECT_RATIOS, describeUpstreamChatError, resolveToolAspectRatio } from '@/lib/simple-chat-upstream';
+import { runWebSearch, extractReasoningDelta, type WebSearchItem } from '@/lib/simple-chat-tools';
 
-const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手。你可以：
-1. 回答用户的各种问题
+const DEFAULT_SYSTEM_PROMPT = `你是无界AI的智能助手，具备自主使用工具的能力（类似 ChatGPT 的工作方式）：
+1. 回答用户的各种问题，支持多模态理解（图片识别）
 2. 当用户需要生成图片时，使用 generate_image 工具
-3. 支持多模态理解（图片识别）
+3. 当问题涉及实时信息、最新事件、具体数据、你不确定的事实时，先用 web_search 工具联网检索，再基于检索结果作答
+
+工具使用原则：
+- 自主判断是否需要工具。需要时直接调用，不要询问用户"要不要我搜索"。
+- 可以多步进行：先调用工具 → 阅读结果 → 如仍不足则再次调用 → 最后综合作答。
+- 使用 web_search 结果作答时，必须在引用处标注来源编号（如 [1]、[2]）。
 
 请保持回复简洁、专业、友好。
 **重要**：默认以自然语言回复用户，不要输出 JSON；只有在系统提示"已加载技能"且该技能要求输出 json 代码块时，才按技能要求输出。`;
@@ -178,49 +184,11 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // 联网搜索
-  let searchResults: string | null = null;
-  let searchError: string | null = null;
+  // 联网搜索现在是模型可自主调用的工具（web_search），由下方的 Agent 循环驱动。
+  // 当用户显式打开"联网搜索"开关时，提示模型本轮应优先检索最新信息。
+  const forwardHeaders = HeaderUtils.extractForwardHeaders(request.headers);
   if (webSearch) {
-    try {
-      // 取最后一条用户消息作为搜索 query
-      const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
-      const searchQuery = lastUserMsg?.content || '';
-      if (searchQuery) {
-        const customHeaders = HeaderUtils.extractForwardHeaders(request.headers);
-        const searchClient = new SearchClient(new Config(), customHeaders);
-        console.log('[simple-chat] Web search query:', searchQuery.slice(0, 100));
-        const searchResp = await searchClient.webSearch(searchQuery, 5, true);
-        console.log('[simple-chat] Web search response:', JSON.stringify({
-          webItemsCount: searchResp.web_items?.length || 0,
-          hasSummary: !!searchResp.summary,
-        }));
-
-        if (searchResp.web_items && searchResp.web_items.length > 0) {
-          const items = searchResp.web_items.slice(0, 5).map((item, i) =>
-            `[${i + 1}] ${(item.title || '').replace(/\n/g, ' ')}\nURL: ${item.url || '无'}\n摘要: ${(item.snippet || '').replace(/\n/g, ' ')}${item.summary ? '\nAI摘要: ' + item.summary.replace(/\n/g, ' ') : ''}`
-          ).join('\n\n');
-
-          searchResults = `## 联网搜索结果\n搜索关键词: "${searchQuery}"\n\n${items}`;
-          if (searchResp.summary) {
-            searchResults += `\n\n## AI 搜索摘要\n${searchResp.summary}`;
-          }
-          enhancedSystemPrompt += `\n\n${searchResults}\n\n请基于以上联网搜索结果回答用户问题。如有引用，请标注来源编号（如 [1]、[2]）。`;
-        } else {
-          console.warn('[simple-chat] Web search returned 0 results');
-          enhancedSystemPrompt += `\n\n(联网搜索未找到相关结果，请基于已有知识回答)`;
-        }
-      }
-    } catch (e: unknown) {
-      const message = errorMessage(e, 'Web search unavailable');
-      const errorDetail = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
-      console.error('[simple-chat] Web search failed:', message, errorDetail);
-      if (e instanceof Error && e.stack) {
-        console.error('[simple-chat] Web search stack:', e.stack.slice(0, 500));
-      }
-      searchError = message;
-      enhancedSystemPrompt += `\n\n(联网搜索暂时不可用: ${message})`;
-    }
+    enhancedSystemPrompt += `\n\n（用户已开启联网搜索：本轮如涉及实时信息或最新事实，请优先调用 web_search 工具检索后再作答。）`;
   }
 
   // 构建消息列表
@@ -345,6 +313,23 @@ export async function POST(request: NextRequest) {
                   },
                 },
                 required: ['prompt'],
+              },
+            },
+          },
+          {
+            type: 'function',
+            function: {
+              name: 'web_search',
+              description: 'Search the web for real-time or up-to-date information (news, prices, recent events, facts you are unsure about). Returns ranked results with URLs you must cite as [1], [2].',
+              parameters: {
+                type: 'object',
+                properties: {
+                  query: {
+                    type: 'string',
+                    description: 'A concise search query in the language most likely to yield good results.',
+                  },
+                },
+                required: ['query'],
               },
             },
           },
