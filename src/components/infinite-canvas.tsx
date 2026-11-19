@@ -69,6 +69,8 @@ import { waitForAnnotationTaskResult } from '@/features/annotations/annotation-t
 import {
   buildAnnotationSourceVersionId,
   createInitialAnnotationControllerState,
+  selectAnnotation,
+  updateAnnotationInstruction,
   type AnnotationGesture,
   useAnnotationController,
 } from '@/features/annotations/use-annotation-controller';
@@ -15838,17 +15840,18 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
               }}
               onPromptChange={(prompt) => {
                 setAnnotationExecutionError(null);
-                setAnnotationV2State((current) => ({ ...current, prompt }));
+                // The toolbar prompt edits the selected annotation's instruction.
+                setAnnotationV2State((current) => {
+                  if (!current.selectedAnnotationId) return { ...current, prompt };
+                  return updateAnnotationInstruction(current, current.selectedAnnotationId, prompt, Date.now());
+                });
               }}
               onModelChange={(modelId) => {
                 setAnnotationExecutionError(null);
                 setAnnotationModelId(modelId);
               }}
               onSelectAnnotation={(annotationId) => {
-                setAnnotationV2State((current) => ({
-                  ...current,
-                  selectedAnnotationId: annotationId,
-                }));
+                setAnnotationV2State((current) => selectAnnotation(current, annotationId));
               }}
               onRemoveAnnotation={(annotationId) => {
                 setAnnotationExecutionError(null);
