@@ -67,8 +67,11 @@ const SAFE_FONT_FAMILY = /^[A-Za-z0-9 ]+$/;
 const UNDER_VOICEOVER_VOLUME = 0.35;
 /** Music fades in and out over this long, or a quarter of the film when it is short. */
 const MUSIC_FADE_SEC = 2;
-/** Broadcast loudness for the finished mix, so music never drowns the lines or clips. */
-const LOUDNESS = 'loudnorm=I=-16:TP=-1.5:LRA=11';
+/**
+ * Peak limiter on the finished mix, so music added on top of loud clips cannot clip.
+ * Not loudnorm: its single-pass mode resamples to 192 kHz and doubled ffmpeg's memory on a 720p episode.
+ */
+const MIX_LIMITER = 'alimiter=limit=0.89:level=disabled';
 
 function even(value: number): number {
   const rounded = Math.max(2, Math.round(value));
@@ -198,9 +201,9 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlan {
       // The foreground keys a compressor on the music: it dips under speech and comes back within half a second.
       filters.push(`[${audioOut}]asplit=2[fg][fgkey]`);
       filters.push('[bgm][fgkey]sidechaincompress=threshold=0.02:ratio=8:attack=20:release=400[bgmd]');
-      filters.push(`[fg][bgmd]amix=inputs=2:duration=first:normalize=0,${LOUDNESS}[amusic]`);
+      filters.push(`[fg][bgmd]amix=inputs=2:duration=first:normalize=0,${MIX_LIMITER}[amusic]`);
     } else {
-      filters.push(`[${audioOut}][bgm]amix=inputs=2:duration=first:normalize=0,${LOUDNESS}[amusic]`);
+      filters.push(`[${audioOut}][bgm]amix=inputs=2:duration=first:normalize=0,${MIX_LIMITER}[amusic]`);
     }
     audioOut = 'amusic';
   }

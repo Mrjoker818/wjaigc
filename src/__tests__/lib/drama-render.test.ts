@@ -56,7 +56,7 @@ describe('drama render plan', () => {
       .toThrow('DRAMA_RENDER_BAD_DURATION');
   });
 
-  it('loops music under the film, fades it, ducks it under the foreground and normalises loudness', () => {
+  it('loops music under the film, fades it, ducks it under the foreground and limits the peaks', () => {
     const plan = buildRenderPlan({ clips, width: 640, height: 360, music: { path: 'bgm.mp3', volume: 0.4, ducking: true }, outputPath: 'o.mp4' });
     const loop = plan.args.indexOf('-stream_loop');
     expect(plan.args.slice(loop, loop + 4)).toEqual(['-stream_loop', '-1', '-i', 'bgm.mp3']);
@@ -66,7 +66,8 @@ describe('drama render plan', () => {
     expect(filter).toContain('atrim=0:7,asetpts=PTS-STARTPTS,volume=0.4,afade=t=in:d=1.75,afade=t=out:st=5.25:d=1.75[bgm]');
     expect(filter).toContain('[acat]asplit=2[fg][fgkey]');
     expect(filter).toContain('[bgm][fgkey]sidechaincompress=');
-    expect(filter).toContain('loudnorm=I=-16');
+    expect(filter).toContain('alimiter=limit=0.89');
+    expect(filter).not.toContain('loudnorm');
     expect(plan.args[plan.args.indexOf('-map', plan.args.indexOf('-map') + 1) + 1]).toBe('[amusic]');
 
     const flat = buildRenderPlan({ clips, width: 640, height: 360, music: { path: 'bgm.mp3', volume: 0.2, ducking: false }, outputPath: 'o.mp4' });
