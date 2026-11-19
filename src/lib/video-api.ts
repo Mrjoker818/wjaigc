@@ -583,6 +583,13 @@ export function resolveVideoSubmitDuration(profile: VideoCompatProfile, model: s
   return seconds;
 }
 
+/** APIMart and AI Link have no character field, so character references go out as reference images. */
+function withCharacterReferencesAsImages(params: VideoGenerateParams): VideoGenerateParams {
+  if (!params.characterReferences?.length) return params;
+  const referenceImages = [...new Set([...(params.referenceImages ?? []), ...params.characterReferences])];
+  return { ...params, referenceImages, characterReferences: undefined };
+}
+
 /**
  * Build the submit request for a video generation task.
  * Returns { url, headers, body } ready for fetch().
@@ -608,11 +615,11 @@ export function buildVideoSubmitRequest(
     case 'fal-video':
       return buildFalVideoSubmit(baseUrl, apiKey, params);
     case 'apimart-video':
-      return buildApiMartVideoSubmit(baseUrl, apiKey, params);
+      return buildApiMartVideoSubmit(baseUrl, apiKey, withCharacterReferencesAsImages(params));
     case 'pearapi-video':
       return buildPearApiVideoSubmit(baseUrl, apiKey, params);
     case 'ai-link':
-      return buildAiLinkSubmit(baseUrl, apiKey, params);
+      return buildAiLinkSubmit(baseUrl, apiKey, withCharacterReferencesAsImages(params));
     case 'rest-generic':
     default:
       return buildRestGenericSubmit(baseUrl, apiKey, params);

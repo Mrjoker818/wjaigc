@@ -451,6 +451,11 @@ export async function POST(request: NextRequest) {
       resolveImageUrl(lastFrameImageUrl),
       ...(pearMaterials?.referenceImages ?? (referenceImages || [])).map((img: string) => resolveImageUrl(img)),
     ]);
+    // Character references are managed images too; providers cannot fetch /api/serve-upload paths.
+    const resolvedCharacterRefs = Array.isArray(characterReferences)
+      ? (await Promise.all(characterReferences.map(url => resolveImageUrl(typeof url === 'string' ? url : undefined))))
+        .filter((url): url is string => Boolean(url))
+      : undefined;
     if (pearMaterials && ((pearMaterials.imageUrl && !resolvedImageUrl) || resolvedRefs.some(url => !url))) {
       throw new ModelCapabilityError('MODEL_CAPABILITY_MISMATCH', '视频参考图片不可用', {
         providerId: provider.id, modelId: pureModel, field: 'referenceImages',
@@ -476,7 +481,7 @@ export async function POST(request: NextRequest) {
       // === 新增高级参数 ===
       cameraControl,
       motionBrush,
-      characterReferences,
+      characterReferences: resolvedCharacterRefs,
       motionStrength,
     };
     const pearSubmitRequest = pearMaterials ? buildVideoSubmitRequest(profile, videoParams) : undefined;

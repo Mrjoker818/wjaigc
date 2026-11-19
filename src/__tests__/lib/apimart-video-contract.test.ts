@@ -43,6 +43,28 @@ describe('APIMart Seedance video submit contract', () => {
     expect(body('seedance-2.5', { generateAudio: false }).generate_audio).toBe(false);
   });
 
+  it('sends character references as reference images, since APIMart has no character field', () => {
+    const submitted = body('seedance-2.5', {
+      referenceImages: ['https://example.com/prop.png'],
+      characterReferences: ['https://example.com/hero.png', 'https://example.com/prop.png'],
+    });
+    expect(submitted.image_urls).toEqual(['https://example.com/prop.png', 'https://example.com/hero.png']);
+    expect(submitted).not.toHaveProperty('character_references');
+    const framed = body('seedance-2.0', { imageUrl: 'https://example.com/a.png', characterReferences: ['https://example.com/hero.png'] });
+    expect(framed.image_with_roles).toEqual([
+      { url: 'https://example.com/a.png', role: 'first_frame' },
+      { url: 'https://example.com/hero.png', role: 'reference_image' },
+    ]);
+  });
+
+  it('sends AI Link Seedance character references as reference_images', () => {
+    const request = buildVideoSubmitRequest('ai-link', {
+      baseUrl: 'https://api.ai-link.shop', apiKey: 'k', model: 'doubao-seedance-2-0-260128', prompt: '竹林小径',
+      characterReferences: ['https://example.com/hero.png'],
+    });
+    expect(JSON.parse(request.body).reference_images).toEqual(['https://example.com/hero.png']);
+  });
+
   it('does not send the undocumented generation_type field', () => {
     expect(body('seedance-2.0-face')).not.toHaveProperty('generation_type');
   });
