@@ -235,8 +235,8 @@ async function withSession(theme:Theme,width:number,height:number,options:Option
 type CHMedia='video'|'3d';
 interface CHEntry {theme:Theme;width:number;height:number;media:CHMedia}
 const COMMON=['复制','下载','删除','发送到聊天修改','加入收藏夹'];
-const VIDEO=['播放视频','视频编辑','视频延长','视频对比','提取帧生成视频','转 GIF','提取封面','批量抽帧(均匀5帧)','批量抽帧(关键帧)','AI配音合成','提取帧','视频压缩'];
-const BAD=['发送参考图','提取关键词','元素拆解','语言修图','人物精修大师','Agent编排','生成720全景图','图片对比'];
+const VIDEO=['播放视频','视频对比','转 GIF','提取封面','批量抽帧(均匀5帧)','批量抽帧(关键帧)','AI配音合成','提取帧','视频压缩'];
+const BAD=['视频编辑','视频延长','提取帧生成视频','发送参考图','提取关键词','元素拆解','语言修图','人物精修大师','Agent编排','生成720全景图','图片对比'];
 const menu=(s:Session):Locator=>s.page.locator('[data-popup="context-menu"]');
 let captureIndex=0;
 async function capture(s:Session,e:CHEntry,label:string):Promise<void>{const dir=path.resolve('output/playwright/canvas-media-ch-native-20261020',String(process.pid));await mkdir(dir,{recursive:true});const file=path.join(dir,e.theme+'-'+e.width+'x'+e.height+'-'+e.media+'-'+(++captureIndex)+'-'+label+'.png');await s.page.screenshot({path:file});console.log('CH_CAPTURE',JSON.stringify({path:file,label,physicalAndroid:false,coze:false,notPlaybackOrModelLoadingAcceptance:true}));}
