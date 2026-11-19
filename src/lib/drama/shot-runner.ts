@@ -1,4 +1,5 @@
 /** One implementation of per-shot generation, shared by the drama workbench and the canvas video panel. */
+import { DIRECTOR_STYLES, normalizeDirectorStyle } from '@/lib/video-director/director-styles';
 import { stripMentions } from './mentions';
 import { activeTake, type DramaCastMember, type DramaLocation, type DramaProjectV1, type DramaProp, type DramaShot, type DramaTake } from './types';
 
@@ -18,6 +19,8 @@ export interface FirstFrameChoice {
   url?: string;
   /** Previous shot video whose last frame must be extracted before submitting. */
   previousVideoUrl?: string;
+  /** Where the film cuts out of the previous take, when it is trimmed; that frame is taken instead of the file's last. */
+  previousEndSec?: number;
 }
 
 function castImage(member: DramaCastMember): string[] {
@@ -32,18 +35,24 @@ function locationImage(location: DramaLocation | undefined): string | undefined 
 }
 
 /**
- * First-frame priority: a frame the user picked for this shot, then the location's reference image,
- * then the previous shot's last frame. Models without image-to-video get no first frame.
+ * First-frame priority: a frame the user picked for this shot, then the previous shot's last frame so the
+ * cut is continuous, then the location's reference image, which opens a scene. `previous` is the shot before
+ * this one in the same scene; a shot at another location never continues from it. Models without
+ * image-to-video get no first frame.
  */
 export function chooseFirstFrame(
   shot: DramaShot, previous: DramaShot | undefined, location: DramaLocation | undefined, capability: ShotModelCapability,
 ): FirstFrameChoice {
   if (!capability.imageToVideo) return { source: 'none' };
   if (shot.firstFrameUrl) return { source: 'user', url: shot.firstFrameUrl };
+  const previousVideo = previous ? activeTake(previous)?.videoUrl : undefined;
+  const sameLocation = !previous?.sceneId || !shot.sceneId || previous.sceneId === shot.sceneId;
+  if (previousVideo && shot.firstFrameFromPrev !== false && sameLocation) {
+    const end = previous?.clipEdit?.trimEndSec;
+    return { source: 'previous-shot', previousVideoUrl: previousVideo, ...(end && end > 0 ? { previousEndSec: end } : {}) };
+  }
   const locationUrl = locationImage(location);
   if (locationUrl) return { source: 'location', url: locationUrl };
-  const previousVideo = previous ? activeTake(previous)?.videoUrl : undefined;
-  if (previousVideo && shot.firstFrameFromPrev !== false) return { source: 'previous-shot', previousVideoUrl: previousVideo };
   return { source: 'none' };
 }
 
@@ -90,10 +99,72 @@ export function chooseReferenceImages(
   return picked;
 }
 
+/** Longest text taken from one bible field; the continuity block rides on every take, so it stays short. */
+const CONTINUITY_FIELD_MAX = 120;
+
+function brief(text: string | undefined, max = CONTINUITY_FIELD_MAX): string {
+  const flat = (text ?? '').replace(/\s+/gu, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+/** A costume of "无" or "-" means the member wears nothing worth repeating, e.g. an animal. */
+function hasValue(text: string | undefined): boolean {
+  return Boolean(text?.trim()) && !/^(无|没有|-|—|none)$/iu.test(text!.trim());
+}
+
+/**
+ * Lines appended to the shot prompt so clips generated one at a time cut together: how each character looks,
+ * where and when the scene plays, the props, the film's look, and how this shot picks up from `previous`
+ * (the shot before it in the same scene). Empty when there is nothing to keep consistent.
+ */
+export function shotContinuityText(
+  doc: DramaProjectV1, shot: DramaShot, previous?: DramaShot, firstFrameSource?: FirstFrameSource,
+): string {
+  const lines: string[] = [];
+  const people = (shot.characterIds ?? [])
+    .map(id => doc.cast.find(member => member.id === id))
+    .filter((member): member is DramaCastMember => Boolean(member))
+    .map(member => {
+      const traits = [
+        brief(member.appearance),
+        hasValue(member.costume) ? `服装 ${brief(member.costume)}` : '',
+        hasValue(member.hair) ? `发型 ${brief(member.hair, 40)}` : '',
+      ].filter(Boolean);
+      return traits.length ? `${member.name}（${traits.join('，')}）` : member.name;
+    });
+  if (people.length) lines.push(`人物：${people.join('；')}。每个镜头里长相和服装保持一致。`);
+
+  const scene = doc.episodes.flatMap(episode => episode.scenes).find(item => item.shots.some(other => other.id === shot.id));
+  const location = doc.locations.find(item => item.id === (shot.sceneId || scene?.locationId));
+  const place = [brief(scene?.heading, 60), brief(location?.description), brief(location?.lighting, 60)].filter(Boolean);
+  if (place.length) lines.push(`场景：${place.join('，')}。`);
+
+  const props = (shot.propIds ?? [])
+    .map(id => doc.props.find(item => item.id === id))
+    .filter((prop): prop is DramaProp => Boolean(prop))
+    .map(prop => (hasValue(prop.description) ? `${prop.name}（${brief(prop.description, 60)}）` : prop.name));
+  if (props.length) lines.push(`道具：${props.join('；')}。`);
+
+  lines.push(`画风：${DIRECTOR_STYLES[normalizeDirectorStyle(doc.style)].rule.quality}，全片统一。`);
+
+  if (firstFrameSource === 'previous-shot') {
+    lines.push('衔接：首帧就是上一镜头的最后一个画面，从这里直接往下演，不要重新开场；人物位置、朝向、运动方向和光线不变。');
+  } else if (previous) {
+    const before = brief(previous.actionBeat || stripMentions(previous.prompt, doc), 60);
+    lines.push(`衔接：紧接上一镜头${before ? `（${before}）` : ''}，人物位置、朝向和运动方向保持一致。`);
+  }
+  const notes = (shot.continuityNotes ?? []).map(note => brief(note, 60)).filter(Boolean);
+  if (notes.length) lines.push(`注意：${notes.join('；')}。`);
+  return `【连贯要求】\n${lines.join('\n')}`;
+}
+
 export interface ShotRequestContext {
   doc: DramaProjectV1;
   shot: DramaShot;
+  /** The shot before this one in the same scene. */
   previous?: DramaShot;
+  /** Where the first frame came from; a frame taken from `previous` changes how the cut is described. */
+  firstFrameSource?: FirstFrameSource;
   modelId: string;
   providerId?: string;
   capability: ShotModelCapability;
@@ -119,8 +190,11 @@ export function shotReferenceImages(
 export function buildShotGenerateRequest(context: ShotRequestContext): Record<string, unknown> {
   const { doc, shot, capability } = context;
   const characterReferences = shotReferenceImages(shot, doc.cast, capability, [context.firstFrameUrl, context.lastFrameUrl], doc.props);
-  const prompt = [stripMentions(shot.directedPrompt || shot.prompt, doc), shot.dialogue ? `台词：「${shot.dialogue}」` : '']
-    .filter(Boolean).join('\n');
+  const prompt = [
+    stripMentions(shot.directedPrompt || shot.prompt, doc),
+    shot.dialogue ? `台词：「${shot.dialogue}」` : '',
+    shotContinuityText(doc, shot, context.previous, context.firstFrameSource),
+  ].filter(Boolean).join('\n');
   return {
     prompt,
     model: context.modelId,
@@ -136,7 +210,8 @@ export function buildShotGenerateRequest(context: ShotRequestContext): Record<st
     ...(context.quality ? { quality: context.quality } : {}),
     ...(context.resolution ? { resolution: context.resolution } : {}),
     generateAudio: context.generateAudio ?? Boolean(shot.dialogue || shot.audioCues),
-    useDirector: true,
+    // The prompt above is complete; the route's director wrapper would add text written for a language model.
+    useDirector: false,
     directorMode: doc.style,
     shotId: shot.id,
     ...(context.projectId ? { projectId: context.projectId } : {}),
@@ -180,11 +255,14 @@ export function isRetryableTake(take: DramaTake): boolean {
   return take.status === 'failed' && take.retryable === true && !PERMANENT_FAILURE.test(take.error ?? '');
 }
 
-/** Extracts the last frame of the previous shot through the server-side ffmpeg route. */
-export async function extractLastFrame(videoUrl: string, fetcher: ShotFetch, signal?: AbortSignal): Promise<string> {
+/**
+ * Extracts the previous shot's closing frame through the server-side ffmpeg route: the file's last frame,
+ * or the frame just before `endSec` when the film trims the take there.
+ */
+export async function extractLastFrame(videoUrl: string, fetcher: ShotFetch, signal?: AbortSignal, endSec?: number): Promise<string> {
   const response = await fetcher('/api/video/extract-frame', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ videoUrl, mode: 'last' }), signal,
+    body: JSON.stringify(endSec ? { videoUrl, mode: 'at', time: Math.max(0, endSec - 0.05) } : { videoUrl, mode: 'last' }), signal,
   });
   const data = await readJson(response);
   if (!response.ok || typeof data.imageUrl !== 'string' || !data.imageUrl) {
@@ -204,11 +282,11 @@ export async function runShot(options: RunShotOptions): Promise<DramaTake> {
     const location = options.doc.locations.find(item => item.id === options.shot.sceneId);
     const choice = chooseFirstFrame(options.shot, options.previous, location, options.capability);
     const firstFrameUrl = choice.source === 'previous-shot' && choice.previousVideoUrl
-      ? await extractLastFrame(choice.previousVideoUrl, fetcher, options.signal)
+      ? await extractLastFrame(choice.previousVideoUrl, fetcher, options.signal, choice.previousEndSec)
       : choice.url;
     emit({});
     const lastFrameUrl = chooseLastFrame(options.shot, options.capability, firstFrameUrl);
-    const body = buildShotGenerateRequest({ ...options, firstFrameUrl, lastFrameUrl });
+    const body = buildShotGenerateRequest({ ...options, firstFrameSource: choice.source, firstFrameUrl, lastFrameUrl });
     const submit = await fetcher('/api/video/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'idempotency-key': `drama:${options.shot.id}:${take.id}` },
@@ -260,9 +338,11 @@ export async function runShot(options: RunShotOptions): Promise<DramaTake> {
   }
 }
 
-/** Shots in timeline order, each paired with the shot before it. */
+/**
+ * Shots in timeline order, each paired with the shot before it in the same scene. A scene's first shot has
+ * none: a new scene is a new time or place, so nothing carries over the cut.
+ */
 export function orderedShots(doc: DramaProjectV1, episodeId: string): Array<{ shot: DramaShot; previous?: DramaShot }> {
   const episode = doc.episodes.find(item => item.id === episodeId);
-  const shots = episode ? episode.scenes.flatMap(scene => scene.shots) : [];
-  return shots.map((shot, i) => ({ shot, previous: i > 0 ? shots[i - 1] : undefined }));
+  return (episode?.scenes ?? []).flatMap(scene => scene.shots.map((shot, i) => ({ shot, previous: i > 0 ? scene.shots[i - 1] : undefined })));
 }

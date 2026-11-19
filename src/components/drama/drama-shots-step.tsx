@@ -77,7 +77,7 @@ export function DramaShotsStep() {
           </button>
         </div>
       </div>
-      <p className="drama-label">镜头按顺序逐个生成。有关键帧的镜头从关键帧开始；没有时，开启「接上一镜头」的镜头会用上一镜头的最后一帧做首帧。生成中可以继续编辑其他镜头。</p>
+      <p className="drama-label">镜头按顺序逐个生成。有关键帧的镜头从关键帧开始；没有时，同一场里的镜头接上一镜头的最后一帧，每场第一个镜头从场景图开始。生成中可以继续编辑其他镜头。</p>
 
       {allShots.length === 0 ? (
         <p className="drama-label">还没有镜头。<button type="button" className="underline" onClick={() => setStep('board')}>去分镜步骤拆解</button></p>

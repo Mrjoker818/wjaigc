@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildDramaShotMessages, DramaPlannerError, parseDramaScriptResponse, parseDramaShotResponse } from '@/lib/drama/planner';
 import { DramaDocumentError, parseDramaProject } from '@/lib/drama/schema';
-import { buildShotGenerateRequest, chooseFirstFrame, chooseLastFrame, chooseReferenceImages, isRetryableTake, runShot, shotReferenceImages } from '@/lib/drama/shot-runner';
+import {
+  buildShotGenerateRequest, chooseFirstFrame, chooseLastFrame, chooseReferenceImages, isRetryableTake, orderedShots, runShot,
+  shotContinuityText, shotReferenceImages,
+} from '@/lib/drama/shot-runner';
 import { shotCapabilityFromDescriptor } from '@/components/drama/drama-models';
 import type { TaskModelDescriptor } from '@/lib/task-core/model-capability-contract';
 import { collectEpisodeTimeline, dialogueCues } from '@/lib/drama/timeline';
@@ -112,15 +115,23 @@ describe('shot runner choices', () => {
   const capability = { imageToVideo: true, maxReferenceImages: 3 };
   const doneTake = { id: 'k1', status: 'completed' as const, videoUrl: '/v/prev.mp4', createdAt: 1 };
 
-  it('picks the first frame from user, then location, then previous shot', () => {
+  it('picks the first frame from user, then the previous shot, then the location', () => {
     const location = { id: 'cafe', name: 'c', imageUrl: '/i/cafe.png' };
     const prev = shot({ id: 'a', takes: [doneTake] });
     expect(chooseFirstFrame(shot({ id: 'b', firstFrameUrl: '/i/user.png' }), prev, location, capability))
       .toEqual({ source: 'user', url: '/i/user.png' });
-    expect(chooseFirstFrame(shot({ id: 'b' }), prev, location, capability)).toEqual({ source: 'location', url: '/i/cafe.png' });
-    expect(chooseFirstFrame(shot({ id: 'b' }), prev, undefined, capability))
+    // Inside a scene the cut continues from the previous shot even when the location has a plate.
+    expect(chooseFirstFrame(shot({ id: 'b' }), prev, location, capability))
       .toEqual({ source: 'previous-shot', previousVideoUrl: '/v/prev.mp4' });
+    expect(chooseFirstFrame(shot({ id: 'b' }), undefined, location, capability)).toEqual({ source: 'location', url: '/i/cafe.png' });
+    expect(chooseFirstFrame(shot({ id: 'b', firstFrameFromPrev: false }), prev, location, capability)).toEqual({ source: 'location', url: '/i/cafe.png' });
     expect(chooseFirstFrame(shot({ id: 'b', firstFrameFromPrev: false }), prev, undefined, capability)).toEqual({ source: 'none' });
+    // A shot at another location never continues from the previous one.
+    expect(chooseFirstFrame(shot({ id: 'b', sceneId: 'street' }), shot({ id: 'a', sceneId: 'cafe', takes: [doneTake] }), undefined, capability))
+      .toEqual({ source: 'none' });
+    // A trimmed take is cut before its end, so that frame is the one to continue from.
+    expect(chooseFirstFrame(shot({ id: 'b' }), shot({ id: 'a', takes: [doneTake], clipEdit: { trimEndSec: 3.2 } }), undefined, capability))
+      .toEqual({ source: 'previous-shot', previousVideoUrl: '/v/prev.mp4', previousEndSec: 3.2 });
     expect(chooseFirstFrame(shot({ id: 'b', firstFrameUrl: '/i/u.png' }), prev, location, { ...capability, imageToVideo: false }))
       .toEqual({ source: 'none' });
   });
@@ -174,8 +185,30 @@ describe('shot runner choices', () => {
       capability, firstFrameUrl: '/f.png',
     });
     expect(body).toMatchObject({ model: 'm', providerId: 'p', imageUrl: '/f.png', mode: 'image2video-first', duration: 6,
-      directorMode: 'music-video', generateAudio: true, shotId: 's1' });
+      directorMode: 'music-video', generateAudio: true, shotId: 's1', useDirector: false });
     expect(String(body.prompt)).toContain('台词：「你好」');
+    expect(String(body.prompt)).toContain('【连贯要求】');
+  });
+
+  it('writes continuity from the bible and the previous shot in the same scene', () => {
+    const doc = plannedDoc();
+    doc.cast[0] = { ...doc.cast[0], costume: '黑色风衣', hair: '短发' };
+    doc.cast.push({ id: 'cat', name: '大橘', appearance: '圆润的橘猫', costume: '无' });
+    doc.props = [{ id: 'letter', name: '信', description: '泛黄的信封' }];
+    const scene = doc.episodes[0].scenes[0];
+    const current = shot({ id: 'b', sceneId: 'cafe', characterIds: ['lin', 'cat'], propIds: ['letter'], continuityNotes: ['信在左手'] });
+    scene.shots = [shot({ id: 'a', actionBeat: '林夏接过信' }), current];
+    const chained = shotContinuityText(doc, current, scene.shots[0], 'previous-shot');
+    expect(chained).toContain('人物：林夏（短发，黑色风衣，服装 黑色风衣，发型 短发）；大橘（圆润的橘猫）');
+    expect(chained).toContain('场景：咖啡馆·内·夜，雨夜的街角咖啡馆');
+    expect(chained).toContain('道具：信（泛黄的信封）');
+    expect(chained).toContain('画风：节奏感画面');
+    expect(chained).toContain('首帧就是上一镜头的最后一个画面');
+    expect(chained).toContain('注意：信在左手');
+    expect(shotContinuityText(doc, current, scene.shots[0], 'user')).toContain('紧接上一镜头（林夏接过信）');
+    expect(shotContinuityText(doc, current, undefined, 'location')).not.toContain('衔接');
+    // A scene's first shot has nothing before it to continue from.
+    expect(orderedShots(doc, doc.episodes[0].id).map(item => item.previous?.id)).toEqual([undefined, 'a']);
   });
 
   it('sends a last frame only with a first frame and only to models that take both', () => {
@@ -216,7 +249,9 @@ describe('runShot', () => {
       fetch: fetcher, sleep: async () => undefined, onTake: t => takes.push(t.status),
     });
     expect(calls.map(call => call.url)).toEqual(['/api/video/extract-frame', '/api/video/generate', '/api/poll-task', '/api/poll-task']);
+    expect(calls[0].body).toEqual({ videoUrl: '/v/a.mp4', mode: 'last' });
     expect(calls[1].body.imageUrl).toBe('/f/last.png');
+    expect(String(calls[1].body.prompt)).toContain('首帧就是上一镜头的最后一个画面');
     expect(take).toMatchObject({ status: 'completed', taskId: 'task-1', credits: 12, videoUrl: '/v/b.mp4', thumbnailUrl: '/v/b.jpg' });
     expect(takes.at(-1)).toBe('completed');
   });

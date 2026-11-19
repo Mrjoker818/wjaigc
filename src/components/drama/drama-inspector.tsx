@@ -7,7 +7,7 @@ import { mentionCandidates, mergeMentionIds } from '@/lib/drama/mentions';
 import { CLIP_SPEED_RANGE, CLIP_VOLUME_MAX, MIN_CLIP_SEC, STILL_MOTIONS, type StillMotion } from '@/lib/drama/render';
 import { shotFilmLength } from '@/lib/drama/timeline';
 import { activeTake, type DramaClipEdit, type DramaShot } from '@/lib/drama/types';
-import { chooseFirstFrame, chooseLastFrame, shotReferenceImages } from '@/lib/drama/shot-runner';
+import { chooseFirstFrame, chooseLastFrame, shotContinuityText, shotReferenceImages } from '@/lib/drama/shot-runner';
 import { applyRetakeSuggestion, estimateShots, REFERENCE_IMAGE_TYPES, uploadReferenceImage } from '@/lib/drama/workbench-client';
 import { currentVoiceover, shotSpeaker } from '@/lib/drama/voiceover';
 import { findShot, fitDuration, orderedPrevious, updateShot } from '@/lib/drama/workbench-state';
@@ -20,7 +20,7 @@ import { ShotReadinessList } from './drama-readiness';
 const FIRST_FRAME_TEXT = {
   user: '首帧：这一镜的关键帧',
   location: '首帧：场景图',
-  'previous-shot': '首帧：上一镜头的最后一帧',
+  'previous-shot': '首帧：上一镜头的最后一帧，动作直接接上',
   none: '首帧：无，模型按文字生成',
 } as const;
 
@@ -138,8 +138,9 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
               onChange={event => set({ durationSec: Math.max(1, Math.min(60, Number(event.target.value) || 1)) })} />
           )}
         </label>
-        <label className="flex items-end gap-2 pb-2 text-sm">
-          <input type="checkbox" checked={shot.firstFrameFromPrev !== false} onChange={event => set({ firstFrameFromPrev: event.target.checked })} />
+        <label className="flex items-end gap-2 pb-2 text-sm" title={previous ? '用上一镜头最后一帧做首帧，动作接得上' : '这一场的第一个镜头，没有上一镜头可接'}>
+          <input type="checkbox" checked={Boolean(previous) && shot.firstFrameFromPrev !== false} disabled={!previous}
+            onChange={event => set({ firstFrameFromPrev: event.target.checked })} />
           接上一镜头
         </label>
       </div>
@@ -200,8 +201,17 @@ function InspectorBody({ shotId, onClose }: { shotId: string; onClose: () => voi
       </section>
 
       <section className="drama-panel flex flex-col gap-2 p-3" aria-label="下一次生成会用的素材">
-        <p className="text-xs">{FIRST_FRAME_TEXT[firstFrame.source]}</p>
+        <p className="text-xs">
+          {'previousEndSec' in firstFrame && firstFrame.previousEndSec
+            ? `首帧：上一镜头剪到 ${firstFrame.previousEndSec.toFixed(1)} 秒处的画面`
+            : FIRST_FRAME_TEXT[firstFrame.source]}
+        </p>
         {lastFrame ? <p className="text-xs">尾帧：这一镜的尾帧（首尾帧模式）</p> : null}
+        <details className="text-xs">
+          <summary className="cursor-pointer text-[var(--drama-muted)]">连贯要求（自动加在画面描述后面）</summary>
+          <p className="mt-1 whitespace-pre-wrap text-[var(--drama-muted)]">{shotContinuityText(doc, shot, previous, firstFrame.source)}</p>
+          <p className="mt-1 text-[var(--drama-muted)]">按设定页的外貌、服装、场景描述和上一镜头自动写出。想改内容，就改设定或这一镜的画面描述。</p>
+        </details>
         <p className="text-xs text-[var(--drama-muted)]">
           角色和道具参考图 {references.length} 张{model ? `（模型最多接受 ${model.capability.maxReferenceImages} 张）` : ''}
         </p>

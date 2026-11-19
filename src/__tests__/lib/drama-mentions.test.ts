@@ -55,6 +55,7 @@ describe('drama mentions', () => {
       aspectRatio: '9:16', references: [], continuityNotes: [], status: 'planned', takes: [],
     };
     const body = buildShotGenerateRequest({ doc: doc(), shot, modelId: 'm', capability: { imageToVideo: false, maxReferenceImages: 0 } });
-    expect(body.prompt).toBe('大橘叼着彩票');
+    expect(String(body.prompt).split('\n')[0]).toBe('大橘叼着彩票');
+    expect(body.prompt).not.toContain('@');
   });
 });

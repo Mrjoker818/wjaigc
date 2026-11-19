@@ -45,7 +45,9 @@ describe('workbench document edits', () => {
     doc = removeShot(doc, added.shotId);
     doc = updateShot(doc, 's1', { durationSec: 8 });
     expect(findShot(doc, 's1')?.shot.duration).toBe(8);
-    expect(orderedPrevious(doc, doc.episodes[0].id, 's2')?.id).toBe('s1');
+    // s2 now opens the second scene, so nothing carries over from s1.
+    expect(orderedPrevious(doc, doc.episodes[0].id, 's2')).toBeUndefined();
+    expect(orderedPrevious(doc, doc.episodes[0].id, 's3')?.id).toBe('s2');
     expect(() => parseDramaProject(doc)).not.toThrow();
   });
 

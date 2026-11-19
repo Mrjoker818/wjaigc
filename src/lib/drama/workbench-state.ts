@@ -183,11 +183,14 @@ export function failedShots(episode: DramaEpisode | undefined): DramaShot[] {
   return pendingShots(episode).filter(shot => shot.takes.at(-1)?.status === 'failed');
 }
 
-/** The shot right before `shotId` in timeline order, across scene boundaries. */
+/**
+ * The shot right before `shotId` in the same scene; none for a scene's first shot, since a new scene
+ * is a new time or place and nothing carries over that cut.
+ */
 export function orderedPrevious(doc: DramaProjectV1, episodeId: string, shotId: string): DramaShot | undefined {
-  const shots = doc.episodes.find(item => item.id === episodeId)?.scenes.flatMap(scene => scene.shots) ?? [];
-  const i = shots.findIndex(shot => shot.id === shotId);
-  return i > 0 ? shots[i - 1] : undefined;
+  const scene = doc.episodes.find(item => item.id === episodeId)?.scenes.find(item => item.shots.some(shot => shot.id === shotId));
+  const i = scene ? scene.shots.findIndex(shot => shot.id === shotId) : -1;
+  return i > 0 ? scene!.shots[i - 1] : undefined;
 }
 
 export function episodeShotCount(episode: DramaEpisode): number {
