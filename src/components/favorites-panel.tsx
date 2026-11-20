@@ -334,7 +334,7 @@ function FavoritesPanelForUser({ userId, onClose, isMonochrome, onApplyParams }:
                 ref={panelRef}
                 onClick={e => e.stopPropagation()}
                 onWheel={handleWheel}
-                className="fixed shadow-2xl flex flex-col overflow-hidden [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:shrink-0 [&_button]:whitespace-nowrap [&_input]:min-h-11 [&_select]:min-h-11 [&_select]:min-w-0 [&_select]:max-w-full [&_p]:break-words"
+                className="fixed shadow-2xl flex flex-col overflow-hidden touch-button-targets [&_button]:shrink-0 [&_button]:whitespace-nowrap touch-field-targets [&_select]:min-w-0 [&_select]:max-w-full [&_p]:break-words"
                 style={{
                     width: panelWidth,
                     height: panelHeight,

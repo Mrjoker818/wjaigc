@@ -476,7 +476,7 @@ export function ImagePreview({ image, onClose, themeStyle = 'gold', onEditImage 
       onClick={onClose}
     >
       <div
-        className={`relative flex w-[calc(100vw-1rem)] min-h-0 min-w-0 flex-col ${viewMode === '3d' ? 'max-w-[700px] h-[min(600px,calc(100dvh-1rem))]' : 'max-w-[70rem] h-[min(56rem,calc(100dvh-1rem))]'} ${bgColor} ${borderColor} border rounded-xl overflow-hidden shadow-2xl outline-none [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:shrink-0 [&_button]:whitespace-nowrap [&_button]:focus-visible:ring-2 [&_button]:focus-visible:ring-inset [&_button]:focus-visible:ring-primary`}
+        className={`relative flex w-[calc(100vw-1rem)] min-h-0 min-w-0 flex-col ${viewMode === '3d' ? 'max-w-[700px] h-[min(600px,calc(100dvh-1rem))]' : 'max-w-[70rem] h-[min(56rem,calc(100dvh-1rem))]'} ${bgColor} ${borderColor} border rounded-xl overflow-hidden shadow-2xl outline-none touch-button-targets [&_button]:shrink-0 [&_button]:whitespace-nowrap [&_button]:focus-visible:ring-2 [&_button]:focus-visible:ring-inset [&_button]:focus-visible:ring-primary`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

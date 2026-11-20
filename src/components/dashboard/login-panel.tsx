@@ -180,7 +180,7 @@ export function LoginPanel({ onLogin }: LoginPanelProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-[100] h-dvh min-h-0 [.theme-monochrome_&]:[--primary:#1d4ed8] [.theme-monochrome_&]:[--muted-foreground:#475569] overflow-y-auto overscroll-contain [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:focus-visible:ring-2 [&_button]:focus-visible:ring-primary [&_input]:min-h-11 [&_input]:text-base" style={{ background: 'var(--background)' }}>
+    <div className="fixed inset-0 z-[100] h-dvh min-h-0 [.theme-monochrome_&]:[--primary:#1d4ed8] [.theme-monochrome_&]:[--muted-foreground:#475569] overflow-y-auto overscroll-contain touch-button-targets [&_button]:focus-visible:ring-2 [&_button]:focus-visible:ring-primary touch-field-targets [&_input]:text-base" style={{ background: 'var(--background)' }}>
       <div className="w-full flex flex-col lg:flex-row" style={{ minHeight: '100%' }}>
 
         {/* 左侧品牌展示区 */}

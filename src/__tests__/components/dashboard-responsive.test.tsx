@@ -165,6 +165,40 @@ describe('mobile chat project recovery layout', () => {
 });
 
 describe('dashboard narrow screen regression', () => {
+  it('keeps desktop user checkboxes compact and all four row actions on one line', async () => {
+    const noOp = vi.fn(async () => {});
+    const view = render(<div className="dashboard-root"><main className="dashboard-scrollable"><AdminTabs activeTab="users"
+      adminUsers={[{ id: 'density-user', name: '密度验收用户', role: 'user', status: 'active' }]}
+      adminGroups={[]} providers={[]} onRefreshAdmin={vi.fn()} onCreateUser={noOp} onRenameUser={noOp}
+      onResetPassword={noOp} onToggleUser={noOp} onDeleteUser={vi.fn()} onBatchDeleteUsers={vi.fn(async () => true)}
+      onToggleUserPermission={noOp} onRechargeCredits={noOp} /></main></div>);
+    await show(view.container, 1440);
+    const list = page.getByRole('region', { name: '用户列表，可横向滚动' });
+    for (const checkbox of await list.getByRole('checkbox').all()) {
+      const rect = await checkbox.boundingBox();
+      expect(rect!.width).toBeLessThanOrEqual(20);
+      expect(rect!.height).toBeLessThanOrEqual(20);
+    }
+    const row = list.locator('.divide-y > div').first();
+    expect((await row.boundingBox())!.height).toBeLessThanOrEqual(72);
+    const actions = await row.locator('button').evaluateAll(elements => elements.map(element => {
+      const rect = element.getBoundingClientRect(); return { y: rect.y, height: rect.height };
+    }));
+    expect(actions).toHaveLength(4);
+    expect(new Set(actions.map(action => action.y)).size).toBe(1);
+    expect(actions.every(action => action.height <= 32)).toBe(true);
+  });
+
+  it('keeps the desktop API status refresh button within its compact header', async () => {
+    const view = dashboard();
+    navigate('API 管理');
+    await show(view.container, 1440);
+    const refresh = page.getByTitle('刷新自检', { exact: true });
+    const rect = await refresh.boundingBox();
+    expect(rect!.width).toBeLessThanOrEqual(32);
+    expect(rect!.height).toBeLessThanOrEqual(32);
+  });
+
   it.each([[640, 320], [390, 240]])('I1: keeps navigation and close reachable with three recent projects at %ix%i', async (width, height) => {
     manager.getProjects.mockReturnValue(recentProjects);
     const view = dashboard();

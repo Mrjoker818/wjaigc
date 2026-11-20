@@ -298,7 +298,7 @@ export function ThirdPartyModelDialog({
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-2" style={{ background: isGold ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.9)', backdropFilter: 'blur(20px)' }}>
       <div 
-        className={`w-full min-w-0 max-w-[560px] max-h-[calc(100dvh-16px)] md:max-w-[340px] md:max-h-[85vh] [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:shrink-0 [&_button]:whitespace-nowrap [&_button>svg]:shrink-0 [&_input:not([type=checkbox])]:text-base [&_input:not([type=checkbox])]:min-h-11 [&_select]:text-base [&_select]:min-h-11 rounded-2xl overflow-hidden shadow-2xl flex flex-col ${isGold ? 'bg-[#141414] border border-[#2a2a2a]' : 'bg-white border border-gray-200'}`}
+        className={`w-full min-w-0 max-w-[560px] max-h-[calc(100dvh-16px)] md:max-w-[340px] md:max-h-[85vh] touch-button-targets [&_button]:shrink-0 [&_button]:whitespace-nowrap [&_button>svg]:shrink-0 [&_input:not([type=checkbox])]:text-base  [&_select]:text-base touch-field-targets rounded-2xl overflow-hidden shadow-2xl flex flex-col ${isGold ? 'bg-[#141414] border border-[#2a2a2a]' : 'bg-white border border-gray-200'}`}
         role="dialog" aria-modal="true" aria-label="第三方模型调用"
       >
         

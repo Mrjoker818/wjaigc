@@ -594,7 +594,7 @@ export default function MediaGatewayAdmin() {
       </div>
 
       <Sheet open={drawerMode !== null} onOpenChange={open => { if (!open) closeDrawer(); }}>
-        <SheetContent className="w-[calc(100%-1rem)] max-w-md overflow-x-hidden overflow-y-auto border-border sm:w-full [&_button]:min-h-11 [&_button]:min-w-11 [&_input:not([type=checkbox])]:min-h-11 [&_input:not([type=checkbox])]:text-base">
+        <SheetContent className="w-[calc(100%-1rem)] max-w-md overflow-x-hidden overflow-y-auto border-border sm:w-full touch-button-targets touch-field-targets [&_input:not([type=checkbox])]:text-base">
           <SheetHeader className="shrink-0 pr-16">
             <SheetTitle>{drawerMode === 'issue' ? '签发媒体网关密钥' : '编辑媒体网关密钥'}</SheetTitle>
             <SheetDescription>{drawerMode === 'issue' ? 'Secret 只在签发成功后显示一次。' : '用户与密钥前缀不可修改。'}</SheetDescription>
@@ -632,7 +632,7 @@ export default function MediaGatewayAdmin() {
       </Sheet>
 
       <Dialog open={issuedSecret !== null} onOpenChange={open => { if (!open) closeSecretDialog(); }}>
-        <DialogContent showCloseButton={false} className="max-h-[calc(100dvh-1rem)] max-w-[calc(100%-1rem)] overflow-x-hidden overflow-y-auto border-border sm:max-w-md [&_button]:min-h-11 [&_button]:min-w-11">
+        <DialogContent showCloseButton={false} className="max-h-[calc(100dvh-1rem)] max-w-[calc(100%-1rem)] overflow-x-hidden overflow-y-auto border-border sm:max-w-md touch-button-targets ">
           <DialogHeader>
             <DialogTitle>密钥签发成功</DialogTitle>
             <DialogDescription>这是唯一一次显示完整 Secret。关闭后无法再次查看。</DialogDescription>
@@ -658,7 +658,7 @@ export default function MediaGatewayAdmin() {
       </Dialog>
 
       <AlertDialog open={revokeKey !== null} onOpenChange={open => { if (!open) closeRevokeDialog(); }}>
-        <AlertDialogContent className="max-h-[calc(100dvh-1rem)] overflow-x-hidden overflow-y-auto [&_button]:min-h-11 [&_button]:min-w-11">
+        <AlertDialogContent className="max-h-[calc(100dvh-1rem)] overflow-x-hidden overflow-y-auto touch-button-targets ">
           <AlertDialogHeader>
             <AlertDialogTitle className="[overflow-wrap:anywhere]">吊销 {revokeKey?.label}</AlertDialogTitle>
             <AlertDialogDescription>吊销后无法恢复，使用该密钥的请求会立即被拒绝。</AlertDialogDescription>

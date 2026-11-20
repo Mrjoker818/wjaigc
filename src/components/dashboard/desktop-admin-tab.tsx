@@ -770,7 +770,7 @@ export default function DesktopAdminTab({
       )}
 
       <AlertDialog open={Boolean(pendingDelete)} onOpenChange={open => { if (!open) setPendingDelete(null); }}>
-        <AlertDialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto [&_button]:min-h-11 [&_button]:min-w-11 [&_[data-slot=alert-dialog-header]]:shrink-0 [&_[data-slot=alert-dialog-footer]]:shrink-0" onCloseAutoFocus={event => {
+        <AlertDialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto touch-button-targets [&_[data-slot=alert-dialog-header]]:shrink-0 [&_[data-slot=alert-dialog-footer]]:shrink-0" onCloseAutoFocus={event => {
           const origin = resourceDeleteOrigin.current;
           if (!origin) return;
           resourceDeleteOrigin.current = null;

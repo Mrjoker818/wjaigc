@@ -1464,7 +1464,7 @@ export default function AiPsdPanel({ onClose, onAddImages, isMonochrome = false,
   return (
     <div
       ref={panelRef}
-      className={`fixed z-[90] min-w-0 [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:max-w-full [&_button]:whitespace-nowrap [&_input]:min-h-11 [&_input]:max-w-full [&_select]:min-h-11 [&_select]:max-w-full [&_textarea]:min-h-11 [&_input]:text-base [&_select]:text-base [&_textarea]:text-base lg:[&_input]:text-sm lg:[&_select]:text-sm lg:[&_textarea]:text-sm ${isDragging ? 'cursor-grabbing' : ''}`}
+      className={`fixed z-[90] min-w-0 touch-button-targets [&_button]:max-w-full [&_button]:whitespace-nowrap touch-field-targets [&_input]:max-w-full  [&_select]:max-w-full [&_textarea]:min-h-11 [&_input]:text-base [&_select]:text-base [&_textarea]:text-base lg:[&_input]:text-sm lg:[&_select]:text-sm lg:[&_textarea]:text-sm ${isDragging ? 'cursor-grabbing' : ''}`}
       style={{ left: panelPos.x, top: panelPos.y, width: panelWidth, maxHeight: panelMaxHeight }}
       onMouseDown={e => e.stopPropagation()}
       onPointerDown={e => e.stopPropagation()}

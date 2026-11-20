@@ -3444,7 +3444,7 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
         {/* ── Tab: API Management ── */}
         {activeTab === 'apis' && isAdmin && (
-          <div className="h-full overflow-y-auto p-4 sm:p-6 relative [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:whitespace-nowrap [&_svg]:shrink-0" onMouseEnter={() => { if (!productionReadiness && !productionReadinessLoading) void refreshProductionReadiness(); if (!cloudTasks.length && !cloudTasksLoading) void refreshCloudTasks(); if (!Object.keys(providerTaskSummary).length) void refreshProviderTaskSummary(); }}>
+          <div className="h-full overflow-y-auto p-4 sm:p-6 relative touch-button-targets [&_button]:whitespace-nowrap [&_svg]:shrink-0" onMouseEnter={() => { if (!productionReadiness && !productionReadinessLoading) void refreshProductionReadiness(); if (!cloudTasks.length && !cloudTasksLoading) void refreshCloudTasks(); if (!Object.keys(providerTaskSummary).length) void refreshProviderTaskSummary(); }}>
             {/* ── Header with add button ── */}
             <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
               <div className="min-w-0">

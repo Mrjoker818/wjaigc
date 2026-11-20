@@ -146,7 +146,7 @@ function ModelDropdownPortal({
   return ReactDOM.createPortal(
     <div
       style={style}
-      className={`max-h-60 overflow-y-auto rounded-xl border shadow-2xl [&_button]:min-h-11 [&_button]:min-w-11 ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-white/10'}`}
+      className={`max-h-60 overflow-y-auto rounded-xl border shadow-2xl touch-button-targets ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-white/10'}`}
     >
       {children}
     </div>,
@@ -784,7 +784,7 @@ export default function LogoSkillPanel({
   return (
     <div
       ref={panelRef}
-      className={`fixed z-[90] min-w-0 [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:max-w-full [&_input]:min-h-11 [&_input]:max-w-full [&_select]:min-h-11 [&_select]:max-w-full [&_textarea]:min-h-11 [&_input]:text-base [&_select]:text-base [&_textarea]:text-base lg:[&_input]:text-sm lg:[&_select]:text-sm lg:[&_textarea]:text-sm ${dragging ? 'cursor-grabbing' : ''}`}
+      className={`fixed z-[90] min-w-0 touch-button-targets [&_button]:max-w-full touch-field-targets [&_input]:max-w-full  [&_select]:max-w-full [&_textarea]:min-h-11 [&_input]:text-base [&_select]:text-base [&_textarea]:text-base lg:[&_input]:text-sm lg:[&_select]:text-sm lg:[&_textarea]:text-sm ${dragging ? 'cursor-grabbing' : ''}`}
       style={{ left: pos.x, top: pos.y, width: panelWidth, maxWidth: 'calc(100vw - 16px)', maxHeight: panelMaxHeight }}
       onMouseDown={e => e.stopPropagation()}
       onPointerDown={e => e.stopPropagation()}

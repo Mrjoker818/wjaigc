@@ -16837,7 +16837,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                 }
               }}
             >
-              <div className={`flex min-h-0 w-[560px] max-w-[calc(100vw-2rem)] max-h-[90dvh] flex-col overflow-hidden rounded-2xl border shadow-2xl [&_button]:min-h-11 [&_button]:min-w-11 [&_select]:min-h-11 [&_input]:min-h-11 ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#444]'}`}>
+              <div className={`flex min-h-0 w-[560px] max-w-[calc(100vw-2rem)] max-h-[90dvh] flex-col overflow-hidden rounded-2xl border shadow-2xl touch-button-targets touch-field-targets ${isMonochrome ? 'bg-white border-gray-200' : 'bg-[#1a1a1a] border-[#444]'}`}>
                 {/* Header */}
                 <div className={`flex shrink-0 items-center justify-between gap-2 px-4 py-3 border-b ${isMonochrome ? 'border-gray-100' : 'border-white/[0.14]'}`}>
                   <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -17394,7 +17394,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
               role="dialog"
               aria-modal="true"
               aria-label="视频抽帧"
-              className="fixed left-1/2 top-1/2 z-[85] w-80 max-w-[calc(100vw-2rem)] max-h-[calc(100dvh-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto overscroll-contain rounded-xl border border-[#333] bg-[#1a1a1a] shadow-2xl [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:whitespace-nowrap"
+              className="fixed left-1/2 top-1/2 z-[85] w-80 max-w-[calc(100vw-2rem)] max-h-[calc(100dvh-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto overscroll-contain rounded-xl border border-[#333] bg-[#1a1a1a] shadow-2xl touch-button-targets [&_button]:whitespace-nowrap"
               data-popup="video-extract"
               onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); closeVideoExtractPanel(); setEditMode('none'); setActiveTool('none'); } }}
             >

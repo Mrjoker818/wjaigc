@@ -4955,7 +4955,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                         <SelectItem key={m.id} value={m.id} className={themeClasses.text}>
                           <div className="flex flex-col w-full">
                             <span className="font-medium text-xs">{m.name}</span>
-                            {m.description && <span className={`text-xs ${themeClasses.textMuted}`}>{m.description}</span>}
+                            {m.description && <span data-slot="menu-item-description" className={`text-xs ${themeClasses.textMuted}`}>{m.description}</span>}
                           </div>
                         </SelectItem>
                       ))}
@@ -5928,7 +5928,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                               void addCanvasImageToChat(img, true);
                             }
                           }}
-                          className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs ${isGold ? 'text-white/80 focus:bg-white/5' : 'text-gray-700 focus:bg-gray-50'} ${isAdded ? (isGold ? 'bg-gold/10' : 'bg-blue-50') : ''}`}
+                          className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs ${isGold ? 'text-white/80' : 'text-gray-700'} ${isAdded ? (isGold ? 'bg-gold/10' : 'bg-blue-50') : ''}`}
                         >
                           <div className="w-7 h-7 rounded overflow-hidden shrink-0 border border-white/10">
                             <img src={img.url} alt="" className="w-full h-full object-cover" />
@@ -5967,7 +5967,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
               >
                 <DropdownMenuItem
                   onSelect={() => { setShowTuneView(true); setShowTunePanel(true); }}
-                  className={`text-xs ${isGold ? 'text-white/80 focus:bg-white/5' : 'text-gray-700 focus:bg-gray-50'}`}
+                  className={`text-xs ${isGold ? 'text-white/80' : 'text-gray-700'}`}
                 >
                   <Sliders size={12} className="mr-2" />
                   打开调节面板
@@ -5977,7 +5977,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                 )}
                 <DropdownMenuItem
                   onSelect={() => { setShowTunePanel(false); setTuneParams({ strength: 70, styleShift: 0, colorTone: 0, detailLevel: 50 }); }}
-                  className={`text-xs ${isGold ? 'text-white/80 focus:bg-white/5' : 'text-gray-700 focus:bg-gray-50'}`}
+                  className={`text-xs ${isGold ? 'text-white/80' : 'text-gray-700'}`}
                 >
                   <RotateCcw size={12} className="mr-2" />
                   重置参数
@@ -6015,7 +6015,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                       setInput(prev => prev + cmd.prompt);
                       textareaRef.current?.focus();
                     }}
-                    className={`flex items-center gap-2.5 text-xs ${isGold ? 'text-white/80 hover:bg-white/5 focus:bg-white/5' : 'text-gray-700 hover:bg-gray-50 focus:bg-gray-50'}`}
+                    className={`flex items-center gap-2.5 text-xs ${isGold ? 'text-white/80' : 'text-gray-700'}`}
                   >
                     <span>{cmd.icon}</span>
                     <span>{cmd.label}</span>
@@ -6084,7 +6084,7 @@ ${allRefImageList.length > 1 ? `用户可以通过"图片#1"、"图片#2"等编�
                                 apiProvider: m.providerId,
                               }));
                             }}
-                            className={`flex items-center gap-2 text-xs ${imageModel === m.id ? (isGold ? 'bg-gold/15 text-gold' : 'bg-blue-50 text-blue-600') : ''} ${isGold ? 'text-white/80 hover:bg-white/5 focus:bg-white/5' : 'text-gray-700 hover:bg-gray-50 focus:bg-gray-50'}`}
+                            className={`flex items-center gap-2 text-xs ${imageModel === m.id ? (isGold ? 'bg-gold/15 text-gold' : 'bg-blue-50 text-blue-600') : ''} ${isGold ? 'text-white/80' : 'text-gray-700'}`}
                           >
                             <ImageIcon size={14} className="opacity-60" />
                             <span className="truncate">{m.name}</span>

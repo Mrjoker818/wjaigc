@@ -1297,7 +1297,7 @@ ${themeDesc}
 
   return (
     <div
-      className="fixed z-[150] flex flex-col [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:shrink-0 [&_button]:whitespace-nowrap [&_input]:min-h-11 [&_input]:min-w-0 [&_select]:min-h-11 [&_select]:min-w-0 [&_select]:max-w-full [&_textarea]:min-w-0 [&_p]:break-words"
+      className="fixed z-[150] flex flex-col touch-button-targets [&_button]:shrink-0 [&_button]:whitespace-nowrap touch-field-targets [&_input]:min-w-0  [&_select]:min-w-0 [&_select]:max-w-full [&_textarea]:min-w-0 [&_p]:break-words"
       style={{
         left: viewport.left + panelPosition.x,
         top: viewport.top + panelPosition.y,

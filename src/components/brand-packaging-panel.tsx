@@ -769,7 +769,7 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
 
       <div
         data-popup
-        className="relative flex min-w-0 flex-col rounded-xl overflow-hidden shadow-2xl border [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:whitespace-nowrap [&_select]:min-h-11 [&_select]:min-w-0 [&_select]:max-w-full [&_input]:min-h-11 [&_input]:min-w-0 [&_textarea]:min-h-11 [&_textarea]:min-w-0 [&_svg]:shrink-0 max-sm:[&_input]:text-base max-sm:[&_select]:text-base max-sm:[&_textarea]:text-base"
+        className="relative flex min-w-0 flex-col rounded-xl overflow-hidden shadow-2xl border touch-button-targets [&_button]:whitespace-nowrap touch-field-targets [&_select]:min-w-0 [&_select]:max-w-full  [&_input]:min-w-0 [&_textarea]:min-h-11 [&_textarea]:min-w-0 [&_svg]:shrink-0 max-sm:[&_input]:text-base max-sm:[&_select]:text-base max-sm:[&_textarea]:text-base"
         style={{
           width: panelWidth,
           height: panelHeight,

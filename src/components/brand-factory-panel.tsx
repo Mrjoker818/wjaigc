@@ -1905,7 +1905,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
   return (
     <div
       ref={panelRef}
-      className={`fixed z-[90] min-w-0 [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:max-w-full [&_input]:min-h-11 [&_input]:max-w-full [&_select]:min-h-11 [&_select]:max-w-full [&_textarea]:min-h-11 [&_input]:text-base [&_select]:text-base [&_textarea]:text-base lg:[&_input]:text-sm lg:[&_select]:text-sm lg:[&_textarea]:text-sm ${isDragging ? 'cursor-grabbing' : ''}`}
+      className={`fixed z-[90] min-w-0 touch-button-targets [&_button]:max-w-full touch-field-targets [&_input]:max-w-full  [&_select]:max-w-full [&_textarea]:min-h-11 [&_input]:text-base [&_select]:text-base [&_textarea]:text-base lg:[&_input]:text-sm lg:[&_select]:text-sm lg:[&_textarea]:text-sm ${isDragging ? 'cursor-grabbing' : ''}`}
       style={{ left: panelPos.x, top: panelPos.y, width: panelWidth, maxWidth: 'calc(100vw - 16px)', maxHeight: panelMaxHeight }}
       onMouseDown={e => e.stopPropagation()}
       onPointerDown={e => e.stopPropagation()}
@@ -1947,7 +1947,7 @@ export default function BrandFactoryPanel({ onClose, onAddImages, isMonochrome =
               const Icon = tab.icon;
               return (
                 <button key={tab.key}
-                  className={`${th.sidebarItem} shrink-0 whitespace-nowrap ${activeTab === tab.key ? th.sidebarItemActive : th.sidebarItemInactive}`}
+                  className={`${th.sidebarItem} min-h-11 shrink-0 whitespace-nowrap ${activeTab === tab.key ? th.sidebarItemActive : th.sidebarItemInactive}`}
                   onClick={() => setActiveTab(tab.key)}>
                   <Icon className="w-3.5 h-3.5 shrink-0" />
                   <span className="truncate">{tab.label}</span>

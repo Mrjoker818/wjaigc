@@ -229,7 +229,7 @@ export function ProjectDataPanel({
       ref={panelRef}
       onWheel={handleWheel}
       data-popup="project-data"
-      className={`fixed ${bgColor} border ${borderColor} rounded-2xl shadow-2xl z-[200] flex flex-col overflow-hidden [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:shrink-0 [&_button]:whitespace-nowrap [&_input]:min-h-11`}
+      className={`fixed ${bgColor} border ${borderColor} rounded-2xl shadow-2xl z-[200] flex flex-col overflow-hidden touch-button-targets [&_button]:shrink-0 [&_button]:whitespace-nowrap touch-field-targets`}
       style={{ left: viewport.left + panelPosition.x, top: viewport.top + panelPosition.y, width: panelWidth, maxHeight: panelHeight }}
     >
       {/* Header */}

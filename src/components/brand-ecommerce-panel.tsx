@@ -805,7 +805,7 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
   return (
     <div
       ref={panelRef}
-      className="fixed z-[150] min-w-0 [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:max-w-full [&_input]:min-h-11 [&_input]:max-w-full [&_select]:min-h-11 [&_select]:max-w-full [&_textarea]:min-h-11 [&_input]:text-base [&_select]:text-base [&_textarea]:text-base lg:[&_input]:text-sm lg:[&_select]:text-sm lg:[&_textarea]:text-sm"
+      className="fixed z-[150] min-w-0 touch-button-targets [&_button]:max-w-full touch-field-targets [&_input]:max-w-full  [&_select]:max-w-full [&_textarea]:min-h-11 [&_input]:text-base [&_select]:text-base [&_textarea]:text-base lg:[&_input]:text-sm lg:[&_select]:text-sm lg:[&_textarea]:text-sm"
       data-floating-panel="true"
       style={{ left: position.x, top: position.y, width: panelWidth, maxWidth: 'calc(100vw - 16px)', maxHeight: panelMaxHeight }}
       onClick={e => e.stopPropagation()}

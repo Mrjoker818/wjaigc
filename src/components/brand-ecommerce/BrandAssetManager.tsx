@@ -64,7 +64,7 @@ export function BrandAssetManager({ currentSettings, onApply, userId, isMonochro
   const textSub = isMonochrome ? 'text-gray-500' : 'text-gray-400';
   const accent = isMonochrome ? '#2563eb' : '#d4af37';
   // Popper rewrites inline animation; this local utility keeps touch targets unscaled.
-  const popupClassName = 'animate-none! max-w-[calc(100vw-16px)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto rounded-xl p-0 shadow-2xl [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:max-w-full [&_input]:min-h-11 [&_input]:max-w-full [&_input]:text-base lg:[&_input]:text-sm';
+  const popupClassName = 'animate-none! max-w-[calc(100vw-16px)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto rounded-xl p-0 shadow-2xl touch-button-targets touch-field-targets [&_button]:max-w-full [&_input]:max-w-full [&_input]:text-base lg:[&_input]:text-sm';
 
   // ─── Load assets on mount ───
   useEffect(() => {

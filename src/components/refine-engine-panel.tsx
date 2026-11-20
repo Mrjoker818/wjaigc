@@ -729,7 +729,7 @@ export default function RefineEnginePanel({ isMonochrome = false, onClose, onAdd
     <div
       ref={panelRef}
       data-floating-panel
-      className="fixed z-[150] [&_button]:min-h-11 [&_button]:min-w-11"
+      className="fixed z-[150] touch-button-targets "
       style={{
         left: position.x,
         top: position.y,
