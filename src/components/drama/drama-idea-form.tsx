@@ -33,7 +33,7 @@ export function DramaIdeaForm({ busy, error, initialIdea, onGenerate, onBlank }:
   return (
     <form onSubmit={submit} className="flex flex-col gap-5" aria-labelledby="drama-start-title">
       <div className="flex flex-col gap-2">
-        <h1 id="drama-start-title" className="font-serif text-3xl font-bold sm:text-4xl">用一句话开始一部短剧</h1>
+        <h1 id="drama-start-title" className="text-2xl font-bold sm:text-3xl">用一句话开始一部短剧</h1>
         <p className="text-sm text-[var(--drama-muted)]">剧本助手会写出分场剧本、角色和场景，之后你可以逐场拆镜头、生成和重拍。</p>
       </div>
       <label className="flex flex-col gap-1.5">
@@ -61,7 +61,7 @@ export function DramaIdeaForm({ busy, error, initialIdea, onGenerate, onBlank }:
           <legend className="drama-label mb-1.5">画面比例</legend>
           <div className="flex gap-2">
             {DRAMA_RATIOS.map(ratio => (
-              <button key={ratio} type="button" className="drama-btn font-mono" aria-pressed={aspectRatio === ratio} onClick={() => setAspectRatio(ratio)}>{ratio}</button>
+              <button key={ratio} type="button" className="drama-btn tabular-nums" aria-pressed={aspectRatio === ratio} onClick={() => setAspectRatio(ratio)}>{ratio}</button>
             ))}
           </div>
         </fieldset>
@@ -69,7 +69,7 @@ export function DramaIdeaForm({ busy, error, initialIdea, onGenerate, onBlank }:
           <legend className="drama-label mb-1.5">单集时长</legend>
           <div className="flex gap-2">
             {LENGTHS.map(value => (
-              <button key={value} type="button" className="drama-btn font-mono" aria-pressed={length === value} onClick={() => setLength(value)}>{value}s</button>
+              <button key={value} type="button" className="drama-btn tabular-nums" aria-pressed={length === value} onClick={() => setLength(value)}>{value}s</button>
             ))}
           </div>
         </fieldset>

@@ -37,7 +37,7 @@ export function DramaAdaptForm({ busy, progress, onAdapt }: {
         <textarea className="drama-input min-h-40 resize-y leading-relaxed" maxLength={ADAPT_MAX_CHARS} value={text}
           onChange={event => setText(event.target.value)} placeholder="粘贴小说章节或故事全文" />
       </label>
-      <p className="drama-label font-mono" aria-live="polite">
+      <p className="drama-label tabular-nums" aria-live="polite">
         {length.toLocaleString('zh-CN')} / {ADAPT_MAX_CHARS.toLocaleString('zh-CN')} 字
         {length >= ADAPT_MIN_CHARS ? ` · 约改编成 ${episodes} 集，每集约 1 分钟写完` : ` · 至少 ${ADAPT_MIN_CHARS} 字`}
       </p>
@@ -56,7 +56,7 @@ export function DramaAdaptForm({ busy, progress, onAdapt }: {
           <legend className="drama-label mb-1.5">画面比例</legend>
           <div className="flex gap-2">
             {DRAMA_RATIOS.map(ratio => (
-              <button key={ratio} type="button" className="drama-btn font-mono" aria-pressed={aspectRatio === ratio} onClick={() => setAspectRatio(ratio)}>{ratio}</button>
+              <button key={ratio} type="button" className="drama-btn tabular-nums" aria-pressed={aspectRatio === ratio} onClick={() => setAspectRatio(ratio)}>{ratio}</button>
             ))}
           </div>
         </fieldset>

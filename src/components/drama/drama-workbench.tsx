@@ -172,7 +172,8 @@ function DramaStart({ projectId, onDramaIdChange, onExit, switcher, chatHandoff,
   ), projectId));
 
   return (
-    <div className="drama-root min-h-dvh overflow-y-auto">
+    // A fixed height, not min-h: the page body does not scroll, so this element has to.
+    <div className="drama-root h-dvh overflow-y-auto">
       <header className="flex items-center gap-3 border-b border-[var(--drama-line)] px-4 py-3">
         {switcher ?? <button type="button" className="drama-btn drama-btn--quiet" onClick={onExit}><ArrowLeft className="h-4 w-4" />返回画布</button>}
         <span className="flex items-center gap-2 text-sm text-[var(--drama-muted)]"><Clapperboard className="h-4 w-4" />短剧工作台</span>
@@ -213,8 +214,8 @@ function DramaStart({ projectId, onDramaIdChange, onExit, switcher, chatHandoff,
                       <li key={item.id}>
                         <button type="button" className="drama-panel flex w-full flex-col items-start gap-1 px-4 py-3 text-left hover:border-[var(--drama-gold)]"
                           onClick={() => onDramaIdChange(item.id)}>
-                          <span className="font-serif font-bold">{item.title || '未命名短剧'}</span>
-                          <span className="drama-label font-mono">{new Date(item.updatedAt).toLocaleString('zh-CN')} 更新</span>
+                          <span className="font-semibold">{item.title || '未命名短剧'}</span>
+                          <span className="drama-label tabular-nums">{new Date(item.updatedAt).toLocaleString('zh-CN')} 更新</span>
                         </button>
                       </li>
                     ))}
