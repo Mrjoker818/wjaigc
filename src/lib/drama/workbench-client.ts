@@ -1,6 +1,7 @@
 /** Browser calls made by the drama workbench. Every failure throws an Error whose message can be shown to the user. */
 import type { SimpleChatWorkspaceHandoffIntent } from '@/lib/simple-chat-workspace-handoff';
 import type { PolishedShot } from './polish';
+import { uncertainDramaSubmission } from './receipt-client';
 import type { DramaProjectRecord, DramaProjectV1, DramaShot, DramaTake } from './types';
 
 export type WorkbenchFetch = (input: string, init?: RequestInit) => Promise<Response>;
@@ -33,6 +34,10 @@ export async function loadDramaProject(id: string, fetcher: WorkbenchFetch = def
 
 export interface DramaProjectSummary { id: string; title: string; version: number; updatedAt: number }
 
+export class DramaCreationUnknownError extends Error {
+  constructor() { super('创建结果未确认，请先返回短剧列表核对，避免重复创建'); this.name = 'DramaCreationUnknownError'; }
+}
+
 export async function listDramaProjects(projectId: string | undefined, fetcher: WorkbenchFetch = defaultFetch): Promise<DramaProjectSummary[]> {
   const response = await fetcher(`/api/drama/projects${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`);
   const data = await readJson(response);
@@ -47,6 +52,7 @@ export async function createDramaProject(
     method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ doc, ...(projectId ? { projectId } : {}) }),
   });
   const data = await readJson(response);
+  if ((response.ok && (!data.project || typeof data.project !== 'object' || typeof (data.project as Record<string, unknown>).id !== 'string')) || response.status >= 500) throw new DramaCreationUnknownError();
   if (!response.ok || !data.project) fail(data, '剧本项目创建失败，请稍后重试');
   return data.project as DramaProjectRecord;
 }
@@ -69,6 +75,7 @@ export async function saveDramaProject(
 }
 
 export interface ScriptRequest {
+  planner?: { providerId: string; modelId: string };
   idea: string;
   title?: string;
   genre?: string;
@@ -148,7 +155,7 @@ export async function createDramaFromChat(intent: SimpleChatWorkspaceHandoffInte
 
 export async function planSceneShots(
   doc: DramaProjectV1, episodeId: string, sceneId: string,
-  options: { shotCount?: number; shotDurationSec?: number } = {}, fetcher: WorkbenchFetch = defaultFetch, signal?: AbortSignal,
+  options: { shotCount?: number; shotDurationSec?: number; allowedDurations?: number[] } = {}, fetcher: WorkbenchFetch = defaultFetch, signal?: AbortSignal,
 ): Promise<DramaShot[]> {
   const response = await fetcher('/api/drama/plan', {
     method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ action: 'shots', doc, episodeId, sceneId, ...options }), signal,
@@ -404,16 +411,17 @@ export async function pollShotTake(
     if (data.status === 'completed') {
       const result = (data.result ?? {}) as Record<string, unknown>;
       const videoUrl = firstText(data.videoUrl, result.videoUrl);
-      if (!videoUrl) return { ...take, status: 'failed', error: '任务已完成但没有返回视频地址' };
+      if (!videoUrl) return { ...take, status: 'generating', retryable: false, error: '原任务已生成，视频地址尚待回读，请恢复原回执' };
       const thumbnailUrl = firstText(data.videoThumbnailUrl, result.videoThumbnailUrl, result.thumbnailUrl);
       return { ...take, status: 'completed', videoUrl, ...(thumbnailUrl ? { thumbnailUrl } : {}) };
     }
-    if (['failed', 'cancelled', 'timeout'].includes(String(data.status))) {
+    if (uncertainDramaSubmission(data.error)) return { ...take, status: 'generating', retryable: false, error: '原供应商提交结果尚未确认，请核对原任务，勿重复生成' };
+    if (['failed', 'cancelled'].includes(String(data.status))) {
       return { ...take, status: 'failed', error: firstText(data.error) ?? '镜头生成失败', ...(data.retryable === true ? { retryable: true } : {}) };
     }
   }
   if (options.signal?.aborted) return take;
-  return { ...take, status: 'failed', error: '镜头生成超过 25 分钟仍未完成。任务可能仍在供应商处运行，稍后可在任务列表查看。' };
+  return { ...take, status: 'generating', retryable: false, error: '原任务暂未返回结果，已保留任务编号，请稍后恢复查询' };
 }
 
 export interface RetakeSuggestion {

@@ -4,10 +4,11 @@ import { useRef, useState } from 'react';
 import { Download, FileArchive, FileSpreadsheet, Film, ImageDown, Loader2, Mic, Music, Subtitles, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { episodeSrt, shotListCsv } from '@/lib/drama/export';
-import { buildEpisodePackage, downloadBlob, downloadText, exportFileName } from '@/lib/drama/export-client';
+import { buildEpisodePackage, buildProjectPackage, downloadBlob, downloadText, exportFileName } from '@/lib/drama/export-client';
+import type { PackageMediaMode } from '@/lib/drama/package';
+import { isFilmCurrent, isVoiceoverCurrent } from '@/lib/drama/production-version';
 import { DRAMA_TRANSITIONS as TRANSITIONS, type DramaTransition } from '@/lib/drama/render';
 import { buildTimeline } from '@/lib/drama/timeline';
-import { currentVoiceover, shotsNeedingVoiceover } from '@/lib/drama/voiceover';
 import type { DramaMusic } from '@/lib/drama/types';
 import { uploadDramaMusic } from '@/lib/drama/workbench-client';
 import { pendingShots } from '@/lib/drama/workbench-state';
@@ -22,15 +23,16 @@ const TRANSITION_LABEL: Record<DramaTransition, string> = { cut: '硬切', fade:
 export function DramaFinalStep() {
   const { doc, episode, update, render, renderEpisode, onPlaceOnCanvas, voiceoverShotIds, generateVoiceovers, voiceAvailable } = useDrama();
   if (!episode) return <p className="drama-label">先在剧本步骤写好分集。</p>;
-  const missing = pendingShots(episode).length;
+  const missing = pendingShots(episode, doc).length;
   const blocks = buildTimeline(doc, episode.id);
   const totalSec = blocks.at(-1)?.endSec ?? 0;
   const last = doc.timeline.lastRender;
-  const ready = last?.status === 'completed' && last.videoUrl && last.episodeId === episode.id;
+  const hasFilm = last?.status === 'completed' && last.videoUrl && (last.episodeId === undefined || last.episodeId === episode.id);
+  const ready = isFilmCurrent(doc, episode.id);
   const shots = episode.scenes.flatMap(scene => scene.shots);
   const spoken = shots.filter(shot => shot.dialogue?.trim());
-  const voiced = spoken.filter(shot => currentVoiceover(shot)).length;
-  const unvoiced = shotsNeedingVoiceover(shots);
+  const voiced = spoken.filter(shot => isVoiceoverCurrent(doc, shot)).length;
+  const unvoiced = spoken.filter(shot => !isVoiceoverCurrent(doc, shot));
   const recording = spoken.some(shot => voiceoverShotIds.has(shot.id));
 
   return (
@@ -82,17 +84,18 @@ export function DramaFinalStep() {
         <div className="flex flex-wrap items-center gap-3">
           <button type="button" className="drama-btn drama-btn--primary" disabled={missing > 0 || render.status === 'rendering'} onClick={() => void renderEpisode()}>
             {render.status === 'rendering' ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <Film className="h-4 w-4" />}
-            {render.status === 'rendering' ? `正在渲染 ${render.progress}%` : ready ? '重新渲染成片' : '渲染成片'}
+            {render.status === 'rendering' ? `正在渲染 ${render.progress}%` : hasFilm ? '重新渲染成片' : '渲染成片'}
           </button>
           <span className="drama-label font-mono">约 {Math.round(totalSec)} 秒 · 渲染不扣积分，只在本机拼接</span>
         </div>
-        {missing ? <p className="text-sm text-[var(--drama-red)]">还有 {missing} 个镜头没有可用的视频，先在镜头步骤里生成。</p> : null}
+        {missing ? <div className="text-sm text-[var(--drama-red)]"><p>还有 {missing} 个镜头没有可用的视频，先在镜头步骤里生成。</p><p className="mt-1 text-xs">参数或剧本发生变化的旧视频也需要更新，历史素材仍保留。</p></div> : null}
         {render.status === 'failed' ? <p role="alert" className="text-sm text-[var(--drama-red)]">{render.error ?? '成片渲染失败'}</p> : null}
       </section>
 
-      {ready && last.videoUrl ? (
+      {hasFilm && last?.videoUrl ? (
         <section className="drama-panel flex flex-col gap-3 p-4" aria-labelledby="drama-film">
-          <h2 id="drama-film" className="text-sm font-semibold">成片</h2>
+          <h2 id="drama-film" className="text-sm font-semibold">{ready ? '成片' : '旧版成片'}</h2>
+          {!ready ? <p role="status" className="text-sm text-[var(--drama-red)]">旧版成片，参数已修改，请重渲染</p> : null}
           <video src={last.videoUrl} poster={last.thumbnailUrl} controls className="w-full rounded-md bg-[var(--drama-ink)]" style={{ aspectRatio: doc.aspectRatio.replace(':', ' / ') }} />
           <div className="flex flex-wrap gap-2">
             <a className="drama-btn" href={last.videoUrl} download><Download className="h-4 w-4" />下载成片</a>
@@ -174,21 +177,36 @@ function MusicSettings() {
 }
 
 /** Subtitles, shot list and a ZIP of everything made for this episode, for editing outside the workbench. */
-function ExportPanel() {
+export function ExportPanel() {
   const { doc, episode } = useDrama();
   const [packing, setPacking] = useState<{ done: number; total: number } | null>(null);
+  const [scope, setScope] = useState<'episode' | 'project'>('episode');
+  const [mode, setMode] = useState<PackageMediaMode>('selected');
+  const [notice, setNotice] = useState<{ error: boolean; text: string } | null>(null);
   if (!episode) return null;
   const srt = episodeSrt(doc, episode.id);
 
   const pack = async () => {
     setPacking({ done: 0, total: 0 });
+    setNotice(null);
     try {
-      const result = await buildEpisodePackage(doc, episode.id, { onProgress: (done, total) => setPacking({ done, total }) });
+      const onProgress = (done: number, total: number) => setPacking({ done, total });
+      const result = scope === 'project'
+        ? await buildProjectPackage(doc, { mediaMode: mode, onProgress })
+        : await buildEpisodePackage(doc, episode.id, { onProgress });
       downloadBlob(result.blob, result.fileName);
-      if (result.missing.length) toast.error(`制作包已下载，${result.missing.length} 个文件没下载成功`, { description: '压缩包里的「缺失文件.txt」列出了它们。' });
-      else toast.success('制作包已下载');
+      if (result.missing.length) {
+        const text = `制作包不完整，${result.missing.length} 个文件缺失。已下载的包内有缺失清单，请补齐后重新导出。`;
+        setNotice({ error: true, text });
+        toast.error('制作包不完整', { description: text });
+      } else {
+        setNotice({ error: false, text: '制作包已下载。' });
+        toast.success('制作包已下载');
+      }
     } catch (error) {
-      toast.error('制作包打包失败', { description: error instanceof Error && error.message ? error.message : '请稍后重试' });
+      const text = error instanceof Error && error.message ? error.message : '请稍后重试';
+      setNotice({ error: true, text });
+      toast.error('制作包打包失败', { description: text });
     } finally {
       setPacking(null);
     }
@@ -197,6 +215,34 @@ function ExportPanel() {
   return (
     <section className="drama-panel flex flex-col gap-3 p-4" aria-labelledby="drama-export">
       <h2 id="drama-export" className="text-sm font-semibold">导出</h2>
+      <div className="flex flex-wrap gap-x-4 gap-y-3">
+        <label className="flex min-w-0 flex-col gap-1.5 text-sm">
+          制作包范围
+          <select className="drama-input min-h-10 max-w-full" value={scope} disabled={packing !== null}
+            onChange={event => { setScope(event.target.value as 'episode' | 'project'); setNotice(null); }} aria-describedby="drama-package-help">
+            <option value="episode">当前集（兼容原制作包）</option>
+            <option value="project">整项目（全部 {doc.episodes.length} 集）</option>
+          </select>
+        </label>
+        {scope === 'project' ? (
+          <label className="flex min-w-0 flex-col gap-1.5 text-sm">
+            素材模式
+            <select className="drama-input min-h-10 max-w-full" value={mode} disabled={packing !== null}
+              onChange={event => setMode(event.target.value as PackageMediaMode)} aria-describedby="drama-package-help">
+              <option value="selected">选用素材</option>
+              <option value="history">含历史素材</option>
+            </select>
+          </label>
+        ) : null}
+      </div>
+      <p id="drama-package-help" className="drama-label">
+        {scope === 'project'
+          ? mode === 'history'
+            ? '保存全部分集、原始剧本、设定与镜头历史、参考素材和来源清单。'
+            : '保存全部分集与原始剧本、当前设定和选用镜头，移除未选镜次与旧设定图历史。'
+          : '保存当前集，沿用原制作包格式。字幕与镜头表单独导出时仍为当前集。'}
+        {scope === 'project' ? ' 不携带运行中的任务。缺失素材会明确列出；不完整的整项目包需补齐后才能恢复。浏览器打包上限 256MB。' : ''}
+      </p>
       <div className="flex flex-wrap gap-2">
         <button type="button" className="drama-btn" disabled={!srt}
           onClick={() => downloadText(srt, exportFileName(doc, episode.id, '字幕.srt'), 'application/x-subrip;charset=utf-8')}>
@@ -211,6 +257,8 @@ function ExportPanel() {
           {packing ? `正在打包 ${packing.done}/${packing.total || '…'}` : '制作包 ZIP'}
         </button>
       </div>
+      {packing ? <p role="status" className="drama-label">正在打包 {packing.done}/{packing.total || '…'} 个素材，请保持页面打开。</p> : null}
+      {notice ? <p role={notice.error ? 'alert' : 'status'} className={notice.error ? 'text-sm text-[var(--drama-red)]' : 'drama-label'}>{notice.text}</p> : null}
       <p className="drama-label">
         {srt ? '字幕按计划时长排时间，渲染后的成片可能差零点几秒。' : '镜头里还没有台词，暂时没有字幕可导出。'}
         制作包含剧本、镜头表、字幕、成片、每镜视频和关键帧、配音、定妆图。

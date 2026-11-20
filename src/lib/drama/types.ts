@@ -2,6 +2,7 @@
 import type { DirectorStyle } from '@/lib/video-director/director-styles';
 import type { VideoCharacter, VideoProp, VideoScene, VideoShotPlan } from '@/lib/video-director/continuity';
 import type { DramaTransition, StillMotion } from './render';
+import type { DramaProductionImage, DramaProductionRun } from './production-state';
 
 export const DRAMA_PROJECT_SCHEMA_ID = 'drama-project-v1';
 export const MAX_SHOTS_PER_EPISODE = 120;
@@ -10,6 +11,7 @@ export type DramaTakeStatus = 'submitted' | 'generating' | 'completed' | 'failed
 
 /** One generation attempt for a shot. A shot keeps every take so the user can switch between them. */
 export interface DramaTake {
+  deliveryState?: import('./receipt-client').TakeDeliveryState;
   id: string;
   taskId?: string;
   videoUrl?: string;
@@ -23,6 +25,8 @@ export interface DramaTake {
   /** Model the take was submitted to, so a reopened page can keep polling the right provider. */
   modelId?: string;
   providerId?: string;
+  /** Canonical generation inputs when this take was submitted. */
+  inputSnapshot?: string;
 }
 
 /** How the selected take is cut into the film. Seconds are on the take's own clock; the render clamps them to the file. */
@@ -44,6 +48,7 @@ export interface DramaShot extends VideoShotPlan {
   voiceoverUrl?: string;
   /** The line as it read when the voiceover was recorded; a different line means the recording is stale. */
   voiceoverText?: string;
+  voiceoverSnapshot?: string;
   durationSec: number;
   modelId?: string;
   providerId?: string;
@@ -54,6 +59,17 @@ export interface DramaShot extends VideoShotPlan {
   still?: { motion: StillMotion };
   /** Do not send the speaker's voice sample with this shot, e.g. to keep an exact first frame. */
   voiceSampleOff?: boolean;
+  /** Resolved audio setting for the next video generation; bound to each take's input version. */
+  generateAudio?: boolean;
+}
+
+/** UTF-16 offsets into the episode's structuredScript snapshot, end exclusive. */
+export interface DramaSourceRange { start: number; end: number }
+
+export interface DramaSourceDialogue {
+  characterId: string;
+  text: string;
+  sourceRange: DramaSourceRange;
 }
 
 export interface DramaSceneBlock {
@@ -65,6 +81,12 @@ export interface DramaSceneBlock {
   /** Cast members who appear in this scene. */
   characterIds?: string[];
   shots: DramaShot[];
+  sourceRange?: DramaSourceRange;
+  dialogues?: DramaSourceDialogue[];
+  /** Retained outputs belong to an earlier source version and need review. */
+  sourceChanged?: boolean;
+  /** Frozen source for archived scenes whose ranges no longer belong to the active snapshot. */
+  sourceText?: string;
 }
 
 export interface DramaEpisode {
@@ -74,7 +96,10 @@ export interface DramaEpisode {
   logline: string;
   /** Full script text the user can edit. */
   script: string;
+  structuredScript?: string;
   scenes: DramaSceneBlock[];
+  /** Removed scenes are excluded from planning/rendering, but retain their media for recovery. */
+  archivedScenes?: DramaSceneBlock[];
 }
 
 /** Which image of a bible item: a cast member's front or side view, a location plate or a prop sheet. */
@@ -135,6 +160,8 @@ export interface DramaTimeline {
     status: 'processing' | 'completed' | 'failed';
     error?: string;
     createdAt: number;
+    inputSnapshot?: string;
+    sourceChanged?: boolean;
   };
 }
 
@@ -146,6 +173,12 @@ export interface DramaReference {
 }
 
 export interface DramaProjectV1 {
+  planner?: { providerId: string; modelId: string };
+  productionRun?: DramaProductionRun;
+  productionImages?: DramaProductionImage[];
+  retainedImages?: Array<{ url: string; sourceUrl?: string; name?: string }>;
+  /** Original speaker identities retained when an active character is removed. */
+  sourceCharacters?: Array<{ id: string; name: string }>;
   schemaId: typeof DRAMA_PROJECT_SCHEMA_ID;
   title: string;
   genre: string;
@@ -158,6 +191,12 @@ export interface DramaProjectV1 {
   timeline: DramaTimeline;
   /** Images sent with the chat message the script was written from. */
   references?: DramaReference[];
+  sourceScript?: {
+    originalText: string;
+    fileName?: string;
+    format: 'text' | 'txt' | 'docx';
+    importedAt: number;
+  };
 }
 
 export interface DramaProjectRecord {

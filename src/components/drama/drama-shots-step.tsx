@@ -2,6 +2,7 @@
 
 import { ArrowUpRight, ImagePlus, Loader2, Play, RotateCcw, Square, X } from 'lucide-react';
 import { activeTake, shotSource } from '@/lib/drama/types';
+import { isTakeCurrent } from '@/lib/drama/production-version';
 import { failedShots, pendingShots, selectTake, updateShot } from '@/lib/drama/workbench-state';
 import { useDrama } from './drama-context';
 import { ShotReadinessBadge } from './drama-readiness';
@@ -15,8 +16,8 @@ export function DramaShotsStep() {
     imageModels, imageModel, setImageModelKey, keyframeShotIds, generateKeyframes, keyframeEstimate, onPlaceOnCanvas,
   } = useDrama();
   if (!episode) return <p className="drama-label">先在剧本步骤写好分集。</p>;
-  const waiting = pendingShots(episode);
-  const failed = failedShots(episode);
+  const waiting = pendingShots(episode, doc);
+  const failed = failedShots(episode, doc);
   const allShots = episode.scenes.flatMap(scene => scene.shots);
   const withoutKeyframe = allShots.filter(shot => !shot.firstFrameUrl);
   const drawingKeyframes = keyframeShotIds.size > 0;
@@ -93,6 +94,7 @@ export function DramaShotsStep() {
               const shotNumber = sceneStarts[sceneIndex] + shotIndex + 1;
               const running = runningShotIds.has(shot.id);
               const take = activeTake(shot);
+              const stale = take && !isTakeCurrent(doc, episode.id, shot, take);
               const still = shotSource(shot)?.kind === 'still';
               const latest = shot.takes.at(-1);
               const selected = selectedShotId === shot.id;
@@ -102,6 +104,8 @@ export function DramaShotsStep() {
                   <button type="button" className="text-left" aria-pressed={selected} aria-label={`选中镜头 ${shotNumber}`} onClick={() => selectShot(shot.id)}>
                     <DramaSlate sceneNumber={sceneIndex + 1} shotNumber={shotNumber} shot={shot} running={running} durationSec={shot.durationSec} />
                   </button>
+                  {stale ? <p role="status" className="px-3 py-2 text-xs text-[var(--drama-gold)]">内容或参考已修改，此视频属于旧版本。历史记录保留，重新生成后再加入成片。</p> : null}
+                  {latest && (latest.status === 'submitted' || latest.status === 'generating') ? <p role="status" className="px-3 py-2 text-xs text-[var(--drama-muted)]">{latest.error || '原任务处理中，重开页面会继续核对回执'}</p> : null}
                   <div className="relative bg-[var(--drama-ink)]" style={{ aspectRatio: doc.aspectRatio.replace(':', ' / ') }}>
                     {take?.videoUrl && !still ? (
                       <video src={take.videoUrl} poster={take.thumbnailUrl ?? shot.firstFrameUrl} controls preload="metadata" className="h-full w-full object-contain" />

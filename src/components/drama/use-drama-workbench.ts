@@ -8,15 +8,20 @@ import {
 } from '@/lib/drama/autopilot';
 import { keyframePrompt, keyframeReferences, locationImageRatio, type KeyframeKind } from '@/lib/drama/reference-prompts';
 import { waitForRender } from '@/lib/drama/render-client';
-import { chooseReferenceImages, isRetryableTake, orderedShots, runShot } from '@/lib/drama/shot-runner';
+import { orderedShots, runShot, shotInputReferenceCount } from '@/lib/drama/shot-runner';
 import type { DramaProjectRecord, DramaProjectV1, DramaShot } from '@/lib/drama/types';
 import {
-  DramaSaveConflictError, estimateShots, generateReferenceImage, generateVoiceover, persistImage, planSceneShots, pollShotTake, saveDramaProject,
+  DramaSaveConflictError, estimateShots, generateVoiceover, planSceneShots, pollShotTake, saveDramaProject,
   startEpisodeRender,
   type CreditEstimate, type ShotEstimateRequest,
 } from '@/lib/drama/workbench-client';
 import { findShot, fitDuration, pendingShots, setSceneShots, updateShot, upsertTake } from '@/lib/drama/workbench-state';
 import { shotVoice } from '@/lib/drama/voiceover';
+import { checkpointProduction, pendingProductionImages, upsertProductionImage, type DramaProductionImage } from '@/lib/drama/production-state';
+import { followProductionImage, submitProductionImage } from '@/lib/drama/production-image-client';
+import { setSlotImage, type BibleSlot } from '@/lib/drama/bible-images';
+import { filmInputSnapshot, shotInputSnapshot, voiceoverInputSnapshot, quoteInputSnapshot } from '@/lib/drama/production-version';
+import { recoverTakeReceipt } from '@/lib/drama/receipt-client';
 import type { DramaStep, DramaWorkbenchApi, RenderState, SaveState } from './drama-context';
 import { useDramaImageModels, useDramaVideoModels, useDramaVoiceAvailable, VOICE_MODEL_MISSING, type DramaModelOption } from './drama-models';
 
@@ -27,8 +32,6 @@ const IMAGE_MODEL_STORAGE_KEY = 'wujie-drama-image-model';
 const KEYFRAME_CONCURRENCY = 3;
 /** Speech requests are short; two at a time keeps the provider from rate limiting a batch. */
 const VOICEOVER_CONCURRENCY = 2;
-/** A failed take the server marked safe to resubmit gets one more attempt after this pause. */
-const AUTO_RETRY_DELAY_MS = 5000;
 
 const AUTOPILOT_STAGE_LABEL: Record<AutopilotStage, string> = {
   bible: '画设定图', keyframes: '画关键帧', shots: '生成镜头', voiceover: '录配音', render: '渲染成片',
@@ -53,10 +56,6 @@ function readStored(key: string): string {
 const readStoredModel = () => readStored(MODEL_STORAGE_KEY);
 const readStoredImageModel = () => readStored(IMAGE_MODEL_STORAGE_KEY);
 
-const pause = (ms: number, signal: AbortSignal) => new Promise<void>(resolve => {
-  const timer = window.setTimeout(resolve, ms);
-  signal.addEventListener('abort', () => { window.clearTimeout(timer); resolve(); }, { once: true });
-});
 
 export function useDramaWorkbench({
   record, projectId, onPlaceOnCanvas, onPlaceImageOnCanvas, canvasMedia, onOpenCredits, onContinueInChat,
@@ -162,7 +161,7 @@ export function useDramaWorkbench({
     if (!shot.modelId) return defaultModel;
     return models.find(model => model.key === shot.modelId)
       ?? models.find(model => model.modelId === shot.modelId && (!shot.providerId || model.providerId === shot.providerId))
-      ?? defaultModel;
+      ;
   }, [models, defaultModel]);
   const [generateAudio, setGenerateAudio] = useState(false);
 
@@ -185,7 +184,8 @@ export function useDramaWorkbench({
     });
   }, [onOpenCredits]);
 
-  const generateShots = useCallback(async (shotIds: string[]) => {
+  const generateShots = useCallback(async (shotIds: string[], stop?: AbortSignal) => {
+    if (stop?.aborted) return false;
     if (batchRef.current) { toast.error('已有镜头在生成，等它完成或先停止'); return false; }
     const life = lifeRef.current;
     if (!life) return false;
@@ -193,7 +193,7 @@ export function useDramaWorkbench({
     const batch = new AbortController();
     batchRef.current = batch;
     setBatchRunning(true);
-    const signal = AbortSignal.any([batch.signal, life.signal]);
+    const signal = AbortSignal.any([batch.signal, life.signal, ...(stop ? [stop] : [])]);
     let failed = 0;
     let completed = 0;
     let lastError: string | undefined;
@@ -203,12 +203,20 @@ export function useDramaWorkbench({
         if (signal.aborted) break;
         const found = findShot(docRef.current, shotId);
         if (!found) continue;
+        if (found.episode.structuredScript !== undefined && found.episode.structuredScript !== found.episode.script) {
+          toast.error('正文已修改，请先在剧本步骤更新分场'); halted = true; break;
+        }
+        if (found.shot.takes.some(take => take.status === 'submitted' || take.status === 'generating')) {
+          toast.error('这个镜头还有原任务待核对，请先恢复原回执'); halted = true; break;
+        }
         const model = modelForShot(found.shot);
         if (!model) { toast.error('还没有可用的视频模型', { description: '请在后台供应商设置里启用一个视频模型后再生成。' }); halted = true; break; }
         const durationSec = fitDuration(found.shot.durationSec, model.durations, model.maxDuration);
         if (durationSec !== found.shot.durationSec) {
           update(current => updateShot(current, shotId, { durationSec }));
         }
+        // Bind inherited defaults to this shot before capturing its generation version.
+        update(current => updateShot(current, shotId, { modelId: model.key, providerId: model.providerId, generateAudio: generateAudio || Boolean(found.shot.dialogue || found.shot.audioCues) }));
         markRunning(shotId, true);
         try {
           const attempt = () => {
@@ -216,22 +224,23 @@ export function useDramaWorkbench({
             const shot = findShot(current, shotId)?.shot ?? found.shot;
             const previous = orderedShots(current, found.episode.id).find(item => item.shot.id === shotId)?.previous;
             let persistedTask = false;
+            const snapshot = shotInputSnapshot(current, found.episode.id, shotId);
             return runShot({
               doc: current, shot, previous, modelId: model.key, providerId: model.providerId,
-              capability: model.capability, generateAudio: generateAudio || undefined, signal,
+              capability: model.capability, generateAudio: shot.generateAudio, signal,
+              onBeforeSubmit: async next => {
+                update(latest => upsertTake(latest, shotId, { ...next, inputSnapshot: snapshot, modelId: model.key, providerId: model.providerId }));
+                if (!await flushSave()) throw new Error('原任务回执未保存，已停止提交，请先解决保存问题');
+              },
               onTake: next => {
-                update(latest => upsertTake(latest, shotId, { ...next, modelId: model.key, providerId: model.providerId }));
+                update(latest => upsertTake(latest, shotId, { ...next, inputSnapshot: snapshot, modelId: model.key, providerId: model.providerId }));
                 // The task id is what lets a reopened page find this take again, so store it right away.
                 if (next.taskId && !persistedTask) { persistedTask = true; void flushSave(); }
               },
             });
           };
-          let take = await attempt();
-          if (isRetryableTake(take) && !signal.aborted) {
-            // A new take has a new id, so the generate route sees a new idempotency key and submits again.
-            await pause(AUTO_RETRY_DELAY_MS, signal);
-            if (!signal.aborted) take = await attempt();
-          }
+          const take = await attempt();
+          if (take.status === 'submitted' || take.status === 'generating') { halted = true; toast('原任务已保留，等待回执核对'); break; }
           if (take.status === 'completed') completed += 1;
           else {
             failed += 1;
@@ -271,24 +280,28 @@ export function useDramaWorkbench({
       shot.takes.filter(take => take.status === 'submitted' || take.status === 'generating').map(take => ({ shotId: shot.id, take })))));
     for (const { shotId, take } of pending) {
       markRunning(shotId, true);
-      void pollShotTake(take, take.modelId, take.providerId, { signal: life.signal }).then(result => {
+      void (async () => {
+        const receipt = take.taskId ? take : await recoverTakeReceipt(take, take.modelId, take.providerId, { shotId, signal: life.signal });
+        return receipt.taskId ? pollShotTake(receipt, receipt.modelId, receipt.providerId, { signal: life.signal }) : receipt;
+      })().then(result => {
         if (life.signal.aborted) return;
         update(latest => upsertTake(latest, shotId, result));
         markRunning(shotId, false);
-      });
+        void flushSave();
+      }).catch(() => { if (!life.signal.aborted) markRunning(shotId, false); });
     }
-  }, [markRunning, update]);
+  }, [flushSave, markRunning, update]);
 
   // --- Credit estimate for the shots that still need a take ---
   const [estimate, setEstimate] = useState<CreditEstimate | null>(null);
-  const estimateRequest = useMemo<ShotEstimateRequest[]>(() => pendingShots(episode).flatMap(shot => {
+  const estimateRequest = useMemo<ShotEstimateRequest[]>(() => pendingShots(episode, doc).flatMap(shot => {
     const model = modelForShot(shot);
     if (!model) return [];
     return [{
       shotId: shot.id, modelId: model.key, providerId: model.providerId,
       durationSec: fitDuration(shot.durationSec, model.durations, model.maxDuration),
       generateAudio: generateAudio || Boolean(shot.dialogue || shot.audioCues),
-      referenceImages: chooseReferenceImages(shot, doc.cast, model.capability, [], doc.props).length,
+      referenceImages: shotInputReferenceCount({ doc, shot, previous: orderedShots(doc, episode!.id).find(item => item.shot.id === shot.id)?.previous, capability: model.capability }),
     }];
   }), [episode, modelForShot, generateAudio, doc.cast, doc.props]);
   const estimateKey = JSON.stringify(estimateRequest);
@@ -307,6 +320,38 @@ export function useDramaWorkbench({
   const voiceAvailable = useDramaVoiceAvailable();
   const [imageModelKey, setImageModelKeyState] = useState(readStoredImageModel);
   const imageModel = imageModels.find(model => model.key === imageModelKey) ?? imageModels.find(model => model.isDefault) ?? imageModels[0];
+  const imageCheckpoint = useCallback(async (operation: DramaProductionImage) => {
+    update(current => upsertProductionImage(current, operation));
+    if (!await flushSave()) throw new Error('生成回执未保存，已停止后续操作，请先解决保存问题');
+  }, [flushSave, update]);
+
+  const applyImageOperation = useCallback(async (operation: DramaProductionImage) => {
+    if (!operation.url || operation.state !== 'stored') return;
+    update(current => {
+      const target = operation.target;
+      const next = target.kind === 'keyframe'
+        ? updateShot(current, target.entityId, target.view === 'last' ? { lastFrameUrl: operation.url } : { firstFrameUrl: operation.url })
+        : setSlotImage(current, { kind: target.kind, id: target.entityId, view: target.view } as BibleSlot, operation.url!);
+      return upsertProductionImage(next, { ...operation, applied: true });
+    });
+    if (!await flushSave()) throw new Error('产物已保存，放回项目时未保存成功，请先解决保存问题');
+  }, [flushSave, update]);
+
+  const generateProductionImage = useCallback(async (target: DramaProductionImage['target'], prompt: string, aspectRatio: string, referenceImages: string[] = [], stop?: AbortSignal): Promise<boolean> => {
+    if (!imageModel) throw new Error('请先选择已授权的图像供应商和模型');
+    if (pendingProductionImages(docRef.current).some(item => item.target.kind === target.kind && item.target.entityId === target.entityId && item.target.view === target.view)) {
+      toast('这个位置已有原任务待核对，请先恢复原回执'); return false;
+    }
+    const operation: DramaProductionImage = { id: `image_${crypto.randomUUID().replaceAll('-', '')}`, target, providerId: imageModel.providerId, modelId: imageModel.modelId,
+      state: 'submitting', applied: false, createdAt: Date.now(), updatedAt: Date.now() };
+    const page = lifeRef.current?.signal;
+    const signal = page && stop ? AbortSignal.any([page, stop]) : stop ?? page;
+    const result = await submitProductionImage(operation, { prompt, aspectRatio, referenceImages }, { checkpoint: imageCheckpoint, signal });
+    if (!lifeRef.current?.signal.aborted) await applyImageOperation(result);
+    if (result.state !== 'stored') { toast(result.error || '已保留原生成回执，等待结果回读'); return false; }
+    return true;
+  }, [applyImageOperation, imageCheckpoint, imageModel]);
+
   const setImageModelKey = useCallback((key: string) => {
     setImageModelKeyState(key);
     try { window.localStorage.setItem(IMAGE_MODEL_STORAGE_KEY, key); } catch { /* private mode */ }
@@ -336,18 +381,15 @@ export function useDramaWorkbench({
         const current = docRef.current;
         const found = findShot(current, shotId);
         if (!found) return;
-        const url = await generateReferenceImage(
+        const done = await generateProductionImage(
+          { kind: 'keyframe', entityId: shotId, view: kind },
           keyframePrompt(found.shot, current, kind),
           locationImageRatio(found.shot.aspectRatio || current.aspectRatio),
-          {
-            ...(imageModel ? { model: imageModel.key, providerId: imageModel.providerId } : {}),
-            referenceImages: keyframeReferences(found.shot, current, imageModel?.maxReferenceImages ?? 0, kind),
-          },
+          keyframeReferences(found.shot, current, imageModel?.maxReferenceImages ?? 0, kind),
+          stop,
         );
-        const saved = await persistImage(url);
         if (life.signal.aborted) return;
-        update(latest => updateShot(latest, shotId, kind === 'last' ? { lastFrameUrl: saved } : { firstFrameUrl: saved }));
-        completed += 1;
+        if (done) completed += 1;
       } catch (error) {
         lastError = errorText(error, `${noun}生成失败`);
         if (/积分不足|余额不足/u.test(lastError)) outOfCredits = true;
@@ -367,8 +409,8 @@ export function useDramaWorkbench({
     else if (completed) toast.error(`${completed} 张${noun}已生成，${failed} 张失败`, { description: lastError });
     else toast.error(`${noun}生成失败`, { description: lastError });
     void flushSave();
-    return true;
-  }, [creditsToast, flushSave, imageModel, markKeyframe, update]);
+    return failed === 0;
+  }, [creditsToast, flushSave, generateProductionImage, imageModel, markKeyframe]);
 
   // --- Voiceover: each line recorded in its speaker's voice, mixed in when the episode renders ---
   const [voiceoverShotIds, setVoiceoverShotIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -397,7 +439,7 @@ export function useDramaWorkbench({
         if (!shot || !line) return;
         const url = await generateVoiceover(line, shotVoice(shot, current.cast));
         if (life.signal.aborted) return;
-        update(latest => updateShot(latest, shotId, { voiceoverUrl: url, voiceoverText: line }));
+        update(latest => updateShot(latest, shotId, { voiceoverUrl: url, voiceoverText: line, voiceoverSnapshot: voiceoverInputSnapshot(current, shot) }));
         completed += 1;
       } catch (error) {
         lastError = errorText(error, '配音生成失败');
@@ -459,7 +501,7 @@ export function useDramaWorkbench({
 
   // --- Final render ---
   const [render, setRender] = useState<RenderState>({ status: 'idle', progress: 0 });
-  const followRender = useCallback(async (taskId: string, renderEpisodeId: string) => {
+  const followRender = useCallback(async (taskId: string, renderEpisodeId: string, inputSnapshot?: string) => {
     const life = lifeRef.current;
     setRender({ status: 'rendering', progress: 2 });
     try {
@@ -467,6 +509,7 @@ export function useDramaWorkbench({
       if (life?.signal.aborted) return;
       update(current => ({ ...current, timeline: { ...current.timeline, lastRender: {
         taskId, episodeId: renderEpisodeId, status: 'completed', videoUrl: result.videoUrl,
+        inputSnapshot,
         ...(result.thumbnailUrl ? { thumbnailUrl: result.thumbnailUrl } : {}),
         ...(result.durationSec ? { durationSec: result.durationSec } : {}), createdAt: Date.now(),
       } } }));
@@ -485,7 +528,7 @@ export function useDramaWorkbench({
   const renderEpisode = useCallback(async (targetId?: string) => {
     const target = docRef.current.episodes.find(item => item.id === (targetId ?? episode?.id));
     if (!target || render.status === 'rendering') return;
-    const missing = pendingShots(target).length;
+    const missing = pendingShots(target, docRef.current).length;
     if (missing) { toast.error(`还有 ${missing} 个镜头没有可用的视频`, { description: '先在镜头步骤里生成或选定这些镜头，再渲染成片。' }); return; }
     if (!await flushSave()) { toast.error('剧本还没保存成功，暂时不能渲染', { description: '检查顶栏的保存状态，保存成功后再试。' }); return; }
     let taskId: string;
@@ -495,14 +538,16 @@ export function useDramaWorkbench({
       setRender({ status: 'failed', progress: 0, error: errorText(error, '成片渲染没有启动') });
       return;
     }
-    update(current => ({ ...current, timeline: { ...current.timeline, lastRender: { taskId, episodeId: target.id, status: 'processing', createdAt: Date.now() } } }));
-    await followRender(taskId, target.id);
+    const inputSnapshot = filmInputSnapshot(docRef.current, target.id);
+    update(current => ({ ...current, timeline: { ...current.timeline, lastRender: { taskId, episodeId: target.id, inputSnapshot, status: 'processing', createdAt: Date.now() } } }));
+    await flushSave();
+    await followRender(taskId, target.id, inputSnapshot);
   }, [episode, render.status, flushSave, record.id, update, followRender]);
 
   // A render that was running when the page closed keeps going on the server; pick its progress up again.
   useEffect(() => {
     const last = docRef.current.timeline.lastRender;
-    if (last?.status === 'processing') void followRender(last.taskId, last.episodeId ?? '');
+    if (last?.status === 'processing') void followRender(last.taskId, last.episodeId ?? '', last.inputSnapshot);
   }, [followRender]);
 
   // --- One-click film: fills only what the episode still lacks, after the user agreed to the price ---
@@ -516,6 +561,8 @@ export function useDramaWorkbench({
   const quoteAutopilot = useCallback(async (): Promise<AutopilotQuote | null> => {
     const episodeId = episode?.id;
     if (!episodeId) return null;
+    const target = docRef.current.episodes.find(item => item.id === episodeId);
+    if (target?.structuredScript !== undefined && target.structuredScript !== target.script) { toast.error('正文已修改，请先在剧本步骤更新分场'); return null; }
     if (busyRef.current || autopilotRef.current) { toast.error('上一个操作还没完成，请稍等'); return null; }
     // Scenes without shots cannot be priced; splitting them is free, so it happens before the quote.
     const empty = autopilotPlan(docRef.current, episodeId).scenes;
@@ -524,7 +571,7 @@ export function useDramaWorkbench({
       setBusyLabel('拆解分镜');
       try {
         for (const sceneId of empty) {
-          const shots = await planSceneShots(docRef.current, episodeId, sceneId);
+          const shots = await planSceneShots(docRef.current, episodeId, sceneId, { allowedDurations: defaultModel?.durations });
           update(current => setSceneShots(current, sceneId, shots));
         }
       } catch (error) {
@@ -536,9 +583,14 @@ export function useDramaWorkbench({
       }
     }
     const current = docRef.current;
+    if (pendingProductionImages(current).length || current.episodes.some(ep => ep.scenes.some(scene => scene.shots.some(shot => shot.takes.some(take => take.status === 'submitted' || take.status === 'generating'))))) {
+      toast('还有原任务待核对，请先恢复原回执再估算'); return null;
+    }
+    const inputSnapshot = quoteInputSnapshot(current, episodeId, { videoModelId: defaultModel?.key, videoProviderId: defaultModel?.providerId, imageModelId: imageModel?.key, imageProviderId: imageModel?.providerId, generateAudio });
     const plan = autopilotPlan(current, episodeId, needsKeyframe);
     // Keyframes and shots are drawn after the bible images exist, so they are priced with those references.
     const filled = plan.bible.reduce((next, item) => applyBibleImage(next, item, `pending:${item.key}`), current);
+    const withFrames = plan.keyframes.reduce((next, id) => updateShot(next, id, { firstFrameUrl: `pending:keyframe:${id}` }), filled);
     const image = imageModel;
     const bibleRequests = image
       ? plan.bible.map(item => ({ shotId: item.key, modelId: image.key, providerId: image.providerId, durationSec: 1, kind: 'image' as const }))
@@ -555,14 +607,14 @@ export function useDramaWorkbench({
     const shotRequests: ShotEstimateRequest[] = [];
     let unpricedShot = false;
     for (const id of plan.shots) {
-      const shot = findShot(filled, id)?.shot;
+      const shot = findShot(withFrames, id)?.shot;
       const model = shot && modelForShot(shot);
       if (!shot || !model) { unpricedShot = true; continue; }
       shotRequests.push({
         shotId: id, modelId: model.key, providerId: model.providerId,
         durationSec: fitDuration(shot.durationSec, model.durations, model.maxDuration),
         generateAudio: generateAudio || Boolean(shot.dialogue || shot.audioCues),
-        referenceImages: chooseReferenceImages(shot, filled.cast, model.capability, [], filled.props).length,
+        referenceImages: shotInputReferenceCount({ doc: withFrames, shot, previous: orderedShots(withFrames, episodeId).find(item => item.shot.id === shot.id)?.previous, capability: model.capability }),
       });
     }
     const credits: AutopilotQuote['credits'] = {};
@@ -577,8 +629,8 @@ export function useDramaWorkbench({
       } catch { /* left unpriced; the dialog says so */ }
     };
     await Promise.all([price('bible', bibleRequests), price('keyframes', keyframeRequests), price('shots', unpricedShot ? null : shotRequests)]);
-    return { episodeId, plan, credits, ...(seen.balance !== undefined ? { balance: seen.balance } : {}) };
-  }, [episode?.id, generateAudio, imageModel, modelForShot, needsKeyframe, update]);
+    return { episodeId, plan, credits, inputSnapshot, ...(seen.balance !== undefined ? { balance: seen.balance } : {}) };
+  }, [defaultModel, episode?.id, generateAudio, imageModel, modelForShot, needsKeyframe, update]);
 
   const drawBible = useCallback(async (items: BibleGap[], signal: AbortSignal): Promise<boolean> => {
     const queue = [...items];
@@ -589,11 +641,8 @@ export function useDramaWorkbench({
       const request = bibleImageRequest(docRef.current, item);
       if (!request || outOfCredits || signal.aborted) return;
       try {
-        const url = await persistImage(await generateReferenceImage(request.prompt, request.aspectRatio,
-          imageModel ? { model: imageModel.key, providerId: imageModel.providerId } : {}));
-        // A stopped run keeps the image it already paid for; only a closed page drops it.
-        if (lifeRef.current?.signal.aborted) return;
-        update(latest => applyBibleImage(latest, item, url));
+        const complete = await generateProductionImage({ kind: item.kind, entityId: item.id, view: item.kind === 'cast' ? 'front' : item.kind === 'location' ? 'plate' : 'sheet' }, request.prompt, request.aspectRatio, [], signal);
+        if (!complete) { failed += 1; lastError = '原生成或文件保存尚未完成，请恢复原回执后继续'; }
       } catch (error) {
         failed += 1;
         lastError = errorText(error, '设定图生成失败');
@@ -606,16 +655,17 @@ export function useDramaWorkbench({
     await Promise.all(workers);
     void flushSave();
     if (outOfCredits && lastError) { creditsToast(lastError); return false; }
-    if (failed) toast.error(`${failed} 张设定图没有生成成功`, { description: `${lastError ?? ''}。这些角色或场景的镜头会只按文字描述生成，之后可在设定步骤补画。` });
-    return !signal.aborted;
-  }, [creditsToast, flushSave, imageModel, update]);
+    if (failed) toast.error(`${failed} 张设定图尚未就绪`, { description: lastError });
+    return !signal.aborted && failed === 0;
+  }, [creditsToast, flushSave, generateProductionImage]);
 
   const runAutopilot = useCallback(async (quote: AutopilotQuote, choices: AutopilotChoices) => {
     const life = lifeRef.current;
     if (!life || autopilotRef.current) return;
     if (busyRef.current || batchRef.current) { toast.error('上一个操作还没完成，请稍等'); return; }
     const open = () => autopilotPlan(docRef.current, quote.episodeId, needsKeyframe);
-    if (!withinQuote(quote, open())) {
+    const inputSnapshot = quoteInputSnapshot(docRef.current, quote.episodeId, { videoModelId: defaultModel?.key, videoProviderId: defaultModel?.providerId, imageModelId: imageModel?.key, imageProviderId: imageModel?.providerId, generateAudio });
+    if (!withinQuote(quote, open(), inputSnapshot)) {
       toast.error('剧本在报价后有改动，价格可能变了', { description: '重新打开一键成片，按最新的价格确认。' });
       return;
     }
@@ -624,26 +674,31 @@ export function useDramaWorkbench({
     const signal = AbortSignal.any([run.signal, life.signal]);
     busyRef.current = true;
     const at: { stage: AutopilotStage } = { stage: 'bible' };
-    const enter = (next: AutopilotStage) => {
+    setAutopilot({ quote, choices, stage: 'bible' });
+    const runId = `run_${crypto.randomUUID().replaceAll('-', '')}`;
+    const enter = async (next: AutopilotStage) => {
       at.stage = next;
+      update(current => checkpointProduction(current, { id: runId, episodeId: quote.episodeId, stage: next, status: 'running', updatedAt: Date.now() }));
+      if (!await flushSave()) throw new Error('制作检查点未保存，已停止后续操作');
+      signal.throwIfAborted();
       setAutopilot({ quote, choices, stage: next });
       setBusyLabel(`一键成片 · ${AUTOPILOT_STAGE_LABEL[next]}`);
     };
     let finished = false;
     try {
       if (choices.bible && open().bible.length) {
-        enter('bible');
+        await enter('bible');
         if (!await drawBible(open().bible, signal)) return;
       }
       if (signal.aborted) return;
       if (choices.keyframes && open().keyframes.length) {
-        enter('keyframes');
+        await enter('keyframes');
         if (!await latestRef.current.generateKeyframes(open().keyframes, 'first', signal)) return;
       }
       if (signal.aborted) return;
       if (open().shots.length) {
-        enter('shots');
-        if (!await latestRef.current.generateShots(open().shots)) return;
+        await enter('shots');
+        if (!await latestRef.current.generateShots(open().shots, signal)) return;
         const left = open().shots.length;
         if (left) {
           toast.error(`一键成片停在镜头这一步：${left} 个镜头没有生成成功`, { description: '在镜头步骤里重拍它们，再点一键成片继续，已完成的不会重做。' });
@@ -652,18 +707,24 @@ export function useDramaWorkbench({
       }
       if (signal.aborted) return;
       if (choices.voiceover && voiceAvailable && open().voiceovers.length) {
-        enter('voiceover');
+        await enter('voiceover');
         await latestRef.current.generateVoiceovers(open().voiceovers);
+        if (open().voiceovers.length) return;
       }
       if (signal.aborted) return;
       if (choices.render) {
-        enter('render');
+        await enter('render');
         busyRef.current = false;
         setBusyLabel(null);
         await latestRef.current.renderEpisode(quote.episodeId);
+        if (docRef.current.timeline.lastRender?.status !== 'completed') return;
       }
       finished = true;
+    } catch (error) {
+      if (!life.signal.aborted) toast.error('制作已暂停，已完成内容保留', { description: errorText(error, '请检查保存和原任务状态') });
     } finally {
+      update(current => checkpointProduction(current, { id: runId, episodeId: quote.episodeId, stage: at.stage, status: finished ? 'completed' : 'paused', updatedAt: Date.now() }));
+      void flushSave();
       autopilotRef.current = null;
       busyRef.current = false;
       setBusyLabel(null);
@@ -674,18 +735,57 @@ export function useDramaWorkbench({
         else if (finished && !choices.render) toast.success('一键成片已完成', { description: '镜头都已备齐，可以在成片步骤渲染。' });
       }
     }
-  }, [drawBible, needsKeyframe, voiceAvailable]);
+  }, [defaultModel, drawBible, flushSave, generateAudio, imageModel, needsKeyframe, update, voiceAvailable]);
 
   const stopAutopilot = useCallback(() => {
     autopilotRef.current?.abort();
     batchRef.current?.abort();
   }, []);
 
+  const [recoveringProduction, setRecoveringProduction] = useState(false);
+  const recoveringRef = useRef(false);
+  const recoverProduction = useCallback(async () => {
+    if (recoveringRef.current || autopilotRef.current) return;
+    const life = lifeRef.current;
+    if (!life) return;
+    recoveringRef.current = true;
+    setRecoveringProduction(true);
+    try {
+      for (const operation of pendingProductionImages(docRef.current)) {
+        if (life.signal.aborted) break;
+        const result = operation.state === 'stored' ? operation : await followProductionImage(operation, { checkpoint: imageCheckpoint, signal: life.signal });
+        if (!life.signal.aborted) await applyImageOperation(result);
+      }
+      const pending = docRef.current.episodes.flatMap(ep => ep.scenes.flatMap(scene => scene.shots.flatMap(shot => shot.takes
+        .filter(take => take.status === 'submitted' || take.status === 'generating').map(take => ({ shotId: shot.id, take })))));
+      for (const { shotId, take } of pending) {
+        if (life.signal.aborted) break;
+        const receipt = take.taskId ? take : await recoverTakeReceipt(take, take.modelId, take.providerId, { shotId, signal: life.signal });
+        const result = receipt.taskId ? await pollShotTake(receipt, receipt.modelId, receipt.providerId, { signal: life.signal }) : receipt;
+        if (!life.signal.aborted) update(current => upsertTake(current, shotId, result));
+      }
+      await flushSave();
+    } catch (error) {
+      if (!life.signal.aborted) toast.error('原回执尚未恢复', { description: errorText(error, '稍后继续核对，不会自动重新生成') });
+    } finally { recoveringRef.current = false; setRecoveringProduction(false); }
+  }, [applyImageOperation, flushSave, imageCheckpoint, update]);
+
+  useEffect(() => {
+    const current = docRef.current;
+    if (current.productionRun?.status === 'running') {
+      update(doc => checkpointProduction(doc, { ...current.productionRun!, status: 'paused', updatedAt: Date.now() }));
+      void flushSave();
+    }
+    // Images already saved but not attached to their target need no network or paid call.
+    for (const operation of pendingProductionImages(current).filter(item => item.state === 'stored')) void applyImageOperation(operation);
+  }, [applyImageOperation, flushSave, update]);
+
   return {
     doc, episode, update, replaceDoc, setEpisodeId, step, setStep, selectedShotId, selectShot,
     models, modelsLoading, defaultModel, setDefaultModelKey, modelForShot, generateAudio, setGenerateAudio,
     runningShotIds, batchRunning, generateShots, stopGeneration, estimate,
     imageModels, imageModel, setImageModelKey, keyframeShotIds, generateKeyframes, voiceoverShotIds, generateVoiceovers,
+    generateProductionImage, recoverProduction, recoveringProduction,
     keyframeEstimate, busyLabel, runJob,
     dramaId: record.id, projectId, saveState, flushSave, render, renderEpisode, onPlaceOnCanvas, onPlaceImageOnCanvas, canvasMedia,
     autopilot, quoteAutopilot, runAutopilot, stopAutopilot, voiceAvailable, onContinueInChat,

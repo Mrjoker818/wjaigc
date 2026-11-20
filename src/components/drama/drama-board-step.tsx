@@ -15,19 +15,19 @@ import { MentionTextarea } from './mention-textarea';
 
 /** Step 3: shots grouped by scene. The planner fills one scene at a time; ordering is by buttons so it stays keyboard accessible. */
 export function DramaBoardStep() {
-  const { doc, episode, update, runningShotIds, runJob, busyLabel, setStep, selectShot } = useDrama();
+  const { doc, episode, update, runningShotIds, runJob, busyLabel, setStep, selectShot, defaultModel } = useDrama();
   if (!episode) return <p className="drama-label">先在剧本步骤写好分集。</p>;
   const total = episode.scenes.reduce((n, scene) => n + scene.shots.length, 0);
 
   const planScene = (scene: DramaSceneBlock) => void runJob(`拆解「${scene.heading}」`, async () => {
-    const shots = await planSceneShots(doc, episode.id, scene.id);
+    const shots = await planSceneShots(doc, episode.id, scene.id, { allowedDurations: defaultModel?.durations });
     update(current => setSceneShots(current, scene.id, shots));
   });
 
   const planAll = () => void runJob('拆解分镜', async () => {
     const targets = episode.scenes.filter(scene => scene.shots.length === 0);
     for (const scene of targets) {
-      const shots = await planSceneShots(doc, episode.id, scene.id);
+      const shots = await planSceneShots(doc, episode.id, scene.id, { allowedDurations: defaultModel?.durations });
       update(current => setSceneShots(current, scene.id, shots));
     }
   });

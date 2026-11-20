@@ -1,7 +1,13 @@
 /** Pure helpers that turn an episode into render inputs: the selected take of every shot and dialogue subtitles. */
 import { clipLength, type StillMotion, type SubtitleCue } from './render';
-import { shotSource, type DramaClipEdit, type DramaProjectV1, type DramaShot } from './types';
-import { currentVoiceover } from './voiceover';
+import type { DramaClipEdit, DramaProjectV1, DramaShot, ShotSource } from './types';
+import { currentTakeForShot, isVoiceoverCurrent } from './production-version';
+
+function currentShotSource(doc: DramaProjectV1, episodeId: string, shot: DramaShot): ShotSource | undefined {
+  if (shot.still && shot.firstFrameUrl) return { kind: 'still', imageUrl: shot.firstFrameUrl, motion: shot.still.motion };
+  const take = currentTakeForShot(doc, episodeId, shot);
+  return take ? { kind: 'video', take } : undefined;
+}
 
 /** One shot in the film: a video take, or a still image with a camera move (then `videoUrl` is absent). */
 export interface TimelineClip {
@@ -32,9 +38,9 @@ export function collectEpisodeTimeline(doc: DramaProjectV1, episodeId: string): 
   const clips: TimelineClip[] = [];
   const missingShotIds: string[] = [];
   for (const shot of episode ? episode.scenes.flatMap(scene => scene.shots) : []) {
-    const source = shotSource(shot);
+    const source = currentShotSource(doc, episodeId, shot);
     if (!source) { missingShotIds.push(shot.id); continue; }
-    const voiceoverUrl = currentVoiceover(shot);
+    const voiceoverUrl = isVoiceoverCurrent(doc, shot) ? shot.voiceoverUrl : undefined;
     clips.push({
       shotId: shot.id,
       ...(source.kind === 'video'
@@ -74,7 +80,7 @@ export function buildTimeline(doc: DramaProjectV1, episodeId: string): TimelineB
     : Math.max(0, Math.min(doc.timeline.transitionSec, Math.min(...shots.map(item => shotFilmLength(item.shot))) / 2, 2));
   let cursor = 0;
   return shots.map(({ shot, sceneNumber }, i) => {
-    const source = shotSource(shot);
+    const source = currentShotSource(doc, episodeId, shot);
     const startSec = cursor;
     const length = shotFilmLength(shot);
     cursor += length - (i < shots.length - 1 ? overlap : 0);
