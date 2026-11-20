@@ -130,7 +130,7 @@ describe('offline mobile layouts', () => {
         await act(async () => { await Promise.resolve(); });
         await layout(view.container, width, height);
         const tools = `textarea[placeholder="${placeholder}"] + div > button`;
-        expect(await page.locator(tools).count(), 'all nine tools and send remain available').toBe(10);
+        expect(await page.locator(tools).count(), 'all ten tools (incl. work mode) and send remain available').toBe(11);
         const textBox = (await page.getByPlaceholder(placeholder).boundingBox())!;
         for (const tool of await page.locator(tools).all()) {
           const box = (await tool.boundingBox())!;

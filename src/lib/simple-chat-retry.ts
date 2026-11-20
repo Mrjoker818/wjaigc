@@ -49,6 +49,8 @@ export interface SimpleChatRetryContextV1 {
   query?: string;
   deepAnalysis?: boolean;
   depth?: 'quick' | 'standard' | 'deep';
+  /** Present only when the request ran in work mode. */
+  workMode?: 'work';
 }
 
 export type SimpleChatRetryContextInput = Omit<SimpleChatRetryContextV1, 'version'>;
@@ -230,6 +232,7 @@ export function readSimpleChatRetryContext(
       ? value.depth
       : null;
   if (depth === null || (value.deepAnalysis !== undefined && typeof value.deepAnalysis !== 'boolean')) return null;
+  if (value.workMode !== undefined && value.workMode !== 'work' && value.workMode !== 'chat') return null;
 
   return {
     version: 1,
@@ -257,6 +260,7 @@ export function readSimpleChatRetryContext(
     ...(query ? { query } : {}),
     ...(typeof value.deepAnalysis === 'boolean' ? { deepAnalysis: value.deepAnalysis } : {}),
     ...(depth ? { depth } : {}),
+    ...(value.workMode === 'work' ? { workMode: 'work' as const } : {}),
   };
 }
 

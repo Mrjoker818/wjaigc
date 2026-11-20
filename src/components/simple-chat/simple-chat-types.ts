@@ -2,6 +2,7 @@
 
 import type { ReasoningEffort, ResponseSpeed, ResolvedChatControls } from '@/lib/chat-generation-controls';
 import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
+import type { WorkMode, WorkPlan } from '@/lib/chatgpt-work-mode';
 import {
   bindWorkspaceSourceTraceToChat,
   parseWorkspaceSourceTrace,
@@ -43,6 +44,8 @@ export interface SimpleChatTask {
   responseSpeed?: ResponseSpeed;
   appliedChatControls?: Pick<ResolvedChatControls, 'appliedReasoningEffort' | 'appliedResponseSpeed' | 'degraded' | 'notices'>;
   activeAgentId?: string;
+  /** 'work' when the task's work-mode switch is on. */
+  workMode?: WorkMode;
   createdAt: number;
   updatedAt: number;
 }
@@ -53,6 +56,8 @@ export interface SimpleChatMessage {
   content: string;
   /** The model's streamed reasoning, shown folded above the answer. */
   reasoning?: string;
+  /** Work-mode plan for this reply; progress is read from the reply's step headings. */
+  workPlan?: WorkPlan;
   images?: string[];
   imageRefs?: WorkspaceAssetReference[];
   attachments?: ChatAttachment[];

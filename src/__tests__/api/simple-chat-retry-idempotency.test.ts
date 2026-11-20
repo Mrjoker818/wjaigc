@@ -275,6 +275,39 @@ describe('simple-chat retry idempotency boundary', () => {
     expect(lastBody.tools.map((tool: { function: { name: string } }) => tool.function.name)).toEqual(['generate_image']);
   });
 
+  it('adds the work-mode steps to the system prompt and streams the plan in work mode', async () => {
+    mocks.fetchWithTimeout.mockResolvedValue(chatProviderResponse());
+    const response = await chatPost(new NextRequest('http://localhost/api/simple-chat/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: '写一份竞品分析报告' }],
+        model: 'chat-model',
+        providerId: 'provider-a',
+        workMode: 'work',
+      }),
+    }));
+    const events = (await response.text()).split('\n')
+      .filter(line => line.startsWith('data: '))
+      .map(line => JSON.parse(line.slice(6)));
+
+    const body = JSON.parse(String((mocks.fetchWithTimeout.mock.calls[0][1] as RequestInit).body));
+    expect(body.messages[0].content).toContain('## 步骤 1 · 明确目标与交付物');
+    const planEvent = events.find(event => event.type === 'work_plan');
+    expect(planEvent.workPlan).toMatchObject({ goal: '写一份竞品分析报告', deliverable: '带依据的结构化报告' });
+    expect(planEvent.workPlan.steps).toHaveLength(4);
+  });
+
+  it('sends no plan and no work-mode prompt outside work mode', async () => {
+    mocks.fetchWithTimeout.mockResolvedValue(chatProviderResponse());
+    const response = await chatPost(chatRequest(undefined));
+    const text = await response.text();
+
+    const body = JSON.parse(String((mocks.fetchWithTimeout.mock.calls[0][1] as RequestInit).body));
+    expect(body.messages[0].content).not.toContain('工作模式');
+    expect(text).not.toContain('work_plan');
+  });
+
   it('keeps a single request without the search tool when web search is off', async () => {
     mocks.fetchWithTimeout.mockResolvedValue(chatProviderResponse());
     const response = await chatPost(chatRequest(undefined));

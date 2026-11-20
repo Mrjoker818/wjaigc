@@ -63,6 +63,7 @@ import {
   parseSimpleChatExportIntent,
 } from '@/lib/multi-platform-export/simple-chat-intent';
 import { MULTI_PLATFORM_EXPORT_SKILL_ID } from '@/lib/skill-runtime/multi-platform-export-preset';
+import { buildWorkModeInstructions, buildWorkPlan, normalizeWorkMode } from '@/lib/chatgpt-work-mode';
 import { BRIEF_TO_VIDEO_SKILL_ID } from '@/lib/skill-runtime/brief-to-video-preset';
 import { createSkillRun, dispatchSkillRunExecution } from '@/lib/skill-runtime/service';
 import { authorizeSimpleChatExportSources } from '@/lib/multi-platform-export/simple-chat-source-authorization';
@@ -359,6 +360,7 @@ export async function POST(request: NextRequest) {
     sourceMessageId?: string;
     selectedEntityIds?: string[];
     skillId?: unknown;
+    workMode?: unknown;
   };
   try {
     body = parseBoundedAgentSurfaceBody(await request.text()) as typeof body;
@@ -842,6 +844,12 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // 工作模式：按固定步骤作答，客户端从步骤标题读取进度。
+  const workPlan = normalizeWorkMode(body.workMode) === 'work'
+    ? buildWorkPlan(messages.findLast(message => message.role === 'user')?.content || '')
+    : null;
+  if (workPlan) enhancedSystemPrompt += `\n\n${buildWorkModeInstructions(workPlan)}`;
+
   // 联网搜索：先按用户最后一句话搜一次；之后模型还能用 web_search 工具补充搜索。
   // 同一轮的所有搜索共用一张结果卡片，来源编号连续。
   const searchQueries: string[] = [];
@@ -1002,6 +1010,7 @@ export async function POST(request: NextRequest) {
           notices: chatControls.notices,
           support: chatControls.support,
         });
+        if (workPlan) send({ type: 'work_plan', workPlan });
 
         // 先发送搜索结果（如果有联网搜索）
         if (webSearch) {

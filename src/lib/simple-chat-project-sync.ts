@@ -7,6 +7,7 @@ import type {
   SimpleChatProject,
   SimpleChatTask,
 } from '@/components/simple-chat/simple-chat-types';
+import { readWorkPlan } from '@/lib/chatgpt-work-mode';
 import {
   normalizeReasoningEffort,
   normalizeResponseSpeed,
@@ -3619,6 +3620,7 @@ function validateTaskEntity(value: Record<string, unknown>): SimpleChatProjectVa
     validateOptionalReasoningEffort(value, 'reasoningEffort'),
     validateOptionalResponseSpeed(value, 'responseSpeed'),
     validateOptionalId(value, 'activeAgentId'),
+    validateOptionalEnum(value, 'workMode', ['chat', 'work']),
     validateRequiredNumber(value, 'createdAt'),
     validateRequiredNumber(value, 'updatedAt'),
     validateAppliedChatControls(value.appliedChatControls),
@@ -3641,6 +3643,7 @@ function validateMessageEntity(value: Record<string, unknown>): SimpleChatProjec
       return limitValidation('message.reasoning', SIMPLE_CHAT_SYNC_LIMITS.messageReasoningBytes, reasoningBytes);
     }
   }
+  if (value.workPlan !== undefined && !readWorkPlan(value.workPlan)) return invalidValidation('workPlan');
   return firstValidation(
     validateRequiredId(value, 'id'),
     validateRequiredEnum(value, 'role', ['user', 'assistant', 'system', 'search']),
@@ -3824,6 +3827,7 @@ function validateRetryContext(value: unknown): SimpleChatProjectValidationResult
     validateOptionalString(value, 'query'),
     validateOptionalBoolean(value, 'deepAnalysis'),
     validateOptionalEnum(value, 'depth', ['quick', 'standard', 'deep']),
+    validateOptionalEnum(value, 'workMode', ['chat', 'work']),
   );
 }
 

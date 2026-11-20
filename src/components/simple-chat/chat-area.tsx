@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, useId } from "react";
-import { Check, Clapperboard, Menu, Paperclip, ArrowUp, Square, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search, Eye, EyeOff, Image, Download, Send, Shield, ThumbsUp, ThumbsDown, Pencil, PenSquare, Brain, PenLine, ScanSearch, Clock } from "lucide-react";
+import { Check, Clapperboard, Menu, Paperclip, ArrowUp, Square, Globe, X, Settings, Bot, User as UserIcon, BookOpen, ChevronDown, Copy, RefreshCw, Trash2, Zap, Sun, Moon, FileText, Database, Sparkles, MessageSquarePlus, Minimize2, Maximize2, MoreHorizontal, Telescope, FileCode, GitBranch, Share2, Search, Eye, EyeOff, Image, Download, Send, Shield, ThumbsUp, ThumbsDown, Pencil, PenSquare, Brain, PenLine, ScanSearch, Clock, ListChecks } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { MarkdownRenderer } from "./markdown-renderer";
+import { WorkPlanCard } from "./work-plan-card";
+import { readWorkPlan } from "@/lib/chatgpt-work-mode";
 import { ImageLightbox } from "./image-lightbox";
 import { QuickCommands } from "./quick-commands";
 import {
@@ -432,6 +434,7 @@ export default function ChatArea({
   const [isStreaming, setIsStreaming] = useState(false);
   const [uploadedImages, setUploadedImages] = useState<ChatAttachment[]>([]);
   const [webSearch, setWebSearch] = useState(false);
+  const [workModeEnabled, setWorkModeEnabled] = useState(task?.workMode === 'work');
   const [showAgentPanel, setShowAgentPanel] = useState(false);
   const [showSkillPanel, setShowSkillPanel] = useState(false);
   const [showInstructionsPanel, setShowInstructionsPanel] = useState(false);
@@ -593,6 +596,13 @@ export default function ChatArea({
     }
     setOpenModelMenu(null);
   }, [onUpdateTask, task, tempChat]);
+
+  // Work mode is remembered per task; a temporary chat keeps it only on screen.
+  const toggleWorkMode = useCallback(() => {
+    const next = !workModeEnabled;
+    setWorkModeEnabled(next);
+    if (task && !tempChat) onUpdateTask({ ...task, workMode: next ? 'work' : undefined });
+  }, [onUpdateTask, task, tempChat, workModeEnabled]);
 
   useEffect(() => { setTemporaryImageSelection(null); }, [task?.id, tempChat]);
 
@@ -787,6 +797,7 @@ export default function ChatArea({
       setMessagesScope(messageScope);
       setReasoningEffort(task.reasoningEffort || 'medium');
       setResponseSpeed(task.responseSpeed || 'balanced');
+      setWorkModeEnabled(task.workMode === 'work');
       setAppliedChatControls(task.appliedChatControls);
       setControlNotice(task.appliedChatControls?.notices[0] || null);
       setHistoryImages([]);
@@ -1341,22 +1352,38 @@ export default function ChatArea({
     handleImageFiles(Array.from(e.dataTransfer.files || []));
   }, [handleImageFiles]);
 
-  // 消息编辑：提交后将该消息之后的对话截断并重新生成
+  // 消息编辑：截断该消息之后的对话，用修改后的文字原地重新生成，不动输入框里的草稿。
+  // 重跑沿用原请求的模型、联网、工作模式等设置，只换问题文字和幂等键。
   function handleEditSubmit(msgId: string) {
-    const idx = messages.findIndex(m => m.id === msgId);
-    if (idx === -1 || !editingContent.trim()) return;
-    const updated = messages.slice(0, idx);
-    const editedMsg: SimpleChatMessage = { ...messages[idx], content: editingContent.trim() };
-    setMessages([...updated, editedMsg]);
+    if (isStreaming) return;
+    const current = messagesRef.current;
+    const idx = current.findIndex(m => m.id === msgId);
+    const edited = editingContent.trim();
+    if (idx === -1 || !edited) return;
+    const original = current[idx];
+    const reply = current[idx + 1];
+    const context = reply?.role === 'assistant'
+      ? readSimpleChatRetryContext(reply.retryContext, {
+        assistantMessageId: reply.id,
+        projectId: projectIdRef.current,
+        taskId: taskIdRef.current,
+      })
+      : null;
     setEditingMessageId(null);
     setEditingContent('');
-    // 用编辑后的内容触发重新生成
-    setInput(editingContent.trim());
-    setTimeout(() => {
-      setMessages(updated);
-      setInput(editingContent.trim());
-      handleSendRef.current?.();
-    }, 0);
+    if (!reply || !context || context.kind !== 'chat' || context.userMessageId !== original.id) {
+      // Older replies carry no request record, so they cannot be re-run in place.
+      setMessages(current.slice(0, idx));
+      setInput(edited);
+      setSearchStatus('这条消息缺少原始请求信息，修改后的内容已放回输入框，按发送重新提问。');
+      return;
+    }
+    const editedMessage: SimpleChatMessage = { ...original, content: edited };
+    setMessages([...current.slice(0, idx), editedMessage, reply]);
+    void executeChatRequest({
+      ...context,
+      idempotencyKey: buildSimpleChatRegenerateIdempotencyKey(context.taskId, reply.id),
+    }, editedMessage);
   }
 
   // 消息删除
@@ -1487,7 +1514,6 @@ export default function ChatArea({
     setInput(prompt);
   }
 
-  const handleSendRef = useRef<(() => void) | null>(null);
 
   const startSelectedSkillRun = useCallback(async (): Promise<void> => {
     const skill = selectedSkill;
@@ -1630,6 +1656,7 @@ export default function ChatArea({
           ...message,
           content: '',
           reasoning: undefined,
+          workPlan: undefined,
           images: [],
           imageRefs: [],
           attachments: [],
@@ -1727,6 +1754,7 @@ export default function ChatArea({
           deepAnalysis: context.deepAnalysis,
           reasoningEffort: context.reasoningEffort,
           responseSpeed: context.responseSpeed,
+          workMode: context.workMode,
         }),
       });
 
@@ -1863,6 +1891,13 @@ export default function ChatArea({
               : '未知错误';
             setSearchStatus(null);
             failMessage(streamError, `请求失败：${streamError}\n\n建议：尝试切换模型或稍后重试。`);
+          } else if (parsed.type === 'work_plan') {
+            const plan = readWorkPlan((value as { workPlan?: unknown }).workPlan);
+            if (plan) {
+              updateRequestMessages(previous => previous.map(message => (
+                message.id === context.assistantMessageId ? { ...message, workPlan: plan } : message
+              )));
+            }
           } else if (parsed.type === 'reasoning' && parsed.content) {
             // Stored up to the sync limit; the start of the reasoning is the useful part.
             reasoningContent = `${reasoningContent}${parsed.content}`.slice(0, 16_000);
@@ -2072,6 +2107,7 @@ export default function ChatArea({
       knowledgeItems: apiKnowledgeItems,
       memories: memories.map(memory => ({ category: memory.category, content: memory.content })),
       deepAnalysis: isDeepAnalysis,
+      ...(workModeEnabled ? { workMode: 'work' as const } : {}),
     });
     const aiMsg: SimpleChatMessage = {
       id: assistantMessageId,
@@ -2096,10 +2132,7 @@ export default function ChatArea({
         if (requestScopeEpochRef.current.epoch === requestEpoch) setIsStreaming(false);
       }
     }
-  }, [input, isStreaming, messages, project, task, uploadedImages, webSearch, memories, selectedImageModel, selectedImageProviderId, brandActive, selectedCanvasProjectId, registerChatAttachment, executeChatRequest, knowledgeItems, reasoningEffort, responseSpeed, selectedSkill]);
-
-  // 供消息编辑后重新生成调用
-  handleSendRef.current = handleSend;
+  }, [input, isStreaming, messages, project, task, uploadedImages, webSearch, memories, selectedImageModel, selectedImageProviderId, brandActive, selectedCanvasProjectId, registerChatAttachment, executeChatRequest, knowledgeItems, reasoningEffort, responseSpeed, selectedSkill, workModeEnabled]);
 
   const executeDeepResearchRequest = useCallback(async (
     context: SimpleChatRetryContextV1,
@@ -3075,6 +3108,9 @@ export default function ChatArea({
                     ? 'bg-primary text-primary-foreground rounded-br-md'
                     : 'bg-card border border-border rounded-bl-md'
                 }`}>
+                  {msg.role === 'assistant' && msg.workPlan ? (
+                    <WorkPlanCard plan={msg.workPlan} content={msg.content} finished={msg.status !== 'streaming'} />
+                  ) : null}
                   {msg.role === 'assistant' && msg.reasoning ? (
                     <details
                       className="mb-2 rounded-lg border border-border/60 bg-muted/30 text-xs text-muted-foreground"
@@ -3380,7 +3416,7 @@ export default function ChatArea({
               onChange={e => { inputEditEpochRef.current += 1; setInput(e.target.value); }}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
-              placeholder={selectedSkill ? `使用 ${selectedSkill.name}：描述你的任务需求，Enter 发送` : activeAgent ? `与 ${activeAgent.name} 对话...` : "输入消息，Enter 发送，支持 Ctrl+V 粘贴图片"}
+              placeholder={selectedSkill ? `使用 ${selectedSkill.name}：描述你的任务需求，Enter 发送` : activeAgent ? `与 ${activeAgent.name} 对话...` : workModeEnabled ? "描述要完成的任务，我会先列计划，再按步骤交付成果" : "输入消息，Enter 发送，支持 Ctrl+V 粘贴图片"}
               rows={1}
               className="block w-full min-w-0 bg-transparent px-4 py-3 text-base sm:text-sm leading-relaxed resize-none outline-none placeholder:text-muted-foreground min-h-[80px] sm:min-h-[60px] max-h-[min(200px,30dvh)]"
               style={{ scrollbarWidth: 'thin', ...(compactHeader ? {
@@ -3401,6 +3437,14 @@ export default function ChatArea({
                 className={`p-1.5 rounded-lg transition-colors ${webSearch ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'}`}
                 title="联网搜索">
                 <Globe className="w-4 h-4" />
+              </button>
+              <button type="button" onClick={toggleWorkMode}
+                aria-label="工作模式"
+                aria-pressed={workModeEnabled}
+                className={`gap-1 px-2 py-1.5 rounded-lg text-xs transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary motion-reduce:transition-none ${workModeEnabled ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'}`}
+                title="工作模式：先列计划，再按步骤交付完整成果">
+                <ListChecks className="w-4 h-4" />
+                <span className="hidden sm:inline">工作模式</span>
               </button>
               <button onClick={handleDeepResearch} disabled={!input.trim() || isStreaming}
                 className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-30 transition-colors"

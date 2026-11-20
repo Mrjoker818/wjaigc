@@ -639,7 +639,7 @@ describe('mobile simple-chat page layout', () => {
 
   async function t5Composer(s: T5Session, width: number, height: number, top = 0): Promise<void> {
     const tools = s.page.locator(T5_TOOLS);
-    expect(await tools.count(), 'original nine direct tools plus send, without duplicates').toBe(10);
+    expect(await tools.count(), 'nine original direct tools, work mode and send, without duplicates').toBe(11);
     const input = await s.page.getByPlaceholder(T5_PLACEHOLDER).boundingBox();
     if (!input) throw new Error('TASK5_TEXTAREA_MEASUREMENT_MISSING');
     for (const tool of await tools.all()) {
@@ -930,7 +930,7 @@ describe('mobile simple-chat page layout', () => {
         await input.fill(T5_DRAFT);
         await t5Settle(s);
         const tools = s.page.locator(T5_TOOLS);
-        expect(await tools.count(), 'all original nine direct tools plus send remain single DOM controls').toBe(10);
+        expect(await tools.count(), 'nine original direct tools, work mode and send remain single DOM controls').toBe(11);
         for (const control of [input, ...await tools.all(),
           s.page.getByLabel('目标画布项目', { exact: true }),
           ...[theme === 'gold' ? '亮色模式' : '暗色模式', '临时聊天', '全局搜索']
@@ -966,7 +966,7 @@ describe('mobile simple-chat page layout', () => {
         await input.fill(T5_DRAFT);
         await t5Settle(s);
         const tools = s.page.locator('#task5-root textarea + div > button');
-        expect(await tools.count(), 'all original nine direct tools plus send remain single DOM controls').toBe(10);
+        expect(await tools.count(), 'nine original direct tools, work mode and send remain single DOM controls').toBe(11);
         for (const control of [input, ...await tools.all(),
           s.page.getByLabel('目标画布项目', { exact: true }),
           ...[theme === 'gold' ? '亮色模式' : '暗色模式', '临时聊天', '全局搜索']
@@ -1149,7 +1149,7 @@ describe('mobile simple-chat page layout', () => {
         await t5ChooseSecond(s, 'image', 375, 667);
         await t5CloseSettings(s, 375, 667);
         await t5Idle(s, true); await t5PairsRetained(s);
-        expect(await s.page.locator(T5_TOOLS).count()).toBe(10);
+        expect(await s.page.locator(T5_TOOLS).count()).toBe(11);
         await t5Viewport(s, 844, 390);
         const landscapeSettings = await t5OpenSettings(s, 844, 390);
         expect(await landscapeSettings.locator('select[aria-label="响应速度"]').count()).toBe(1);
