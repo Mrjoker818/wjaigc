@@ -3,6 +3,7 @@
 import type { ReasoningEffort, ResponseSpeed, ResolvedChatControls } from '@/lib/chat-generation-controls';
 import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
 import type { WorkMode, WorkPlan } from '@/lib/chatgpt-work-mode';
+import type { SimpleChatDramaDraft } from '@/lib/simple-chat-drama-draft';
 import {
   bindWorkspaceSourceTraceToChat,
   parseWorkspaceSourceTrace,
@@ -58,6 +59,8 @@ export interface SimpleChatMessage {
   reasoning?: string;
   /** Work-mode plan for this reply; progress is read from the reply's step headings. */
   workPlan?: WorkPlan;
+  /** Short-drama script the model saved in this reply. */
+  dramaDraft?: SimpleChatDramaDraft;
   images?: string[];
   imageRefs?: WorkspaceAssetReference[];
   attachments?: ChatAttachment[];

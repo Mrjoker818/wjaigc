@@ -5,6 +5,8 @@ import { Check, Clapperboard, Menu, Paperclip, ArrowUp, Square, Globe, X, Settin
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { MarkdownRenderer } from "./markdown-renderer";
 import { WorkPlanCard } from "./work-plan-card";
+import { DramaDraftCard } from "./drama-draft-card";
+import { readDramaDraft } from '@/lib/simple-chat-drama-draft';
 import { readWorkPlan } from "@/lib/chatgpt-work-mode";
 import { ImageLightbox } from "./image-lightbox";
 import { QuickCommands } from "./quick-commands";
@@ -98,6 +100,7 @@ type SimpleChatStreamPayload = {
   resultCount?: number;
   searchResults?: string;
   label?: string;
+  tool?: string;
   runId?: string;
   imageUrl?: string;
   imageRef?: unknown;
@@ -1657,6 +1660,7 @@ export default function ChatArea({
           content: '',
           reasoning: undefined,
           workPlan: undefined,
+          dramaDraft: undefined,
           images: [],
           imageRefs: [],
           attachments: [],
@@ -1820,7 +1824,9 @@ export default function ChatArea({
                   content: [
                     fullContent.trim() ? fullContent : '',
                     parsed.status === 'failed'
-                      ? `${parsed.label || '图片生成失败'}\n\n建议：切换图像模型或稍后重试。`
+                      ? parsed.tool === 'drama_draft'
+                        ? `${parsed.label || '剧本没有写成'}\n\n建议：把故事的主角、冲突和结局说得更具体，或稍后重试。`
+                        : `${parsed.label || '图片生成失败'}\n\n建议：切换图像模型或稍后重试。`
                       : `*${parsed.label || '正在处理图片任务...'}*`,
                   ].filter(Boolean).join('\n\n'),
                   ...(typeof parsed.runId === 'string' ? { agentRunId: parsed.runId } : {}),
@@ -1891,6 +1897,16 @@ export default function ChatArea({
               : '未知错误';
             setSearchStatus(null);
             failMessage(streamError, `请求失败：${streamError}\n\n建议：尝试切换模型或稍后重试。`);
+          } else if (parsed.type === 'drama_draft') {
+            const draft = readDramaDraft(value);
+            if (draft) {
+              // Drop the "正在写短剧剧本" line; the card below the reply replaces it.
+              updateRequestMessages(previous => previous.map(message => (
+                message.id === context.assistantMessageId
+                  ? { ...message, content: fullContent.trim() ? fullContent : `剧本《${draft.title}》已写好。`, dramaDraft: draft }
+                  : message
+              )));
+            }
           } else if (parsed.type === 'work_plan') {
             const plan = readWorkPlan((value as { workPlan?: unknown }).workPlan);
             if (plan) {
@@ -3146,6 +3162,7 @@ export default function ChatArea({
                   ) : (
                     <div className="whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-relaxed">{msg.content}</div>
                   )}
+                  {msg.role === 'assistant' && msg.dramaDraft ? <DramaDraftCard draft={msg.dramaDraft} /> : null}
                   {msg.agentRunId && msg.content !== '视频成片任务已提交。' && (
                     <div className="mt-3">
                       <AgentRunMessageProgress

@@ -43,7 +43,8 @@ import { authorizeAgentContext } from '@/lib/agent-runtime/context-adapters';
 import { prepareAdmittedAgentTaskExecution } from '@/lib/agent-runtime/surface-dispatch';
 import { resolveAgentRuntimeMode } from '@/lib/agent-runtime/mode';
 import { admitAuthorizedAgentExecution } from '@/lib/agent-runtime/admission-gate';
-import { executeAdmittedToolCall } from '@/lib/chat-tools';
+import { CHAT_TOOLS, executeAdmittedToolCall, executeToolCall } from '@/lib/chat-tools';
+import { platformsForUser } from '@/lib/platform-routes';
 import { resolveTaskModel, resolveTaskModelCatalog } from '@/lib/task-core/model-catalog';
 import { STRICT_AGENT_GENERATE_HEADER } from '@/lib/agent-runtime/generate-image-adapter';
 import { resolveSimpleChatRequestIdempotencyKey } from '@/lib/simple-chat-retry';
@@ -325,6 +326,9 @@ function simpleChatEventResponse(event: Record<string, unknown>): Response {
     },
   });
 }
+
+// A reply can include a short-drama script, which waits up to about 90 s for the planner.
+export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
   const agentRuntimeMode = resolveAgentRuntimeMode(process.env.WUJIE_AGENT_RUNTIME_MODE);
@@ -844,6 +848,12 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // 短剧剧本：开通了视频平台的用户，模型可以直接把故事写成短剧剧本草稿（不扣积分）。
+  const dramaToolEnabled = platformsForUser(user).includes('video');
+  if (dramaToolEnabled) {
+    enhancedSystemPrompt += '\n\n## 短剧剧本（create_drama_draft）\n用户要拍短剧、故事短片或有剧情的多镜头视频时，调用 create_drama_draft 把故事写成分场剧本草稿，不要用 generate_image 逐张画分镜。写剧本不消耗积分；草稿保存后，用户点「在短剧工作台打开」继续拆镜头、生成和成片。只是聊故事、改文案或要一张图时不要调用。';
+  }
+
   // 工作模式：按固定步骤作答，客户端从步骤标题读取进度。
   const workPlan = normalizeWorkMode(body.workMode) === 'work'
     ? buildWorkPlan(messages.findLast(message => message.role === 'user')?.content || '')
@@ -1057,6 +1067,7 @@ export async function POST(request: NextRequest) {
               },
             },
           },
+          ...(dramaToolEnabled ? CHAT_TOOLS.filter(tool => tool.function.name === 'create_drama_draft') : []),
         ];
 
         const webSearchTool = {
@@ -1106,9 +1117,10 @@ export async function POST(request: NextRequest) {
             }),
           };
           let fetchRes = await fetchWithTimeout(apiUrl, chatRequestInit, 'chat');
-          // Gateways that only route /v1 answer 404. Retry only then: a streamed
-          // reply is not JSON, so a content-type based retry would send a second paid request.
-          if (fetchRes.status === 404 && !shouldSkipV1Retry(baseUrl)) {
+          // Gateways that only route /v1 answer 404, or 405 ("POST not supported for route
+          // chat/completions"). Retry only then: both reject before any model runs, while a
+          // streamed reply is not JSON, so a content-type based retry would send a second paid request.
+          if ((fetchRes.status === 404 || fetchRes.status === 405) && !shouldSkipV1Retry(baseUrl)) {
             await fetchRes.body?.cancel().catch(() => undefined);
             fetchRes = await fetchWithTimeout(`${baseUrl}/v1/chat/completions`, chatRequestInit, 'chat');
           }
@@ -1515,6 +1527,41 @@ export async function POST(request: NextRequest) {
               send({ type: 'tool_status', tool: 'generating_image', status: 'failed', label: `${jobPrefix}图片生成失败: ${errorMessage(e, '未知错误')}` });
             }
           }));
+        }
+
+        // 短剧剧本：一次请求只写一份草稿。剧本助手用后台配置的对话模型，最长约 90 秒。
+        const dramaCall = dramaToolEnabled
+          ? Object.values(toolCalls).find(call => call.name === 'create_drama_draft')
+          : undefined;
+        if (dramaCall) {
+          let dramaArgs: Record<string, unknown> = {};
+          try {
+            const parsed: unknown = JSON.parse(dramaCall.arguments || '{}');
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) dramaArgs = parsed as Record<string, unknown>;
+          } catch { /* fall back to the user's words */ }
+          if (typeof dramaArgs.idea !== 'string' || !dramaArgs.idea.trim()) dramaArgs = { ...dramaArgs, idea: userText };
+          send({ type: 'tool_status', tool: 'drama_draft', status: 'running', label: '正在写短剧剧本，大约需要 1 分钟...' });
+          const result = await executeToolCall('create_drama_draft', dramaArgs, {
+            chatApiKey: apiKey,
+            chatBaseUrl: baseUrl,
+            origin: new URL(request.url).origin,
+            userId: user.id,
+            userRole: user.role === 'admin' ? 'admin' : 'user',
+            ...(body.assetProjectId ? { projectId: body.assetProjectId } : {}),
+            allowedTools: ['create_drama_draft'],
+          });
+          const draft = result.data;
+          if (result.success && typeof draft?.dramaId === 'string') {
+            send({
+              type: 'drama_draft',
+              dramaId: draft.dramaId,
+              title: typeof draft.title === 'string' && draft.title ? draft.title : '未命名短剧',
+              ...(body.assetProjectId ? { projectId: body.assetProjectId } : {}),
+              summary: `${Number(draft.episodeCount) || 0} 集、${Number(draft.sceneCount) || 0} 场、${Number(draft.castCount) || 0} 个角色`,
+            });
+          } else {
+            send({ type: 'tool_status', tool: 'drama_draft', status: 'failed', label: `剧本没有写成：${result.error || '请稍后重试'}` });
+          }
         }
 
         send({ type: 'done' });

@@ -53,7 +53,7 @@ describe('create_drama_draft chat tool', () => {
   it('writes one script, saves it in the canvas project and returns the draft id', async () => {
     const result = await executeToolCall('create_drama_draft', { idea: '外卖员暴雨夜送错餐', style: 'anime', aspect_ratio: '16:9' }, context);
     expect(result.success).toBe(true);
-    expect(result.data).toEqual({ dramaId: 'drama_1', title: '雨夜来信' });
+    expect(result.data).toEqual({ dramaId: 'drama_1', title: '雨夜来信', episodeCount: 1, sceneCount: 2, castCount: 1 });
     expect(result.resultText).toContain('1 集、2 场、1 个角色');
     expect(mocks.writes[0]).toEqual({ input: { idea: '外卖员暴雨夜送错餐', style: 'anime', aspectRatio: '16:9' }, options: { retry: false } });
     expect(mocks.created).toEqual([{ userId: 'user-1', projectId: 'project-1' }]);

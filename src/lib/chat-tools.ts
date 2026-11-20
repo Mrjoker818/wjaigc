@@ -1421,7 +1421,10 @@ async function executeCreateDramaDraft(
     const sceneCount = doc.episodes.reduce((total, episode) => total + episode.scenes.length, 0);
     return {
       success: true,
-      data: { dramaId: record.id, title: record.title },
+      data: {
+        dramaId: record.id, title: record.title,
+        episodeCount: doc.episodes.length, sceneCount, castCount: doc.cast.length,
+      },
       resultText: `已保存剧本草稿《${record.title}》：${doc.episodes.length} 集、${sceneCount} 场、${doc.cast.length} 个角色。`
         + '告诉用户点击「在短剧工作台打开」继续拆镜头、生成镜头视频和渲染成片，不要再用 generate_video 逐个生成这些镜头。',
     };

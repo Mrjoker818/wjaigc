@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   getSessionUser: vi.fn(),
   requireApiAuthOrReject: vi.fn(),
   webSearch: vi.fn(),
+  executeToolCall: vi.fn(),
 }));
 
 vi.mock('server-only', () => ({}));
@@ -35,6 +36,11 @@ vi.mock('@/lib/api-auth', async (importOriginal) => {
     ...actual,
     requireApiAuthOrReject: mocks.requireApiAuthOrReject,
   };
+});
+
+vi.mock('@/lib/chat-tools', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/chat-tools')>();
+  return { ...actual, executeToolCall: mocks.executeToolCall };
 });
 
 vi.mock('coze-coding-dev-sdk', () => ({
@@ -174,6 +180,22 @@ describe('simple-chat retry idempotency boundary', () => {
     }));
   });
 
+  it('retries a gateway that answers 405 for the unversioned route on /v1', async () => {
+    const unversioned = { ...provider, baseUrl: 'https://provider.example' };
+    mocks.findProviderForModel.mockResolvedValue(unversioned);
+    mocks.findProviderById.mockResolvedValue(unversioned);
+    mocks.fetchWithTimeout.mockReset();
+    mocks.fetchWithTimeout
+      .mockResolvedValueOnce(new Response('POST not supported for route chat/completions', { status: 405 }))
+      .mockResolvedValueOnce(chatProviderResponse());
+    const response = await chatPost(chatRequest('simple-chat-retry:task-e:assistant-e'));
+    const text = await response.text();
+
+    expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(2);
+    expect(String(mocks.fetchWithTimeout.mock.calls[1][0])).toBe('https://provider.example/v1/chat/completions');
+    expect(text).not.toContain('"type":"error"');
+  });
+
   it('does not retry a /v1 provider that answers 404', async () => {
     mocks.fetchWithTimeout.mockReset();
     mocks.fetchWithTimeout.mockResolvedValue(new Response('not found', { status: 404 }));
@@ -272,7 +294,7 @@ describe('simple-chat retry idempotency boundary', () => {
 
     expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(3);
     const lastBody = JSON.parse(String((mocks.fetchWithTimeout.mock.calls[2][1] as RequestInit).body));
-    expect(lastBody.tools.map((tool: { function: { name: string } }) => tool.function.name)).toEqual(['generate_image']);
+    expect(lastBody.tools.map((tool: { function: { name: string } }) => tool.function.name)).toEqual(['generate_image', 'create_drama_draft']);
   });
 
   it('adds the work-mode steps to the system prompt and streams the plan in work mode', async () => {
@@ -298,6 +320,66 @@ describe('simple-chat retry idempotency boundary', () => {
     expect(planEvent.workPlan.steps).toHaveLength(4);
   });
 
+  it('writes a short-drama draft when the model calls create_drama_draft', async () => {
+    const dramaCall = JSON.stringify({ choices: [{ delta: {
+      tool_calls: [{ index: 0, id: 'call-drama', function: { name: 'create_drama_draft', arguments: '{"idea":"外卖员暴雨夜送错餐","style":"anime"}' } }],
+    } }] });
+    mocks.fetchWithTimeout.mockResolvedValueOnce(new Response(`data: ${dramaCall}\n\ndata: [DONE]\n\n`, { status: 200 }));
+    mocks.executeToolCall.mockResolvedValue({
+      success: true,
+      resultText: 'ok',
+      data: { dramaId: 'drama_1', title: '雨夜来信', episodeCount: 1, sceneCount: 6, castCount: 3 },
+    });
+    const response = await chatPost(new NextRequest('http://localhost/api/simple-chat/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [{ role: 'user', content: '帮我写个短剧' }], model: 'chat-model', providerId: 'provider-a', assetProjectId: 'project-1' }),
+    }));
+    const events = (await response.text()).split('\n')
+      .filter(line => line.startsWith('data: '))
+      .map(line => JSON.parse(line.slice(6)));
+
+    const body = JSON.parse(String((mocks.fetchWithTimeout.mock.calls[0][1] as RequestInit).body));
+    expect(body.tools.map((tool: { function: { name: string } }) => tool.function.name)).toContain('create_drama_draft');
+    expect(body.messages[0].content).toContain('create_drama_draft');
+    expect(mocks.executeToolCall).toHaveBeenCalledWith(
+      'create_drama_draft',
+      { idea: '外卖员暴雨夜送错餐', style: 'anime' },
+      expect.objectContaining({ userId: 'admin-a', projectId: 'project-1', allowedTools: ['create_drama_draft'] }),
+    );
+    expect(events).toContainEqual({
+      type: 'drama_draft', dramaId: 'drama_1', title: '雨夜来信', projectId: 'project-1', summary: '1 集、6 场、3 个角色',
+    });
+    expect(events.at(-1)).toEqual({ type: 'done' });
+  });
+
+  it('reports a failed draft with the reason instead of a draft event', async () => {
+    const dramaCall = JSON.stringify({ choices: [{ delta: {
+      tool_calls: [{ index: 0, id: 'call-drama', function: { name: 'create_drama_draft', arguments: 'not json' } }],
+    } }] });
+    mocks.fetchWithTimeout.mockResolvedValueOnce(new Response(`data: ${dramaCall}\n\ndata: [DONE]\n\n`, { status: 200 }));
+    mocks.executeToolCall.mockResolvedValue({ success: false, error: '剧本助手暂时不可用', resultText: 'x' });
+    const response = await chatPost(chatRequest(undefined));
+    const events = (await response.text()).split('\n')
+      .filter(line => line.startsWith('data: '))
+      .map(line => JSON.parse(line.slice(6)));
+
+    expect(mocks.executeToolCall.mock.calls[0][1]).toEqual({ idea: 'Hello' });
+    expect(events.some(event => event.type === 'drama_draft')).toBe(false);
+    expect(events).toContainEqual(expect.objectContaining({ type: 'tool_status', tool: 'drama_draft', status: 'failed', label: '剧本没有写成：剧本助手暂时不可用' }));
+  });
+
+  it('does not offer the drama tool to a user without the video platform', async () => {
+    mocks.getSessionUser.mockResolvedValue({ id: 'user-a', role: 'user', productType: 'chat', apiPermissions: { chat: true } });
+    mocks.requireApiAuthOrReject.mockResolvedValue({ userId: 'user-a', role: 'user' });
+    const response = await chatPost(chatRequest(undefined));
+    await response.text();
+
+    const body = JSON.parse(String((mocks.fetchWithTimeout.mock.calls[0][1] as RequestInit).body));
+    expect(body.tools.map((tool: { function: { name: string } }) => tool.function.name)).not.toContain('create_drama_draft');
+    expect(body.messages[0].content).not.toContain('create_drama_draft');
+  });
+
   it('sends no plan and no work-mode prompt outside work mode', async () => {
     mocks.fetchWithTimeout.mockResolvedValue(chatProviderResponse());
     const response = await chatPost(chatRequest(undefined));
@@ -315,7 +397,7 @@ describe('simple-chat retry idempotency boundary', () => {
 
     expect(mocks.fetchWithTimeout).toHaveBeenCalledTimes(1);
     const body = JSON.parse(String((mocks.fetchWithTimeout.mock.calls[0][1] as RequestInit).body));
-    expect(body.tools.map((tool: { function: { name: string } }) => tool.function.name)).toEqual(['generate_image']);
+    expect(body.tools.map((tool: { function: { name: string } }) => tool.function.name)).toEqual(['generate_image', 'create_drama_draft']);
   });
 
   it('derives stable Deep Research phase keys', async () => {
