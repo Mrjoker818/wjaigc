@@ -32,6 +32,9 @@ importers:
 
   .:
     dependencies:
+      '@noble/hashes':
+        specifier: 1.8.0
+        version: 1.8.0
       '@aws-sdk/client-s3':
         specifier: ^3.1090.0
         version: 3.1090.0

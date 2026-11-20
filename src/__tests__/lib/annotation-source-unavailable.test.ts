@@ -121,6 +121,14 @@ beforeEach((): void => {
   // Non-routable placeholder; getPool acquisition below is intercepted before network I/O.
   vi.stubEnv('DATABASE_URL', 'postgresql://fault-only.invalid/fault_test');
   vi.stubEnv('PGDATABASE_URL', undefined);
+  vi.stubEnv('PGHOST', undefined);
+  vi.stubEnv('PGPORT', undefined);
+  vi.stubEnv('PGDATABASE', undefined);
+  vi.stubEnv('PGUSER', undefined);
+  vi.stubEnv('PGPASSWORD', undefined);
+  vi.stubEnv('COZE_SUPABASE_URL', undefined);
+  vi.stubEnv('COZE_SUPABASE_SERVICE_ROLE_KEY', undefined);
+  vi.stubEnv('COZE_SUPABASE_ANON_KEY', undefined);
   vi.stubEnv('WUJIE_YJS_ENABLED', 'true');
 });
 afterEach((): void => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });

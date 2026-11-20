@@ -3,6 +3,8 @@ import { DIRECTOR_STYLES, normalizeDirectorStyle } from '@/lib/video-director/di
 import { shotLanguageText } from './shot-language';
 import { shotSpeaker } from './voiceover';
 import { stripMentions } from './mentions';
+import type { ReceiptTake } from './receipt-client';
+import { uncertainDramaSubmission } from './receipt-client';
 import { activeTake, type DramaCastMember, type DramaLocation, type DramaProjectV1, type DramaProp, type DramaShot, type DramaTake } from './types';
 
 export interface ShotModelCapability {
@@ -184,6 +186,16 @@ export interface ShotRequestContext {
   resolution?: string;
 }
 
+/** Estimate the same first/last-frame plus reference-image inputs the generate route will bill. */
+export function shotInputReferenceCount(context: Pick<ShotRequestContext, 'doc' | 'shot' | 'previous' | 'capability'>): number {
+  const { doc, shot, previous, capability } = context;
+  const location = doc.locations.find(item => item.id === shot.sceneId);
+  const first = chooseFirstFrame(shot, previous, location, capability);
+  const firstUrl = first.url || (first.source === 'previous-shot' ? 'pending:previous-frame' : undefined);
+  const lastUrl = chooseLastFrame(shot, capability, firstUrl);
+  return [firstUrl, lastUrl].filter(Boolean).length + shotReferenceImages(shot, doc.cast, capability, [firstUrl, lastUrl], doc.props).length;
+}
+
 /** The generate route counts the first and last frames against the same image limit as the references. */
 export function shotReferenceImages(
   shot: DramaShot, cast: DramaCastMember[], capability: ShotModelCapability, frames: Array<string | undefined> = [], props: DramaProp[] = [],
@@ -247,6 +259,8 @@ export interface RunShotOptions extends Omit<ShotRequestContext, 'firstFrameUrl'
   signal?: AbortSignal;
   /** Called whenever the take changes so the UI can save progress. */
   onTake?: (take: DramaTake) => void;
+  /** Persist this same take, its model, request key and input snapshot before the paid submission. */
+  onBeforeSubmit?: (take: DramaTake) => Promise<void>;
   pollIntervalMs?: (attempt: number) => number;
   timeoutMs?: number;
   now?: () => number;
@@ -259,7 +273,10 @@ const defaultSleep = (ms: number, signal?: AbortSignal) => new Promise<void>((re
 });
 
 async function readJson(response: Response): Promise<Record<string, unknown>> {
-  try { return await response.json() as Record<string, unknown>; } catch { return {}; }
+  try {
+    const data: unknown = await response.json();
+    return data && typeof data === 'object' && !Array.isArray(data) ? data as Record<string, unknown> : {};
+  } catch { return {}; }
 }
 
 function errorText(data: Record<string, unknown>, fallback: string): string {
@@ -298,8 +315,17 @@ export async function runShot(options: RunShotOptions): Promise<DramaTake> {
   const fetcher = options.fetch ?? ((input, init) => fetch(input, init));
   const now = options.now ?? Date.now;
   const sleep = options.sleep ?? defaultSleep;
-  const take: DramaTake = { id: `take_${now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`, status: 'submitted', createdAt: now() };
-  const emit = (patch: Partial<DramaTake>) => { Object.assign(take, patch); options.onTake?.({ ...take }); };
+  const take: ReceiptTake = {
+    id: `take_${now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`, status: 'submitted', createdAt: now(),
+    modelId: options.modelId, ...(options.providerId ? { providerId: options.providerId } : {}),
+  };
+  let submissionAttempted = false;
+  const emit = (patch: Partial<ReceiptTake>) => { Object.assign(take, patch); options.onTake?.({ ...take }); };
+  const pending = (code: string, error: string, generation: 'unknown' | 'pending' | 'completed' = take.taskId ? 'pending' : 'unknown') => {
+    emit({ status: take.taskId ? 'generating' : 'submitted', retryable: false, error,
+      deliveryState: { generation, result: 'pending', code } });
+    return { ...take };
+  };
   try {
     const location = options.doc.locations.find(item => item.id === options.shot.sceneId);
     const choice = chooseFirstFrame(options.shot, options.previous, location, options.capability);
@@ -309,17 +335,29 @@ export async function runShot(options: RunShotOptions): Promise<DramaTake> {
     emit({});
     const lastFrameUrl = chooseLastFrame(options.shot, options.capability, firstFrameUrl);
     const body = buildShotGenerateRequest({ ...options, firstFrameSource: choice.source, firstFrameUrl, lastFrameUrl });
+    // The parent must durably save this exact identity before any paid call can escape the page.
+    await options.onBeforeSubmit?.({ ...take });
+    options.signal?.throwIfAborted();
+    submissionAttempted = true;
     const submit = await fetcher('/api/video/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'idempotency-key': `drama:${options.shot.id}:${take.id}` },
-      body: JSON.stringify(body), signal: options.signal,
+      body: JSON.stringify({ ...body, sessionId: `drama-take:${options.shot.id}:${take.id}`, messageId: take.id }), signal: options.signal,
     });
     const submitted = await readJson(submit);
-    if (!submit.ok || typeof submitted.taskId !== 'string') {
+    if (!submit.ok || typeof submitted.taskId !== 'string' || !submitted.taskId) {
+      // A missing response or a gateway failure cannot prove that admission/charging did not happen.
+      if (submit.ok || submit.status >= 500 || submit.status === 408 || submit.status === 409
+        || uncertainDramaSubmission(submitted.error)
+        || typeof submitted.error !== 'string' || !submitted.error) {
+        return pending('DRAMA_SUBMISSION_UNKNOWN', '提交回执尚未确认，原任务可能仍在运行，请恢复原任务查询，勿重复提交。');
+      }
       emit({ status: 'failed', error: errorText(submitted, '镜头提交失败'), ...(submitted.retryable === true ? { retryable: true } : {}) });
       return { ...take };
     }
-    emit({ taskId: submitted.taskId, status: 'generating', ...(typeof submitted.creditCost === 'number' ? { credits: submitted.creditCost } : {}) });
+    emit({ taskId: submitted.taskId, status: 'generating', retryable: false,
+      deliveryState: { generation: 'pending', result: 'pending' },
+      ...(typeof submitted.creditCost === 'number' ? { credits: submitted.creditCost } : {}) });
 
     const deadline = now() + (options.timeoutMs ?? 25 * 60_000);
     const interval = options.pollIntervalMs ?? (attempt => (attempt < 3 ? 2000 : attempt < 20 ? 4000 : 6000));
@@ -337,24 +375,30 @@ export async function runShot(options: RunShotOptions): Promise<DramaTake> {
         continue;
       }
       const data = await readJson(polled);
+      if (!polled.ok) continue;
       if (data.status === 'completed') {
         const result = (data.result ?? {}) as Record<string, unknown>;
         const videoUrl = [data.videoUrl, result.videoUrl].find((value): value is string => typeof value === 'string' && value.length > 0);
-        if (!videoUrl) { emit({ status: 'failed', error: '任务已完成但没有返回视频地址' }); return { ...take }; }
+        if (!videoUrl) return pending('DRAMA_RESULT_PENDING', '生成已完成，视频结果尚待取回，请恢复原任务查询。', 'completed');
         const thumbnailUrl = [data.videoThumbnailUrl, result.videoThumbnailUrl, result.thumbnailUrl]
           .find((value): value is string => typeof value === 'string' && value.length > 0);
-        emit({ status: 'completed', videoUrl, ...(thumbnailUrl ? { thumbnailUrl } : {}) });
+        emit({ status: 'completed', error: undefined, videoUrl, deliveryState: { generation: 'completed', result: 'available' },
+          ...(thumbnailUrl ? { thumbnailUrl } : {}) });
         return { ...take };
       }
-      if (['failed', 'cancelled', 'timeout'].includes(String(data.status))) {
-        emit({ status: 'failed', error: errorText(data, '镜头生成失败'), ...(data.retryable === true ? { retryable: true } : {}) });
+      if (data.status === 'timeout') return pending('DRAMA_POLL_TIMEOUT', '原任务查询超时，任务可能仍在运行，请恢复原任务查询。');
+      if (uncertainDramaSubmission(data.error)) return pending('DRAMA_SUBMISSION_UNKNOWN', '原供应商提交结果尚未确认，请核对原任务，勿重复生成');
+      if (['failed', 'cancelled'].includes(String(data.status))) {
+        emit({ status: 'failed', error: errorText(data, '镜头生成失败'), retryable: data.retryable === true,
+          deliveryState: { generation: 'failed', result: 'pending' } });
         return { ...take };
       }
     }
-    emit({ status: 'failed', error: '镜头生成超过 25 分钟仍未完成。任务可能仍在供应商处运行，稍后可在任务列表查看。' });
-    return { ...take };
+    return pending('DRAMA_POLL_TIMEOUT', '镜头生成查询超时。原任务可能仍在供应商处运行，请恢复原任务查询。');
   } catch (error) {
-    if (options.signal?.aborted) throw error;
+    if (submissionAttempted) return pending(take.taskId ? 'DRAMA_POLL_INTERRUPTED' : 'DRAMA_SUBMISSION_UNKNOWN',
+      '原任务回执尚未确认，任务可能仍在运行，请恢复原任务查询，勿重复提交。');
+    if (options.signal?.aborted) { emit({ status: 'failed', retryable: true, error: '已停止，尚未提交生成请求' }); return { ...take }; }
     emit({ status: 'failed', error: error instanceof Error ? error.message : '镜头生成失败' });
     return { ...take };
   }

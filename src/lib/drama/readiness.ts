@@ -1,6 +1,6 @@
 import { chooseFirstFrame, type ShotModelCapability } from './shot-runner';
-import { shotSource, type DramaEpisode, type DramaProjectV1, type DramaShot } from './types';
-import { currentVoiceover } from './voiceover';
+import type { DramaEpisode, DramaProjectV1, DramaShot } from './types';
+import { currentTakeForShot, isVoiceoverCurrent } from './production-version';
 import { fitDuration, orderedPrevious } from './workbench-state';
 
 /** Workbench step where a missing item is fixed; matches the workbench's own step ids. */
@@ -69,17 +69,20 @@ export function shotReadiness(doc: DramaProjectV1, episodeId: string, shot: Dram
   if (model?.capability.imageToVideo) {
     const previous = orderedPrevious(doc, episodeId, shot.id);
     const location = doc.locations.find(item => item.id === shot.sceneId);
-    const source = chooseFirstFrame(shot, previous, location, model.capability).source;
+    const currentPrevious = previous && currentTakeForShot(doc, episodeId, previous) ? previous : undefined;
+    const source = chooseFirstFrame(shot, currentPrevious, location, model.capability).source;
     add({ key: 'firstFrame', ok: source !== 'none', required: false, label: '首帧', step: 'shots' },
       '没有关键帧、场景图或上一镜头可接，会只按文字生成，构图不可控');
   }
 
-  add({ key: 'video', ok: Boolean(shotSource(shot)), required: true, label: '选用的视频', step: 'shots' },
-    shot.takes.at(-1)?.status === 'failed' ? '最近一次生成失败，重拍后才能进成片' : '还没有生成视频');
+  add({ key: 'video', ok: Boolean((shot.still && shot.firstFrameUrl) || currentTakeForShot(doc, episodeId, shot)), required: true, label: '选用的视频', step: 'shots' },
+    shot.takes.some(take => take.status === 'completed' && take.videoUrl) ? '制作输入已更改，选用的视频需要重拍'
+      : shot.takes.at(-1)?.status === 'failed' ? '最近一次生成失败，重拍后才能进成片' : '还没有生成视频');
 
   if (shot.dialogue?.trim()) {
-    add({ key: 'voiceover', ok: Boolean(currentVoiceover(shot)), required: false, label: '台词配音', step: 'final' },
-      shot.voiceoverUrl ? '台词改过，配音需要重录' : '台词还没有配音，成片里只有字幕');
+    add({ key: 'voiceover', ok: isVoiceoverCurrent(doc, shot), required: false, label: '台词配音', step: 'final' },
+      shot.voiceoverUrl ? shot.voiceoverText !== shot.dialogue.trim() ? '台词改过，配音需要重录' : '音色或声音样本改过，配音需要重录'
+        : '台词还没有配音，成片里只有字幕');
   }
   return checks;
 }

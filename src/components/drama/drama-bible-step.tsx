@@ -10,7 +10,7 @@ import {
 import type { DramaCastMember, DramaLocation, DramaProp } from '@/lib/drama/types';
 import { DEFAULT_VOICE, DRAMA_VOICES } from '@/lib/drama/voiceover';
 import { castViewImage, setSlotImage, slotHistory, type BibleSlot } from '@/lib/drama/bible-images';
-import { generateReferenceImage, persistImage, REFERENCE_IMAGE_TYPES, uploadReferenceImage } from '@/lib/drama/workbench-client';
+import { REFERENCE_IMAGE_TYPES, uploadReferenceImage } from '@/lib/drama/workbench-client';
 import {
   nextBibleId, removeCastMember, removeLocation, removeProp, updateCastMember, updateLocation, updateProp,
 } from '@/lib/drama/workbench-state';
@@ -22,7 +22,7 @@ const VIEW_LABEL: Record<CastView, string> = { front: '正面', side: '侧面', 
 
 /** Step 2: cast and location cards. The locked image is the reference every shot uses. */
 export function DramaBibleStep() {
-  const { doc, update, setStep, imageModel, onPlaceImageOnCanvas } = useDrama();
+  const { doc, update, setStep, imageModel, onPlaceImageOnCanvas, generateProductionImage } = useDrama();
   const [picking, setPicking] = useState<{ slot: BibleSlot; label: string } | null>(null);
   const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set());
   const mark = (key: string, on: boolean) => setPending(previous => {
@@ -44,9 +44,12 @@ export function DramaBibleStep() {
       mark(slotKey(slot), false);
     }
   };
-  const makeImage = (slot: BibleSlot, prompt: string, aspectRatio: string, referenceImages: string[] = []) =>
-    fillSlot(slot, '设定图生成失败', async () => persistImage(await generateReferenceImage(prompt, aspectRatio,
-      referenceImages.length && imageModel ? { model: imageModel.key, providerId: imageModel.providerId, referenceImages } : {})));
+  const makeImage = async (slot: BibleSlot, prompt: string, aspectRatio: string, referenceImages: string[] = []) => {
+    mark(slotKey(slot), true);
+    try { await generateProductionImage({ kind: slot.kind, entityId: slot.id, view: slot.view }, prompt, aspectRatio, referenceImages); }
+    catch (error) { toast.error('设定图生成未完成', { description: error instanceof Error ? error.message : '请核对原任务' }); }
+    finally { mark(slotKey(slot), false); }
+  };
   const uploadImage = (slot: BibleSlot, file: File) => fillSlot(slot, '图片上传失败', () => uploadReferenceImage(file));
   const restoreImage = (slot: BibleSlot, url: string) => update(current => setSlotImage(current, slot, url));
 

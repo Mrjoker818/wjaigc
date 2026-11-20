@@ -21,6 +21,9 @@ export const DRAMA_STEPS: Array<{ id: DramaStep; label: string; hint: string }> 
 ];
 
 export interface DramaWorkbenchApi {
+  generateProductionImage: (target: import('@/lib/drama/production-state').DramaProductionImage['target'], prompt: string, aspectRatio: string, referenceImages?: string[]) => Promise<boolean>;
+  recoverProduction: () => Promise<void>;
+  recoveringProduction: boolean;
   doc: DramaProjectV1;
   episode: DramaEpisode | undefined;
   /** Applies a pure edit to the document; the workbench saves it automatically. */

@@ -3,6 +3,7 @@ import {
   activeTake, MAX_SHOTS_PER_EPISODE, shotSource,
   type DramaCastMember, type DramaEpisode, type DramaLocation, type DramaProjectV1, type DramaProp, type DramaSceneBlock, type DramaShot, type DramaTake,
 } from './types';
+import { currentTakeForShot } from './production-version';
 
 export interface ShotLocation {
   episode: DramaEpisode;
@@ -129,16 +130,21 @@ export function updateProp(doc: DramaProjectV1, id: string, patch: Partial<Drama
 
 /** A new id that is not used by any cast member, location or prop. */
 export function nextBibleId(doc: DramaProjectV1, prefix: 'char' | 'loc' | 'prop'): string {
-  const used = new Set([...doc.cast, ...doc.locations, ...doc.props].map(item => item.id));
+  const used = new Set([...doc.cast, ...doc.locations, ...doc.props, ...(doc.sourceCharacters ?? [])].map(item => item.id));
   for (let i = 1; ; i += 1) if (!used.has(`${prefix}_${i}`)) return `${prefix}_${i}`;
 }
 
 /** Removes a cast member and every reference to it from scenes and shots. */
 export function removeCastMember(doc: DramaProjectV1, id: string): DramaProjectV1 {
   const strip = (ids?: string[]) => ids?.filter(item => item !== id);
-  return mapScenes({ ...doc, cast: doc.cast.filter(member => member.id !== id) }, scene => ({
-    ...scene, characterIds: strip(scene.characterIds), shots: scene.shots.map(shot => ({ ...shot, characterIds: strip(shot.characterIds) })),
-  }));
+  const original = doc.cast.find(member => member.id === id);
+  const linked = doc.episodes.some(episode => [...episode.scenes, ...(episode.archivedScenes ?? [])].some(scene => scene.dialogues?.some(line => line.characterId === id)));
+  const sourceCharacters = [...(doc.sourceCharacters ?? [])];
+  if (original && linked && !sourceCharacters.some(member => member.id === id)) sourceCharacters.push({ id, name: original.name });
+  const edit = (scene: DramaSceneBlock): DramaSceneBlock => ({ ...scene, characterIds: strip(scene.characterIds),
+    shots: scene.shots.map(shot => ({ ...shot, characterIds: strip(shot.characterIds), ...(shot.speakerId === id ? { speakerId: undefined } : {}) })) });
+  return { ...doc, cast: doc.cast.filter(member => member.id !== id), ...(sourceCharacters.length ? { sourceCharacters } : {}),
+    episodes: doc.episodes.map(episode => ({ ...episode, scenes: episode.scenes.map(edit), ...(episode.archivedScenes ? { archivedScenes: episode.archivedScenes.map(edit) } : {}) })) };
 }
 
 /** Removes a prop and every shot reference to it. */
@@ -174,13 +180,15 @@ export function formatTimecode(totalSec: number): string {
 }
 
 /** Shots that still need a usable take, in timeline order. */
-export function pendingShots(episode: DramaEpisode | undefined): DramaShot[] {
-  return episode ? episode.scenes.flatMap(scene => scene.shots).filter(shot => !shotSource(shot)) : [];
+export function pendingShots(episode: DramaEpisode | undefined, doc?: DramaProjectV1): DramaShot[] {
+  return episode ? episode.scenes.flatMap(scene => scene.shots).filter(shot => doc
+    ? !(shot.still && shot.firstFrameUrl) && !currentTakeForShot(doc, episode.id, shot)
+    : !shotSource(shot)) : [];
 }
 
 /** Shots whose newest take failed and that have no usable take to fall back on. */
-export function failedShots(episode: DramaEpisode | undefined): DramaShot[] {
-  return pendingShots(episode).filter(shot => shot.takes.at(-1)?.status === 'failed');
+export function failedShots(episode: DramaEpisode | undefined, doc?: DramaProjectV1): DramaShot[] {
+  return pendingShots(episode, doc).filter(shot => shot.takes.at(-1)?.status === 'failed');
 }
 
 /**

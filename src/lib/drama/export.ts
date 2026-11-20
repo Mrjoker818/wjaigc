@@ -4,6 +4,7 @@ import { buildTimeline, dialogueCues } from './timeline';
 import { stripMentions } from './mentions';
 import { activeTake, type DramaProjectV1 } from './types';
 import { currentVoiceover } from './voiceover';
+import { completedPackageImages, packageReferences, projectPackageDoc, type PackageMediaMode } from './package';
 
 /** A file name segment without path separators or characters Windows rejects. */
 export function safeFileName(value: string, fallback = '短剧'): string {
@@ -58,6 +59,24 @@ export interface PackageMedia {
   /** Path inside the ZIP. */
   name: string;
   url: string;
+}
+
+/** Every reference in the retained project, with unique filenames even when asset names repeat. */
+export function projectPackageMedia(doc: DramaProjectV1, mode: PackageMediaMode): Array<PackageMedia & { references: string[] }> {
+  const refs = packageReferences(projectPackageDoc(doc, mode), '/doc');
+  if (mode === 'history') for (const [url, paths] of packageReferences(completedPackageImages(doc), '/archive/completedProductionImages')) {
+    refs.set(url, [...(refs.get(url) ?? []), ...paths]);
+  }
+  return [...refs].map(([url, references], index) => {
+    const hint = references[0];
+    const dataExt = /^data:(?:image\/(png|jpeg|webp|gif|bmp|avif)|video\/(mp4|webm)|audio\/(mpeg|wav))/iu.exec(url);
+    const mimeExt = dataExt?.slice(1).find(Boolean)?.replace('jpeg', 'jpg').replace('mpeg', 'mp3');
+    const fallback = /(?:voice|audio|music)/iu.test(hint) ? 'mp3' : /(?:video|takes)/iu.test(hint) && !/thumbnail/iu.test(hint) ? 'mp4' : 'png';
+    const ext = mimeExt || extension(url, fallback);
+    const name = `素材/${String(index + 1).padStart(5, '0')}_${safeFileName(hint.split('/').at(-1) || '素材')}.${ext}`;
+    // Unsupported extensions are retained in the manifest; the browser builder reports them missing.
+    return { url, name, references };
+  });
 }
 
 function extension(url: string, fallback: string): string {

@@ -13,6 +13,7 @@ import { importDramaPackage } from '@/lib/drama/import-client';
 import { blankEpisodeDoc } from '@/lib/drama/workbench-state';
 import { DramaAdaptForm } from './drama-adapt-form';
 import { DramaIdeaForm } from './drama-idea-form';
+import { DramaSourceForm } from './drama-source-form';
 import { DramaShell } from './drama-shell';
 import type { DramaWorkbenchApi } from './drama-context';
 
@@ -95,6 +96,7 @@ export default function DramaWorkbench(props: DramaWorkbenchProps) {
 function DramaStart({ projectId, onDramaIdChange, onExit, switcher, chatHandoff, onChatHandoffDone, initialIdea }: DramaWorkbenchProps) {
   const [projects, setProjects] = useState<DramaProjectSummary[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
+  const [listAttempt, setListAttempt] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [adaptProgress, setAdaptProgress] = useState<{ value: number; label?: string } | null>(null);
@@ -104,12 +106,13 @@ function DramaStart({ projectId, onDramaIdChange, onExit, switcher, chatHandoff,
 
   useEffect(() => {
     let live = true;
+    setListError(null);
     listDramaProjects(projectId).then(
       list => { if (live) setProjects(list); },
       err => { if (live) setListError(err instanceof Error ? err.message : '剧本列表读取失败'); },
     );
     return () => { live = false; };
-  }, [projectId]);
+  }, [projectId, listAttempt]);
 
   /** Runs one creation job; `save` resolves to the stored record, which is then opened. */
   const create = useCallback(async (label: string, save: () => Promise<DramaProjectRecord>) => {
@@ -185,6 +188,8 @@ function DramaStart({ projectId, onDramaIdChange, onExit, switcher, chatHandoff,
           </p>
         ) : null}
         <DramaIdeaForm key={initialIdea} busy={busy} error={error} initialIdea={initialIdea} onGenerate={generate} onBlank={blank} />
+        <DramaSourceForm key={projectId} busy={busy} projectId={projectId} onBusyChange={setBusy}
+          onCreated={record => onDramaIdChange(record.id)} onRefreshProjects={() => setListAttempt(value => value + 1)} />
         <DramaAdaptForm busy={busy} progress={adaptProgress} onAdapt={adapt} />
         <section aria-labelledby="drama-import" className="drama-panel flex flex-col gap-3 p-4">
           <h2 id="drama-import" className="flex items-center gap-2 text-sm font-semibold"><FileArchive className="h-4 w-4" />导入制作包</h2>

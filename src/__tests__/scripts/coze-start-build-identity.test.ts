@@ -26,7 +26,13 @@ function runStart(): string {
   return execFileSync(
     bash,
     ['-c', 'PATH="$PWD/fake-bin:$PATH" exec bash scripts/coze-start.sh'],
-    { cwd: fixture, encoding: 'utf8', windowsHide: true, timeout: 10_000 },
+    {
+      cwd: fixture,
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 10_000,
+      env: { ...process.env, DATABASE_URL: '', PGDATABASE_URL: '', WUJIE_PRESENCE_ENABLED: '', WUJIE_YJS_ENABLED: '' },
+    },
   );
 }
 
@@ -40,7 +46,10 @@ function runScript(script: string): ScriptRun {
       {
         cwd: fixture,
         windowsHide: true,
-        env: { ...process.env, DATABASE_URL: '', PGDATABASE_URL: '' },
+        env: {
+          ...process.env, DATABASE_URL: '', PGDATABASE_URL: '',
+          WUJIE_PRESENCE_ENABLED: '', WUJIE_YJS_ENABLED: '',
+        },
       },
     );
   const completion = new Promise<ScriptResult>((resolveRun, rejectRun) => {

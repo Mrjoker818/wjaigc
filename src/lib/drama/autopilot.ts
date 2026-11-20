@@ -2,9 +2,9 @@
 import {
   CAST_IMAGE_RATIO, castImagePrompt, locationImagePrompt, locationImageRatio, PROP_IMAGE_RATIO, propImagePrompt,
 } from './reference-prompts';
-import { shotSource, type DramaCastMember, type DramaLocation, type DramaProjectV1, type DramaProp, type DramaShot } from './types';
-import { shotsNeedingVoiceover } from './voiceover';
+import { type DramaCastMember, type DramaLocation, type DramaProjectV1, type DramaProp, type DramaShot } from './types';
 import { updateCastMember, updateLocation, updateProp } from './workbench-state';
+import { currentTakeForShot, isVoiceoverCurrent } from './production-version';
 
 /** Stages in the order a run goes through them. */
 export const AUTOPILOT_STAGES = ['bible', 'keyframes', 'shots', 'voiceover', 'render'] as const;
@@ -49,7 +49,7 @@ export function autopilotPlan(
   const propIds = new Set(shots.flatMap(shot => shot.propIds ?? []));
   const gap = (kind: BibleGap['kind'], item: { id: string; name: string }): BibleGap =>
     ({ key: `bible:${kind}:${item.id}`, kind, id: item.id, name: item.name || item.id });
-  const pending = shots.filter(shot => !shotSource(shot));
+  const pending = shots.filter(shot => !(shot.still && shot.firstFrameUrl) && !currentTakeForShot(doc, episodeId, shot));
   return {
     scenes: scenes.filter(scene => scene.shots.length === 0).map(scene => scene.id),
     bible: [
@@ -59,7 +59,7 @@ export function autopilotPlan(
     ],
     keyframes: pending.filter(shot => !shot.firstFrameUrl && needsKeyframe(shot)).map(shot => shot.id),
     shots: pending.map(shot => shot.id),
-    voiceovers: shotsNeedingVoiceover(shots).map(shot => shot.id),
+    voiceovers: shots.filter(shot => shot.dialogue?.trim() && !isVoiceoverCurrent(doc, shot)).map(shot => shot.id),
   };
 }
 
@@ -88,6 +88,7 @@ export type AutopilotChoices = Record<'bible' | 'keyframes' | 'voiceover' | 'ren
 export type PaidStage = 'bible' | 'keyframes' | 'shots';
 
 export interface AutopilotQuote {
+  inputSnapshot?: string;
   episodeId: string;
   plan: AutopilotPlan;
   /** Credits per paid stage; undefined when that stage could not be priced. */
@@ -130,7 +131,8 @@ export function autopilotDone(quote: AutopilotQuote, now: AutopilotPlan): Record
 }
 
 /** True when every open paid item was in the quote, so running the plan now cannot cost more than quoted. */
-export function withinQuote(quote: AutopilotQuote, now: AutopilotPlan): boolean {
+export function withinQuote(quote: AutopilotQuote, now: AutopilotPlan, inputSnapshot?: string): boolean {
+  if (quote.inputSnapshot !== undefined && quote.inputSnapshot !== inputSnapshot) return false;
   const covered = (open: string[], quoted: string[]) => open.every(id => quoted.includes(id));
   return covered(now.bible.map(item => item.key), quote.plan.bible.map(item => item.key))
     && covered(now.keyframes, quote.plan.keyframes)

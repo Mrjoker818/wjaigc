@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireApiAuthOrReject } from '@/lib/api-auth';
 import { videoForbidden } from '@/lib/drama/access';
-import { dramaPlannerConfig, withPlanRetry, writeDramaScript } from '@/lib/drama/draft';
+import { dramaPlannerConfig, DramaPlannerSelectionError, withPlanRetry, writeDramaScript } from '@/lib/drama/draft';
 import { buildDramaShotMessages, callDramaLlm, DramaPlannerError, parseDramaShotResponse } from '@/lib/drama/planner';
 import { buildPolishMessages, parsePolishResponse } from '@/lib/drama/polish';
 import { DramaDocumentError, parseDramaProject } from '@/lib/drama/schema';
@@ -15,10 +15,12 @@ const ASPECT_RATIOS = new Set(['9:16', '16:9', '1:1', '4:3', '3:4', '21:9']);
 const MAX_IDEA_CHARS = 4000;
 
 function plannerError(error: unknown): NextResponse {
+  if (error instanceof DramaPlannerSelectionError) return NextResponse.json({ error: error.message, code: error.code }, { status: 403 });
   if (error instanceof DramaDocumentError) {
     return NextResponse.json({ error: '剧本项目格式不正确，请刷新后重试', code: error.code }, { status: 400 });
   }
   if (error instanceof DramaPlannerError) {
+    if (error.code === 'DRAMA_SOURCE_STALE') return NextResponse.json({ error: '正文已修改，请先在剧本步骤更新分场，再拆解分镜', code: error.code }, { status: 409 });
     if (error.code === 'DRAMA_PLANNER_UNAVAILABLE') {
       return NextResponse.json({ error: '剧本助手暂时连不上对话模型，请稍后重试', code: error.code }, { status: 503 });
     }
@@ -45,13 +47,25 @@ export async function POST(request: NextRequest) {
   if (!body || (body.action !== 'script' && body.action !== 'shots' && body.action !== 'polish')) {
     return NextResponse.json({ error: '请求内容不正确，请刷新后重试' }, { status: 400 });
   }
-  const config = await dramaPlannerConfig(request.signal);
+  try {
+  const documentSelection = body.doc && typeof body.doc === 'object' ? (body.doc as Record<string, unknown>).planner : undefined;
+  const rawSelection = body.planner ?? documentSelection;
+  if (rawSelection !== undefined && (!rawSelection || typeof rawSelection !== 'object' || Array.isArray(rawSelection)
+    || typeof (rawSelection as Record<string, unknown>).providerId !== 'string' || !(rawSelection as Record<string, unknown>).providerId
+    || typeof (rawSelection as Record<string, unknown>).modelId !== 'string' || !(rawSelection as Record<string, unknown>).modelId)) {
+    return NextResponse.json({ error: '请选择完整的编剧供应商和模型', code: 'DRAMA_PLANNER_INVALID_SELECTION' }, { status: 400 });
+  }
+  const selection = rawSelection && typeof rawSelection === 'object' ? rawSelection as Record<string, unknown> : {};
+  const config = await dramaPlannerConfig(request.signal, {
+    user: auth.user,
+    ...(typeof selection.providerId === 'string' ? { providerId: selection.providerId } : {}),
+    ...(typeof selection.modelId === 'string' ? { modelId: selection.modelId } : {}),
+  });
   if (!config) {
     return NextResponse.json({
       error: '还没有可用的对话模型。请在后台供应商设置里启用一个对话模型后再生成剧本。', code: 'DRAMA_PLANNER_NOT_CONFIGURED',
     }, { status: 503 });
   }
-  try {
     if (body.action === 'script') {
       const idea = typeof body.idea === 'string' ? body.idea.trim() : '';
       if (!idea) return NextResponse.json({ error: '先写一句话说明这部短剧讲什么' }, { status: 400 });
@@ -81,6 +95,7 @@ export async function POST(request: NextRequest) {
       episodeId: typeof body.episodeId === 'string' ? body.episodeId : '',
       sceneId: typeof body.sceneId === 'string' ? body.sceneId : '',
       shotDurationSec: Number(body.shotDurationSec) || undefined,
+      allowedDurations: Array.isArray(body.allowedDurations) ? body.allowedDurations.filter((n): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 2 && n <= 60).slice(0, 30) : undefined,
     };
     const shotCount = Number(body.shotCount) || undefined;
     const messages = buildDramaShotMessages({ ...input, shotCount });

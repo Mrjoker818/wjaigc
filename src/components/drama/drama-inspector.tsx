@@ -10,6 +10,7 @@ import { activeTake, type DramaClipEdit, type DramaShot } from '@/lib/drama/type
 import { chooseFirstFrame, chooseLastFrame, shotContinuityText, shotReferenceImages } from '@/lib/drama/shot-runner';
 import { applyRetakeSuggestion, estimateShots, REFERENCE_IMAGE_TYPES, uploadReferenceImage } from '@/lib/drama/workbench-client';
 import { currentVoiceover, shotSpeaker } from '@/lib/drama/voiceover';
+import { isVoiceoverCurrent } from '@/lib/drama/production-version';
 import { findShot, fitDuration, orderedPrevious, updateShot } from '@/lib/drama/workbench-state';
 import { diagnoseFailure, listFailureTypes, type VideoFailureType } from '@/lib/video-director/retake-diagnosis';
 import { useDrama } from './drama-context';
@@ -404,7 +405,7 @@ function VoiceoverPanel({ shotId, busy, onRecord }: { shotId: string; busy: bool
   const shot = findShot(doc, shotId)?.shot;
   if (!shot) return null;
   const speaker = shotSpeaker(shot, doc.cast);
-  const voiceover = currentVoiceover(shot);
+  const voiceover = isVoiceoverCurrent(doc, shot) ? currentVoiceover(shot) : undefined;
   const stale = Boolean(shot.voiceoverUrl && !voiceover);
   return (
     <section className="drama-panel flex flex-col gap-2 p-3" aria-labelledby="drama-voiceover">

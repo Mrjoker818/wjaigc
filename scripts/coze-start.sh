@@ -1,21 +1,38 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Detect a platform-bound database in any injection form the Coze sandbox uses:
+#   1. DATABASE_URL / PGDATABASE_URL (canonical connection string)
+#   2. libpq split variables: PGHOST + PGPORT + PGDATABASE + PGUSER (+ PGPASSWORD)
+#   3. Supabase integration: COZE_SUPABASE_URL + COZE_SUPABASE_SERVICE_ROLE_KEY/ANON_KEY
+#
+# Returns 0 (bound) or 1 (no binding). The Supabase surface is an HTTP/REST
+# endpoint, so it counts as a binding signal (unblocks startup) without being a
+# pg connection source; code paths that need a pg pool still rely on URL or libpq.
+db_binding_present() {
+  if [ -n "${DATABASE_URL:+configured}${PGDATABASE_URL:+configured}" ]; then
+    return 0
+  fi
+  if [ -n "${PGHOST:+configured}" ] && [ -n "${PGDATABASE:+configured}" ] && [ -n "${PGUSER:+configured}" ]; then
+    return 0
+  fi
+  if [ -n "${COZE_SUPABASE_URL:+configured}" ] && [ -n "${COZE_SUPABASE_SERVICE_ROLE_KEY:+configured}${COZE_SUPABASE_ANON_KEY:+configured}" ]; then
+    return 0
+  fi
+  return 1
+}
+
 DEPLOYMENT=0
 if [ "${1:-}" = "--deployment" ]; then
   DEPLOYMENT=1
-  if [ -z "${DATABASE_URL:+configured}${PGDATABASE_URL:+configured}" ]; then
-    # Hard-fail only when WUJIE_REQUIRE_DB=1 is explicitly set AND this is a
-    # packaged production runtime (no Git checkout, COZE_PROJECT_ENV=PROD).
-    # Build and validation sandboxes are Git checkouts and intentionally run
-    # without the binding. Packaged build sandboxes have neither a Git
-    # checkout nor the platform DB binding (production env vars are bound to
-    # the runtime, not the build stage); they boot without DB enforcement so
-    # the pipeline can exercise the start command. Set WUJIE_REQUIRE_DB=1 in
-    # production env vars to keep the "missing DB refuses to start" guard.
-    # See AGENTS.md (认证与部署).
-    if [ "${WUJIE_REQUIRE_DB:-}" = "1" ] && [ "${COZE_PROJECT_ENV:-}" = "PROD" ] && ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
-      echo "[coze-start] Deployment requires DATABASE_URL or PGDATABASE_URL." >&2
+  if ! db_binding_present; then
+    # Hard-fail only for a packaged production runtime (no Git checkout,
+    # COZE_PROJECT_ENV=PROD) whose database binding is missing. Build and
+    # validation sandboxes are Git checkouts and intentionally run without the
+    # binding; they boot without DB enforcement so the pipeline can exercise
+    # the start command. See AGENTS.md (认证与部署).
+    if [ "${COZE_PROJECT_ENV:-}" = "PROD" ] && ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+      echo "[coze-start] Deployment requires a database binding (DATABASE_URL, PGDATABASE_URL, libpq split variables, or COZE_SUPABASE_* binding)." >&2
       exit 1
     fi
     echo "[coze-start] No database binding detected; starting without deployment DB enforcement."

@@ -13,6 +13,8 @@ import { DramaFinalStep } from './drama-final-step';
 import { DramaInspector } from './drama-inspector';
 import { DramaTaskPanel } from './drama-task-panel';
 import { DramaTimeline } from './drama-timeline';
+import { DramaPlannerPicker } from './drama-planner-picker';
+import { DramaProductionStatus } from './drama-production-status';
 
 const SAVE_TEXT: Record<SaveState, string> = {
   saved: '已保存', dirty: '有改动', saving: '正在保存', error: '保存失败，将自动重试', conflict: '已在其他窗口修改',
@@ -76,6 +78,8 @@ export function DramaShell({
           </div>
         </header>
 
+        <DramaPlannerPicker />
+        <DramaProductionStatus />
         <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
           <nav aria-label="制作步骤" className="flex shrink-0 gap-1 overflow-x-auto border-b border-[var(--drama-line)] p-2 lg:w-44 lg:flex-col lg:border-b-0 lg:border-r">
             {DRAMA_STEPS.map((item, i) => (
@@ -92,14 +96,14 @@ export function DramaShell({
               </button>
             ))}
           </nav>
-          <div role="main" className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4">
+          <div role="main" inert={api.autopilot !== null} className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4">
             {step === 'script' ? <DramaScriptStep />
               : step === 'bible' ? <DramaBibleStep />
                 : step === 'board' ? <DramaBoardStep />
                   : step === 'shots' ? <DramaShotsStep />
                     : <DramaFinalStep />}
           </div>
-          <DramaInspector />
+          <div className="contents" inert={api.autopilot !== null}><DramaInspector /></div>
         </div>
         <DramaTimeline />
       </div>

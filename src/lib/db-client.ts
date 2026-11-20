@@ -46,16 +46,49 @@ export function normalizePostgresConnectionString(connectionString: string): str
   return connectionString;
 }
 
+/**
+ * Resolve the PostgreSQL connection string from the binding the platform injected.
+ *
+ * Coze preview/runtime sandboxes expose the bound database in one of three forms:
+ *   1. DATABASE_URL / PGDATABASE_URL (canonical connection string)
+ *   2. libpq split variables: PGHOST + PGPORT + PGDATABASE + PGUSER (+ PGPASSWORD)
+ *   3. Supabase integration: COZE_SUPABASE_URL + COZE_SUPABASE_SERVICE_ROLE_KEY/ANON_KEY
+ *
+ * The pg driver only consumes a connection string (or its own libpq env vars), so
+ * split variables are assembled into a canonical string here. Supabase bindings do
+ * not map to a pg connection string directly (HTTP/REST surface), so they count as
+ * a *binding signal* for startup decisions but not as a pg connection source.
+ */
+export function resolveDatabaseConnectionString(): string | undefined {
+  const canonical = process.env.DATABASE_URL || process.env.PGDATABASE_URL;
+  if (canonical) return normalizePostgresConnectionString(canonical);
+
+  const host = process.env.PGHOST?.trim();
+  const port = process.env.PGPORT?.trim() || '5432';
+  const database = process.env.PGDATABASE?.trim();
+  const user = process.env.PGUSER?.trim();
+  if (host && database && user) {
+    const password = process.env.PGPASSWORD ? `:${encodeURIComponent(process.env.PGPASSWORD)}` : '';
+    return `postgresql://${encodeURIComponent(user)}${password}@${host}:${port}/${encodeURIComponent(database)}`;
+  }
+  return undefined;
+}
+
+/** True when the platform bound a database in any supported injection form. */
 export function isDatabaseConfigured(): boolean {
-  return Boolean(process.env.DATABASE_URL || process.env.PGDATABASE_URL);
+  if (resolveDatabaseConnectionString()) return true;
+  return Boolean(
+    process.env.COZE_SUPABASE_URL
+    && (process.env.COZE_SUPABASE_SERVICE_ROLE_KEY || process.env.COZE_SUPABASE_ANON_KEY),
+  );
 }
 
 function getConnectionString(): string {
-  const configuredConnectionString = process.env.DATABASE_URL || process.env.PGDATABASE_URL;
+  const configuredConnectionString = resolveDatabaseConnectionString();
   if (!configuredConnectionString) {
-    throw new Error('[db-client] No DATABASE_URL or PGDATABASE_URL environment variable set');
+    throw new Error('[db-client] No DATABASE_URL, PGDATABASE_URL, or libpq split environment variables set');
   }
-  return normalizePostgresConnectionString(configuredConnectionString);
+  return configuredConnectionString;
 }
 
 function createPool(connectionString: string): Pool {
