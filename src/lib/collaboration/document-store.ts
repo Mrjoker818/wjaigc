@@ -4,9 +4,7 @@ import { isDeepStrictEqual } from 'node:util';
 
 import type { PoolClient } from 'pg';
 import type * as YTypes from 'yjs';
-// 服务端与原生协作入口统一加载 CJS；浏览器由构建配置统一解析。
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const Y: typeof YTypes = require('yjs');
+import { Y } from './yjs-singleton';
 
 import { getPool } from '@/lib/db-client';
 import {

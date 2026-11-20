@@ -76,6 +76,18 @@ async function main() {
     if (await statIfPresent(file)) throw new VerificationError(`Forbidden source path ${file}.`);
   }
 
+  // Admin settings exports embed live provider API keys; they must never ship
+  // in the runtime package (.dockerignore excludes the same pattern).
+  const assetEntries = await readdir('assets').catch(() => []);
+  const leakedSettingsExports = assetEntries.filter((name) =>
+    /^wujie-api-settings-.*\.json$/i.test(name),
+  );
+  if (leakedSettingsExports.length > 0) {
+    throw new VerificationError(
+      `Forbidden credential export in package: assets/${leakedSettingsExports[0]}.`,
+    );
+  }
+
   if (phase === '--source') {
     console.log('[deploy-package] Verified absence of retired source paths.');
     return;

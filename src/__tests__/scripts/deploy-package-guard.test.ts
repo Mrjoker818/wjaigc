@@ -356,7 +356,10 @@ describe('deployment package guard', () => {
       'echo synthetic-preview-started',
     ]);
 
-    const deployment = runCoze('coze-start.sh', ['--deployment'], {});
+    // Packaged production runtime: no Git checkout + COZE_PROJECT_ENV=PROD.
+    // Only that combination hard-fails without a database binding; build and
+    // validation sandboxes (Git checkouts or non-PROD) boot without one.
+    const deployment = runCoze('coze-start.sh', ['--deployment'], { COZE_PROJECT_ENV: 'PROD' });
     const preview = runCoze('coze-start.sh', [], {});
 
     expect(deployment.status).toBe(1);
@@ -364,6 +367,29 @@ describe('deployment package guard', () => {
     expect(deployment.output).not.toContain('synthetic-preview-started');
     expect(preview.status).toBe(0);
     expect(preview.output).toContain('synthetic-preview-started');
+  }, 15_000);
+
+  it('self-provisions dependencies when a packaged runtime lacks node_modules', () => {
+    // The FaaS package follows .dockerignore, which excludes node_modules; the
+    // runtime must install them before the server can exec.
+    writeFixture('.next/BUILD_ID', 'synthetic-build');
+    writeExecutable('fake-bin/git', ['exit 1']);
+    writeExecutable('fake-bin/next', ['echo synthetic-runtime-started']);
+    writeExecutable('fake-bin/pnpm', [
+      'if [ "$*" = "install --frozen-lockfile" ]; then',
+      '  mkdir -p node_modules/.bin',
+      '  cp fake-bin/next node_modules/.bin/next',
+      '  echo synthetic-dep-install',
+      '  exit 0',
+      'fi',
+      'exit 2',
+    ]);
+
+    const result = runCoze('coze-start.sh', ['--deployment']);
+
+    expect(result.status).toBe(0);
+    expect(result.output).toContain('synthetic-dep-install');
+    expect(result.output).toContain('synthetic-runtime-started');
   }, 15_000);
 
   it('requires verified NFT manifests immediately after a deployment fallback build', () => {

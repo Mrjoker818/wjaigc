@@ -2,9 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type SetStateAction } from 'react';
 import type * as YTypes from 'yjs';
-// 服务端与原生协作入口统一加载 CJS；浏览器由构建配置统一解析。
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const Y: typeof YTypes = require('yjs');
+import { Y } from './yjs-singleton';
 import { CanvasDocumentMediaSync, CanvasDocumentMediaSyncError, readDocumentMediaResponse } from './document-media-sync';
 import { OwnerDocumentRequestError, readOwnerProjectStatus } from './document-owner-client';
 import { openDocumentHttpConnection, DocumentHttpConnectionError, type DocumentHttpConnection } from './document-http-connection';

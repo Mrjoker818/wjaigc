@@ -16,9 +16,17 @@ fi
 
 # Apply checksum-managed migrations during the build phase so the runtime
 # fast path can remain within Coze's cold-start budget.
+# SAFETY BOUNDARY: migrations must not run automatically. In particular
+# migrations/20261118_wj_remove_node_workflows.sql deletes saved workflows and
+# drops tables; it may only run after an explicit decision
+# (WUJIE_RUN_MIGRATIONS=1), never via an ambient preview build.
 if [ -n "${DATABASE_URL:-${PGDATABASE_URL:-}}" ]; then
-  echo "[coze-preview-build] Applying database migrations..."
-  pnpm run migrate
+  if [ "${WUJIE_RUN_MIGRATIONS:-0}" = "1" ]; then
+    echo "[coze-preview-build] Applying database migrations..."
+    pnpm run migrate
+  else
+    echo "[coze-preview-build] DB env present but WUJIE_RUN_MIGRATIONS!=1; skipping migrations (safety guard)."
+  fi
 else
   echo "[coze-preview-build] Database URL is not configured; skipping migrations."
 fi

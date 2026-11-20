@@ -10,3 +10,12 @@ data
 *.log
 # Build-only cache (~400MB+); not needed at runtime and would bloat the FaaS package.
 .next/cache
+# Test suites and their fixtures never run in the packaged runtime.
+src/__tests__
+# Dev-workspace upload data; runtime uploads persist via the data root instead.
+public/uploads
+# Credential exports and manual config backups must never ship in the package.
+assets/wujie-api-settings-*.json
+assets/*.zip
+# TypeScript incremental build artifacts.
+*.tsbuildinfo

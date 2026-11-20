@@ -66,6 +66,13 @@ export async function register() {
         await Promise.all([checkModule('cairosvg'), checkModule('ezdxf')]);
 
         if (missing.length > 0) {
+          if (process.env.COZE_PROJECT_ENV === 'PROD') {
+            // Production runtimes may lack pip network access (observed as a
+            // 120s stall in the FaaS sandbox). The vectorize API fallback
+            // covers missing deps, so do not spend boot time installing.
+            console.log('[instrumentation] SVG convert deps missing; auto-install skipped in production (API fallback)');
+            return;
+          }
           console.log(`[instrumentation] Installing SVG convert deps: ${missing.join(', ')}`);
           // 异步 pip install，不阻塞事件循环
           exec(`pip3 install ${missing.join(' ')} -q`, { timeout: 120000 }, (err) => {

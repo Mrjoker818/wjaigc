@@ -294,6 +294,23 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     hostname: '0.0.0.0',
     dev: launch.dev,
   });
+  // Deployment validation may detect readiness from the runtime log the same
+  // way it does for the scaffolded custom server, which prints
+  // "> Server listening at ..." once its HTTP server is bound. Emit the same
+  // contract here (plus a Next-style ready line) so a healthy collaboration
+  // boot is recognised instead of timing out.
+  startup
+    .then(({ server }) => {
+      const address = server.address();
+      const boundPort =
+        address && typeof address === 'object' && 'port' in address ? address.port : port;
+      const env = process.env.COZE_PROJECT_ENV || 'production';
+      console.log(`> Server listening at http://localhost:${boundPort} as ${env}`);
+      console.log('✓ Ready for connections');
+    })
+    .catch(() => {
+      // Startup failure is reported by the catch below.
+    });
   void startup.catch(() => {
     if (shutdown) return;
     removeSignalHandlers();

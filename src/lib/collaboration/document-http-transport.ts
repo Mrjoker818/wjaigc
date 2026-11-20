@@ -1,9 +1,6 @@
 'use client';
 
-import type * as YTypes from 'yjs';
-// The document session uses the same Yjs instance.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const Y: typeof YTypes = require('yjs');
+import { Y } from './yjs-singleton';
 import type { DocumentExchangeSessionDescriptor } from './document-exchange-session-protocol';
 import type { PendingDocumentUpdateStore } from './document-client';
 
