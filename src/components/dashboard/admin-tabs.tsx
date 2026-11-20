@@ -1116,7 +1116,7 @@ export default function AdminTabs(props: AdminTabsProps) {
             <p className="text-sm text-muted-foreground mt-0.5">查看和管理平台所有用户</p>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={handleRefresh} className="h-11 min-w-11 px-4 rounded-lg bg-muted text-muted-foreground text-sm font-medium hover:text-foreground transition-colors flex items-center gap-2 cursor-pointer"><RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />刷新</button>
+            <button onClick={handleRefresh} className="desktop-compact-field h-11 min-w-11 px-4 rounded-lg bg-muted text-muted-foreground text-sm font-medium hover:text-foreground transition-colors flex items-center gap-2 cursor-pointer"><RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />刷新</button>
           </div>
         </div>
         {/* 操作栏：搜索 + 筛选 + 批量操作 + 添加 */}
@@ -1124,22 +1124,22 @@ export default function AdminTabs(props: AdminTabsProps) {
           <div className="flex min-w-0 w-full sm:w-auto items-center gap-3 flex-wrap">
             <div className="relative min-w-0 max-w-full w-full sm:w-auto">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <input value={userSearch} onChange={e => setUserSearch(e.target.value)} placeholder="搜索用户名 / 邮箱" className="h-11 min-w-0 max-w-full bg-background border border-border rounded-md pl-9 pr-3 py-2 text-base text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 w-full sm:w-64 transition-colors" />
+              <input value={userSearch} onChange={e => setUserSearch(e.target.value)} placeholder="搜索用户名 / 邮箱" className="desktop-compact-field h-11 min-w-0 max-w-full bg-background border border-border rounded-md pl-9 pr-3 py-2 text-base text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 w-full sm:w-64 transition-colors" />
             </div>
             <div className="relative inline-flex min-w-0 max-w-full items-center">
-              <select value={userFilterRole} onChange={e => setUserFilterRole(e.target.value)} className="h-11 min-w-11 max-w-full bg-background border border-border rounded-md pl-3 pr-8 py-2 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer appearance-none">
+              <select value={userFilterRole} onChange={e => setUserFilterRole(e.target.value)} className="desktop-compact-field h-11 min-w-11 max-w-full bg-background border border-border rounded-md pl-3 pr-8 py-2 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer appearance-none">
                 <option value="all">全部角色</option><option value="admin">Admin</option><option value="user">User</option>
               </select>
               <ChevronDown className="w-3.5 h-3.5 text-muted-foreground absolute right-2.5 pointer-events-none" />
             </div>
             <div className="relative inline-flex min-w-0 max-w-full items-center">
-              <select value={userFilterStatus} onChange={e => setUserFilterStatus(e.target.value)} className="h-11 min-w-11 max-w-full bg-background border border-border rounded-md pl-3 pr-8 py-2 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer appearance-none">
+              <select value={userFilterStatus} onChange={e => setUserFilterStatus(e.target.value)} className="desktop-compact-field h-11 min-w-11 max-w-full bg-background border border-border rounded-md pl-3 pr-8 py-2 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer appearance-none">
                 <option value="all">全部状态</option><option value="active">活跃</option><option value="disabled">禁用</option>
               </select>
               <ChevronDown className="w-3.5 h-3.5 text-muted-foreground absolute right-2.5 pointer-events-none" />
             </div>
             <div className="relative inline-flex w-full min-w-0 max-w-full items-center sm:w-64">
-              <select value={userFilterGroup} onChange={e => setUserFilterGroup(e.target.value)} className="h-11 w-full min-w-0 max-w-full bg-background border border-border rounded-md pl-3 pr-8 py-2 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer appearance-none">
+              <select value={userFilterGroup} onChange={e => setUserFilterGroup(e.target.value)} className="desktop-compact-field h-11 w-full min-w-0 max-w-full bg-background border border-border rounded-md pl-3 pr-8 py-2 text-base text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer appearance-none">
                 <option value="all">全部分组</option>
                 {props.adminGroups.filter(g => g.is_active).map(g => (
                   <option key={g.id} value={g.id}>{g.name}</option>
@@ -1150,11 +1150,11 @@ export default function AdminTabs(props: AdminTabsProps) {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button onClick={() => handleBatchToggleUsers(true)} disabled={selectedUserIds.size === 0} className={`min-h-11 min-w-11 bg-muted text-muted-foreground px-3 py-2 rounded-md text-sm font-medium transition-all inline-flex items-center gap-1.5 ${selectedUserIds.size === 0 ? 'cursor-not-allowed opacity-50' : 'hover:text-foreground cursor-pointer'}`}><CheckCircle className="w-3.5 h-3.5" />批量启用</button>
-            <button onClick={() => handleBatchToggleUsers(false)} disabled={selectedUserIds.size === 0} className={`min-h-11 min-w-11 bg-muted text-muted-foreground px-3 py-2 rounded-md text-sm font-medium transition-all inline-flex items-center gap-1.5 ${selectedUserIds.size === 0 ? 'cursor-not-allowed opacity-50' : 'hover:text-foreground cursor-pointer'}`}><Ban className="w-3.5 h-3.5" />批量禁用</button>
-            <button onClick={() => void handleBatchDeleteUsers()} disabled={selectedUserIds.size === 0} className={`min-h-11 min-w-11 bg-muted text-muted-foreground px-3 py-2 rounded-md text-sm font-medium transition-all inline-flex items-center gap-1.5 ${selectedUserIds.size === 0 ? 'cursor-not-allowed opacity-50' : 'hover:text-destructive cursor-pointer'}`}><Trash2 className="w-3.5 h-3.5" />批量删除</button>
+            <button onClick={() => handleBatchToggleUsers(true)} disabled={selectedUserIds.size === 0} className={`desktop-compact-control min-h-11 min-w-11 bg-muted text-muted-foreground px-3 py-2 rounded-md text-sm font-medium transition-all inline-flex items-center gap-1.5 ${selectedUserIds.size === 0 ? 'cursor-not-allowed opacity-50' : 'hover:text-foreground cursor-pointer'}`}><CheckCircle className="w-3.5 h-3.5" />批量启用</button>
+            <button onClick={() => handleBatchToggleUsers(false)} disabled={selectedUserIds.size === 0} className={`desktop-compact-control min-h-11 min-w-11 bg-muted text-muted-foreground px-3 py-2 rounded-md text-sm font-medium transition-all inline-flex items-center gap-1.5 ${selectedUserIds.size === 0 ? 'cursor-not-allowed opacity-50' : 'hover:text-foreground cursor-pointer'}`}><Ban className="w-3.5 h-3.5" />批量禁用</button>
+            <button onClick={() => void handleBatchDeleteUsers()} disabled={selectedUserIds.size === 0} className={`desktop-compact-control min-h-11 min-w-11 bg-muted text-muted-foreground px-3 py-2 rounded-md text-sm font-medium transition-all inline-flex items-center gap-1.5 ${selectedUserIds.size === 0 ? 'cursor-not-allowed opacity-50' : 'hover:text-destructive cursor-pointer'}`}><Trash2 className="w-3.5 h-3.5" />批量删除</button>
             <div className="w-px h-6 bg-border/30 mx-1" />
-            <button onClick={openUserAddDrawer} className="min-h-11 min-w-11 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium hover:opacity-90 active:scale-[0.98] transition-all inline-flex items-center gap-2"><UserPlus className="w-4 h-4" />添加用户</button>
+            <button onClick={openUserAddDrawer} className="desktop-compact-control min-h-11 min-w-11 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium hover:opacity-90 active:scale-[0.98] transition-all inline-flex items-center gap-2"><UserPlus className="w-4 h-4" />添加用户</button>
           </div>
         </div>
         {/* 选中提示 */}
@@ -1170,9 +1170,9 @@ export default function AdminTabs(props: AdminTabsProps) {
         <div role="region" aria-label="用户列表，可横向滚动" tabIndex={0} className="max-w-full overflow-x-auto bg-card rounded-lg shadow-card border border-border/50">
           <div className="min-w-[1120px]">
           {/* 表头 */}
-          <div className="grid grid-cols-[44px_minmax(0,1fr)_minmax(0,1.2fr)_90px_80px_90px_90px_70px_100px_110px_100px] items-center px-4 py-3 bg-muted text-xs font-semibold text-muted-foreground uppercase tracking-wider border-b border-border/20">
+          <div className="grid grid-cols-[44px_minmax(0,1fr)_minmax(0,1.2fr)_90px_80px_90px_90px_70px_100px_110px_144px] items-center px-4 py-3 bg-muted text-xs font-semibold text-muted-foreground uppercase tracking-wider border-b border-border/20">
             <div className="flex items-center justify-center">
-              <input type="checkbox" checked={selectedUserIds.size > 0 && selectedUserIds.size === filteredUsers.length} onChange={() => { if (selectedUserIds.size === filteredUsers.length) setSelectedUserIds(new Set()); else setSelectedUserIds(new Set(filteredUsers.map(u => u.id))); }} className="w-11 h-11 shrink-0 rounded border-border accent-primary" />
+              <input type="checkbox" checked={selectedUserIds.size > 0 && selectedUserIds.size === filteredUsers.length} onChange={() => { if (selectedUserIds.size === filteredUsers.length) setSelectedUserIds(new Set()); else setSelectedUserIds(new Set(filteredUsers.map(u => u.id))); }} className="desktop-user-checkbox w-11 h-11 shrink-0 rounded border-border accent-primary" />
             </div>
             <span>用户名</span><span>邮箱</span><span>分组</span><span>角色</span><span>状态</span><span>积分余额</span><span>作品数</span><span>注册时间</span><span>最后登录</span><span className="text-right">操作</span>
           </div>
@@ -1182,9 +1182,9 @@ export default function AdminTabs(props: AdminTabsProps) {
               const isActive = u.status === 'active';
               const isSelected = selectedUserIds.has(u.id);
               return (
-                <div key={u.id} className={`grid grid-cols-[44px_minmax(0,1fr)_minmax(0,1.2fr)_90px_80px_90px_90px_70px_100px_110px_100px] items-center px-4 py-3 hover:bg-muted/30 transition-colors ${isSelected ? 'bg-primary/5' : ''}`}>
+                <div key={u.id} className={`grid grid-cols-[44px_minmax(0,1fr)_minmax(0,1.2fr)_90px_80px_90px_90px_70px_100px_110px_144px] items-center px-4 py-3 hover:bg-muted/30 transition-colors ${isSelected ? 'bg-primary/5' : ''}`}>
                   <div className="flex items-center justify-center">
-                    <input type="checkbox" checked={isSelected} onChange={() => setSelectedUserIds(prev => { const n = new Set(prev); n.has(u.id) ? n.delete(u.id) : n.add(u.id); return n; })} className="w-11 h-11 shrink-0 rounded border-border accent-primary" />
+                    <input type="checkbox" checked={isSelected} onChange={() => setSelectedUserIds(prev => { const n = new Set(prev); n.has(u.id) ? n.delete(u.id) : n.add(u.id); return n; })} className="desktop-user-checkbox w-11 h-11 shrink-0 rounded border-border accent-primary" />
                   </div>
                   <div className="flex min-w-0 items-center gap-2.5">
                     <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary shrink-0">{u.name.charAt(0).toUpperCase()}</div>
@@ -1201,11 +1201,11 @@ export default function AdminTabs(props: AdminTabsProps) {
                   <span className="text-sm text-muted-foreground">{getUserProjects(u) || '-'}</span>
                   <span className="text-xs text-muted-foreground">{formatDate(getUserCreated(u))}</span>
                   <span className="text-xs text-muted-foreground">{getUserLastLogin(u)}</span>
-                  <div className="grid grid-cols-2 justify-items-end gap-1">
-                    <button onClick={() => setUserDetailId(u.id)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground" title="详情"><Eye className="w-3.5 h-3.5" /></button>
-                    <button onClick={() => setUserDetailId(u.id)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md hover:bg-muted transition-colors text-primary" title="编辑"><Pencil className="w-3.5 h-3.5" /></button>
-                    <button onClick={() => props.onToggleUser(u)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md hover:bg-muted transition-colors text-yellow-500" title={isActive ? '禁用' : '启用'}><Ban className="w-3.5 h-3.5" /></button>
-                    <button onClick={() => props.onDeleteUser(u)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md hover:bg-muted transition-colors text-destructive" title="删除"><Trash2 className="w-3.5 h-3.5" /></button>
+                  <div className="desktop-user-actions grid grid-cols-2 justify-items-end gap-1">
+                    <button onClick={() => setUserDetailId(u.id)} className="desktop-user-action flex h-11 w-11 shrink-0 items-center justify-center rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground" title="详情"><Eye className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => setUserDetailId(u.id)} className="desktop-user-action flex h-11 w-11 shrink-0 items-center justify-center rounded-md hover:bg-muted transition-colors text-primary" title="编辑"><Pencil className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => props.onToggleUser(u)} className="desktop-user-action flex h-11 w-11 shrink-0 items-center justify-center rounded-md hover:bg-muted transition-colors text-yellow-500" title={isActive ? '禁用' : '启用'}><Ban className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => props.onDeleteUser(u)} className="desktop-user-action flex h-11 w-11 shrink-0 items-center justify-center rounded-md hover:bg-muted transition-colors text-destructive" title="删除"><Trash2 className="w-3.5 h-3.5" /></button>
                   </div>
                 </div>
               );
@@ -2117,7 +2117,7 @@ export default function AdminTabs(props: AdminTabsProps) {
     };
 
     return (
-      <div className="space-y-4 p-4 sm:p-6 pb-8 [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:whitespace-nowrap [&_svg]:shrink-0">
+      <div className="space-y-4 p-4 sm:p-6 pb-8 touch-button-targets [&_button]:whitespace-nowrap [&_svg]:shrink-0">
         {/* 页面标题 */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>

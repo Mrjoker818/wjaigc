@@ -759,7 +759,7 @@ export default function ModelViewer3D({
         role="dialog"
         aria-modal="true"
         aria-label="3D模型预览"
-        className="relative min-h-0 rounded-2xl border border-[#2a2a2a]/80 bg-gradient-to-b from-[#141414] to-[#0a0a0a] overflow-y-auto flex flex-col shadow-2xl shadow-black/50 lg:overflow-hidden [&_button]:inline-flex [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:shrink-0 [&_button]:items-center [&_button]:justify-center [&_button]:whitespace-nowrap"
+        className="relative min-h-0 rounded-2xl border border-[#2a2a2a]/80 bg-gradient-to-b from-[#141414] to-[#0a0a0a] overflow-y-auto flex flex-col shadow-2xl shadow-black/50 lg:overflow-hidden [&_button]:inline-flex touch-button-targets [&_button]:shrink-0 [&_button]:items-center [&_button]:justify-center [&_button]:whitespace-nowrap"
         style={{ width: Math.min(1200, Math.max(0, viewerViewport.width - 16)), height: Math.min(800, Math.max(0, viewerViewport.height - 16)) }}
         onWheel={(e) => e.stopPropagation()}
         onContextMenu={(e) => e.preventDefault()}

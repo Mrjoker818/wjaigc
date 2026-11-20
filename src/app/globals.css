@@ -64,6 +64,8 @@ main.dashboard-scrollable {
   --color-destructive: var(--destructive);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
+  --color-menu-highlight: var(--menu-highlight);
+  --color-menu-highlight-foreground: var(--menu-highlight-foreground);
   --color-muted-foreground: var(--muted-foreground);
   --color-muted: var(--muted);
   --color-secondary-foreground: var(--secondary-foreground);
@@ -237,8 +239,22 @@ main.dashboard-scrollable {
   --sidebar-ring: #D4AF37;
 }
 
+/* Menu state colors stay separate from general-purpose accent surfaces. */
+:root,
+.dark,
+.theme-gold {
+  color-scheme: dark;
+  --native-select-color-scheme: dark;
+  --menu-highlight: #262c36;
+  --menu-highlight-foreground: #d4af37;
+}
+
 /* Monochrome 主题：白色为主 + 彩色强调 */
 .theme-monochrome {
+  color-scheme: light;
+  --native-select-color-scheme: light;
+  --menu-highlight: #eff6ff;
+  --menu-highlight-foreground: #1e40af;
   --background: #ffffff;
   --foreground: #1e293b;
   --card: #f8fafc;
@@ -304,6 +320,15 @@ main.dashboard-scrollable {
   --text-caption: #94a3b8;
 }
 
+:root,
+.dark,
+.theme-gold,
+.theme-monochrome {
+  --native-select-background: var(--popover);
+  --native-select-foreground: var(--popover-foreground);
+  --native-select-disabled-foreground: var(--muted-foreground);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -311,29 +336,26 @@ main.dashboard-scrollable {
   body {
     @apply bg-background text-foreground;
   }
-  /* 深色主题下原生 select 的 option 下拉菜单可读性修复 */
-  /* 原生 option 无法继承 Tailwind 主题色，必须显式设置 */
-  .dark option,
-  .dashboard-root option {
-    background-color: #1c2128;
-    color: #e6edf3;
+  /* Explicit option/group pairs also cover gold workspaces and native UA popups. */
+  select {
+    color-scheme: var(--native-select-color-scheme);
   }
-  .dark option:hover,
-  .dark option:checked,
-  .dashboard-root option:hover,
-  .dashboard-root option:checked {
-    background-color: #262c36;
-    color: #d4af37;
+  select :is(option, optgroup) {
+    background-color: var(--native-select-background);
+    color: var(--native-select-foreground);
   }
-  /* Monochrome 主题下的 option */
-  .theme-monochrome option {
-    background-color: #ffffff;
-    color: #1e293b;
+  select:not(:disabled) option:not(:disabled):is(:hover, :checked) {
+    background-color: var(--menu-highlight);
+    color: var(--menu-highlight-foreground);
   }
-  .theme-monochrome option:hover,
-  .theme-monochrome option:checked {
-    background-color: #f1f5f9;
-    color: #3b82f6;
+  select:disabled {
+    cursor: not-allowed;
+    opacity: 0.65;
+  }
+  select:disabled :is(option, optgroup),
+  select :is(option, optgroup):disabled {
+    background-color: var(--native-select-background);
+    color: var(--native-select-disabled-foreground);
   }
 }
 
@@ -1195,6 +1217,8 @@ input[type="range"]::-moz-range-thumb {
    品牌IP设计工场 — 黑金风格工作台（参考原型还原）
    ================================================================ */
 .brand-ip-workspace {
+  color-scheme: dark;
+  --native-select-color-scheme: dark;
   --bi-bg: #090a0c;
   --bi-panel: #111216;
   --bi-panel-soft: #15161b;
@@ -1755,6 +1779,13 @@ input[type="range"]::-moz-range-thumb {
 /* In the components layer so Tailwind utilities on drama elements (min-h-*, w-*) still win. */
 @layer components {
   .drama-root {
+    color-scheme: dark;
+    --native-select-color-scheme: dark;
+    --native-select-background: var(--drama-ink);
+    --native-select-foreground: var(--drama-paper);
+    --native-select-disabled-foreground: var(--drama-muted);
+    --menu-highlight: #262c36;
+    --menu-highlight-foreground: #d4af37;
     --drama-graphite: #1e2530;
     --drama-panel: #2a3340;
     --drama-paper: #e6eaee;
@@ -1769,7 +1800,15 @@ input[type="range"]::-moz-range-thumb {
   }
   .drama-root :focus-visible { outline: 2px solid var(--drama-gold); outline-offset: 2px; }
   .drama-root .drama-panel { background: var(--drama-panel); border: 1px solid var(--drama-line); border-radius: 8px; }
-  .drama-root .drama-paper { background: var(--drama-paper); color: var(--drama-graphite); }
+  .drama-root .drama-paper {
+    background: var(--drama-paper); color: var(--drama-graphite);
+    --native-select-color-scheme: light;
+    --native-select-background: #ffffff;
+    --native-select-foreground: var(--drama-graphite);
+    --native-select-disabled-foreground: #64748b;
+    --menu-highlight: var(--drama-paper);
+    --menu-highlight-foreground: var(--drama-graphite);
+  }
   .drama-root .drama-label { font-size: 12px; color: var(--drama-muted); }
   .drama-root .drama-input {
     width: 100%; min-height: 36px; padding: 6px 10px; border-radius: 6px; font-size: 14px;
@@ -1856,4 +1895,27 @@ input[type="range"]::-moz-range-thumb {
   @media (prefers-reduced-motion: reduce) {
     .platform-switch__tab, .platform-switch__tally { transition: none; }
   }
+}
+
+/* Touch floors belong to touch/narrow layouts, not every desktop control.
+   Semantic toggles keep their visual shape; their surrounding labels own spacing. */
+@layer base {
+  @media (max-width: 767px), (pointer: coarse) {
+    .touch-button-targets :where(button:not([role="checkbox"], [role="switch"], [role="radio"])) {
+      min-height: 44px;
+      min-width: 44px;
+    }
+    .touch-field-targets :where(input:not([type="checkbox"], [type="radio"], [type="range"], [type="hidden"]), select) {
+      min-height: 44px;
+      min-width: 44px;
+    }
+  }
+}
+
+@media (min-width: 768px) and (hover: hover) and (pointer: fine) {
+  .desktop-user-checkbox { width: 16px; height: 16px; }
+  .desktop-user-actions { display: flex; justify-content: flex-end; }
+  .desktop-user-action { width: 32px; height: 32px; }
+  .desktop-compact-field { height: 36px; font-size: 14px; }
+  .desktop-compact-control { min-height: 36px; }
 }

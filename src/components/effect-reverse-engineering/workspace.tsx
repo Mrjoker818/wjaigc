@@ -121,7 +121,7 @@ export function EffectReverseWorkspace({ imageUrl, points, regions, task, busy, 
   };
 
   return (
-    <main data-testid="effect-reverse-workspace" data-panel="workspace" className="flex min-h-fit min-w-0 flex-none flex-col bg-[#0d0e0f] lg:min-h-0 lg:flex-1 [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:whitespace-nowrap [&_textarea]:text-base lg:[&_textarea]:text-sm">
+    <main data-testid="effect-reverse-workspace" data-panel="workspace" className="flex min-h-fit min-w-0 flex-none flex-col bg-[#0d0e0f] lg:min-h-0 lg:flex-1 touch-button-targets [&_button]:whitespace-nowrap [&_textarea]:text-base lg:[&_textarea]:text-sm">
       <nav className="flex h-[58px] shrink-0 items-end gap-1 overflow-x-auto border-b border-white/10 px-3 lg:px-5" role="tablist" aria-label={REVERSE_COPY.workspaceLabel}>
         {tabs.map(([value, label]) => {
           const resultRequired = value === 'vector' || value === 'history';

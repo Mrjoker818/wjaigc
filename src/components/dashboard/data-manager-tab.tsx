@@ -612,7 +612,7 @@ export default function DataManagerTab({
     return (
         <DialogContent
           showCloseButton={false}
-          className={`block w-[calc(100vw-2rem)] max-w-3xl sm:max-w-3xl max-h-[calc(100dvh-2rem)] overflow-y-auto p-0 [overflow-wrap:anywhere] [&_svg]:shrink-0 [&_button]:min-h-11 [&_button]:min-w-11 rounded-2xl ${isDark ? 'bg-[#1a1a1a] border border-white/10' : 'bg-white border border-gray-200'} shadow-2xl`}
+          className={`block w-[calc(100vw-2rem)] max-w-3xl sm:max-w-3xl max-h-[calc(100dvh-2rem)] overflow-y-auto p-0 [overflow-wrap:anywhere] [&_svg]:shrink-0 touch-button-targets rounded-2xl ${isDark ? 'bg-[#1a1a1a] border border-white/10' : 'bg-white border border-gray-200'} shadow-2xl`}
           onCloseAutoFocus={event => {
             event.preventDefault();
             const target = detailReturnFocusRef.current;
