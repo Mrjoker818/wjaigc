@@ -5,12 +5,16 @@ DEPLOYMENT=0
 if [ "${1:-}" = "--deployment" ]; then
   DEPLOYMENT=1
   if [ -z "${DATABASE_URL:+configured}${PGDATABASE_URL:+configured}" ]; then
-    # Hard-fail only for a packaged production runtime (no Git checkout,
-    # COZE_PROJECT_ENV=PROD) whose database binding is missing. Build and
-    # validation sandboxes are Git checkouts and intentionally run without the
-    # binding; they boot without DB enforcement so the pipeline can exercise
-    # the start command. See AGENTS.md (认证与部署).
-    if [ "${COZE_PROJECT_ENV:-}" = "PROD" ] && ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+    # Hard-fail only when WUJIE_REQUIRE_DB=1 is explicitly set AND this is a
+    # packaged production runtime (no Git checkout, COZE_PROJECT_ENV=PROD).
+    # Build and validation sandboxes are Git checkouts and intentionally run
+    # without the binding. Packaged build sandboxes have neither a Git
+    # checkout nor the platform DB binding (production env vars are bound to
+    # the runtime, not the build stage); they boot without DB enforcement so
+    # the pipeline can exercise the start command. Set WUJIE_REQUIRE_DB=1 in
+    # production env vars to keep the "missing DB refuses to start" guard.
+    # See AGENTS.md (认证与部署).
+    if [ "${WUJIE_REQUIRE_DB:-}" = "1" ] && [ "${COZE_PROJECT_ENV:-}" = "PROD" ] && ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
       echo "[coze-start] Deployment requires DATABASE_URL or PGDATABASE_URL." >&2
       exit 1
     fi
