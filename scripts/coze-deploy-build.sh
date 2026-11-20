@@ -24,7 +24,13 @@ fi
 # migrations/20261118_wj_remove_node_workflows.sql deletes saved workflows and
 # drops tables; it may only run after an explicit decision
 # (WUJIE_RUN_MIGRATIONS=1), never via an ambient build.
-if [ -n "${DATABASE_URL:+configured}${PGDATABASE_URL:+configured}" ]; then
+# Detect a platform-bound database in any injection form the Coze sandbox uses
+# (URL, libpq split variables, or the Supabase integration surface). Keep in
+# sync with db_binding_present() in scripts/coze-start.sh and
+# resolveDatabaseConnectionString()/isDatabaseConfigured() in src/lib/db-client.ts.
+if [ -n "${DATABASE_URL:+configured}${PGDATABASE_URL:+configured}" ] \
+  || { [ -n "${PGHOST:+configured}" ] && [ -n "${PGDATABASE:+configured}" ] && [ -n "${PGUSER:+configured}" ]; } \
+  || { [ -n "${COZE_SUPABASE_URL:+configured}" ] && [ -n "${COZE_SUPABASE_SERVICE_ROLE_KEY:+configured}${COZE_SUPABASE_ANON_KEY:+configured}" ]; }; then
   if [ "${WUJIE_RUN_MIGRATIONS:-0}" = "1" ]; then
     echo "[coze-deploy-build] Applying database migrations..."
     pnpm run migrate
@@ -32,7 +38,7 @@ if [ -n "${DATABASE_URL:+configured}${PGDATABASE_URL:+configured}" ]; then
     echo "[coze-deploy-build] DB env present but WUJIE_RUN_MIGRATIONS!=1; skipping migrations (safety guard)."
   fi
 else
-  echo "[coze-deploy-build] Database URL is not configured; skipping migrations."
+  echo "[coze-deploy-build] No database binding detected; skipping migrations."
 fi
 
 MEDIA_GUARD=()

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthConfigurationError, getSessionUser } from '@/lib/server-auth';
 import { AuthServiceError } from '@/lib/auth/auth-errors';
+import { isDatabaseConfigured } from '@/lib/db-client';
 
 export const dynamic = 'force-dynamic';
 
@@ -73,7 +74,7 @@ function getPersistenceModeForLog(): AuthPersistenceMode | undefined {
     return configuredMode;
   }
   if (configuredMode !== undefined) return undefined;
-  return process.env.DATABASE_URL || process.env.PGDATABASE_URL ? 'DB_ONLY' : 'FILE_ONLY';
+  return isDatabaseConfigured() ? 'DB_ONLY' : 'FILE_ONLY';
 }
 
 function getRouteAuthError(

@@ -192,7 +192,7 @@ describe('deployment package guard', () => {
       'echo synthetic-build-completed',
     ]);
 
-    const result = runCoze('coze-deploy-build.sh');
+    const result = runCoze('coze-deploy-build.sh', [], { ...runtimeEnv, WUJIE_RUN_MIGRATIONS: '1' });
 
     expect(result.output).toMatch(/synthetic-install[\s\S]+synthetic-migrate[\s\S]+synthetic-build-completed/);
     expect(result.status).toBe(1);
@@ -363,10 +363,56 @@ describe('deployment package guard', () => {
     const preview = runCoze('coze-start.sh', [], {});
 
     expect(deployment.status).toBe(1);
-    expect(deployment.output).toContain('requires DATABASE_URL or PGDATABASE_URL');
+    expect(deployment.output).toContain('requires a database binding');
     expect(deployment.output).not.toContain('synthetic-preview-started');
     expect(preview.status).toBe(0);
     expect(preview.output).toContain('synthetic-preview-started');
+  }, 15_000);
+
+  it('allows a packaged deployment with only libpq split variables (no URL)', () => {
+    writeFixture('.next/BUILD_ID', 'synthetic-build');
+    writeExecutable('fake-bin/git', ['exit 1']);
+    writeExecutable('node_modules/.bin/next', [
+      '[ "${WUJIE_DEPLOYMENT_DB_ONLY:-}" = "1" ] || exit 3',
+      '[ "${WUJIE_AUTH_PERSISTENCE_MODE:-}" = "DB_ONLY" ] || exit 4',
+      'echo synthetic-runtime-started',
+    ]);
+
+    // The Coze runtime sandbox injects the bound DB as libpq split variables
+    // (PGHOST+PGPORT+PGDATABASE+PGUSER) without a canonical URL. The guard must
+    // recognize that form so a packaged PROD runtime does not hard-fail.
+    const result = runCoze('coze-start.sh', ['--deployment'], {
+      COZE_PROJECT_ENV: 'PROD',
+      PGHOST: 'synthetic.invalid',
+      PGPORT: '5432',
+      PGDATABASE: 'wujie',
+      PGUSER: 'wujie',
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.output).toContain('synthetic-runtime-started');
+  }, 15_000);
+
+  it('allows a packaged deployment with only a COZE_SUPABASE_* binding (no URL)', () => {
+    writeFixture('.next/BUILD_ID', 'synthetic-build');
+    writeExecutable('fake-bin/git', ['exit 1']);
+    writeExecutable('node_modules/.bin/next', [
+      '[ "${WUJIE_DEPLOYMENT_DB_ONLY:-}" = "1" ] || exit 3',
+      '[ "${WUJIE_AUTH_PERSISTENCE_MODE:-}" = "DB_ONLY" ] || exit 4',
+      'echo synthetic-runtime-started',
+    ]);
+
+    // Some Coze environments bind storage via the Supabase integration surface
+    // only. It is not a pg connection source, but it is a binding signal that
+    // must unblock the packaged PROD startup guard.
+    const result = runCoze('coze-start.sh', ['--deployment'], {
+      COZE_PROJECT_ENV: 'PROD',
+      COZE_SUPABASE_URL: 'https://synthetic.supabase.example',
+      COZE_SUPABASE_SERVICE_ROLE_KEY: 'synthetic-key',
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.output).toContain('synthetic-runtime-started');
   }, 15_000);
 
   it('self-provisions dependencies when a packaged runtime lacks node_modules', () => {
