@@ -466,6 +466,7 @@ export async function executeToolCall(
     allowedTools?: string[];
     canonicalImageUrl?: string;
     canonicalImageUrls?: readonly string[];
+    dramaPlanRetry?: boolean;
   }
 ): Promise<ToolCallResult> {
   if (context.allowedTools && !context.allowedTools.includes(toolName)) {
@@ -523,6 +524,8 @@ interface ToolContext {
   userRole?: 'user' | 'admin';
   canonicalImageUrl?: string;
   canonicalImageUrls?: readonly string[];
+  /** The caller has time for a second planner call when the first script reply does not parse. */
+  dramaPlanRetry?: boolean;
 }
 
 function routeMismatch(): ToolCallResult {
@@ -1410,13 +1413,13 @@ async function executeCreateDramaDraft(
         resultText: '错误：还没有可用的对话模型，无法写剧本。请告诉用户先在后台供应商设置里启用一个对话模型。',
       };
     }
-    // One planner call only: the chat tool has a 120s limit and a call may take 90s.
+    // One planner call by default: canvas chat has a 120s limit and a call may take 90s.
     const doc = await writeDramaScript(config, {
       idea: String(args.idea).trim().slice(0, DRAMA_IDEA_LIMIT),
       ...(typeof args.title === 'string' && args.title.trim() ? { title: args.title.trim().slice(0, 200) } : {}),
       style: normalizeDirectorStyle(args.style),
       aspectRatio: typeof args.aspect_ratio === 'string' ? args.aspect_ratio : '9:16',
-    }, { retry: false });
+    }, { retry: context.dramaPlanRetry === true });
     const record = await createDramaProject(context.userId, access.kind === 'unscoped' ? null : access.projectId, doc);
     const sceneCount = doc.episodes.reduce((total, episode) => total + episode.scenes.length, 0);
     return {

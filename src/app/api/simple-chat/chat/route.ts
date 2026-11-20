@@ -1529,7 +1529,7 @@ export async function POST(request: NextRequest) {
           }));
         }
 
-        // 短剧剧本：一次请求只写一份草稿。剧本助手用后台配置的对话模型，最长约 90 秒。
+        // 短剧剧本：一次请求只写一份草稿。剧本助手用后台配置的对话模型；回复整理不成剧本时再试一次（maxDuration 300 秒）。
         const dramaCall = dramaToolEnabled
           ? Object.values(toolCalls).find(call => call.name === 'create_drama_draft')
           : undefined;
@@ -1549,6 +1549,7 @@ export async function POST(request: NextRequest) {
             userRole: user.role === 'admin' ? 'admin' : 'user',
             ...(body.assetProjectId ? { projectId: body.assetProjectId } : {}),
             allowedTools: ['create_drama_draft'],
+            dramaPlanRetry: true,
           });
           const draft = result.data;
           if (result.success && typeof draft?.dramaId === 'string') {

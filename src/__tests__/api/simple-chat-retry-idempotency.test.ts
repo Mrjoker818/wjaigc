@@ -345,7 +345,7 @@ describe('simple-chat retry idempotency boundary', () => {
     expect(mocks.executeToolCall).toHaveBeenCalledWith(
       'create_drama_draft',
       { idea: '外卖员暴雨夜送错餐', style: 'anime' },
-      expect.objectContaining({ userId: 'admin-a', projectId: 'project-1', allowedTools: ['create_drama_draft'] }),
+      expect.objectContaining({ userId: 'admin-a', projectId: 'project-1', allowedTools: ['create_drama_draft'], dramaPlanRetry: true }),
     );
     expect(events).toContainEqual({
       type: 'drama_draft', dramaId: 'drama_1', title: '雨夜来信', projectId: 'project-1', summary: '1 集、6 场、3 个角色',

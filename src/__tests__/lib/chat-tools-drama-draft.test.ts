@@ -72,6 +72,11 @@ describe('create_drama_draft chat tool', () => {
     expect(mocks.created).toHaveLength(0);
   });
 
+  it('asks the planner for a second try only when the caller has time for it', async () => {
+    await executeToolCall('create_drama_draft', { idea: '故事' }, { ...context, dramaPlanRetry: true });
+    expect(mocks.writes[0].options).toEqual({ retry: true });
+  });
+
   it('saves without a canvas project when the chat has none', async () => {
     mocks.access = { kind: 'unscoped' };
     await executeToolCall('create_drama_draft', { idea: '故事' }, { ...context, projectId: undefined });
