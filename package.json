@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev --webpack -p 5000",
     "build": "node scripts/build-completion-marker.mjs clear && next build --turbopack && node scripts/prune-build-traces.mjs && node scripts/build-completion-marker.mjs seal",
+    "build:coze": "node scripts/build-completion-marker.mjs clear && next build --webpack && node scripts/prune-build-traces.mjs && node scripts/build-completion-marker.mjs seal",
     "start": "next start -p 5000 -H 0.0.0.0",
     "start:presence": "node --require next/dist/server/node-environment --conditions=react-server --import tsx scripts/presence-server.ts",
     "dev:presence": "node --require next/dist/server/node-environment --conditions=react-server --import tsx scripts/presence-server.ts --dev",

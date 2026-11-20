@@ -186,19 +186,55 @@ describe('deployment package guard', () => {
       'if [[ -v WUJIE_BOOTSTRAP_PROVIDERS_JSON || -v WUJIE_ADMIN_PASSWORD ]]; then exit 8; fi',
       'if [ "$*" = "install --frozen-lockfile" ]; then echo synthetic-install; exit 0; fi',
       'if [ "$*" = "run migrate" ] && [[ -v PGDATABASE_URL ]]; then echo synthetic-migrate; exit 0; fi',
-      'if [ "$*" != "run build" ]; then exit 2; fi',
+      'if [ "$*" != "run build:coze" ]; then exit 2; fi',
       'mkdir -p .next',
       `printf '%s\\n' '{"version":1,"files":["../deploy-seed/system/users.json"]}' > .next/next-server.js.nft.json`,
       'echo synthetic-build-completed',
     ]);
 
-    const result = runCoze('coze-deploy-build.sh', [], { ...runtimeEnv, WUJIE_RUN_MIGRATIONS: '1' });
+    const result = runCoze('coze-deploy-build.sh', [], {
+      ...runtimeEnv,
+      WUJIE_RUN_MIGRATIONS: '1',
+    });
 
     expect(result.output).toMatch(/synthetic-install[\s\S]+synthetic-migrate[\s\S]+synthetic-build-completed/);
     expect(result.status).toBe(1);
     expect(result.output).toContain('.next/next-server.js.nft.json');
     expect(result.output).toContain('deploy-seed/system/users.json');
   }, 15_000);
+
+  describe.each(['coze-preview-build.sh', 'coze-deploy-build.sh'])('%s migration approval', (script) => {
+    it.each([
+      ['DATABASE_URL', undefined, false],
+      ['PGDATABASE_URL', undefined, false],
+      ['DATABASE_URL', '1', true],
+      ['PGDATABASE_URL', '1', true],
+    ] as const)('with %s and WUJIE_RUN_MIGRATIONS=%s invokes migrate=%s', (databaseVariable, approval, migrate) => {
+      writeExecutable('fake-bin/uname', ['echo Darwin']);
+      writeExecutable('fake-bin/git', ['exit 1']);
+      writeExecutable('fake-bin/pnpm', [
+        'if [ "$*" = "install --frozen-lockfile" ]; then echo synthetic-install; exit 0; fi',
+        'if [ "$*" = "run migrate" ]; then echo synthetic-migrate; exit 0; fi',
+        `if [ "$*" != "run ${script === 'coze-deploy-build.sh' ? 'build:coze' : 'build'}" ]; then exit 2; fi`,
+        'mkdir -p .next',
+        `printf '%s\\n' '{"version":1,"files":[]}' > .next/next-server.js.nft.json`,
+        'echo synthetic-build-completed',
+      ]);
+
+      const result = runCoze(script, [], {
+        [databaseVariable]: runtimeEnv.PGDATABASE_URL,
+        WUJIE_RUN_MIGRATIONS: approval,
+      });
+
+      expect(result.status).toBe(0);
+      if (migrate) {
+        expect(result.output).toMatch(/synthetic-install[\s\S]+synthetic-migrate[\s\S]+synthetic-build-completed/);
+      } else {
+        expect(result.output).toMatch(/synthetic-install[\s\S]+synthetic-build-completed/);
+        expect(result.output).not.toContain('synthetic-migrate');
+      }
+    }, 15_000);
+  });
 
   it('stages Linux tools before building and runs the media package guard', () => {
     const bundle = `assets/wujie-coze-media/${process.arch}`;
@@ -214,7 +250,7 @@ describe('deployment package guard', () => {
     ]);
     writeExecutable('fake-bin/pnpm', [
       'if [ "$*" = "install --frozen-lockfile" ]; then exit 0; fi',
-      '[ "$*" = "run build" ] || exit 2',
+      '[ "$*" = "run build:coze" ] || exit 2',
       `[ -x ${bundle}/ffmpeg ] && [ -x ${bundle}/ffprobe ] || exit 3`,
       `mkdir -p ${dirname(manifest).replaceAll('\\', '/')}`,
       `printf '%s\\n' '${JSON.stringify({ version: 1, files: references })}' > ${manifest}`,

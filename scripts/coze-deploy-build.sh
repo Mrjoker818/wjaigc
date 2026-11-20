@@ -48,13 +48,15 @@ if [ "$(uname -s)" = Linux ]; then
 fi
 
 # Step 2: Build the project
-echo "[coze-deploy-build] Building Next.js project..."
-pnpm run build
+# Use the previously successful Webpack artifact format at Coze's legacy
+# deployment boundary. Keep the normal build unchanged for local/VPS use.
+echo "[coze-deploy-build] Building Next.js project with Webpack..."
+pnpm run build:coze
 
 node scripts/verify-deploy-package.mjs --built "${MEDIA_GUARD[@]}"
 
 # Step 3: Keep the Next output and traced media tools; drop the build cache.
-# The Turbopack build cache (.next/cache) is build-only and is by far the
+# The compiler build cache (.next/cache) is build-only and is by far the
 # largest artifact (~400M). It is never read at runtime (next start serves
 # .next/server + .next/static), so removing it here keeps both the build-time
 # disk usage and the FaaS runtime package small. A dist/ backup copy was
