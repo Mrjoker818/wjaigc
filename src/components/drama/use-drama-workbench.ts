@@ -41,6 +41,7 @@ export interface UseDramaWorkbenchOptions {
   onPlaceImageOnCanvas?: DramaWorkbenchApi['onPlaceImageOnCanvas'];
   canvasMedia?: DramaWorkbenchApi['canvasMedia'];
   onOpenCredits?: () => void;
+  onContinueInChat?: DramaWorkbenchApi['onContinueInChat'];
 }
 
 const errorText = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
@@ -58,7 +59,7 @@ const pause = (ms: number, signal: AbortSignal) => new Promise<void>(resolve => 
 });
 
 export function useDramaWorkbench({
-  record, projectId, onPlaceOnCanvas, onPlaceImageOnCanvas, canvasMedia, onOpenCredits,
+  record, projectId, onPlaceOnCanvas, onPlaceImageOnCanvas, canvasMedia, onOpenCredits, onContinueInChat,
 }: UseDramaWorkbenchOptions): DramaWorkbenchApi {
   const [doc, setDoc] = useState<DramaProjectV1>(record.doc);
   const docRef = useRef(record.doc);
@@ -687,7 +688,7 @@ export function useDramaWorkbench({
     imageModels, imageModel, setImageModelKey, keyframeShotIds, generateKeyframes, voiceoverShotIds, generateVoiceovers,
     keyframeEstimate, busyLabel, runJob,
     dramaId: record.id, projectId, saveState, flushSave, render, renderEpisode, onPlaceOnCanvas, onPlaceImageOnCanvas, canvasMedia,
-    autopilot, quoteAutopilot, runAutopilot, stopAutopilot, voiceAvailable,
+    autopilot, quoteAutopilot, runAutopilot, stopAutopilot, voiceAvailable, onContinueInChat,
   };
 }
 

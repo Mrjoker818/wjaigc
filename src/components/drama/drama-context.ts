@@ -1,5 +1,6 @@
 'use client';
 
+import type { DramaChatHandoff } from '@/lib/drama/chat-handoff';
 import { createContext, useContext } from 'react';
 import type { AutopilotChoices, AutopilotQuote, AutopilotRun } from '@/lib/drama/autopilot';
 import type { CanvasMediaLike } from '@/lib/drama/library';
@@ -92,6 +93,8 @@ export interface DramaWorkbenchApi {
   onPlaceImageOnCanvas?: (image: { url: string; name?: string }) => void;
   /** Pictures and videos on the project's canvas, offered in the library picker. */
   canvasMedia?: readonly CanvasMediaLike[];
+  /** Opens simple chat with the episode script; absent when the user has no chat platform. */
+  onContinueInChat?: (handoff: DramaChatHandoff) => void;
 }
 
 export type SaveState = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict';

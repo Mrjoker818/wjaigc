@@ -167,7 +167,8 @@ import {
   useWorkspaceLocationSearch,
 } from '@/lib/project-workspace-url';
 import { parseSimpleChatWorkspaceHandoffIntent, type SimpleChatWorkspaceHandoffIntent } from '@/lib/simple-chat-workspace-handoff';
-import { dramaIdFromSearch, isWorkspacePath, platformsForUser, workspaceAddress, workspaceModeForPath } from '@/lib/platform-routes';
+import { dramaIdFromSearch, isWorkspacePath, platformHref, platformsForUser, workspaceAddress, workspaceModeForPath } from '@/lib/platform-routes';
+import { writeDramaChatHandoff } from '@/lib/drama/chat-handoff';
 import { PlatformSwitcher } from '@/components/platform/platform-switcher';
 import { toStableImageUrl } from '@/lib/stable-image-url';
 import { APP_FULL_VERSION_LABEL, APP_NAME } from '@/config/app-meta';
@@ -6832,6 +6833,10 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
           canvasMedia={currentProject ? images : undefined}
           chatHandoff={dramaChatHandoff}
           onChatHandoffDone={clearDramaChatHandoff}
+          onContinueInChat={userPlatforms.includes('chat') ? handoff => {
+            writeDramaChatHandoff(window.sessionStorage, handoff);
+            window.location.assign(platformHref('chat'));
+          } : undefined}
         />
         {/* This branch returns before the canvas Toaster, so the workbench needs its own to show errors. */}
         <Toaster

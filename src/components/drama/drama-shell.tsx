@@ -19,7 +19,7 @@ const SAVE_TEXT: Record<SaveState, string> = {
 };
 
 export function DramaShell({
-  record, projectId, onExit, switcher, onCloseProject, onPlaceOnCanvas, onPlaceImageOnCanvas, canvasMedia, onOpenCredits,
+  record, projectId, onExit, switcher, onCloseProject, onPlaceOnCanvas, onPlaceImageOnCanvas, canvasMedia, onOpenCredits, onContinueInChat,
 }: {
   record: DramaProjectRecord;
   projectId?: string;
@@ -31,8 +31,9 @@ export function DramaShell({
   onPlaceImageOnCanvas?: DramaWorkbenchApi['onPlaceImageOnCanvas'];
   canvasMedia?: DramaWorkbenchApi['canvasMedia'];
   onOpenCredits?: () => void;
+  onContinueInChat?: DramaWorkbenchApi['onContinueInChat'];
 }) {
-  const api = useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onPlaceImageOnCanvas, canvasMedia, onOpenCredits });
+  const api = useDramaWorkbench({ record, projectId, onPlaceOnCanvas, onPlaceImageOnCanvas, canvasMedia, onOpenCredits, onContinueInChat });
   const { doc, episode, step, setStep, saveState, estimate } = api;
   const short = estimate ? Math.max(0, estimate.total - estimate.balance) : 0;
 

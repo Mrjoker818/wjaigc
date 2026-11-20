@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Sidebar from "@/components/simple-chat/sidebar";
 import { PlatformSwitcher } from "@/components/platform/platform-switcher";
 import { platformsForUser } from "@/lib/platform-routes";
+import { dramaChatHandoffMessage, takeDramaChatHandoff } from "@/lib/drama/chat-handoff";
 import { useTheme } from "@/app/simple-chat/providers";
 import ChatArea, { type KnowledgeItemsMutation, type KnowledgeMutationResult } from "@/components/simple-chat/chat-area";
 import { SimpleChatSyncStatusView } from "@/components/simple-chat/simple-chat-sync-status";
@@ -351,6 +352,30 @@ export default function SimpleChatPage() {
     commitProjects(prev => prev.map(p => p.id === projectId ? { ...p, tasks: [...p.tasks, task], updatedAt: Date.now() } : p));
     setActiveTaskId(task.id);
   }, [commitProjects]);
+
+  // 「在对话里继续改」 from the drama script page: a new task that starts with the episode script.
+  const syncReady = syncSnapshot.status === 'synced' || syncSnapshot.status === 'syncing';
+  useEffect(() => {
+    if (!user?.id || !syncReady || !visibleActiveProjectId) return;
+    const handoff = takeDramaChatHandoff(window.sessionStorage);
+    if (!handoff) return;
+    handleCreateTask(visibleActiveProjectId, {
+      name: `改剧本：${handoff.title}`.slice(0, 60),
+      messages: [{
+        id: generateId(),
+        role: 'assistant',
+        content: dramaChatHandoffMessage(handoff),
+        status: 'completed',
+        createdAt: Date.now(),
+        dramaDraft: {
+          dramaId: handoff.dramaId,
+          title: handoff.title,
+          ...(handoff.projectId ? { projectId: handoff.projectId } : {}),
+          summary: handoff.summary,
+        },
+      }],
+    });
+  }, [handleCreateTask, syncReady, user?.id, visibleActiveProjectId]);
 
   const handleDeleteTask = useCallback((projectId: string, taskId: string) => {
     commitProjects(prev => prev.map(p => {

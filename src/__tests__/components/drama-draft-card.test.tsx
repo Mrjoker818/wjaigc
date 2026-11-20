@@ -31,7 +31,8 @@ describe('simple chat drama draft', () => {
   it('links the card to the drama in the video workbench', () => {
     const html = renderToStaticMarkup(<DramaDraftCard draft={draft} />);
     expect(html).toContain('《雨夜来信》');
-    expect(html).toContain('1 集、6 场、3 个角色 · 写剧本不消耗积分');
+    expect(html).toContain('1 集、6 场、3 个角色');
+    expect(html).toContain('短剧剧本已保存在短剧工作台');
     expect(html).toContain('href="/video?projectId=project-1&amp;dramaId=drama_1"');
     expect(html).toContain('在短剧工作台打开');
   });

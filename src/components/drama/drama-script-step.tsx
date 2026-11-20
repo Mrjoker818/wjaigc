@@ -1,15 +1,28 @@
 'use client';
 
 import { useState } from 'react';
-import { Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { MessageSquareText, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { buildDramaChatHandoff } from '@/lib/drama/chat-handoff';
 import { planDramaScript } from '@/lib/drama/workbench-client';
 import { addScene, removeScene, updateEpisode, updateScene } from '@/lib/drama/workbench-state';
 import { useDrama } from './drama-context';
 
 /** Step 1: the episode script on "storyboard paper", plus the scene list the board is built from. */
 export function DramaScriptStep() {
-  const { doc, episode, update, replaceDoc, runJob, busyLabel, setStep } = useDrama();
+  const { doc, episode, update, replaceDoc, runJob, busyLabel, setStep, dramaId, projectId, flushSave, onContinueInChat } = useDrama();
   const [idea, setIdea] = useState(episode?.logline ?? '');
+  const [leaving, setLeaving] = useState(false);
+
+  // Save first: the chat opens in this tab, and the way back reloads the drama from the server.
+  const continueInChat = async () => {
+    if (!episode || !onContinueInChat) return;
+    setLeaving(true);
+    if (!(await flushSave()) && !window.confirm('剧本的最新改动还没保存成功。仍然去对话里改吗？没保存的改动会丢失。')) {
+      setLeaving(false);
+      return;
+    }
+    onContinueInChat(buildDramaChatHandoff(doc, episode, { dramaId, projectId }));
+  };
 
   const regenerate = () => {
     const shotCount = doc.episodes.reduce((total, item) => total + item.scenes.reduce((n, scene) => n + scene.shots.length, 0), 0);
@@ -42,6 +55,12 @@ export function DramaScriptStep() {
           <h2 id="drama-script" className="font-serif text-xl font-bold">剧本</h2>
           <input className="drama-input max-w-xs" aria-label="本集标题" maxLength={200} value={episode.title}
             onChange={event => update(current => updateEpisode(current, episode.id, { title: event.target.value }))} />
+          {onContinueInChat ? (
+            <button type="button" className="drama-btn sm:ml-auto" disabled={leaving || Boolean(busyLabel)} onClick={() => void continueInChat()}
+              title="打开智能对话，带上这一集的梗概、分场和剧本，让对话模型帮你改">
+              <MessageSquareText className="h-4 w-4" />{leaving ? '正在保存…' : '在对话里继续改'}
+            </button>
+          ) : null}
         </div>
         <textarea
           className="drama-input min-h-80 resize-y font-serif leading-loose" aria-label="剧本正文" maxLength={100000} value={episode.script}

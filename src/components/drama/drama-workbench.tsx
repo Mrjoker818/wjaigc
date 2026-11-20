@@ -32,6 +32,7 @@ export interface DramaWorkbenchProps {
   /** The project's canvas pictures, offered when picking a reference image. */
   canvasMedia?: DramaWorkbenchApi['canvasMedia'];
   onOpenCredits?: () => void;
+  onContinueInChat?: DramaWorkbenchApi['onContinueInChat'];
   /** A message sent from simple chat; it is written into a new script draft once, then `onChatHandoffDone` clears it. */
   chatHandoff?: SimpleChatWorkspaceHandoffIntent | null;
   onChatHandoffDone?: () => void;
@@ -68,7 +69,7 @@ export default function DramaWorkbench(props: DramaWorkbenchProps) {
       <DramaShell
         key={state.record.id} record={state.record} projectId={projectId} onExit={props.onExit} switcher={props.switcher}
         onPlaceOnCanvas={props.onPlaceOnCanvas} onPlaceImageOnCanvas={props.onPlaceImageOnCanvas} canvasMedia={props.canvasMedia}
-        onOpenCredits={props.onOpenCredits}
+        onOpenCredits={props.onOpenCredits} onContinueInChat={props.onContinueInChat}
         onCloseProject={() => onDramaIdChange(null)}
       />
     );
