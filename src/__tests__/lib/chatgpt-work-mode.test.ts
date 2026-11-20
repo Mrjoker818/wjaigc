@@ -58,16 +58,23 @@ describe('work plan progress', () => {
     expect(deriveWorkPlanProgress(plan, content, false).statuses).toEqual(['done', 'running', 'pending', 'pending']);
   });
 
-  it('reports steps the reply never reached as skipped once finished', () => {
+  it('marks a jumped-over step as skipped and later steps as pending once finished', () => {
     const content = '## 步骤 1 · 明确目标\n…\n### 步骤3：分步执行\n…';
     const progress = deriveWorkPlanProgress(plan, content, true);
-    expect(progress.statuses).toEqual(['done', 'skipped', 'done', 'skipped']);
+    expect(progress.statuses).toEqual(['done', 'skipped', 'done', 'pending']);
     expect(progress.current).toBe(3);
+  });
+
+  it('keeps later steps pending when the model stops after step 1 to ask questions', () => {
+    const content = '## 步骤 1 · 明确目标与交付物\n请补充门店所在城市。';
+    expect(deriveWorkPlanProgress(plan, content, true).statuses).toEqual(['done', 'pending', 'pending', 'pending']);
   });
 
   it('ignores step numbers that are not headings or are out of range', () => {
     const content = '先看步骤 2 的说明。\n## 步骤 9 · 额外';
-    expect(deriveWorkPlanProgress(plan, content, true).statuses).toEqual(['skipped', 'skipped', 'skipped', 'skipped']);
+    const progress = deriveWorkPlanProgress(plan, content, true);
+    expect(progress.current).toBe(0);
+    expect(progress.statuses).toEqual(['pending', 'pending', 'pending', 'pending']);
   });
 });
 

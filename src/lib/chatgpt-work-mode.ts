@@ -86,8 +86,9 @@ export function readWorkPlan(value: unknown): WorkPlan | null {
 
 /**
  * Which steps the reply has reached, from its `## 步骤 n` headings. While streaming, the last
- * heading seen is running and earlier ones are done. Once finished, steps without a heading are
- * reported as skipped rather than done.
+ * heading seen is running and earlier ones are done. Once finished, a step jumped over before
+ * the last heading is skipped, and steps after it stay pending: the model may have stopped to
+ * ask the user for more information.
  */
 export function deriveWorkPlanProgress(plan: WorkPlan, content: string, finished: boolean): WorkPlanProgress {
   const seen = new Set<number>();
@@ -98,7 +99,7 @@ export function deriveWorkPlanProgress(plan: WorkPlan, content: string, finished
   const current = seen.size > 0 ? Math.max(...seen) : 0;
   const statuses = plan.steps.map((_, offset): WorkPlanStepStatus => {
     const index = offset + 1;
-    if (finished) return seen.has(index) ? 'done' : 'skipped';
+    if (finished) return seen.has(index) ? 'done' : index < current ? 'skipped' : 'pending';
     if (current === 0) return index === 1 ? 'running' : 'pending';
     if (index === current) return 'running';
     if (index < current) return seen.has(index) ? 'done' : 'skipped';

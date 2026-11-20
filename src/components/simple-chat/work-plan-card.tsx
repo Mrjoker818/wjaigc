@@ -12,14 +12,18 @@ const STATUS_TEXT: Record<WorkPlanStepStatus, string> = {
 
 /**
  * Work-mode plan shown above a reply. Step states come from the `## 步骤 n` headings the model
- * has written so far, so a step is only marked done when the reply really reached it.
+ * has written so far, so a step is only marked done when the reply really reached it. A finished
+ * reply without any step heading (a failed request, or a model that ignored the format) shows no
+ * card rather than a plan that claims progress.
  */
 export function WorkPlanCard({ plan, content, finished }: { plan: WorkPlan; content: string; finished: boolean }) {
   const progress = deriveWorkPlanProgress(plan, content, finished);
+  if (finished && progress.current === 0) return null;
   const total = plan.steps.length;
   const doneCount = progress.statuses.filter(status => status === 'done').length;
+  const waiting = finished && progress.statuses.includes('pending');
   const summary = finished
-    ? (doneCount === total ? '已完成' : `完成 ${doneCount}/${total} 步`)
+    ? (doneCount === total ? '已完成' : waiting ? `完成 ${doneCount}/${total} 步 · 待你回复` : `完成 ${doneCount}/${total} 步`)
     : `第 ${progress.current}/${total} 步`;
 
   return (
@@ -66,12 +70,12 @@ export function WorkPlanCard({ plan, content, finished }: { plan: WorkPlan; cont
               }`}>
                 {step.title}
               </span>
-              {(status === 'running' || status === 'skipped') && (
+              {(status === 'running' || status === 'skipped' || (finished && status === 'pending')) && (
                 <span aria-hidden className={`shrink-0 leading-[18px] ${status === 'running' ? 'text-primary' : 'text-muted-foreground'}`}>
-                  {STATUS_TEXT[status]}
+                  {finished && status === 'pending' ? '待继续' : STATUS_TEXT[status]}
                 </span>
               )}
-              <span className="sr-only">{STATUS_TEXT[status]}</span>
+              <span className="sr-only">{finished && status === 'pending' ? '待继续' : STATUS_TEXT[status]}</span>
             </li>
           );
         })}
