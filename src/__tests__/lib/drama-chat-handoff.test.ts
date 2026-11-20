@@ -24,7 +24,7 @@ function sampleDoc(script = '第 1 场 · 便利店 · 内 · 夜\n阿强：「�
   const base = createEmptyDramaProject();
   const episode = {
     ...base.episodes[0],
-    index: 1,
+    index: 0,
     title: '送错的外卖',
     logline: '外卖员暴雨夜送错餐',
     script,
@@ -50,6 +50,14 @@ describe('drama to chat handoff', () => {
     expect(handoff.text).toContain('1. 便利店门口（便利店；阿强）：阿强发现送错了');
     expect(handoff.text).toContain('阿强：「这单不是我的。」');
     expect(dramaChatHandoffMessage(handoff)).toContain('告诉我想怎么改');
+  });
+
+  it('does not repeat an episode number the title already has', () => {
+    const { doc, episode } = sampleDoc();
+    const titled = { ...episode, title: '第 1 集：三点十七分的指针' };
+    const handoff = buildDramaChatHandoff({ ...doc, episodes: [titled] }, titled, { dramaId: 'drama_1' });
+    expect(handoff.text).toContain('## 《雨夜来信》第 1 集：三点十七分的指针');
+    expect(handoff.text).not.toContain('第 0 集');
   });
 
   it('cuts a very long script and says so', () => {

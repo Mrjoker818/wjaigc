@@ -29,8 +29,14 @@ export function buildDramaChatHandoff(
   const castById = new Map(doc.cast.map(member => [member.id, member.name]));
   const locationById = new Map(doc.locations.map(location => [location.id, location.name]));
   const script = episode.script.trim();
+  // `index` counts from 0; titles are often already "第 1 集：…".
+  const number = doc.episodes.indexOf(episode) + 1 || episode.index + 1;
+  const episodeTitle = episode.title.trim();
+  const episodeLabel = /^第\s*\d+\s*集/.test(episodeTitle)
+    ? episodeTitle
+    : `第 ${number} 集${episodeTitle ? `：${episodeTitle}` : ''}`;
   const lines = [
-    `## 《${title}》第 ${episode.index} 集${episode.title.trim() ? `：${episode.title.trim()}` : ''}`,
+    `## 《${title}》${episodeLabel}`,
     episode.logline.trim() ? `**梗概**：${episode.logline.trim()}` : '',
     doc.cast.length ? `**角色**：${doc.cast.map(member => member.name).join('、')}` : '',
     episode.scenes.length ? '**分场**' : '',
@@ -49,7 +55,7 @@ export function buildDramaChatHandoff(
     dramaId: ids.dramaId,
     ...(ids.projectId ? { projectId: ids.projectId } : {}),
     title,
-    summary: `第 ${episode.index} 集 · ${episode.scenes.length} 场 · ${doc.cast.length} 个角色`,
+    summary: `第 ${number} 集 · ${episode.scenes.length} 场 · ${doc.cast.length} 个角色`,
     text: lines.filter(Boolean).join('\n\n'),
     createdAt: now,
   };
