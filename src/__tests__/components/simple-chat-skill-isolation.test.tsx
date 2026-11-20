@@ -178,6 +178,39 @@ describe('Simple Chat Skill catalog isolation', () => {
     ]));
   });
 
+  it('offers 自动技能 plus every preset skill in the composer select', () => {
+    renderChatArea({ fetchMock: vi.fn((..._args: unknown[]) => new Promise<Response>(() => {})) });
+    const select = screen.getByRole('combobox', { name: '技能' }) as HTMLSelectElement;
+    expect(select.value).toBe('');
+    expect(Array.from(select.options).map(option => option.value)).toEqual(['', ...SIMPLE_CHAT_PRESET_SKILLS.map(skill => skill.id)]);
+    expect(select.options[0].textContent).toBe('自动技能');
+
+    fireEvent.change(select, { target: { value: 'excel-master' } });
+    expect(document.querySelector('[data-simple-chat-selected-skill="excel-master"]')).not.toBeNull();
+  });
+
+  it('routes a /ppt command to PPT大师 without sending the command text', async () => {
+    const fetchMock = vi.fn((..._args: unknown[]) => new Promise<Response>(() => {}));
+    renderChatArea({ fetchMock });
+    const skill = SIMPLE_CHAT_PRESET_SKILLS.find(candidate => candidate.id === 'ppt-master')!;
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '/ppt 季度销售汇报' } });
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
+
+    await waitFor(() => expect(
+      fetchMock.mock.calls.some(([url]) => String(url) === '/api/simple-chat/chat'),
+    ).toBe(true));
+    const chatCall = fetchMock.mock.calls.find(([url]) => String(url) === '/api/simple-chat/chat')!;
+    const body = JSON.parse(String((chatCall[1] as RequestInit).body)) as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(body.messages).toEqual(expect.arrayContaining([
+      { role: 'system', content: skill.systemPrompt },
+      expect.objectContaining({ role: 'user', content: '季度销售汇报' }),
+    ]));
+    expect(await screen.findByText('技能 · PPT大师')).not.toBeNull();
+  });
+
   it('turns the selected skill and the typed request into a recoverable background skill run', async () => {
     const fetchMock = vi.fn((input: unknown, _init?: unknown) => (String(input) === '/api/skill-runs'
       ? Promise.resolve(new Response(JSON.stringify({ runId: 'run-1', reused: false }), { status: 201 }))

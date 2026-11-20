@@ -9,6 +9,7 @@ import type {
 } from '@/components/simple-chat/simple-chat-types';
 import { readWorkPlan } from '@/lib/chatgpt-work-mode';
 import { readDramaDraft } from '@/lib/simple-chat-drama-draft';
+import { readSimpleChatReplySkill } from '@/lib/simple-chat-auto-skill';
 import {
   normalizeReasoningEffort,
   normalizeResponseSpeed,
@@ -3646,6 +3647,7 @@ function validateMessageEntity(value: Record<string, unknown>): SimpleChatProjec
   }
   if (value.workPlan !== undefined && !readWorkPlan(value.workPlan)) return invalidValidation('workPlan');
   if (value.dramaDraft !== undefined && !readDramaDraft(value.dramaDraft)) return invalidValidation('dramaDraft');
+  if (value.skill !== undefined && !readSimpleChatReplySkill(value.skill)) return invalidValidation('skill');
   return firstValidation(
     validateRequiredId(value, 'id'),
     validateRequiredEnum(value, 'role', ['user', 'assistant', 'system', 'search']),

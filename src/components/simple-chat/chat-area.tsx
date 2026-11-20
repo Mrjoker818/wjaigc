@@ -6,6 +6,8 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { MarkdownRenderer } from "./markdown-renderer";
 import { WorkPlanCard } from "./work-plan-card";
 import { DramaDraftCard } from "./drama-draft-card";
+import { SkillTraceCard } from "./skill-trace-card";
+import { SIMPLE_CHAT_SKILL_COMMANDS, selectSimpleChatAutoSkill } from '@/lib/simple-chat-auto-skill';
 import { readDramaDraft } from '@/lib/simple-chat-drama-draft';
 import { readWorkPlan } from "@/lib/chatgpt-work-mode";
 import { ImageLightbox } from "./image-lightbox";
@@ -1983,7 +1985,19 @@ export default function ChatArea({
   // Handle send
   const handleSend = useCallback(async () => {
     const requestModelSelection = readSimpleChatModelSelection(task);
-    const content = input.trim();
+    const typed = input.trim();
+    // 自动技能: a leading /ppt-style command, the skill chosen in the composer, or keywords.
+    const skillSelection = selectSimpleChatAutoSkill(typed, {
+      explicitSkillId: selectedSkill?.id,
+      previousSkillId: [...messages].reverse().find(message => message.role === 'assistant')?.skill?.id,
+      knownSkillIds: PRESET_SKILLS.map(skill => skill.id),
+    });
+    const routedSkill = PRESET_SKILLS.find(skill => skill.id === skillSelection.skillId) ?? null;
+    const content = skillSelection.source === 'command' ? skillSelection.text : typed;
+    if (skillSelection.source === 'command' && !content && uploadedImages.length === 0) {
+      setSearchStatus(`已选「${routedSkill?.name}」，在指令后面写上要做的内容，例如「${typed} 季度销售汇报」。`);
+      return;
+    }
     if (!content && uploadedImages.length === 0) return;
     if (isStreaming || !project || !task) return;
     if (!requestModelSelection.modelId || !requestModelSelection.providerId) {
@@ -2073,7 +2087,7 @@ export default function ChatArea({
       const agent = project.agents.find(candidate => candidate.id === requestActiveAgentId);
       if (agent) systemMessages.push({ role: 'system', content: agent.systemPrompt });
     }
-    if (selectedSkill) systemMessages.push({ role: 'system', content: selectedSkill.systemPrompt });
+    if (routedSkill) systemMessages.push({ role: 'system', content: routedSkill.systemPrompt });
     if (webSearch) {
       systemMessages.push({
         role: 'system',
@@ -2133,6 +2147,9 @@ export default function ChatArea({
       providerId: retryContext.providerId,
       status: 'streaming',
       retryContext,
+      ...(routedSkill && skillSelection.source
+        ? { skill: { id: routedSkill.id, name: routedSkill.name, source: skillSelection.source } }
+        : {}),
       createdAt: Date.now(),
     };
 
@@ -3124,6 +3141,9 @@ export default function ChatArea({
                     ? 'bg-primary text-primary-foreground rounded-br-md'
                     : 'bg-card border border-border rounded-bl-md'
                 }`}>
+                  {msg.role === 'assistant' && msg.skill ? (
+                    <SkillTraceCard skill={msg.skill} content={msg.content} finished={msg.status !== 'streaming'} />
+                  ) : null}
                   {msg.role === 'assistant' && msg.workPlan ? (
                     <WorkPlanCard plan={msg.workPlan} content={msg.content} finished={msg.status !== 'streaming'} />
                   ) : null}
@@ -3455,6 +3475,23 @@ export default function ChatArea({
                 title="联网搜索">
                 <Globe className="w-4 h-4" />
               </button>
+              {/* Narrow or short screens keep one toolbar row for the send button; 自动技能 and
+                  slash commands still route there, and the Skill panel picks a skill by hand. */}
+              {!compactHeader && <select
+                value={selectedSkill?.id ?? ''}
+                onChange={event => {
+                  const skill = PRESET_SKILLS.find(item => item.id === event.target.value);
+                  setSelectedSkill(skill ?? null);
+                }}
+                aria-label="技能"
+                title={`技能：默认按你的要求自动选择，也可以在开头输入 ${SIMPLE_CHAT_SKILL_COMMANDS.join('、')}`}
+                className={`min-h-11 max-w-[7.5rem] shrink-0 cursor-pointer truncate rounded-lg bg-transparent px-1.5 text-xs outline-none transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary motion-reduce:transition-none ${selectedSkill ? 'text-primary' : 'text-muted-foreground'}`}
+              >
+                <option value="">自动技能</option>
+                {PRESET_SKILLS.map(skill => (
+                  <option key={skill.id} value={skill.id}>{skill.icon} {skill.name}</option>
+                ))}
+              </select>}
               <button type="button" onClick={toggleWorkMode}
                 aria-label="工作模式"
                 aria-pressed={workModeEnabled}

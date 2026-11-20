@@ -4,6 +4,7 @@ import type { ReasoningEffort, ResponseSpeed, ResolvedChatControls } from '@/lib
 import type { WorkspaceAssetReference } from '@/lib/asset-core/types';
 import type { WorkMode, WorkPlan } from '@/lib/chatgpt-work-mode';
 import type { SimpleChatDramaDraft } from '@/lib/simple-chat-drama-draft';
+import type { SimpleChatReplySkill } from '@/lib/simple-chat-auto-skill';
 import {
   bindWorkspaceSourceTraceToChat,
   parseWorkspaceSourceTrace,
@@ -61,6 +62,8 @@ export interface SimpleChatMessage {
   workPlan?: WorkPlan;
   /** Short-drama script the model saved in this reply. */
   dramaDraft?: SimpleChatDramaDraft;
+  /** Preset skill that answered this reply, and how it was chosen. */
+  skill?: SimpleChatReplySkill;
   images?: string[];
   imageRefs?: WorkspaceAssetReference[];
   attachments?: ChatAttachment[];
