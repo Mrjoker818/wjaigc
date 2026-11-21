@@ -1,0 +1,841 @@
+{
+  "schemaVersion": 1,
+  "kind": "pure-source-retirement-evidence",
+  "reviewedAt": "2026-11-21T06:29:09.298084+00:00",
+  "reviewedHead": "29f7e2df5cb53619c2f5401fa587fbea7882b079",
+  "deletionSubjectAndBody": "feat(video): make videos only in the drama workbench, and fold the director layer into it\n\nThe canvas video panel, its edit/extend panel and their routes are removed. The canvas\nkeeps playing, comparing and processing existing videos. Its video entries (toolbar,\nShift+4, command palette, quick create) now open the drama workbench, carrying a typed\nidea into the \"start from one sentence\" form.\n\n/api/video/generate and /api/video/extend no longer wrap the prompt in the director\ncompiler's LLM instructions (【导演编排】). That text was written for a language model\nand went straight to the video model.\n\nWhat was useful from that layer (Seedance 2.0 Skill OS directing notes) moves into the\ndrama inspector: a free 润色 action that rewrites one shot through the chat model and\nfills shot size, camera move, light and sound, plus fields to edit them. The chosen\nvalues are sent as one \"镜头：…\" line after the description.",
+  "draftSource": {
+    "originalPath": "output/canvas-chat-audit/ci-20261121/registration-draft/proposed-registration.json",
+    "sha256": "c3263478936cbb0e056d2635dbb2b48db7fdc130e3fd10e8511ce0f9b34f2c4f",
+    "snapshotScope": "Each full four-path proposal is copied below; original output references inside historical snapshots are not active evidence dependencies."
+  },
+  "scope": "Only four pure source paths; no UI restoration, shared data migration, billing settlement, protected-ID removal or other holds released.",
+  "retirements": [
+    {
+      "path": "src/lib/video-director/index.ts",
+      "schemaVersion": 1,
+      "deletionCommit": "9c8249e9fef309b55152060ce412160ef80456b0",
+      "deletionParent": "738ed3c835fb7a0d602cc17019788460b1e2537b",
+      "deletedParentBlob": "6ec92951c7a89d83d3ebefd37cb8df409ab49f8e",
+      "reason": "仅为旧导演层的聚合导出；上游已删除该兼容门面，用户要求对齐当前程序，因此不恢复同名入口。",
+      "replacement": {
+        "description": "当前调用直接导入具体导演模块，并通过 /video 短剧工作台制作视频；不宣称旧聚合 API 等价保留。",
+        "paths": [
+          "src/lib/video-director/director-styles.ts",
+          "src/lib/video-director/continuity.ts"
+        ],
+        "equivalence": "not-claimed"
+      },
+      "obligations": {
+        "status": "none-owned-by-path",
+        "reason": "删除父 blob 仅含 export/re-export，无本路径独立数据、任务存储、扣费、退款或未完账务职责。"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "userDirection": "用户明确要求对齐最新版程序，只正式退役这四条纯源码路径；不恢复旧 UI 或空 stub，不处理其余历史数据、任务、账务或迁移 hold。"
+      },
+      "parentSource": "export * from './prompt-compiler';\nexport * from './continuity';\nexport * from './retake-diagnosis';\nexport * from './model-capabilities';\nexport * from './reference-binding';\nexport type { StoryAssetsPlanRequest, StoryAssetsPlanResult, StoryAssetGenTask } from './continuity';\n",
+      "sourceAudit": {
+        "path": "docs/testing/evidence/2026-11-21-source-review/review-drama.json",
+        "sha256": "c95fcd839c611c7aa2f788bbecb6b59fd509c2687eec028756f3516e0f4eba3b",
+        "jsonPointer": "/items/42",
+        "markdown": "docs/testing/evidence/2026-11-21-source-review/review-drama.md",
+        "markdownLine": 729
+      },
+      "originalProposalSnapshot": {
+        "path": "src/lib/video-director/index.ts",
+        "group": "drama",
+        "auditRef": {
+          "file": "output/canvas-chat-audit/ci-20261121/review-drama.json",
+          "jsonPointer": "/items/42",
+          "sha256": "c95fcd839c611c7aa2f788bbecb6b59fd509c2687eec028756f3516e0f4eba3b",
+          "markdown": "output/canvas-chat-audit/ci-20261121/review-drama.md",
+          "markdownLine": 729
+        },
+        "identity": {
+          "reviewedHead": "29f7e2df5cb53619c2f5401fa587fbea7882b079",
+          "reviewedTree": "5b8a6aae374a19bb3a7dd63e1631ec67de8971d9",
+          "previousReviewedBlob": null,
+          "reviewedBlob": null,
+          "pathLastChangeCommit": "9c8249e9fef309b55152060ce412160ef80456b0",
+          "meaning": "原审版本路径最后变更/删除提交；不得覆盖原历史sourceCommit",
+          "observedWorkingBlob": null,
+          "observedRawWorkingBlob": null,
+          "workingIdentityMethod": "existing_review_record_contract_index_for_clean_workfile_hash_object_for_unstaged_change; autocrlf_raw_bytes_are_not_alone_source_drift",
+          "workingTreeDrift": false,
+          "newCodeReviewed": false
+        },
+        "originalDecision": "reviewed-no-blocker",
+        "proposedSourceDecision": "retirement_source_candidate",
+        "reason": "原审完整读取删除diff并查剩余导入，未见源码阻断；导演层已并入短剧，删除可作退役候选。",
+        "hold": null,
+        "formalAcceptance": {
+          "status": "not_established_by_this_review",
+          "passed": false,
+          "requirements": [
+            "保留当前具体模块的参数/引用测试；不恢复旧导演聚合层；真实供应商兼容仍须验证。"
+          ],
+          "evidenceLimit": "仅重用已获静态审核/历史CI；真实浏览器、隔离数据库、供应商、正式Coze部署各按需另验。源码候选不等于release ready。"
+        },
+        "registration": {
+          "kind": "record_retirement_in_separate_versioned_lifecycle_schema",
+          "state": "proposal_only",
+          "mayRegisterSourceCandidate": true,
+          "eligibleForCurrentBlobProjection": false,
+          "applicationBlockers": [
+            "current_schema_cannot_register_retired_path"
+          ],
+          "allowlistChanged": false,
+          "stage0AlreadyExactAllowed": false,
+          "stage1AlreadyExactAllowed": false,
+          "existingAuthorizations": [],
+          "newAuthorizationProposal": null
+        },
+        "historicalEntries": [],
+        "retainedReview": {
+          "path": "src/lib/video-director/index.ts",
+          "stage0Unapproved": true,
+          "previousReviewedBlob": null,
+          "wasRecorded": false,
+          "currentBlob": null,
+          "sourceCommit": "9c8249e9fef309b55152060ce412160ef80456b0",
+          "introductionCommit": "dc5983d916fa61cfe44bd827fd2636cc61b8117a",
+          "pathState": "deleted",
+          "lineCountAtHead": 0,
+          "reviewMethod": "full-deletion-diff-and-remaining-import-search",
+          "reviewedHead": "29f7e2df5cb53619c2f5401fa587fbea7882b079",
+          "change": "删除旧导演模块聚合导出，保留被使用的具体 prompt-compiler/director-styles 模块。",
+          "sourceEvidence": [
+            "删除提交 9c8249e9fef309b55152060ce412160ef80456b0 的完整删除 diff 已读",
+            "HEAD 中不存在，currentBlob=null；已搜索 src/tests 无目标导入残留"
+          ],
+          "risk": "不能把不存在文件填旧 blob 放行；需在外部 Stage0 路径保护中按真实迁移评审，此处不修改基线。仅确认本路径删除及新 drama 依赖上下文，未审批 other 组入口。",
+          "findingIds": [],
+          "deletedParentBlob": "6ec92951c7a89d83d3ebefd37cb8df409ab49f8e",
+          "existingTestEvidence": [
+            {
+              "path": "src/__tests__/lib/drama-engine.test.ts",
+              "lines": [
+                116,
+                294
+              ],
+              "summary": "新的参考图/音频/镜头语言参数路径",
+              "executedByReviewer": false,
+              "sourceBlobAtHead": "459625dd742f9918079e748beb3b5cfdfe514b6d",
+              "historicalLogRecords": [
+                {
+                  "log": "output/canvas-chat-audit/ci-20261121/44863279442-136721231942.log",
+                  "line": 8826,
+                  "raw": "2026-11-21T04:08:23.2621120Z  \u001b[32m✓\u001b[39m src/__tests__/lib/drama-engine.test.ts \u001b[2m(\u001b[22m\u001b[2m23 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 43\u001b[2mms\u001b[22m\u001b[39m",
+                  "reportedTestCount": 23,
+                  "commit": "26e021b97bfd92d36210e287ad71f363ff51abb9",
+                  "commitLine": 206,
+                  "qualification": "历史日志记录；本次未执行；对应 commit 不在本地对象库，未验证与当前 blob 相同"
+                }
+              ]
+            },
+            {
+              "path": "src/__tests__/lib/drama-mentions.test.ts",
+              "lines": [
+                52,
+                60
+              ],
+              "summary": "生成请求明确去 @",
+              "executedByReviewer": false,
+              "sourceBlobAtHead": "b7cec0ef7860cad30d8de4e89368c73e7d412dc8",
+              "historicalLogRecords": [
+                {
+                  "log": "output/canvas-chat-audit/ci-20261121/44863279442-136721231994.log",
+                  "line": 4463,
+                  "raw": "2026-11-21T04:05:54.1343662Z  \u001b[32m✓\u001b[39m src/__tests__/lib/drama-mentions.test.ts \u001b[2m(\u001b[22m\u001b[2m5 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 7\u001b[2mms\u001b[22m\u001b[39m",
+                  "reportedTestCount": 5,
+                  "commit": "26e021b97bfd92d36210e287ad71f363ff51abb9",
+                  "commitLine": 206,
+                  "qualification": "历史日志记录；本次未执行；对应 commit 不在本地对象库，未验证与当前 blob 相同"
+                }
+              ]
+            }
+          ],
+          "testsRunByReviewer": false,
+          "decision": "reviewed-no-blocker",
+          "blocking": false,
+          "blockingReason": "已读本路径具体源码/删除 diff 与相关调用/测试证据，未发现本路径新增阻断；仅静态评审，不是运行验收、测试通过或精确 allowlist 写入。"
+        },
+        "existingTestEvidence": [
+          {
+            "path": "src/__tests__/lib/drama-engine.test.ts",
+            "lines": [
+              116,
+              294
+            ],
+            "summary": "新的参考图/音频/镜头语言参数路径",
+            "executedByReviewer": false,
+            "sourceBlobAtHead": "459625dd742f9918079e748beb3b5cfdfe514b6d",
+            "historicalLogRecords": [
+              {
+                "log": "output/canvas-chat-audit/ci-20261121/44863279442-136721231942.log",
+                "line": 8826,
+                "raw": "2026-11-21T04:08:23.2621120Z  \u001b[32m✓\u001b[39m src/__tests__/lib/drama-engine.test.ts \u001b[2m(\u001b[22m\u001b[2m23 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 43\u001b[2mms\u001b[22m\u001b[39m",
+                "reportedTestCount": 23,
+                "commit": "26e021b97bfd92d36210e287ad71f363ff51abb9",
+                "commitLine": 206,
+                "qualification": "历史日志记录；本次未执行；对应 commit 不在本地对象库，未验证与当前 blob 相同"
+              }
+            ]
+          },
+          {
+            "path": "src/__tests__/lib/drama-mentions.test.ts",
+            "lines": [
+              52,
+              60
+            ],
+            "summary": "生成请求明确去 @",
+            "executedByReviewer": false,
+            "sourceBlobAtHead": "b7cec0ef7860cad30d8de4e89368c73e7d412dc8",
+            "historicalLogRecords": [
+              {
+                "log": "output/canvas-chat-audit/ci-20261121/44863279442-136721231994.log",
+                "line": 4463,
+                "raw": "2026-11-21T04:05:54.1343662Z  \u001b[32m✓\u001b[39m src/__tests__/lib/drama-mentions.test.ts \u001b[2m(\u001b[22m\u001b[2m5 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 7\u001b[2mms\u001b[22m\u001b[39m",
+                "reportedTestCount": 5,
+                "commit": "26e021b97bfd92d36210e287ad71f363ff51abb9",
+                "commitLine": 206,
+                "qualification": "历史日志记录；本次未执行；对应 commit 不在本地对象库，未验证与当前 blob 相同"
+              }
+            ]
+          }
+        ],
+        "retirement": {
+          "intent": {
+            "status": "established",
+            "basis": [
+              "upstream-deletion-commit",
+              "current-user-direction"
+            ],
+            "userDirection": "按GitHub最新程序对齐；不恢复旧节点；local数据已保护；破坏性migration禁止执行"
+          },
+          "deletionCommit": "9c8249e9fef309b55152060ce412160ef80456b0",
+          "deletionSubject": "feat(video): make videos only in the drama workbench, and fold the director layer into it",
+          "deletedParentBlob": "6ec92951c7a89d83d3ebefd37cb8df409ab49f8e",
+          "previousReviewedBlob": null,
+          "currentBlob": null,
+          "emptyBlobMustNeverRepresentCurrentFile": true,
+          "historicalDataRisk": "本文件无独立持久化副作用/遗留账务义务的具体证据；共享历史责任由对应存储/任务项单列，不把纯删除一律变成未审源码。",
+          "historicalRiskStatus": "no_path_specific_persistence_blocker_identified",
+          "currentEntry": "/video 短剧工作台及具体prompt-compiler/director-styles/shot-runner能力路径；只表示相关职责",
+          "originalAssertion": "删除旧导演模块聚合导出，保留被使用的具体 prompt-compiler/director-styles 模块。",
+          "originalAssertionEvidence": [],
+          "originalAssertionCoverageStatus": "no_legacy_executed_assertion_in_original_record",
+          "replacementEquivalence": "not_claimed",
+          "nonEquivalentGap": "旧聚合/协议默认表/引用拼接不再提供同名兼容；当前短剧能力与具体模块没有被本草案认定为完全等价。",
+          "action": "保留当前具体模块的参数/引用测试；不恢复旧导演聚合层；真实供应商兼容仍须验证。"
+        },
+        "repairReport": []
+      }
+    },
+    {
+      "path": "src/lib/video-director/model-capabilities.ts",
+      "schemaVersion": 1,
+      "deletionCommit": "9c8249e9fef309b55152060ce412160ef80456b0",
+      "deletionParent": "738ed3c835fb7a0d602cc17019788460b1e2537b",
+      "deletedParentBlob": "5147db1bad7867d1b31e2c9dcbbd800c389f3d2f",
+      "reason": "旧协议级静态导演能力默认表及兼容函数已随导演层删除；以当前逐镜头模型能力路径承接相关参数职责。",
+      "replacement": {
+        "description": "当前 drama-models 从 TaskModelDescriptor 生成能力，shot-runner 按能力选择参考图；不宣称旧默认值或 API 等价。",
+        "paths": [
+          "src/components/drama/drama-models.ts",
+          "src/lib/drama/shot-runner.ts"
+        ],
+        "equivalence": "not-claimed"
+      },
+      "obligations": {
+        "status": "none-owned-by-path",
+        "reason": "删除父 blob 只包含常量、类型和纯查询/映射函数，读取视频注册表但不写数据、不建任务、不扣费或清算。"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "userDirection": "用户明确要求对齐最新版程序，只正式退役这四条纯源码路径；不恢复旧 UI 或空 stub，不处理其余历史数据、任务、账务或迁移 hold。"
+      },
+      "parentSource": "// 视频模型导演能力档案：按模型家族确定支持的导演特性（首尾帧/多参考图/音效/最大时长/参考角色限制等）\nimport { VIDEO_MODEL_REGISTRY } from '../video-api';\nimport type { DirectorStyle } from './prompt-compiler';\n\nexport interface VideoModelDirectorProfile {\n  supportsFirstLastFrame: boolean;\n  supportsMultiReference: boolean;\n  supportsAudio: boolean;\n  supportsMotionBrush: boolean;\n  supportsCameraControl: boolean;\n  supportsNegativePrompt: boolean;\n  supportsSeed: boolean;\n  maxDuration: number; // 秒\n  maxReferenceCount: number;\n  maxCharacterRefs: number;\n  cameraMoves: string[];\n  aspectRatios: string[];\n}\n\nconst DEFAULT_PROFILE: VideoModelDirectorProfile = {\n  supportsFirstLastFrame: false,\n  supportsMultiReference: false,\n  supportsAudio: false,\n  supportsMotionBrush: false,\n  supportsCameraControl: false,\n  supportsNegativePrompt: true,\n  supportsSeed: false,\n  maxDuration: 10,\n  maxReferenceCount: 1,\n  maxCharacterRefs: 1,\n  cameraMoves: ['static'],\n  aspectRatios: ['16:9', '9:16', '1:1'],\n};\n\n// 协议级能力默认值（保守）\nconst PROTOCOL_PROFILE: Record<string, Partial<VideoModelDirectorProfile>> = {\n  'dashscope-kling': {\n    supportsFirstLastFrame: true,\n    supportsMultiReference: false,\n    supportsAudio: true,\n    supportsMotionBrush: true,\n    supportsCameraControl: true,\n    maxDuration: 10,\n    maxReferenceCount: 2,\n    maxCharacterRefs: 3,\n    cameraMoves: ['static', 'push_in', 'push_out', 'pan_left', 'pan_right', 'tilt_up', 'tilt_down', 'tracking', 'crane_up', 'crane_down'],\n    aspectRatios: ['16:9', '9:16', '1:1', '21:9', '4:3'],\n  },\n  'volcengine-ark': {\n    supportsFirstLastFrame: true,\n    supportsMultiReference: true,\n    supportsAudio: true,\n    supportsMotionBrush: false,\n    supportsCameraControl: true,\n    maxDuration: 15,\n    maxReferenceCount: 4,\n    maxCharacterRefs: 3,\n    cameraMoves: ['static', 'push_in', 'push_out', 'pan_left', 'pan_right', 'tilt_up', 'tilt_down', 'orbit_left', 'orbit_right', 'zoom_in', 'zoom_out'],\n    aspectRatios: ['16:9', '9:16', '1:1', '21:9', '4:3'],\n  },\n  minimax: {\n    supportsFirstLastFrame: false,\n    supportsMultiReference: false,\n    supportsAudio: true,\n    supportsMotionBrush: false,\n    supportsCameraControl: false,\n    maxDuration: 6,\n    maxReferenceCount: 1,\n    maxCharacterRefs: 1,\n    cameraMoves: ['static'],\n    aspectRatios: ['16:9', '9:16', '1:1'],\n  },\n  vidu: {\n    supportsFirstLastFrame: true,\n    supportsMultiReference: true,\n    supportsAudio: false,\n    supportsMotionBrush: false,\n    supportsCameraControl: false,\n    maxDuration: 8,\n    maxReferenceCount: 4,\n    maxCharacterRefs: 2,\n    cameraMoves: ['static'],\n    aspectRatios: ['16:9', '9:16', '1:1'],\n  },\n  'openai-video': {\n    supportsFirstLastFrame: false,\n    supportsMultiReference: false,\n    supportsAudio: false,\n    supportsMotionBrush: false,\n    supportsCameraControl: false,\n    maxDuration: 20,\n    maxReferenceCount: 1,\n    maxCharacterRefs: 1,\n    cameraMoves: ['static'],\n    aspectRatios: ['16:9', '9:16', '1:1'],\n  },\n  'fal-video': {\n    supportsFirstLastFrame: true,\n    supportsMultiReference: true,\n    supportsAudio: false,\n    supportsMotionBrush: false,\n    supportsCameraControl: false,\n    maxDuration: 13,\n    maxReferenceCount: 3,\n    maxCharacterRefs: 2,\n    cameraMoves: ['static'],\n    aspectRatios: ['16:9', '9:16', '1:1', '21:9'],\n  },\n};\n\nexport function getVideoModelDirectorProfile(modelId: string): VideoModelDirectorProfile {\n  const entry = (VIDEO_MODEL_REGISTRY as unknown as Record<string, { protocol: string; features?: Record<string, boolean>; maxDuration?: number }>)[modelId];\n  const base: VideoModelDirectorProfile = { ...DEFAULT_PROFILE };\n  if (entry) {\n    const protoOverrides = PROTOCOL_PROFILE[entry.protocol] || {};\n    Object.assign(base, protoOverrides);\n    if (entry.maxDuration) base.maxDuration = entry.maxDuration;\n    // 按 features 字段细化开关\n    if (entry.features) {\n      const f = entry.features;\n      if (f.firstLastFrame === false) base.supportsFirstLastFrame = false;\n      if (f.multiReference === false) base.supportsMultiReference = false;\n      if (f.audio === false) base.supportsAudio = false;\n      if (f.cameraControl === false) base.supportsCameraControl = false;\n      if (f.motionBrush === false) base.supportsMotionBrush = false;\n    }\n  }\n  return base;\n}\n\n// 兼容旧 API\nexport function getModelCameraMoveLimit(modelId: string): string[] {\n  return getVideoModelDirectorProfile(modelId).cameraMoves;\n}\nexport function getModelFeatureSupport(modelId: string): Record<string, boolean> {\n  const p = getVideoModelDirectorProfile(modelId);\n  return {\n    firstLastFrame: p.supportsFirstLastFrame,\n    multiReference: p.supportsMultiReference,\n    audio: p.supportsAudio,\n    motionBrush: p.supportsMotionBrush,\n    cameraControl: p.supportsCameraControl,\n    negativePrompt: p.supportsNegativePrompt,\n    seed: p.supportsSeed,\n  };\n}\nexport function getModelMaxReferenceTypes(modelId: string): { total: number; characters: number } {\n  const p = getVideoModelDirectorProfile(modelId);\n  return { total: p.maxReferenceCount, characters: p.maxCharacterRefs };\n}\nexport function getModelAspectRatios(modelId: string): string[] {\n  return getVideoModelDirectorProfile(modelId).aspectRatios;\n}\n\n// 限制常量\nexport const CAPABILITY_LIMITS = {\n  maxShotCount: 8,\n  maxPromptLength: 1500,\n  defaultStyle: 'cinematic' as DirectorStyle,\n};\nexport const CAMERA_MOVE_LIMITS = {\n  all: ['static', 'push_in', 'push_out', 'pan_left', 'pan_right', 'tilt_up', 'tilt_down', 'orbit_left', 'orbit_right', 'zoom_in', 'zoom_out', 'tracking', 'crane_up', 'crane_down', 'handheld', 'dolly'],\n};\nexport const FEATURE_SUPPORT = {\n  shotPlan: true,\n  directorPrompt: true,\n  retakeDiagnosis: true,\n};\nexport const MAX_REFERENCE_TYPES = {\n  default: 4,\n  perModel: true,\n};\n",
+      "sourceAudit": {
+        "path": "docs/testing/evidence/2026-11-21-source-review/review-drama.json",
+        "sha256": "c95fcd839c611c7aa2f788bbecb6b59fd509c2687eec028756f3516e0f4eba3b",
+        "jsonPointer": "/items/43",
+        "markdown": "docs/testing/evidence/2026-11-21-source-review/review-drama.md",
+        "markdownLine": 746
+      },
+      "originalProposalSnapshot": {
+        "path": "src/lib/video-director/model-capabilities.ts",
+        "group": "drama",
+        "auditRef": {
+          "file": "output/canvas-chat-audit/ci-20261121/review-drama.json",
+          "jsonPointer": "/items/43",
+          "sha256": "c95fcd839c611c7aa2f788bbecb6b59fd509c2687eec028756f3516e0f4eba3b",
+          "markdown": "output/canvas-chat-audit/ci-20261121/review-drama.md",
+          "markdownLine": 746
+        },
+        "identity": {
+          "reviewedHead": "29f7e2df5cb53619c2f5401fa587fbea7882b079",
+          "reviewedTree": "5b8a6aae374a19bb3a7dd63e1631ec67de8971d9",
+          "previousReviewedBlob": null,
+          "reviewedBlob": null,
+          "pathLastChangeCommit": "9c8249e9fef309b55152060ce412160ef80456b0",
+          "meaning": "原审版本路径最后变更/删除提交；不得覆盖原历史sourceCommit",
+          "observedWorkingBlob": null,
+          "observedRawWorkingBlob": null,
+          "workingIdentityMethod": "existing_review_record_contract_index_for_clean_workfile_hash_object_for_unstaged_change; autocrlf_raw_bytes_are_not_alone_source_drift",
+          "workingTreeDrift": false,
+          "newCodeReviewed": false
+        },
+        "originalDecision": "reviewed-no-blocker",
+        "proposedSourceDecision": "retirement_source_candidate",
+        "reason": "原审完整读取删除diff并查剩余导入，未见源码阻断；导演层已并入短剧，删除可作退役候选。",
+        "hold": null,
+        "formalAcceptance": {
+          "status": "not_established_by_this_review",
+          "passed": false,
+          "requirements": [
+            "保留当前具体模块的参数/引用测试；不恢复旧导演聚合层；真实供应商兼容仍须验证。"
+          ],
+          "evidenceLimit": "仅重用已获静态审核/历史CI；真实浏览器、隔离数据库、供应商、正式Coze部署各按需另验。源码候选不等于release ready。"
+        },
+        "registration": {
+          "kind": "record_retirement_in_separate_versioned_lifecycle_schema",
+          "state": "proposal_only",
+          "mayRegisterSourceCandidate": true,
+          "eligibleForCurrentBlobProjection": false,
+          "applicationBlockers": [
+            "current_schema_cannot_register_retired_path"
+          ],
+          "allowlistChanged": false,
+          "stage0AlreadyExactAllowed": false,
+          "stage1AlreadyExactAllowed": false,
+          "existingAuthorizations": [],
+          "newAuthorizationProposal": null
+        },
+        "historicalEntries": [],
+        "retainedReview": {
+          "path": "src/lib/video-director/model-capabilities.ts",
+          "stage0Unapproved": true,
+          "previousReviewedBlob": null,
+          "wasRecorded": false,
+          "currentBlob": null,
+          "sourceCommit": "9c8249e9fef309b55152060ce412160ef80456b0",
+          "introductionCommit": "dc5983d916fa61cfe44bd827fd2636cc61b8117a",
+          "pathState": "deleted",
+          "lineCountAtHead": 0,
+          "reviewMethod": "full-deletion-diff-and-remaining-import-search",
+          "reviewedHead": "29f7e2df5cb53619c2f5401fa587fbea7882b079",
+          "change": "删除旧协议级静态导演能力默认表及兼容导出，视频制作改走 drama shot-runner 的模型能力。",
+          "sourceEvidence": [
+            "删除提交 9c8249e9fef309b55152060ce412160ef80456b0 的完整删除 diff 已读",
+            "HEAD 中不存在，currentBlob=null；已搜索 src/tests 无目标导入残留"
+          ],
+          "risk": "不能把不存在文件填旧 blob 放行；需在外部 Stage0 路径保护中按真实迁移评审，此处不修改基线。仅确认本路径删除及新 drama 依赖上下文，未审批 other 组入口。",
+          "findingIds": [],
+          "deletedParentBlob": "5147db1bad7867d1b31e2c9dcbbd800c389f3d2f",
+          "existingTestEvidence": [
+            {
+              "path": "src/__tests__/lib/drama-engine.test.ts",
+              "lines": [
+                116,
+                294
+              ],
+              "summary": "新的参考图/音频/镜头语言参数路径",
+              "executedByReviewer": false,
+              "sourceBlobAtHead": "459625dd742f9918079e748beb3b5cfdfe514b6d",
+              "historicalLogRecords": [
+                {
+                  "log": "output/canvas-chat-audit/ci-20261121/44863279442-136721231942.log",
+                  "line": 8826,
+                  "raw": "2026-11-21T04:08:23.2621120Z  \u001b[32m✓\u001b[39m src/__tests__/lib/drama-engine.test.ts \u001b[2m(\u001b[22m\u001b[2m23 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 43\u001b[2mms\u001b[22m\u001b[39m",
+                  "reportedTestCount": 23,
+                  "commit": "26e021b97bfd92d36210e287ad71f363ff51abb9",
+                  "commitLine": 206,
+                  "qualification": "历史日志记录；本次未执行；对应 commit 不在本地对象库，未验证与当前 blob 相同"
+                }
+              ]
+            },
+            {
+              "path": "src/__tests__/lib/drama-mentions.test.ts",
+              "lines": [
+                52,
+                60
+              ],
+              "summary": "生成请求明确去 @",
+              "executedByReviewer": false,
+              "sourceBlobAtHead": "b7cec0ef7860cad30d8de4e89368c73e7d412dc8",
+              "historicalLogRecords": [
+                {
+                  "log": "output/canvas-chat-audit/ci-20261121/44863279442-136721231994.log",
+                  "line": 4463,
+                  "raw": "2026-11-21T04:05:54.1343662Z  \u001b[32m✓\u001b[39m src/__tests__/lib/drama-mentions.test.ts \u001b[2m(\u001b[22m\u001b[2m5 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 7\u001b[2mms\u001b[22m\u001b[39m",
+                  "reportedTestCount": 5,
+                  "commit": "26e021b97bfd92d36210e287ad71f363ff51abb9",
+                  "commitLine": 206,
+                  "qualification": "历史日志记录；本次未执行；对应 commit 不在本地对象库，未验证与当前 blob 相同"
+                }
+              ]
+            }
+          ],
+          "testsRunByReviewer": false,
+          "decision": "reviewed-no-blocker",
+          "blocking": false,
+          "blockingReason": "已读本路径具体源码/删除 diff 与相关调用/测试证据，未发现本路径新增阻断；仅静态评审，不是运行验收、测试通过或精确 allowlist 写入。"
+        },
+        "existingTestEvidence": [
+          {
+            "path": "src/__tests__/lib/drama-engine.test.ts",
+            "lines": [
+              116,
+              294
+            ],
+            "summary": "新的参考图/音频/镜头语言参数路径",
+            "executedByReviewer": false,
+            "sourceBlobAtHead": "459625dd742f9918079e748beb3b5cfdfe514b6d",
+            "historicalLogRecords": [
+              {
+                "log": "output/canvas-chat-audit/ci-20261121/44863279442-136721231942.log",
+                "line": 8826,
+                "raw": "2026-11-21T04:08:23.2621120Z  \u001b[32m✓\u001b[39m src/__tests__/lib/drama-engine.test.ts \u001b[2m(\u001b[22m\u001b[2m23 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 43\u001b[2mms\u001b[22m\u001b[39m",
+                "reportedTestCount": 23,
+                "commit": "26e021b97bfd92d36210e287ad71f363ff51abb9",
+                "commitLine": 206,
+                "qualification": "历史日志记录；本次未执行；对应 commit 不在本地对象库，未验证与当前 blob 相同"
+              }
+            ]
+          },
+          {
+            "path": "src/__tests__/lib/drama-mentions.test.ts",
+            "lines": [
+              52,
+              60
+            ],
+            "summary": "生成请求明确去 @",
+            "executedByReviewer": false,
+            "sourceBlobAtHead": "b7cec0ef7860cad30d8de4e89368c73e7d412dc8",
+            "historicalLogRecords": [
+              {
+                "log": "output/canvas-chat-audit/ci-20261121/44863279442-136721231994.log",
+                "line": 4463,
+                "raw": "2026-11-21T04:05:54.1343662Z  \u001b[32m✓\u001b[39m src/__tests__/lib/drama-mentions.test.ts \u001b[2m(\u001b[22m\u001b[2m5 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 7\u001b[2mms\u001b[22m\u001b[39m",
+                "reportedTestCount": 5,
+                "commit": "26e021b97bfd92d36210e287ad71f363ff51abb9",
+                "commitLine": 206,
+                "qualification": "历史日志记录；本次未执行；对应 commit 不在本地对象库，未验证与当前 blob 相同"
+              }
+            ]
+          }
+        ],
+        "retirement": {
+          "intent": {
+            "status": "established",
+            "basis": [
+              "upstream-deletion-commit",
+              "current-user-direction"
+            ],
+            "userDirection": "按GitHub最新程序对齐；不恢复旧节点；local数据已保护；破坏性migration禁止执行"
+          },
+          "deletionCommit": "9c8249e9fef309b55152060ce412160ef80456b0",
+          "deletionSubject": "feat(video): make videos only in the drama workbench, and fold the director layer into it",
+          "deletedParentBlob": "5147db1bad7867d1b31e2c9dcbbd800c389f3d2f",
+          "previousReviewedBlob": null,
+          "currentBlob": null,
+          "emptyBlobMustNeverRepresentCurrentFile": true,
+          "historicalDataRisk": "本文件无独立持久化副作用/遗留账务义务的具体证据；共享历史责任由对应存储/任务项单列，不把纯删除一律变成未审源码。",
+          "historicalRiskStatus": "no_path_specific_persistence_blocker_identified",
+          "currentEntry": "/video 短剧工作台及具体prompt-compiler/director-styles/shot-runner能力路径；只表示相关职责",
+          "originalAssertion": "删除旧协议级静态导演能力默认表及兼容导出，视频制作改走 drama shot-runner 的模型能力。",
+          "originalAssertionEvidence": [],
+          "originalAssertionCoverageStatus": "no_legacy_executed_assertion_in_original_record",
+          "replacementEquivalence": "not_claimed",
+          "nonEquivalentGap": "旧聚合/协议默认表/引用拼接不再提供同名兼容；当前短剧能力与具体模块没有被本草案认定为完全等价。",
+          "action": "保留当前具体模块的参数/引用测试；不恢复旧导演聚合层；真实供应商兼容仍须验证。"
+        },
+        "repairReport": []
+      }
+    },
+    {
+      "path": "src/lib/video-director/reference-binding.ts",
+      "schemaVersion": 1,
+      "deletionCommit": "9c8249e9fef309b55152060ce412160ef80456b0",
+      "deletionParent": "738ed3c835fb7a0d602cc17019788460b1e2537b",
+      "deletedParentBlob": "fa19c94c6a33b5392346d6a2ff083dcbf3373231",
+      "reason": "旧 reference-binding 兼容再导出和纯参考文本拼接助手已被上游删除；用户要求沿用当前具体引用实现。",
+      "replacement": {
+        "description": "当前 continuity 声明引用类型，shot-runner 负责参考图选择和请求构造；旧 prompt-compiler 已不在当前树中，不恢复旧同名拼接助手。",
+        "paths": [
+          "src/lib/video-director/continuity.ts",
+          "src/lib/drama/shot-runner.ts"
+        ],
+        "equivalence": "not-claimed"
+      },
+      "obligations": {
+        "status": "none-owned-by-path",
+        "reason": "删除父 blob 是类型/符号再导出及分组字符串构造，没有数据库、文件写入、独立任务状态或账务操作。"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "userDirection": "用户明确要求对齐最新版程序，只正式退役这四条纯源码路径；不恢复旧 UI 或空 stub，不处理其余历史数据、任务、账务或迁移 hold。"
+      },
+      "parentSource": "/**\n * 参考资产语义绑定（兼容导出）\n * 基于 Seedance 2.0 Skill OS 的参考角色设计\n */\n\nexport type {\n  VideoReferenceRole as ReferenceRole,\n  VideoReferenceBinding as ReferenceBinding,\n} from './prompt-compiler';\nexport {\n  REFERENCE_ROLE_LABEL as REFERENCE_ROLE_LABELS,\n  REFERENCE_ROLE_COLOR as REFERENCE_ROLE_DESCRIPTIONS,\n  classifyReferenceByHint as classifyVideoReferenceType,\n  classifyReferenceByHint,\n  REFERENCE_ROLE_LABEL,\n  REFERENCE_ROLE_COLOR,\n} from './prompt-compiler';\n\nimport type { VideoReferenceBinding } from './prompt-compiler';\n\ntype ExtendedVideoReferenceBinding = VideoReferenceBinding & {\n  assetUrl?: string;\n  assetType?: string;\n  type?: string;\n};\nimport { REFERENCE_ROLE_LABEL } from './prompt-compiler';\n\nexport function buildReferenceTagSection(refs: VideoReferenceBinding[]): string {\n  if (!refs || refs.length === 0) return '';\n  const lines: string[] = [];\n  const grouped: Record<string, VideoReferenceBinding[]> = {};\n  for (const r of refs) {\n    const anyR = r as ExtendedVideoReferenceBinding;\n    if (!grouped[r.role]) grouped[r.role] = [];\n    grouped[r.role].push(r);\n    if (!anyR.assetUrl && !anyR.url) {\n      // skip refs without url\n    }\n  }\n  for (const role of Object.keys(grouped)) {\n    const label = (REFERENCE_ROLE_LABEL as Record<string, string>)[role] || role;\n    const urls = grouped[role]\n      .map(r => {\n        const anyR = r as ExtendedVideoReferenceBinding;\n        const url = anyR.assetUrl || anyR.url || '';\n        const type = anyR.assetType || anyR.type || '';\n        return type === 'video' ? `[video]${url}` : url;\n      })\n      .filter(Boolean)\n      .join('; ');\n    if (urls) lines.push(`- ${label}参考: ${urls}`);\n  }\n  return lines.length ? lines.join('\\n') : '';\n}\n",
+      "sourceAudit": {
+        "path": "docs/testing/evidence/2026-11-21-source-review/review-drama.json",
+        "sha256": "c95fcd839c611c7aa2f788bbecb6b59fd509c2687eec028756f3516e0f4eba3b",
+        "jsonPointer": "/items/44",
+        "markdown": "docs/testing/evidence/2026-11-21-source-review/review-drama.md",
+        "markdownLine": 763
+      },
+      "originalProposalSnapshot": {
+        "path": "src/lib/video-director/reference-binding.ts",
+        "group": "drama",
+        "auditRef": {
+          "file": "output/canvas-chat-audit/ci-20261121/review-drama.json",
+          "jsonPointer": "/items/44",
+          "sha256": "c95fcd839c611c7aa2f788bbecb6b59fd509c2687eec028756f3516e0f4eba3b",
+          "markdown": "output/canvas-chat-audit/ci-20261121/review-drama.md",
+          "markdownLine": 763
+        },
+        "identity": {
+          "reviewedHead": "29f7e2df5cb53619c2f5401fa587fbea7882b079",
+          "reviewedTree": "5b8a6aae374a19bb3a7dd63e1631ec67de8971d9",
+          "previousReviewedBlob": null,
+          "reviewedBlob": null,
+          "pathLastChangeCommit": "9c8249e9fef309b55152060ce412160ef80456b0",
+          "meaning": "原审版本路径最后变更/删除提交；不得覆盖原历史sourceCommit",
+          "observedWorkingBlob": null,
+          "observedRawWorkingBlob": null,
+          "workingIdentityMethod": "existing_review_record_contract_index_for_clean_workfile_hash_object_for_unstaged_change; autocrlf_raw_bytes_are_not_alone_source_drift",
+          "workingTreeDrift": false,
+          "newCodeReviewed": false
+        },
+        "originalDecision": "reviewed-no-blocker",
+        "proposedSourceDecision": "retirement_source_candidate",
+        "reason": "原审完整读取删除diff并查剩余导入，未见源码阻断；导演层已并入短剧，删除可作退役候选。",
+        "hold": null,
+        "formalAcceptance": {
+          "status": "not_established_by_this_review",
+          "passed": false,
+          "requirements": [
+            "保留当前具体模块的参数/引用测试；不恢复旧导演聚合层；真实供应商兼容仍须验证。"
+          ],
+          "evidenceLimit": "仅重用已获静态审核/历史CI；真实浏览器、隔离数据库、供应商、正式Coze部署各按需另验。源码候选不等于release ready。"
+        },
+        "registration": {
+          "kind": "record_retirement_in_separate_versioned_lifecycle_schema",
+          "state": "proposal_only",
+          "mayRegisterSourceCandidate": true,
+          "eligibleForCurrentBlobProjection": false,
+          "applicationBlockers": [
+            "current_schema_cannot_register_retired_path"
+          ],
+          "allowlistChanged": false,
+          "stage0AlreadyExactAllowed": false,
+          "stage1AlreadyExactAllowed": false,
+          "existingAuthorizations": [],
+          "newAuthorizationProposal": null
+        },
+        "historicalEntries": [],
+        "retainedReview": {
+          "path": "src/lib/video-director/reference-binding.ts",
+          "stage0Unapproved": true,
+          "previousReviewedBlob": null,
+          "wasRecorded": false,
+          "currentBlob": null,
+          "sourceCommit": "9c8249e9fef309b55152060ce412160ef80456b0",
+          "introductionCommit": "dc5983d916fa61cfe44bd827fd2636cc61b8117a",
+          "pathState": "deleted",
+          "lineCountAtHead": 0,
+          "reviewMethod": "full-deletion-diff-and-remaining-import-search",
+          "reviewedHead": "29f7e2df5cb53619c2f5401fa587fbea7882b079",
+          "change": "删除旧 reference-binding 兼容再导出及参考文本拼接助手，保留具体 prompt-compiler 引用类型。",
+          "sourceEvidence": [
+            "删除提交 9c8249e9fef309b55152060ce412160ef80456b0 的完整删除 diff 已读",
+            "HEAD 中不存在，currentBlob=null；已搜索 src/tests 无目标导入残留"
+          ],
+          "risk": "不能把不存在文件填旧 blob 放行；需在外部 Stage0 路径保护中按真实迁移评审，此处不修改基线。仅确认本路径删除及新 drama 依赖上下文，未审批 other 组入口。",
+          "findingIds": [],
+          "deletedParentBlob": "fa19c94c6a33b5392346d6a2ff083dcbf3373231",
+          "existingTestEvidence": [
+            {
+              "path": "src/__tests__/lib/drama-engine.test.ts",
+              "lines": [
+                116,
+                294
+              ],
+              "summary": "新的参考图/音频/镜头语言参数路径",
+              "executedByReviewer": false,
+              "sourceBlobAtHead": "459625dd742f9918079e748beb3b5cfdfe514b6d",
+              "historicalLogRecords": [
+                {
+                  "log": "output/canvas-chat-audit/ci-20261121/44863279442-136721231942.log",
+                  "line": 8826,
+                  "raw": "2026-11-21T04:08:23.2621120Z  \u001b[32m✓\u001b[39m src/__tests__/lib/drama-engine.test.ts \u001b[2m(\u001b[22m\u001b[2m23 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 43\u001b[2mms\u001b[22m\u001b[39m",
+                  "reportedTestCount": 23,
+                  "commit": "26e021b97bfd92d36210e287ad71f363ff51abb9",
+                  "commitLine": 206,
+                  "qualification": "历史日志记录；本次未执行；对应 commit 不在本地对象库，未验证与当前 blob 相同"
+                }
+              ]
+            },
+            {
+              "path": "src/__tests__/lib/drama-mentions.test.ts",
+              "lines": [
+                52,
+                60
+              ],
+              "summary": "生成请求明确去 @",
+              "executedByReviewer": false,
+              "sourceBlobAtHead": "b7cec0ef7860cad30d8de4e89368c73e7d412dc8",
+              "historicalLogRecords": [
+                {
+                  "log": "output/canvas-chat-audit/ci-20261121/44863279442-136721231994.log",
+                  "line": 4463,
+                  "raw": "2026-11-21T04:05:54.1343662Z  \u001b[32m✓\u001b[39m src/__tests__/lib/drama-mentions.test.ts \u001b[2m(\u001b[22m\u001b[2m5 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 7\u001b[2mms\u001b[22m\u001b[39m",
+                  "reportedTestCount": 5,
+                  "commit": "26e021b97bfd92d36210e287ad71f363ff51abb9",
+                  "commitLine": 206,
+                  "qualification": "历史日志记录；本次未执行；对应 commit 不在本地对象库，未验证与当前 blob 相同"
+                }
+              ]
+            }
+          ],
+          "testsRunByReviewer": false,
+          "decision": "reviewed-no-blocker",
+          "blocking": false,
+          "blockingReason": "已读本路径具体源码/删除 diff 与相关调用/测试证据，未发现本路径新增阻断；仅静态评审，不是运行验收、测试通过或精确 allowlist 写入。"
+        },
+        "existingTestEvidence": [
+          {
+            "path": "src/__tests__/lib/drama-engine.test.ts",
+            "lines": [
+              116,
+              294
+            ],
+            "summary": "新的参考图/音频/镜头语言参数路径",
+            "executedByReviewer": false,
+            "sourceBlobAtHead": "459625dd742f9918079e748beb3b5cfdfe514b6d",
+            "historicalLogRecords": [
+              {
+                "log": "output/canvas-chat-audit/ci-20261121/44863279442-136721231942.log",
+                "line": 8826,
+                "raw": "2026-11-21T04:08:23.2621120Z  \u001b[32m✓\u001b[39m src/__tests__/lib/drama-engine.test.ts \u001b[2m(\u001b[22m\u001b[2m23 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 43\u001b[2mms\u001b[22m\u001b[39m",
+                "reportedTestCount": 23,
+                "commit": "26e021b97bfd92d36210e287ad71f363ff51abb9",
+                "commitLine": 206,
+                "qualification": "历史日志记录；本次未执行；对应 commit 不在本地对象库，未验证与当前 blob 相同"
+              }
+            ]
+          },
+          {
+            "path": "src/__tests__/lib/drama-mentions.test.ts",
+            "lines": [
+              52,
+              60
+            ],
+            "summary": "生成请求明确去 @",
+            "executedByReviewer": false,
+            "sourceBlobAtHead": "b7cec0ef7860cad30d8de4e89368c73e7d412dc8",
+            "historicalLogRecords": [
+              {
+                "log": "output/canvas-chat-audit/ci-20261121/44863279442-136721231994.log",
+                "line": 4463,
+                "raw": "2026-11-21T04:05:54.1343662Z  \u001b[32m✓\u001b[39m src/__tests__/lib/drama-mentions.test.ts \u001b[2m(\u001b[22m\u001b[2m5 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 7\u001b[2mms\u001b[22m\u001b[39m",
+                "reportedTestCount": 5,
+                "commit": "26e021b97bfd92d36210e287ad71f363ff51abb9",
+                "commitLine": 206,
+                "qualification": "历史日志记录；本次未执行；对应 commit 不在本地对象库，未验证与当前 blob 相同"
+              }
+            ]
+          }
+        ],
+        "retirement": {
+          "intent": {
+            "status": "established",
+            "basis": [
+              "upstream-deletion-commit",
+              "current-user-direction"
+            ],
+            "userDirection": "按GitHub最新程序对齐；不恢复旧节点；local数据已保护；破坏性migration禁止执行"
+          },
+          "deletionCommit": "9c8249e9fef309b55152060ce412160ef80456b0",
+          "deletionSubject": "feat(video): make videos only in the drama workbench, and fold the director layer into it",
+          "deletedParentBlob": "fa19c94c6a33b5392346d6a2ff083dcbf3373231",
+          "previousReviewedBlob": null,
+          "currentBlob": null,
+          "emptyBlobMustNeverRepresentCurrentFile": true,
+          "historicalDataRisk": "本文件无独立持久化副作用/遗留账务义务的具体证据；共享历史责任由对应存储/任务项单列，不把纯删除一律变成未审源码。",
+          "historicalRiskStatus": "no_path_specific_persistence_blocker_identified",
+          "currentEntry": "/video 短剧工作台及具体prompt-compiler/director-styles/shot-runner能力路径；只表示相关职责",
+          "originalAssertion": "删除旧 reference-binding 兼容再导出及参考文本拼接助手，保留具体 prompt-compiler 引用类型。",
+          "originalAssertionEvidence": [],
+          "originalAssertionCoverageStatus": "no_legacy_executed_assertion_in_original_record",
+          "replacementEquivalence": "not_claimed",
+          "nonEquivalentGap": "旧聚合/协议默认表/引用拼接不再提供同名兼容；当前短剧能力与具体模块没有被本草案认定为完全等价。",
+          "action": "保留当前具体模块的参数/引用测试；不恢复旧导演聚合层；真实供应商兼容仍须验证。"
+        },
+        "repairReport": []
+      }
+    },
+    {
+      "path": "src/lib/video-panel-events.ts",
+      "schemaVersion": 1,
+      "deletionCommit": "9c8249e9fef309b55152060ce412160ef80456b0",
+      "deletionParent": "738ed3c835fb7a0d602cc17019788460b1e2537b",
+      "deletedParentBlob": "75c43fea075c0149b895bccabf82811e03a85b63",
+      "reason": "六行 wujie:open-video-panel 旧事件桥已随旧视频面板删除，用户明确不恢复旧 UI；旧事件兼容正式退役。",
+      "replacement": {
+        "description": "调用方改用 /video 路由和平台切换入口；不承诺旧插件事件还能唤起原面板，也不以空事件桥冒充兼容。",
+        "paths": [
+          "src/app/video/page.tsx",
+          "src/components/platform/platform-switcher.tsx"
+        ],
+        "equivalence": "not-claimed"
+      },
+      "obligations": {
+        "status": "none-owned-by-path",
+        "reason": "删除父 blob 仅声明事件名并在浏览器 dispatchEvent；没有本路径拥有的数据、任务队列、支付或未完账务。"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "userDirection": "用户明确要求对齐最新版程序，只正式退役这四条纯源码路径；不恢复旧 UI 或空 stub，不处理其余历史数据、任务、账务或迁移 hold。"
+      },
+      "parentSource": "export const VIDEO_PANEL_OPEN_EVENT = 'wujie:open-video-panel';\n\nexport function requestVideoPanelOpen(): void {\n  if (typeof window === 'undefined') return;\n  window.dispatchEvent(new Event(VIDEO_PANEL_OPEN_EVENT));\n}\n",
+      "sourceAudit": {
+        "path": "docs/testing/evidence/2026-11-21-source-review/review-other.json",
+        "sha256": "88949d655c293e2094493ac0ce5d13c03d9b9dc7ffc82321f810b47e886c2555",
+        "jsonPointer": "/entries/82",
+        "markdown": "docs/testing/evidence/2026-11-21-source-review/review-other.md",
+        "markdownLine": 1108
+      },
+      "originalProposalSnapshot": {
+        "path": "src/lib/video-panel-events.ts",
+        "group": "other",
+        "auditRef": {
+          "file": "output/canvas-chat-audit/ci-20261121/review-other.json",
+          "jsonPointer": "/entries/82",
+          "sha256": "88949d655c293e2094493ac0ce5d13c03d9b9dc7ffc82321f810b47e886c2555",
+          "markdown": "output/canvas-chat-audit/ci-20261121/review-other.md",
+          "markdownLine": 1108
+        },
+        "identity": {
+          "reviewedHead": "29f7e2df5cb53619c2f5401fa587fbea7882b079",
+          "reviewedTree": "5b8a6aae374a19bb3a7dd63e1631ec67de8971d9",
+          "previousReviewedBlob": null,
+          "reviewedBlob": null,
+          "pathLastChangeCommit": "9c8249e9fef309b55152060ce412160ef80456b0",
+          "meaning": "原审版本路径最后变更/删除提交；不得覆盖原历史sourceCommit",
+          "observedWorkingBlob": null,
+          "observedRawWorkingBlob": null,
+          "workingIdentityMethod": "existing_review_record_contract_index_for_clean_workfile_hash_object_for_unstaged_change; autocrlf_raw_bytes_are_not_alone_source_drift",
+          "workingTreeDrift": false,
+          "newCodeReviewed": false
+        },
+        "originalDecision": "hold",
+        "proposedSourceDecision": "retirement_source_candidate",
+        "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+        "hold": null,
+        "formalAcceptance": {
+          "status": "not_established_by_this_review",
+          "passed": false,
+          "requirements": [
+            "公告/调用方使用当前平台链接；无需恢复六行事件桥"
+          ],
+          "evidenceLimit": "仅重用已获静态审核/历史CI；真实浏览器、隔离数据库、供应商、正式Coze部署各按需另验。源码候选不等于release ready。"
+        },
+        "registration": {
+          "kind": "record_retirement_in_separate_versioned_lifecycle_schema",
+          "state": "proposal_only",
+          "mayRegisterSourceCandidate": true,
+          "eligibleForCurrentBlobProjection": false,
+          "applicationBlockers": [
+            "current_schema_cannot_register_retired_path"
+          ],
+          "allowlistChanged": false,
+          "stage0AlreadyExactAllowed": false,
+          "stage1AlreadyExactAllowed": false,
+          "existingAuthorizations": [],
+          "newAuthorizationProposal": null
+        },
+        "historicalEntries": [],
+        "retainedReview": {
+          "path": "src/lib/video-panel-events.ts",
+          "stage0Unapproved": true,
+          "previousReviewedBlob": null,
+          "wasRecorded": false,
+          "currentBlob": null,
+          "sourceCommit": "9c8249e9fef309b55152060ce412160ef80456b0",
+          "introductionCommit": [
+            "dc5983d916fa61cfe44bd827fd2636cc61b8117a"
+          ],
+          "disposition": "hold",
+          "reviewStatus": "reviewed-hold",
+          "blocking": true,
+          "reason": "hold：实际删除diff已审；旧功能退役/历史数据或任务保留的对应确认尚缺，不能以新hash盖章。",
+          "historicalEntries": [],
+          "change": "移除wujie:open-video-panel事件桥；当前HEAD无路径，读删除父提交6行并追查引入记录。",
+          "risk": "低到中；旧快捷键/插件事件调用不再打开视频面板。",
+          "testEvidence": [],
+          "testEvidenceLimit": "已读删除diff；未取得直接验证该路径退役/历史恢复的已执行用例结果；其他工作流同名套件不可替代本项证据。",
+          "minimalValidation": "核对现存事件调用方及新短剧入口承接；未运行。",
+          "diffReview": {
+            "method": "HEAD absence checked; introduction queried; deletion-parent source read and git diff parent blob -> empty blob",
+            "from": null,
+            "to": null,
+            "reproduceArgv": [
+              "git",
+              "show",
+              "75c43fea075c0149b895bccabf82811e03a85b63"
+            ]
+          },
+          "deletionProof": {
+            "fromBlob": "75c43fea075c0149b895bccabf82811e03a85b63",
+            "toEmptyBlob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+            "headPathAbsent": true,
+            "emptyBlobIsNotCurrentBlob": true
+          },
+          "introductionEvidence": [
+            {
+              "commit": "dc5983d916fa61cfe44bd827fd2636cc61b8117a",
+              "committedAt": "2026-07-14T22:03:26+08:00",
+              "subject": "fix: V62 canvas stability and toolbar provider routing"
+            }
+          ],
+          "sourceCommitMeaning": "HEAD路径最后变更提交（删除路径为删除提交）；不替换historicalEntries中的原始source/sourceCommit/sourceBlob。",
+          "findingBasis": "static_source_review_with_existing_CI_only",
+          "ciClassification": "Stage0精确路径未授权；无旧review blob不代表本次新引入功能或已证实新回归。",
+          "reviewRecordAction": "hold：不得登记为reviewed或加入允许清单，待本项理由解决后重新审查。",
+          "changeCategory": "deleted",
+          "blockerKind": "retirement-and-history-confirmation"
+        },
+        "existingTestEvidence": [],
+        "retirement": {
+          "intent": {
+            "status": "established",
+            "basis": [
+              "upstream-deletion-commit",
+              "current-user-direction"
+            ],
+            "userDirection": "按GitHub最新程序对齐；不恢复旧节点；local数据已保护；破坏性migration禁止执行"
+          },
+          "deletionCommit": "9c8249e9fef309b55152060ce412160ef80456b0",
+          "deletionSubject": "feat(video): make videos only in the drama workbench, and fold the director layer into it",
+          "deletedParentBlob": "75c43fea075c0149b895bccabf82811e03a85b63",
+          "previousReviewedBlob": null,
+          "currentBlob": null,
+          "emptyBlobMustNeverRepresentCurrentFile": true,
+          "historicalDataRisk": "本文件无独立持久化副作用/遗留账务义务的具体证据；共享历史责任由对应存储/任务项单列，不把纯删除一律变成未审源码。",
+          "historicalRiskStatus": "no_path_specific_persistence_blocker_identified",
+          "currentEntry": "平台 /video 链接与platform-switcher",
+          "originalAssertion": "旧wujie:open-video-panel事件桥；无本路径已执行证据",
+          "originalAssertionEvidence": [],
+          "originalAssertionCoverageStatus": "no_legacy_executed_assertion_in_original_record",
+          "replacementEquivalence": "not_claimed",
+          "nonEquivalentGap": "事件名兼容已撤回，不能声称插件仍能打开原面板",
+          "action": "公告/调用方使用当前平台链接；无需恢复六行事件桥"
+        },
+        "repairReport": []
+      }
+    }
+  ]
+}
