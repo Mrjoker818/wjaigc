@@ -10,7 +10,8 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
 type Theme='gold'|'mono';
 interface Options {admin?:boolean; requireMissing?:boolean; touch?:boolean;holdRecovery?:boolean;catalogLoading?:boolean}
 interface FixtureWindow extends Window {canvasUi:{png:string;mount(theme:Theme,options:Options):void;unmount():void;state:{mounts:number;disposed:boolean;scopeChecks:number;images:unknown[];actions:string[];view:{offsetX:number;offsetY:number;zoom:number}|null;events:Array<{type:string;target:string}>}}}
-interface Session {context:BrowserContext;page:Page;options:Options;errors:string[];counts:Map<string,number>;handlers:Set<Promise<void>>;mounted:boolean;pending:Set<Request>;completed:Set<Request>;failed:Set<Request>;refused:Set<Request>;responseStatus:Map<Request,number>;nativeWaiters:Set<()=>void>;png:Buffer;releaseRecovery:()=>void;recoveryCalls:number}
+type RequestPhase='scenario'|'unmount_requested'|'unmounted'|'draining'|'context_closing';
+interface Session {context:BrowserContext;page:Page;options:Options;errors:string[];counts:Map<string,number>;handlers:Set<Promise<void>>;mounted:boolean;pending:Set<Request>;completed:Set<Request>;failed:Set<Request>;refused:Set<Request>;responseStatus:Map<Request,number>;nativeWaiters:Set<()=>void>;png:Buffer;releaseRecovery:()=>void;recoveryCalls:number;requestPhase:RequestPhase;failureObservations:Map<Request,{phase:RequestPhase;status:number|null;count:number}>}
 const ORIGIN='https://canvas-shell-mobile.invalid';
 const THEMES:readonly Theme[]=['gold','mono'];
 const HELP_FILES=['canvas-overview.jpeg','erase-tool.jpeg','mask-tool.jpeg','remove-bg.jpeg','upscale.jpeg','lang-edit.jpeg','svg-trace.jpeg','extend.jpeg','oh-my-prompt.jpeg'];
@@ -114,11 +115,15 @@ async function session(theme: Theme = 'gold', width: number = 390, height: numbe
     const page = await context.newPage(); page.setDefaultTimeout(1500);
     let releaseRecovery:()=>void=()=>{};const recoveryGate=options.holdRecovery?new Promise<void>(resolve=>{releaseRecovery=resolve;}):Promise.resolve();
     const s: Session = { context, page, options, errors: [], counts: new Map(), handlers: new Set(), mounted: false,
-      pending: new Set(), completed: new Set(), failed: new Set(), refused: new Set(), responseStatus: new Map(), nativeWaiters: new Set(), png: Buffer.alloc(0),releaseRecovery,recoveryCalls:0 }; value = s; live.add(s);
+      pending: new Set(), completed: new Set(), failed: new Set(), refused: new Set(), responseStatus: new Map(), nativeWaiters: new Set(), requestPhase: 'scenario', failureObservations: new Map(), png: Buffer.alloc(0),releaseRecovery,recoveryCalls:0 }; value = s; live.add(s);
     context.on('request', request => s.pending.add(request));
     context.on('response', response => s.responseStatus.set(response.request(),response.status()));
     context.on('requestfinished', request => { s.pending.delete(request); s.completed.add(request); for (const notify of s.nativeWaiters) notify(); });
-    context.on('requestfailed', request => { s.pending.delete(request); s.failed.add(request); for (const notify of s.nativeWaiters) notify(); });
+    context.on('requestfailed', request => {
+      const url = new URL(request.url());
+      s.failureObservations.set(request, { phase: s.requestPhase, status: s.responseStatus.get(request) ?? null, count: s.counts.get(url.pathname + url.search) ?? 0 });
+      s.pending.delete(request); s.failed.add(request); for (const notify of s.nativeWaiters) notify();
+    });
     page.on('pageerror', error => s.errors.push(String(error)));
     page.on('dialog', dialog => { s.errors.push('CANVAS_UI_FIXTURE_UNEXPECTED_DIALOG'); void dialog.dismiss().catch(error => s.errors.push(String(error))); });
     await context.routeWebSocket('**/*', socket => { s.errors.push('CANVAS_UI_FIXTURE_UNKNOWN_WS'); socket.close({ code: 1008, reason: 'Offline fixture forbids WebSockets' }); });
@@ -170,12 +175,18 @@ async function nativeRequestsFinished(s: Session): Promise<void> {
 async function dispose(s: Session, expectedRefusal?: 'http' | 'websocket', cleanupProbe?: () => void): Promise<void> {
   const failures: unknown[] = [];
   try {
-    if (s.mounted) await bounded('unmount', () => s.page.evaluate(() => (window as unknown as FixtureWindow).canvasUi.unmount()));
+    if (s.mounted) {
+      s.requestPhase = 'unmount_requested';
+      await bounded('unmount', () => s.page.evaluate(() => (window as unknown as FixtureWindow).canvasUi.unmount()));
+      s.requestPhase = 'unmounted';
+    }
     cleanupProbe?.(); // Used only by the cleanup-fault selftest, after real unmount.
   } catch (error) { failures.push(error); }
+  s.requestPhase = 'draining';
   try { await bounded('routes', () => Promise.all([...s.handlers])); } catch (error) { failures.push(String(error)); }
   try { await nativeRequestsFinished(s); await bounded('final routes', () => Promise.all([...s.handlers])); } catch (error) { failures.push(String(error)); }
   const unresolvedBeforeClose = s.pending.size !== 0 || s.handlers.size !== 0;
+  s.requestPhase = 'context_closing';
   try { await s.context.close(); contexts.delete(s.context); live.delete(s); } catch (error) { failures.push(String(error)); }
   // Cleanup/lifecycle/allowlist failures can never share the expected-refusal
   // prefix. A boundary selftest must not succeed merely because close failed.
@@ -192,8 +203,9 @@ async function dispose(s: Session, expectedRefusal?: 'http' | 'websocket', clean
   console.log('RM_POSITIVE_INPUT_RECEIPT',JSON.stringify({counts:s.counts.get('/api/task-events')??0,requests:[...s.responseStatus].filter(([request])=>request.url()===ORIGIN+'/api/task-events').map(([request,status])=>({status,finished:s.completed.has(request),failed:s.failed.has(request)}))}));
   const validFailures=expectedRefusal==='http'?failed.length===1&&failed[0].url()===ORIGIN+'/unexpected'&&s.refused.has(failed[0]):failed.length===0;
   if(unresolvedBeforeClose||s.pending.size||!validFailures||JSON.stringify(completed.sort())!==JSON.stringify(expectedCompleted.sort())){
-    console.log('CANVAS_UI_NATIVE_REQUEST_FAILURE_DIAGNOSTIC',JSON.stringify({unresolvedBeforeClose,pending:[...s.pending].map(r=>r.url()),completed,expectedCompleted,failed:failed.map(r=>({url:r.url(),error:r.failure()?.errorText,status:s.responseStatus.get(r)}))}));
-    invalid('CANVAS_UI_FIXTURE_NATIVE_REQUEST_FAILURE');
+    const diagnostic=JSON.stringify({unresolvedBeforeClose,pending:[...s.pending].map(r=>r.url()),completed,expectedCompleted,counts:[...s.counts],failed:failed.map(r=>({url:r.url(),error:r.failure()?.errorText,status:s.responseStatus.get(r),atFailure:s.failureObservations.get(r)}))});
+    console.log('CANVAS_UI_NATIVE_REQUEST_FAILURE_DIAGNOSTIC',diagnostic);
+    invalid('CANVAS_UI_FIXTURE_NATIVE_REQUEST_FAILURE '+diagnostic);
   }
   if (failures.length) throw Error('CANVAS_UI_FIXTURE_CLEANUP_FAILURE: ' + failures.join('; '));
   if (expectedRefusal) {

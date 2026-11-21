@@ -149,6 +149,12 @@ export function getRecoverySubmissionDeadline(
 export function classifyRecoverySubmissionFailure(
   input: RecoverySubmissionFailureInput,
 ): RecoverySubmissionFailureDecision {
+  if (input.responseData?.code === 'GENERATED_IMAGE_PERSISTENCE_FAILED') {
+    return { defer: false, retryDelayMs: 0, taskError: normalizeTaskError(null, {
+      code: 'GENERATED_IMAGE_PERSISTENCE_FAILED', message: '生成图片保存失败',
+      source: 'wujie', retryable: false, requestId: input.requestId,
+    }) };
+  }
   const rawMessage = getRawFailureMessage(input);
   const responseBody = input.responseData ? JSON.stringify(input.responseData) : undefined;
   const classified = classifyApiError(rawMessage, input.status, responseBody);

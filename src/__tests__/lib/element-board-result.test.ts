@@ -32,11 +32,17 @@ function resolved(buffer: Buffer, width: number, height: number) {
   return { buffer, width, height, mimeType: 'image/png' };
 }
 
-const base = { resultUrl: 'https://provider.example.com/board.png', sourceHash: 'a'.repeat(64), modelId: 'gpt-image-2', providerId: 'p' };
+const base = { resultUrl: 'https://provider.example.com/board.png', sourceHash: 'a'.repeat(64), sourceUrl: '/api/serve-upload/element-sources/frozen.png', modelId: 'gpt-image-2', providerId: 'p' };
+let frozen: Buffer;
+function setResult(result: ReturnType<typeof resolved>) {
+  mocks.resolveLayerSourceImage.mockImplementation(async (url: string) => url === base.sourceUrl ? resolved(frozen, 512, 512) : result);
+}
 
 describe('element board quality gate', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    frozen = await sharp({ create: { width: 512, height: 512, channels: 4, background: '#246b53' } }).png().toBuffer();
+    base.sourceHash = createHash('sha256').update(frozen).digest('hex');
     mocks.saveImageFile.mockImplementation((_buffer: Buffer, filename: string) => `/api/serve-upload/element-boards/${filename}`);
   });
 
@@ -48,7 +54,7 @@ describe('element board quality gate', () => {
 
   it('re-hosts a passing transparent board and reports the checks', async () => {
     const buffer = await png(512, 288, true);
-    mocks.resolveLayerSourceImage.mockResolvedValue(resolved(buffer, 512, 288));
+    setResult(resolved(buffer, 512, 288));
     const { finalizeElementBoardResult } = await import('@/lib/element-decomposition/board-result');
 
     const result = await finalizeElementBoardResult({ ...base, background: 'transparent' });
@@ -61,7 +67,7 @@ describe('element board quality gate', () => {
 
   it('rejects an opaque result when transparency was requested but accepts it on light gray', async () => {
     const buffer = await png(512, 512, false);
-    mocks.resolveLayerSourceImage.mockResolvedValue(resolved(buffer, 512, 512));
+    setResult(resolved(buffer, 512, 512));
     const { finalizeElementBoardResult } = await import('@/lib/element-decomposition/board-result');
 
     await expect(finalizeElementBoardResult({ ...base, background: 'transparent' }))

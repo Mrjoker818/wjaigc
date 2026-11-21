@@ -11,14 +11,14 @@ import { chromium, type Browser, type BrowserContext, type Page, type Request } 
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import {acceptsEmptyOwnedProjectsSync} from '@/__tests__/helpers/canvas-toolbar-empty-sync-contract.mjs';
 type Theme='gold'|'mono';
-interface Options {admin?:boolean; requireMissing?:boolean; touch?:boolean;holdRecovery?:boolean;catalogLoading?:boolean;collapsed?:boolean;expectedNavigations?:number}
+interface Options {admin?:boolean; requireMissing?:boolean; touch?:boolean;holdRecovery?:boolean;catalogLoading?:boolean;collapsed?:boolean;expectedNavigations?:number;storageSeed?:Record<string,string>}
 interface FixtureWindow extends Window {canvasUi:{png:string;mount(theme:Theme,options:Options):void;unmount():void;state:{mounts:number;disposed:boolean;scopeChecks:number;images:unknown[];groups:unknown[];actions:string[];view:{offsetX:number;offsetY:number;zoom:number}|null;events:Array<{type:string;target:string}>}}}
 interface Session {projectRevision:number;context:BrowserContext;page:Page;options:Options;errors:string[];counts:Map<string,number>;handlers:Set<Promise<void>>;mounted:boolean;pending:Set<Request>;completed:Set<Request>;failed:Set<Request>;refused:Set<Request>;responseStatus:Map<Request,number>;nativeWaiters:Set<()=>void>;png:Buffer;releaseRecovery:()=>void;recoveryCalls:number}
 const ORIGIN='https://canvas-shell-mobile.invalid';
 const GT_LIMITS:Record<string,number>={'/api/user-data/sync':2,'/api/models?type=all':1,'/api/models?type=image':4,'/api/models?type=chat':4,'/api/models?type=vlm':3,'/api/models?type=video':3,'/api/announcement':1,'/api/user-data/sync?key=projects':1,'/api/user-data/sync?key=chat_agents':3,'/api/user-data/sync?key=chat_sessions':3,'/api/skills?surface=canvas':3};
 // Four bounded reloads reuse exactly the original endpoint whitelist.
 for (const key of Object.keys(GT_LIMITS)) GT_LIMITS[key] *= 4;
-Object.assign(GT_LIMITS, { '/?loginMode=canvas': 4, '/api/upscayl': 4, '/api/models?type=upscaler': 4, '/api/models?type=removebg': 4, '/api/models?type=3d': 4, '/api/session': 8, '/api/auth/me': 8, '/api/task-events': 8 });
+Object.assign(GT_LIMITS, { '/?loginMode=canvas': 4, '/canvas?loginMode=canvas': 3, '/api/upscayl': 4, '/api/models?type=upscaler': 4, '/api/models?type=removebg': 4, '/api/models?type=3d': 4, '/api/session': 8, '/api/auth/me': 8, '/api/task-events': 8 });
 let announcementText = '';
 const HELP_FILES=['canvas-overview.jpeg','erase-tool.jpeg','mask-tool.jpeg','remove-bg.jpeg','upscale.jpeg','lang-edit.jpeg','svg-trace.jpeg','extend.jpeg','oh-my-prompt.jpeg'];
 const ENTRY=String.raw`
@@ -139,7 +139,7 @@ async function session(theme: Theme = 'gold', width: number = 390, height: numbe
           || headers.authorization || headers.cookie || headers['x-api-key'] || headers['api-key'] || headers['idempotency-key']) throw Error('CANVAS_UI_FIXTURE_HTTP_BOUNDARY');
         const key = url.pathname + url.search, count = (s.counts.get(key) ?? 0) + 1; s.counts.set(key, count);
         if (count > (GT_LIMITS[key]??(['/api/session','/api/auth/me','/api/task-events'].includes(key)?6:HELP_FILES.some(file=>key==='/api/help-image?file='+file)?3:1))) throw Error('CANVAS_UI_FIXTURE_HTTP_COUNT ' + key);
-        if (key === '/?loginMode=canvas' && request.isNavigationRequest()) {
+        if ((key === '/?loginMode=canvas' || key === '/canvas?loginMode=canvas') && request.isNavigationRequest()) {
           await route.fulfill({ contentType: 'text/html', body: `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style></head><body style="margin:0;width:100vw;height:100dvh;overflow:hidden"><div id="fixture-root" style="position:relative;width:100%;height:100%"></div></body></html>` }); return;
         }
         if(key==='/api/announcement'){await route.fulfill({json:{success:true,announcement:{enabled:true,text:announcementText,type:'warning',displayMode:'banner'}}});return;}
@@ -159,6 +159,9 @@ async function session(theme: Theme = 'gold', width: number = 390, height: numbe
       s.handlers.add(operation); try { await operation; } finally { s.handlers.delete(operation); }
     });
     await context.addInitScript((text: string) => { if (!localStorage.getItem('dismissed_announcements')) localStorage.setItem('dismissed_announcements', JSON.stringify(['banner:' + text.slice(0, 64)])); }, announcementText);
+    if (options.storageSeed) await context.addInitScript(seed => {
+      for (const [key, value] of Object.entries(seed)) localStorage.setItem(key, value);
+    }, options.storageSeed);
     await context.addInitScript(() => { const actor='omp-mobile-user',user={id:actor,username:'离线用户',password:'',role:'user',apiPermissions:{image:true,chat:true,threeD:true,imageEdit:true,vectorize:true,vlm:true,layer:true,video:true,upscaler:true,removebg:true,audio:true},status:'active',createdAt:1,updatedAt:1};localStorage.setItem('unbounded_ai_current_user',actor);localStorage.setItem('wujie_selected_model',JSON.stringify({model:'bx-provider::bx-image',providerId:'bx-provider'}));localStorage.setItem('unbounded_ai_user_data',JSON.stringify({users:[user],userData:{[actor]:{user,projects:[],apiKeys:[],usageStats:[]}}})); });
     await page.goto(ORIGIN+'/?loginMode=canvas'); await page.addScriptTag({ content: bundle });
     s.png=Buffer.from((await page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.png)).split(',')[1],'base64');
@@ -198,7 +201,7 @@ async function dispose(s: Session, expectedRefusal?: 'http' | 'websocket', clean
   const invalid=(code:string):never=>{if(failures.length)throw new AggregateError([Error(code),...failures],'CANVAS_UI_FIXTURE_VALIDATION_AND_CLEANUP');throw Error(code);};
   const allowed=['/?loginMode=canvas',...Object.keys(GT_LIMITS),'/api/session','/api/auth/me','/api/task-events','/api/upscayl','/api/models?type=upscaler','/api/models?type=removebg','/api/models?type=3d','/logo.png','/api/tasks/recover?projectId=canvas-ui-project',...HELP_FILES.map(file=>'/api/help-image?file='+file)];
   const keys=[...s.counts.keys()];
-  if(s.options.requireMissing || s.counts.get('/?loginMode=canvas')!==(s.options.expectedNavigations ?? 1) || keys.some(k=>!allowed.includes(k)&&!(expectedRefusal==='http'&&k==='/unexpected'))){
+  if(s.options.requireMissing || s.counts.get('/?loginMode=canvas')!==1 || (s.counts.get('/canvas?loginMode=canvas')??0)!==(s.options.expectedNavigations ?? 1)-1 || keys.some(k=>!allowed.includes(k)&&!(expectedRefusal==='http'&&k==='/unexpected'))){
     console.log('CANVAS_UI_FIXTURE_REQUEST_DIAGNOSTIC',JSON.stringify({counts:[...s.counts],errors:s.errors}));
     invalid('CANVAS_UI_FIXTURE_REQUEST_VALIDATION');
   }
@@ -219,6 +222,21 @@ async function dispose(s: Session, expectedRefusal?: 'http' | 'websocket', clean
 }
 
 async function withSession(theme:Theme,width:number,height:number,options:Options,run:(s:Session)=>Promise<void>):Promise<void>{const s=await session(theme,width,height,options);let primary:unknown;try{await run(s);}catch(e){primary=e;}try{await dispose(s);}catch(cleanup){if(primary)throw new AggregateError([primary,cleanup],'CANVAS_UI_FIXTURE_TEST_AND_CLEANUP');throw cleanup;}if(primary)throw primary;}
+
+it('preserves historical user presets and execution receipts when the current canvas mounts', async () => {
+  const storageSeed = {
+    'wujie-node-presets': JSON.stringify([{ id: 'synthetic-preset', name: '原用户预设' }]),
+    'wujie-prompt-snippets': JSON.stringify([{ id: 'synthetic-snippet', prompt: '原用户提示词' }]),
+    'wujie_workflow_exec_state:v2:synthetic-user:original-run': JSON.stringify({ taskId: 'original-task', state: 'pending-review' }),
+    'synthetic-unrelated-preference': 'retain-exact-bytes',
+  };
+  await withSession('gold', 390, 844, { storageSeed }, async s => {
+    const retained = await s.page.evaluate(keys => Object.fromEntries(keys.map(key => [key, localStorage.getItem(key)])), Object.keys(storageSeed));
+    expect(retained).toEqual(storageSeed);
+    expect(s.counts.has('/api/workflow/execute')).toBe(false);
+    expect(s.counts.has('/api/generate')).toBe(false);
+  });
+}, 30_000);
 
 
 

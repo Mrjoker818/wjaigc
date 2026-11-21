@@ -37,8 +37,8 @@ function checkRegisterRateLimit(ip: string): { blocked: boolean; retryAfterSecon
     return { blocked: true, retryAfterSeconds: Math.ceil((entry.lockedUntil - now) / 1000) };
   }
 
-  // 锁定过期，清除记录
-  registerRateLimitMap.delete(key);
+  // 只有真正到期的锁定才能重置；尚未达到阈值的失败必须继续累计。
+  if (entry.lockedUntil > 0) registerRateLimitMap.delete(key);
   return { blocked: false, retryAfterSeconds: 0 };
 }
 

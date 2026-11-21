@@ -13,13 +13,10 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 const user: User = { id: 'synthetic-user', name: 'Synthetic', createdAt: 1, updatedAt: 1 };
-const returnedId = 'workflow-return:synthetic-placement';
-const added = '持久化期间新增的合成消息';
-const makeTask = (alreadyReturned = false): SimpleChatTask => ({
+const makeTask = (): SimpleChatTask => ({
   id: 'task-a', projectId: 'project-a', name: 'Synthetic A',
   messages: [
     { id: 'existing', role: 'user', content: '合成原消息', createdAt: 1 },
-    ...(alreadyReturned ? [{ id: returnedId, role: 'assistant' as const, content: '已有工作流结果', createdAt: 1 }] : []),
   ],
   model: 'synthetic-model', providerId: 'synthetic-provider', createdAt: 1, updatedAt: 1,
 });
@@ -39,9 +36,9 @@ type FixtureState = {
   requests: string[];
   captureParent: (tasks: Record<string, SimpleChatTask>) => void;
 };
-function createFixture(alreadyReturned = false): FixtureState {
+function createFixture(): FixtureState {
   const state: FixtureState = { gate: deferred<void>(), chatGate: deferred<Response>(), updates: [], persisted: [],
-    parent: { 'project-a': makeTask(alreadyReturned), 'project-b': structuredClone(taskB) }, requests: [],
+    parent: { 'project-a': makeTask(), 'project-b': structuredClone(taskB) }, requests: [],
     captureParent: tasks => { state.parent = tasks; } };
   return state;
 }
@@ -92,10 +89,6 @@ function Fixture({ state }: { state: FixtureState }) {
 function setup(state: FixtureState, mutateSearch?: (search: string) => string): void {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input); state.requests.push(`${init?.method || 'GET'} ${url}`);
-    if (url === '/api/assets/transfer' && init?.method === 'POST') return response({
-      url: '/synthetic-image.png', assetId: 'synthetic-asset', assetVersionId: 'synthetic-version-result',
-      placementId: 'synthetic-placement', entityId: 'workflow-return:synthetic-execution:synthetic-output',
-    });
     if (url === '/api/simple-chat/chat' && init?.method === 'POST') return state.chatGate.promise;
     if (url === '/api/models?type=chat') return response({ models: [{ id: 'synthetic-model', name: 'Synthetic', providerId: 'synthetic-provider' }], providers: [{ id: 'synthetic-provider', name: 'Synthetic' }] });
     if (url === '/api/models?type=image') return response({ models: [], providers: [] });
@@ -103,20 +96,10 @@ function setup(state: FixtureState, mutateSearch?: (search: string) => string): 
     if (url === '/api/simple-chat/memory') return response({ memories: [] });
     throw new Error(`Unexpected fetch blocked: ${url}`);
   }));
-  window.history.replaceState(null, '', '/simple-chat?assetProjectId=synthetic-asset-project&workflowVersionId=synthetic-source&workflowId=synthetic-workflow&workflowExecutionId=synthetic-execution&workflowOutputNodeId=synthetic-output&workflowOutputLabel=synthetic-result');
+  window.history.replaceState(null, '', '/simple-chat');
   if (mutateSearch) window.history.replaceState(null, '', `/simple-chat${mutateSearch(window.location.search)}`);
   render(<Fixture state={state} />);
 }
-async function sendWhilePending(state: FixtureState): Promise<void> {
-  await waitFor(() => expect(state.persisted).toHaveLength(1));
-  expect(state.persisted[0].messages.filter(message => message.id === returnedId)).toHaveLength(1);
-  fireEvent.change(screen.getByPlaceholderText('输入消息，Enter 发送，支持 Ctrl+V 粘贴图片'), { target: { value: added } });
-  fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
-  await screen.findByText(added);
-  await waitFor(() => expect(state.requests).toContain('POST /api/simple-chat/chat'));
-  expect(state.updates.some(value => value.messages.some(message => message.content === added))).toBe(false);
-}
-
 beforeEach(() => {
   const values = new Map<string, string>();
   vi.stubGlobal('localStorage', { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value), removeItem: (key: string) => values.delete(key), clear: () => values.clear() });
@@ -126,7 +109,7 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-describe('workflow return while persistence is pending', () => {
+describe('chat account, draft and attachment isolation', () => {
   it('shows the current project messages when projects use the same task id', async () => {
     const state = createFixture();
     state.parent['project-b'] = { ...state.parent['project-b'], id: 'task-a' };
@@ -287,159 +270,98 @@ describe('workflow return while persistence is pending', () => {
     expect(await screen.findByAltText('normal-late.png')).not.toBeNull();
   });
 
-  it('binds workflow asset transfer to the active account', async () => {
-    const state = createFixture(); setup(state);
-    try {
-      await waitFor(() => expect(state.persisted).toHaveLength(1));
-      const transfer = vi.mocked(fetch).mock.calls.find(([input]) => String(input) === '/api/assets/transfer');
-      expect(transfer).toBeDefined();
-      expect(new Headers(transfer?.[1]?.headers).get('x-wujie-expected-actor-id')).toBe(user.id);
-    } finally {
-      await act(async () => { state.gate.resolve(); await state.gate.promise; });
-    }
+});
+
+// 20b4fd5e (2026-11-17) retired the inbound workflow URL consumer, including
+// transfer, return-message persistence and URL acknowledgement. Keep the ten
+// independent concurrency tests above; do not reinstate the deleted protocol.
+// Per-case retirement and current bridge/send-scope coverage (including gaps):
+// output/canvas-chat-audit/ci-20261121/f05/report.md
+const retiredSearch = '?assetProjectId=synthetic-asset-project&workflowVersionId=synthetic-source&workflowId=synthetic-workflow&workflowExecutionId=synthetic-execution&workflowOutputNodeId=synthetic-output&workflowOutputLabel=synthetic-result&unrelated=keep';
+
+describe('retired inbound workflow URLs have no import side effects', () => {
+  it.each([
+    ['former complete intent', retiredSearch],
+    ['sourceVersionId alias', retiredSearch.replace('workflowVersionId=', 'sourceVersionId=')],
+    ['conflicting version aliases', `${retiredSearch}&sourceVersionId=another-version`],
+    ['another target task', `${retiredSearch}&projectId=project-a&taskId=task-other`],
+  ])('does not transfer, persist or insert messages for %s', async (_label, search) => {
+    const state = createFixture();
+    const original = structuredClone(state.parent);
+    setup(state, () => `${search}#retained`);
+    const originalUrl = window.location.href;
+    await screen.findByText('合成原消息');
+    await waitFor(() => expect(state.requests).toContain('GET /api/models?type=chat'));
+    await act(async () => {});
+
+    expect(state.requests.filter(request => !request.startsWith('GET '))).toEqual([]);
+    expect(state.persisted).toEqual([]);
+    expect(state.parent['project-a'].messages).toEqual(original['project-a'].messages);
+    expect(state.parent['project-b'].messages).toEqual(original['project-b'].messages);
+    expect(document.querySelectorAll('[data-chat-message-id]')).toHaveLength(1);
+    expect(window.location.href).toBe(originalUrl);
   });
 
-  it('does not apply an old workflow return after the active account changes', async () => {
-    const state = createFixture(); setup(state);
-    await waitFor(() => expect(state.persisted).toHaveLength(1));
-    expect(state.parent['project-a'].messages.some(message => message.id === returnedId)).toBe(true);
-    // The new account loads its own messages even when the project and task IDs match.
+  it('keeps the old URL inert across account and project changes without clearing a draft', async () => {
+    const state = createFixture();
+    setup(state, () => retiredSearch);
+    const originalUrl = window.location.href;
+    await screen.findByText('合成原消息');
     fireEvent.click(screen.getByRole('button', { name: '切换账号并载入消息' }));
     await screen.findByText('另一账号原消息');
-    await act(async () => { state.gate.resolve(); await state.gate.promise; });
-    expect(screen.queryByText('工作流结果已返回：synthetic-result')).toBeNull();
-    expect(state.parent['project-a'].messages.map(message => message.content)).toEqual(['另一账号原消息']);
-    expect(state.requests.filter(request => request === 'POST /api/assets/transfer')).toHaveLength(1);
-    expect(window.location.search).toContain('workflowExecutionId=synthetic-execution');
-  });
-
-  it.each([false, true])('keeps the new message and one return in UI and parent (already present: %s)', async alreadyReturned => {
-    const state = createFixture(alreadyReturned); setup(state);
-    await sendWhilePending(state);
-    await act(async () => { state.gate.resolve(); await state.gate.promise; });
-    await waitFor(() => {
-      expect(screen.queryByText(added)).not.toBeNull();
-      expect(state.parent['project-a'].messages.some(message => message.content === added)).toBe(true);
-      expect(state.parent['project-a'].messages.filter(message => message.id === returnedId)).toHaveLength(1);
-    });
-    expect(document.querySelectorAll(`[data-chat-message-id="${returnedId}"]`)).toHaveLength(1);
-  });
-
-  it('keeps the persistence guard until an existing return is acknowledged', async () => {
-    const state = createFixture(true); setup(state);
-    try {
-      await sendWhilePending(state);
-      fireEvent.click(screen.getByRole('button', { name: '深度' }));
-      expect(state.updates.some(value => value.messages.some(message => message.content === added))).toBe(false);
-    } finally {
-      await act(async () => { state.gate.resolve(); await state.gate.promise; });
-    }
-    await waitFor(() => expect(state.parent['project-a'].messages.some(message => message.content === added)).toBe(true));
-    expect(state.parent['project-a'].reasoningEffort).toBe('high');
-  });
-
-  it('does not replace the active messages or clear return parameters when persistence rejects', async () => {
-    const state = createFixture(); setup(state);
-    await sendWhilePending(state);
-    await act(async () => { state.gate.reject(new Error('synthetic flush failure')); await state.gate.promise.catch(() => undefined); });
-    expect(screen.queryByText(added)).not.toBeNull();
-    expect(screen.queryByText('工作流结果已返回：synthetic-result')).toBeNull();
-    expect(window.location.search).toContain('workflowExecutionId=synthetic-execution');
-    expect(state.persisted).toHaveLength(1);
-  });
-
-  it('preserves a newer workflow return URL when the previous save completes', async () => {
-    const state = createFixture(); setup(state);
-    await waitFor(() => expect(state.persisted).toHaveLength(1));
-    const newer = window.location.search.replace('workflowExecutionId=synthetic-execution', 'workflowExecutionId=synthetic-new-execution');
-    window.history.replaceState(null, '', `/simple-chat${newer}&unrelated=keep`);
-    await act(async () => { state.gate.resolve(); await state.gate.promise; });
-    expect(window.location.search).toContain('workflowExecutionId=synthetic-new-execution');
-    expect(window.location.search).toContain('unrelated=keep');
-  });
-
-  it('clears only the completed return parameters when the intent is unchanged', async () => {
-    const state = createFixture(); setup(state);
-    await waitFor(() => expect(state.persisted).toHaveLength(1));
-    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}&unrelated=keep`);
-    await act(async () => { state.gate.resolve(); await state.gate.promise; });
-    expect(window.location.search).not.toContain('workflowExecutionId=');
-    expect(window.location.search).toContain('unrelated=keep');
-  });
-
-  it('clears a completed sourceVersionId alias without touching unrelated parameters', async () => {
-    const state = createFixture();
-    setup(state, search => search.replace('workflowVersionId=', 'sourceVersionId=') + '&unrelated=keep');
-    await waitFor(() => expect(state.persisted).toHaveLength(1));
-    await act(async () => { state.gate.resolve(); await state.gate.promise; });
-    expect(window.location.search).not.toContain('sourceVersionId=');
-    expect(window.location.search).not.toContain('workflowExecutionId=');
-    expect(window.location.search).toContain('unrelated=keep');
-  });
-
-  it('keeps the return when the target task changes during persistence', async () => {
-    const state = createFixture(); setup(state, search => `${search}&projectId=project-a&taskId=task-a`);
-    await waitFor(() => expect(state.persisted).toHaveLength(1));
-    window.history.replaceState(null, '', `/simple-chat${window.location.search.replace('taskId=task-a', 'taskId=task-new')}`);
-    await act(async () => { state.gate.resolve(); await state.gate.promise; });
-    expect(window.location.search).toContain('workflowExecutionId=synthetic-execution');
-    expect(window.location.search).toContain('taskId=task-new');
-  });
-
-  it('clears the return when the page only fills in the current project and task', async () => {
-    const state = createFixture(); setup(state);
-    await waitFor(() => expect(state.persisted).toHaveLength(1));
-    window.history.replaceState(null, '', `/simple-chat${window.location.search}&projectId=project-a&taskId=task-a`);
-    await act(async () => { state.gate.resolve(); await state.gate.promise; });
-    expect(window.location.search).not.toContain('workflowExecutionId=');
-    expect(window.location.search).toContain('projectId=project-a');
-    expect(window.location.search).toContain('taskId=task-a');
-  });
-
-  it('rejects conflicting version aliases before transferring or saving a result', async () => {
-    const state = createFixture(); setup(state, search => `${search}&sourceVersionId=another-version`);
-    await screen.findByText('工作流返回参数存在冲突，未处理。请返回工作流重新发送。');
-    expect(state.requests).not.toContain('POST /api/assets/transfer');
-    expect(state.persisted).toHaveLength(0);
-    expect(window.location.search).toContain('sourceVersionId=another-version');
-    expect(window.location.search).toContain('workflowExecutionId=synthetic-execution');
-  });
-
-  it('does not transfer a return addressed to a different task', async () => {
-    const state = createFixture();
-    setup(state, search => `${search}&projectId=project-a&taskId=task-other`);
-    await screen.findByText('合成原消息');
-    expect(state.requests).not.toContain('POST /api/assets/transfer');
-    expect(state.persisted).toHaveLength(0);
-    expect(window.location.search).toContain('workflowExecutionId=synthetic-execution');
-  });
-
-  it('does not persist an old return to another project with the same task ID', async () => {
-    const state = createFixture();
-    state.parent['project-b'] = { ...structuredClone(taskB), id: 'task-a' };
-    const bBefore = structuredClone(state.parent['project-b']);
-    setup(state);
-    await sendWhilePending(state);
-    window.history.replaceState(null, '', '/simple-chat');
-    fireEvent.click(screen.getByRole('button', { name: '切换到合成项目B' }));
-    expect(screen.getByTestId('fixture-project').textContent).toBe('project-b');
-    await act(async () => { state.gate.resolve(); await state.gate.promise; });
-    expect(state.persisted).toHaveLength(1);
-    expect(state.persisted[0].projectId).toBe('project-a');
-    expect(state.parent['project-b']).toEqual(bBefore);
-    expect(screen.queryByText('工作流结果已返回：synthetic-result')).toBeNull();
-  });
-
-  it('does not apply an old completion after the user switches projects', async () => {
-    const state = createFixture(); setup(state);
-    await sendWhilePending(state);
-    // Isolate the already-started receipt; do not create a second intent for project B.
-    window.history.replaceState(null, '', '/simple-chat');
+    const placeholder = '输入消息，Enter 发送，支持 Ctrl+V 粘贴图片';
+    fireEvent.change(screen.getByPlaceholderText(placeholder), { target: { value: '当前账号草稿' } });
     fireEvent.click(screen.getByRole('button', { name: '切换到合成项目B' }));
     await screen.findByText('项目B原消息');
-    await act(async () => { state.gate.resolve(); await state.gate.promise; });
-    expect(screen.queryByText('项目B原消息')).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '切回合成项目A' }));
+    await screen.findByText('另一账号原消息');
+    await act(async () => {});
+
+    expect((screen.getByPlaceholderText(placeholder) as HTMLTextAreaElement).value).toBe('当前账号草稿');
+    expect(state.parent['project-a'].messages.map(message => message.content)).toEqual(['另一账号原消息']);
     expect(state.parent['project-b'].messages).toEqual(taskB.messages);
-    expect(state.parent['project-b'].messages.some(message => message.id === returnedId || message.content === added)).toBe(false);
+    expect(state.requests.filter(request => !request.startsWith('GET '))).toEqual([]);
+    expect(state.persisted).toEqual([]);
+    expect(window.location.href).toBe(originalUrl);
+  });
+
+  it('allows ordinary sending and stopping while retaining the old URL and newer draft', async () => {
+    const state = createFixture();
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(value): void { controller = value; },
+      cancel(): void { cancelled = true; },
+    });
+    const emit = (content: string): void => {
+      controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ type: 'text', content })}\n\n`));
+    };
+    state.chatGate.resolve(new Response(body, { headers: { 'Content-Type': 'text/event-stream' } }));
+    setup(state, () => retiredSearch);
+    const originalUrl = window.location.href;
+    const placeholder = '输入消息，Enter 发送，支持 Ctrl+V 粘贴图片';
+    await screen.findByText('合成原消息');
+    fireEvent.change(screen.getByPlaceholderText(placeholder), { target: { value: '普通聊天请求' } });
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
+    await waitFor(() => expect(state.requests).toContain('POST /api/simple-chat/chat'));
+    await act(async () => { emit('停止前的回答'); });
+    await screen.findByText('停止前的回答');
+    fireEvent.change(screen.getByPlaceholderText(placeholder), { target: { value: '停止期间的新草稿' } });
+    fireEvent.click(screen.getByRole('button', { name: '停止生成' }));
+    const chatRequest = vi.mocked(fetch).mock.calls.find(([input]) => String(input) === '/api/simple-chat/chat');
+    expect(chatRequest?.[1]?.signal?.aborted).toBe(true);
+    // Release the pending read after abort; the real SSE consumer must discard it.
+    await act(async () => { emit('停止后不应追加的回答'); });
+    await screen.findByRole('button', { name: '发送消息' });
+    await waitFor(() => expect(cancelled).toBe(true));
+
+    expect(screen.queryByText('停止后不应追加的回答')).toBeNull();
+    expect((screen.getByPlaceholderText(placeholder) as HTMLTextAreaElement).value).toBe('停止期间的新草稿');
+    await waitFor(() => expect(state.parent['project-a'].messages.map(message => message.content))
+      .toEqual(['合成原消息', '普通聊天请求', '停止前的回答']));
+    expect(state.parent['project-a'].messages.at(-1)?.status).toBe('completed');
+    expect(state.requests.filter(request => !request.startsWith('GET '))).toEqual(['POST /api/simple-chat/chat']);
+    expect(state.persisted).toEqual([]);
+    expect(window.location.href).toBe(originalUrl);
   });
 });

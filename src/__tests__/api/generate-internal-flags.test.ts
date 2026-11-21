@@ -63,6 +63,7 @@ vi.mock('@/lib/op-log', async original => ({
 // Intentionally real: source resolution, secret verification, and the complete route.
 import { getInternalRequestHeaders } from '@/lib/api-auth';
 import { POST } from '@/app/api/generate/route';
+import { classifyRecoverySubmissionFailure } from '@/lib/task-core/recovery-submission';
 
 type Caller = 'cookie-user' | 'cookie-admin' | 'desktop-token' | 'missing-secret-cookie'
   | 'wrong-secret-cookie' | 'forged-strict-cookie' | 'internal' | 'anonymous'
@@ -252,5 +253,70 @@ describe('generate internal flags through real API authentication', () => {
       taskId: 'offline-provider-task', userId: 'user-1', creditCost: credits ? 0 : 7,
     }));
     expect(boundary.database).not.toHaveBeenCalled();
+  });
+
+  describe('internal inline output publication', () => {
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+    function prepareDirectProvider(): void {
+      const provider = { id: 'offline-provider', name: 'Offline', type: 'image', modelType: 'image',
+        apiKey: 'offline-key', baseUrl: 'https://provider.invalid', selectedModels: ['offline-model'],
+        isEnabled: true, createdAt: 1, updatedAt: 1 };
+      boundary.provider.mockResolvedValue(provider);
+      boundary.providerForModel.mockResolvedValue(provider);
+      boundary.allProviders.mockResolvedValue([{ provider, models: ['offline-model'] }]);
+      boundary.model.mockResolvedValue({ providerId: 'offline-provider', modelId: 'offline-model',
+        kind: 'image', sourceType: 'image', protocol: 'openai', executionMode: 'async',
+        allowedRatios: ['1:1'], allowedSizes: [], qualityOptions: [], maxOutputs: 1,
+        supportsReferenceImages: false, supportsMask: false, supportedOperations: ['text-to-image'],
+        outputKinds: ['png'], capabilitySources: {} });
+      boundary.fetch.mockResolvedValue(Response.json({ data: [{ b64_json: png }] }));
+    }
+    function submitInline(): Promise<Response> {
+      return request('internal', { _skipCredits: true, _skipCloudTaskPersistence: true });
+    }
+    it('waits for the durable URL before publishing a completed registry result', async () => {
+      prepareDirectProvider();
+      let release!: (url: string) => void;
+      boundary.persistImage.mockReturnValue(new Promise<string>(resolve => { release = resolve; }));
+      const pending = submitInline();
+      await vi.waitFor(() => expect(boundary.persistImage).toHaveBeenCalledTimes(1));
+      expect(boundary.register).not.toHaveBeenCalled();
+      expect(boundary.progress).not.toHaveBeenCalled();
+      const url = '/api/serve-upload/generate/owned-inline.png';
+      release(url);
+      const response = await pending;
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ success: true, directImageUrls: [url], taskIds: [expect.any(String)] });
+      expect(boundary.progress).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+        status: 'completed', result: expect.objectContaining({ imageUrl: url }),
+      }));
+      expect(boundary.persistImage).toHaveBeenCalledTimes(1);
+      expect(boundary.fetch).toHaveBeenCalledTimes(1);
+      expect(boundary.consume).not.toHaveBeenCalled();
+      expect(boundary.submitted).not.toHaveBeenCalled();
+      expect(boundary.database).not.toHaveBeenCalled();
+    });
+    it.each([null, `data:image/png;base64,${png}`])('refuses an unpublished inline output when storage returns %s', async saved => {
+      prepareDirectProvider();
+      boundary.persistImage.mockResolvedValue(saved);
+      const response = await submitInline();
+      expect(response.status).toBe(500);
+      const payload = await response.json();
+      expect(payload).toMatchObject({ success: false });
+      const recovery = classifyRecoverySubmissionFailure({
+        status: response.status, responseData: payload, attemptCount: 1, requestId: 'owned-inline-output',
+      });
+      expect(recovery.defer).toBe(false);
+      expect(recovery.taskError).toMatchObject({
+        code: 'GENERATED_IMAGE_PERSISTENCE_FAILED', source: 'wujie', retryable: false,
+      });
+      expect(boundary.register).not.toHaveBeenCalled();
+      expect(boundary.progress).not.toHaveBeenCalled();
+      expect(boundary.fetch).toHaveBeenCalledTimes(1);
+      expect(boundary.persistImage).toHaveBeenCalledTimes(1);
+      expect(boundary.consume).not.toHaveBeenCalled();
+      expect(boundary.submitted).not.toHaveBeenCalled();
+      expect(boundary.database).not.toHaveBeenCalled();
+    });
   });
 });

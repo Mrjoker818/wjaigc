@@ -64,6 +64,44 @@ async function ensureLedger(client) {
   `);
 }
 
+/** Retiring an entry point is not permission to discard saved data or publication receipts. */
+export async function assertWorkflowRetirementSafe(client, version) {
+  if (version !== '20261118_wj_remove_node_workflows.sql') return;
+  const names = ['wujie_user_data', 'wujie_projects', 'wujie_workflow_edit_outputs', 'wujie_workflow_edit_publications'];
+  const { rows: tables } = await client.query(`
+    SELECT c.relname AS table_name, n.nspname AS schema_name, c.relkind AS relation_kind
+      FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+     WHERE c.oid IN (SELECT pg_catalog.to_regclass(name)::oid FROM pg_catalog.unnest($1::text[]) names(name))
+     ORDER BY c.relname
+  `, [names]);
+  if (tables.some(table => !['r', 'p'].includes(table.relation_kind))) {
+    throw new Error('WORKFLOW_RETIREMENT_RELATION_REQUIRES_REVIEW: unexpected relation type must be reviewed before this migration');
+  }
+  const { rows: [settings] } = await client.query("SELECT current_setting('lock_timeout') AS lock_timeout");
+  const quote = value => '"' + String(value).replaceAll('"', '""') + '"';
+  try {
+    await client.query("SELECT set_config('lock_timeout', '2000', true)");
+    for (const table of tables) {
+      if (!names.includes(table.table_name)) throw new Error('Unexpected workflow retirement relation');
+      await client.query(`LOCK TABLE ${quote(table.schema_name)}.${quote(table.table_name)} IN ACCESS EXCLUSIVE MODE`);
+    }
+    for (const table of tables) {
+      const relation = `${quote(table.schema_name)}.${quote(table.table_name)}`;
+      const condition = table.table_name === 'wujie_user_data'
+        ? `WHERE data_key LIKE 'workflow\\_%' ESCAPE '\\'
+           OR (data_key = 'projects' AND EXISTS (
+             SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(data_value) = 'array' THEN data_value ELSE '[]'::jsonb END) item(value)
+              WHERE jsonb_typeof(item.value->'metadata') = 'object' AND (item.value->'metadata') ? 'workflow'
+           ))`
+        : table.table_name === 'wujie_projects' ? "WHERE metadata ? 'workflow'" : '';
+      const { rows: [result] } = await client.query(`SELECT EXISTS (SELECT 1 FROM ${relation} ${condition}) AS has_history`);
+      if (result?.has_history !== false) throw new Error('WORKFLOW_RETIREMENT_HISTORY_REQUIRES_REVIEW: saved workflows or publication receipts must be preserved before this migration');
+    }
+  } finally {
+    await client.query("SELECT set_config('lock_timeout', $1, true)", [settings.lock_timeout]).catch(() => undefined);
+  }
+}
+
 export async function applyMigrations() {
   const client = new Client(connectionOptions(getConnectionString()));
   await client.connect();
@@ -95,6 +133,7 @@ export async function applyMigrations() {
           continue;
         }
 
+        await assertWorkflowRetirementSafe(client, version);
         await client.query(contents.toString('utf8'));
         await client.query(
           'INSERT INTO wujie_schema_migrations(version, checksum) VALUES ($1, $2)',

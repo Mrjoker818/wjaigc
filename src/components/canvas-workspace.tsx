@@ -304,23 +304,8 @@ function getInitialWorkspaceMode(): WorkspaceMode {
   return getInitialWorkspaceModeFromSearch(window.location.search);
 }
 
-// 节点模式已下线，清掉它留在浏览器里的预设、片段和执行状态。
-const RETIRED_NODE_MODE_STORAGE_KEYS = ['wujie-node-presets', 'wujie-prompt-snippets'];
-const RETIRED_NODE_MODE_STORAGE_PREFIX = 'wujie_workflow_exec_state:v2:';
-
-function clearRetiredNodeModeStorage(): void {
-  try {
-    for (const key of RETIRED_NODE_MODE_STORAGE_KEYS) window.localStorage.removeItem(key);
-    const staleKeys: string[] = [];
-    for (let index = 0; index < window.localStorage.length; index += 1) {
-      const key = window.localStorage.key(index);
-      if (key?.startsWith(RETIRED_NODE_MODE_STORAGE_PREFIX)) staleKeys.push(key);
-    }
-    for (const key of staleKeys) window.localStorage.removeItem(key);
-  } catch {
-    // Storage can be unavailable in private mode; nothing to clean up then.
-  }
-}
+// Retired entry points do not authorize deleting historical user presets or
+// execution receipts. Leave that storage intact for an explicit recovery/export.
 
 function normalizeQuickCreateModels(data: QuickCreateModelsResponse): QuickCreateModelCandidate[] {
   const providerNames = new Map(
@@ -1286,10 +1271,6 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
   const hasActiveCanvasTasks = images.some(img => shouldPersistProcessingPlaceholder(img) || img.processing?.status === 'processing');
 
   // 安全切换模式：有进行中任务时弹窗确认
-  useEffect(() => {
-    clearRetiredNodeModeStorage();
-  }, []);
-
   const safeSwitchMode = useCallback((targetMode: 'drama' | 'dashboard') => {
     if (hasActiveCanvasTasks) {
       setPendingModeSwitch(targetMode);

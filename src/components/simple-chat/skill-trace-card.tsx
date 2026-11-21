@@ -21,7 +21,7 @@ export function SkillTraceCard({ skill, content, finished, pdfGenerationStatus, 
 }) {
   const steps = skill.id === 'pdf-master' ? SIMPLE_CHAT_PDF_STEPS : SKILL_FILE_STEPS;
   const statuses = skill.id === 'pdf-master' ? deriveSimpleChatPdfSteps(content, finished, pdfGenerationStatus)
-    : isSimpleChatFileSkill(skill.id) ? deriveSkillFileSteps(content, finished) : null;
+    : isSimpleChatFileSkill(skill.id) ? deriveSkillFileSteps(content, finished, skill.id) : null;
   return (
     <section aria-label={`技能：${skill.name}`} data-testid="skill-trace" className="mb-2 text-xs">
       <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-muted-foreground">
@@ -46,7 +46,7 @@ export function SkillTraceCard({ skill, content, finished, pdfGenerationStatus, 
                   {status === 'failed' && <X className="h-2.5 w-2.5" strokeWidth={3} />}
                   {status === 'running' && <span className="h-1.5 w-1.5 rounded-full bg-primary motion-safe:animate-pulse" />}
                 </span>
-                {label}
+                {skill.id !== 'pdf-master' && index === 3 && status !== 'done' ? '等待文件数据' : label}
                 <span className="sr-only">：{skill.id === 'pdf-master' && index === 3 && status === 'failed'
                   ? '生成失败，请重试' : STATUS_TEXT[status]}</span>
               </li>

@@ -25,4 +25,13 @@ describe('translateApiError', () => {
     expect(toUserFacingError('rate limit exceeded')).toBe('请求过于频繁，请稍后再试');
     expect(toUserFacingError('参考图数量超过模型上限')).toBe('参考图数量超过模型上限');
   });
+  it.each([
+    '{"error":"供应商失败","token":"synthetic-private-value"}',
+    '请求失败，内部令牌为 synthetic-private-value',
+    '错误详情 https://provider.invalid/private?api_key=synthetic-private-value',
+    '上游异常 <html>synthetic-private-value</html>',
+  ])('never echoes an unrecognized mixed-language upstream payload: %s', raw => {
+    expect(toUserFacingError(raw)).toBe('服务暂时出错，请稍后重试或切换模型');
+    expect(translateApiError(raw)).toContain('synthetic-private-value');
+  });
 });

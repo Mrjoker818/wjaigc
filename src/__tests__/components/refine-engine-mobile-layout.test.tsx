@@ -91,9 +91,9 @@ async function settle(page: Page): Promise<void> {
   });
 }
 
-async function session(theme: Theme, width: number, height: number): Promise<Session> {
+async function session(theme: Theme, width: number, height: number, coarse = false): Promise<Session> {
   if (!browser) throw Error('REFINE_BROWSER_MISSING');
-  const context = await browser.newContext({ viewport: { width, height }, reducedMotion: 'reduce', serviceWorkers: 'block' });
+  const context = await browser.newContext({ viewport: { width, height }, hasTouch: coarse, reducedMotion: 'reduce', serviceWorkers: 'block' });
   const page = await context.newPage();
   const value: Session = { context, page, requests: [], errors: [] };
   live.add(value);
@@ -141,8 +141,8 @@ async function dispose(value: Session): Promise<void> {
     throw Error(`REFINE_FIXTURE_REQUEST_SEQUENCE: ${JSON.stringify(value.requests)}`);
 }
 
-async function withSession(theme: Theme, width: number, height: number, operation: (value: Session) => Promise<void>): Promise<void> {
-  const value = await session(theme, width, height);
+async function withSession(theme: Theme, width: number, height: number, operation: (value: Session) => Promise<void>, coarse = false): Promise<void> {
+  const value = await session(theme, width, height, coarse);
   try { await operation(value); } finally { await dispose(value); }
 }
 
@@ -154,8 +154,11 @@ async function target(value: Session, control: Locator, view: VisibleViewport): 
   const rect = await control.boundingBox();
   expect(rect).not.toBeNull();
   if (!rect) throw Error('REFINE_MISSING_RECT');
-  expect(rect.width, 'touch width').toBeGreaterThanOrEqual(44);
-  expect(rect.height, 'touch height').toBeGreaterThanOrEqual(44);
+  // Use the CSS media condition, not the floating/visual viewport dimensions.
+  const touch = await control.evaluate(() => matchMedia('(max-width: 767px), (pointer: coarse)').matches);
+  const minimum = touch ? 44 : 24;
+  expect(rect.width, touch ? 'touch width' : 'desktop width').toBeGreaterThanOrEqual(minimum);
+  expect(rect.height, touch ? 'touch height' : 'desktop height').toBeGreaterThanOrEqual(minimum);
   expect(rect.x).toBeGreaterThanOrEqual(view.left + 16);
   expect(rect.y).toBeGreaterThanOrEqual(view.top + 16);
   expect(rect.x + rect.width).toBeLessThanOrEqual(view.left + view.width - 16);
@@ -249,6 +252,30 @@ describe('mobile refine layout', () => {
       }
       await closeControl(value).click();
     });
+  }, 25000);
+});
+
+describe('F06 refine target policy', () => {
+  it.each(THEMES)('%s switches at 767/768px and retains the wide coarse floor', async theme => {
+    await withSession(theme, 767, 844, async value => {
+      for (const width of [767, 768]) {
+        await value.page.setViewportSize({ width, height: 844 }); await settle(value.page);
+        expect(await value.page.evaluate(() => ({ narrow: matchMedia('(max-width: 767px)').matches, coarse: matchMedia('(pointer: coarse)').matches })))
+          .toEqual({ narrow: width === 767, coarse: false });
+        await checkHeader(value, { width, height: 844, left: 0, top: 0 });
+        const rect = await value.page.getByRole('button', { name: '标准模式', exact: true }).boundingBox();
+        expect(rect!.height, 'touch floor versus existing desktop mode density').toBe(width === 767 ? 44 : 42);
+        console.log('F06_REFINE_TARGET', JSON.stringify({ theme, width, coarse: false, height: rect!.height }));
+      }
+    });
+    await withSession(theme, 1440, 900, async value => {
+      expect(await value.page.evaluate(() => ({ narrow: matchMedia('(max-width: 767px)').matches, coarse: matchMedia('(pointer: coarse)').matches })))
+        .toEqual({ narrow: false, coarse: true });
+      await checkHeader(value, { width: 1440, height: 900, left: 0, top: 0 });
+      expect((await value.page.getByRole('button', { name: '标准模式', exact: true }).boundingBox())!.height).toBe(44);
+      await closeControl(value).tap();
+      expect(await value.page.evaluate(() => (window as unknown as FixtureWindow).refineMobileFixture.state.closes)).toBe(1);
+    }, true);
   }, 25000);
 });
 

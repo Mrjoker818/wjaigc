@@ -399,7 +399,7 @@ describe('deployment package guard', () => {
     const preview = runCoze('coze-start.sh', [], {});
 
     expect(deployment.status).toBe(1);
-    expect(deployment.output).toContain('requires a database binding');
+    expect(deployment.output).toContain('requires a PostgreSQL connection source');
     expect(deployment.output).not.toContain('synthetic-preview-started');
     expect(preview.status).toBe(0);
     expect(preview.output).toContain('synthetic-preview-started');
@@ -429,26 +429,30 @@ describe('deployment package guard', () => {
     expect(result.output).toContain('synthetic-runtime-started');
   }, 15_000);
 
-  it('allows a packaged deployment with only a COZE_SUPABASE_* binding (no URL)', () => {
+  it('rejects a packaged deployment with only a Supabase HTTP binding before starting dependencies or runtime', () => {
     writeFixture('.next/BUILD_ID', 'synthetic-build');
     writeExecutable('fake-bin/git', ['exit 1']);
+    writeExecutable('fake-bin/pnpm', ['echo synthetic-dependency-command', 'exit 2']);
     writeExecutable('node_modules/.bin/next', [
       '[ "${WUJIE_DEPLOYMENT_DB_ONLY:-}" = "1" ] || exit 3',
       '[ "${WUJIE_AUTH_PERSISTENCE_MODE:-}" = "DB_ONLY" ] || exit 4',
       'echo synthetic-runtime-started',
     ]);
 
-    // Some Coze environments bind storage via the Supabase integration surface
-    // only. It is not a pg connection source, but it is a binding signal that
-    // must unblock the packaged PROD startup guard.
+    // A Supabase HTTP binding cannot be consumed by the PostgreSQL driver.
+    // Keep deployment fail-closed until a real pg connection is configured.
     const result = runCoze('coze-start.sh', ['--deployment'], {
       COZE_PROJECT_ENV: 'PROD',
       COZE_SUPABASE_URL: 'https://synthetic.supabase.example',
       COZE_SUPABASE_SERVICE_ROLE_KEY: 'synthetic-key',
     });
 
-    expect(result.status).toBe(0);
-    expect(result.output).toContain('synthetic-runtime-started');
+    expect(result.status).toBe(1);
+    expect(result.output).toContain('Supabase HTTP binding does not provide a PostgreSQL connection source');
+    expect(result.output).not.toContain('synthetic-runtime-started');
+    expect(result.output).not.toContain('synthetic-dependency-command');
+    expect(result.output).not.toContain('synthetic.supabase.example');
+    expect(result.output).not.toContain('synthetic-key');
   }, 15_000);
 
   it('self-provisions dependencies when a packaged runtime lacks node_modules', () => {

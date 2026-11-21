@@ -1,17 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ApiProvider } from '@/lib/universal-api-types';
 
-const state = vi.hoisted(() => ({ provider: null as Record<string, unknown> | null }));
+const state = vi.hoisted(() => ({ provider: null as ApiProvider | null }));
 vi.mock('server-only', () => ({}));
 vi.mock('@/lib/server-api-config', () => ({
   findProviderForFeature: async () => state.provider,
-  findProviderById: async (id: string) => state.provider?.id === id ? state.provider : null,
+  getApiProviders: async () => state.provider ? [state.provider] : [],
 }));
+vi.mock('@/lib/server-auth', () => ({ listManagedUsers: () => { throw new Error('D01_OFFLINE_USER_STORAGE_FORBIDDEN'); } }));
 
 import { dramaPlannerConfig, DramaPlannerSelectionError } from '@/lib/drama/draft';
 import type { User } from '@/lib/user-types';
 
 const user = { role: 'user', chatModels: ['p::chat-1'] } as User;
-beforeEach(() => { state.provider = { id: 'p', type: 'chat', isEnabled: true, baseUrl: 'https://example.com/v1', apiKey: 'not-a-real-key', selectedModels: ['chat-1', 'chat-2'] }; });
+beforeEach(() => { state.provider = { id: 'p', name: 'p', type: 'chat', isEnabled: true, baseUrl: 'https://example.com/v1', apiKey: 'not-a-real-key', selectedModels: ['chat-1', 'chat-2'], createdAt: 1, updatedAt: 1 }; });
 describe('drama planner selection', () => {
   it('uses the exact enabled provider and authorized model, including a nonfirst selected model', async () => {
     const admin = { role: 'admin' } as User;

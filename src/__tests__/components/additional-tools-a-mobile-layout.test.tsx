@@ -116,6 +116,50 @@ interface Session {
   faults: string[]; requests: string[]; submissions: Record<string, unknown>[];
   cancels: string[]; keys: string[]; runs: Run[]; handlers: Set<Promise<void>>;
   inFlight: Set<Request>;
+  nativeObservation: NativeObservationA;
+}
+type NativeReceiptA = Record<string, string | number | boolean | null>;
+interface NativeObservationA {
+  phase: string; started: number; sequence: number; nextRequestId: number; dropped: number; evicted: number;
+  requests: Map<Request, { id: number; status: number | null; runIndex: number | null }>;
+  events: NativeReceiptA[]; lastFailure: NativeReceiptA | null;
+}
+// At most 63 recent events plus one retained native failure; never log request payloads.
+function observeA(s: Session, event: string, request?: Request, details: NativeReceiptA = {}): void {
+  if (s.kind !== 'ecommerce' || s.suite !== 'continuity') return;
+  const observation = s.nativeObservation;
+  let receipt = request ? observation.requests.get(request) : undefined;
+  if (request && !receipt) {
+    if (observation.requests.size >= 64) {
+      const oldest = observation.requests.keys().next().value;
+      if (oldest) observation.requests.delete(oldest);
+      observation.evicted++;
+    }
+    receipt = { id: ++observation.nextRequestId, status: null, runIndex: null };
+    observation.requests.set(request, receipt);
+  }
+  if (receipt && typeof details.responseStatus === 'number') receipt.status = details.responseStatus;
+  if (receipt && typeof details.runIndex === 'number') receipt.runIndex = details.runIndex;
+  const url = request?.url();
+  const entry: NativeReceiptA = { sequence: ++observation.sequence, ms: Date.now() - observation.started,
+    phase: observation.phase, event, requestId: receipt?.id ?? null,
+    route: !request ? null : url === ORIGIN + '/api/poll-task' ? 'poll-task' : url === ORIGIN + '/api/cancel-task' ? 'cancel-task' : 'fixture-other',
+    method: request?.method() ?? null, resourceType: request?.resourceType() ?? null,
+    statusAtEvent: receipt?.status ?? null, statusAtFailure: event === 'requestfailed' ? receipt?.status ?? null : null,
+    error: event === 'requestfailed' ? request?.failure()?.errorText.slice(0, 160) ?? null : null,
+    runIndex: receipt?.runIndex ?? null, nativePending: s.inFlight.size, routePending: s.handlers.size, ...details };
+  if (event === 'requestfailed') observation.lastFailure = entry;
+  if (observation.events.length >= 63) { observation.events.shift(); observation.dropped++; }
+  observation.events.push(entry);
+}
+function emitObservationA(s: Session, bodyFailed: boolean, cleanupFailed: boolean): void {
+  if (s.kind !== 'ecommerce' || s.suite !== 'continuity') return;
+  try {
+    console.log('A_NATIVE_TIMING_DIAGNOSTIC', JSON.stringify({ kind: s.kind, suite: s.suite,
+      bodyFailed, cleanupFailed, faultCount: s.faults.length, nativePending: s.inFlight.size, routePending: s.handlers.size,
+      dropped: s.nativeObservation.dropped, evicted: s.nativeObservation.evicted,
+      events: s.nativeObservation.events, lastFailure: s.nativeObservation.lastFailure }));
+  } catch { /* Passive diagnostics must not replace the original failure. */ }
 }
 const KINDS: readonly Kind[] = ['ecommerce', 'factory', 'packaging', 'logo', 'scene', 'agent'];
 const THEMES: readonly Theme[] = ['gold', 'mono'];
@@ -360,22 +404,31 @@ async function handleRoute(s: Session, route: Route): Promise<void> {
   if (run && s.kind === 'ecommerce' && post && !headers['idempotency-key'] && url.href === `${ORIGIN}/api/poll-task`
     && isDeepStrictEqual(body, { taskId: run.taskId, model: 'image-b', providerId: 'offline-b' })) {
     run.polls++;
+    observeA(s, 'poll:route', request, { runIndex: run.index, runPhase: run.phase, polls: run.polls });
     if (run.phase === 'pending') {
-      await route.fulfill({ json: { success: true, status: 'processing', progress: 47, label: '离线任务处理中' } }); return;
+      observeA(s, 'poll:processing-fulfill-start', request);
+      await route.fulfill({ json: { success: true, status: 'processing', progress: 47, label: '离线任务处理中' } });
+      observeA(s, 'poll:processing-fulfill-resolved', request); return;
     }
     await route.fulfill({ json: run.phase === 'cancelled' ? { status: 'cancelled' } : completed(s, run) });
+    observeA(s, 'poll:terminal-fulfill-resolved', request, { runPhase: run.phase });
     run.terminalServed = true; return;
   }
   if (run && s.kind === 'ecommerce' && post && !headers['idempotency-key'] && url.href === `${ORIGIN}/api/cancel-task`
     && isDeepStrictEqual(body, { taskId: run.taskId }) && run.phase === 'pending') {
     s.cancels.push(`footer:${run.taskId}`); run.phase = 'cancelled';
+    observeA(s, 'cancel:route', request, { runIndex: run.index });
     // Poll responses are finite, not held open. Drain an already-dispatched poll
     // before the original client's confirmed-cancel abort; no failed HTTP allowed.
     run.release();
+    observeA(s, 'cancel:drain-snapshot-start', request);
     await bounded(Promise.all([...s.inFlight].filter(candidate => candidate.url() === `${ORIGIN}/api/poll-task`)
-      .map(async candidate => { const response = await candidate.response(); if (response) await response.finished(); })), 2000, 'CANCEL_POLL_DRAIN');
+      .map(async candidate => { observeA(s, 'cancel:drain-member', candidate); const response = await candidate.response(); if (response) await response.finished(); observeA(s, 'cancel:drain-member-settled', candidate); })), 2000, 'CANCEL_POLL_DRAIN');
+    observeA(s, 'cancel:drain-snapshot-settled', request);
     run.terminalServed = true;
-    await route.fulfill({ json: { success: true, cancelled: true } }); return;
+    observeA(s, 'cancel:ack-fulfill-start', request);
+    await route.fulfill({ json: { success: true, cancelled: true } });
+    observeA(s, 'cancel:ack-fulfill-resolved', request); return;
   }
   if (run && s.kind === 'agent') {
     if (get && url.href === `${ORIGIN}/api/agent-edit?taskId=${run.taskId}`) {
@@ -412,25 +465,27 @@ async function open(kind: Kind, suite: Suite): Promise<Session> {
   // Headless CI renders this scene with software WebGL at desktop size.
   page.setDefaultTimeout(kind === 'scene' ? 5000 : 2000);
   const s: Session = { kind, suite, context, page, media: { original: '', results: [] }, mounted: false, closing: false,
-    directions: 0, faults: [], requests: [], submissions: [], cancels: [], keys: [], runs: [], handlers: new Set(), inFlight: new Set() };
+    directions: 0, faults: [], requests: [], submissions: [], cancels: [], keys: [], runs: [], handlers: new Set(), inFlight: new Set(),
+    nativeObservation: { phase: 'open', started: Date.now(), sequence: 0, nextRequestId: 0, dropped: 0, evicted: 0, requests: new Map(), events: [], lastFailure: null } };
   live.add(s);
   page.on('pageerror', error => s.faults.push(`PAGEERROR:${error.message}`));
   page.on('console', message => { if (message.type() === 'error') s.faults.push(`CONSOLE:${message.text()}`); });
   page.on('dialog', dialog => { s.faults.push(`DIALOG:${dialog.type()}:${dialog.message()}`); void dialog.dismiss(); });
-  page.on('request', request => s.inFlight.add(request));
-  page.on('requestfinished', request => s.inFlight.delete(request));
-  page.on('requestfailed', request => { s.inFlight.delete(request); s.faults.push(`REQUESTFAILED:${request.method()} ${request.url()}:${request.failure()?.errorText}`); });
-  page.on('response', response => { if (response.status() >= 400) s.faults.push(`HTTP_ERROR:${response.status()} ${response.url()}`); });
+  page.on('request', request => { s.inFlight.add(request); observeA(s, 'request', request); });
+  page.on('requestfinished', request => { s.inFlight.delete(request); observeA(s, 'requestfinished', request); });
+  page.on('requestfailed', request => { s.inFlight.delete(request); s.faults.push(`REQUESTFAILED:${request.method()} ${request.url()}:${request.failure()?.errorText}`); observeA(s, 'requestfailed', request); });
+  page.on('response', response => { observeA(s, 'response', response.request(), { responseStatus: response.status() }); if (response.status() >= 400) s.faults.push(`HTTP_ERROR:${response.status()} ${response.url()}`); });
   await context.routeWebSocket('**/*', socket => {
     s.faults.push(`UNEXPECTED_WEBSOCKET:${socket.url()}`); socket.close({ code: 1008, reason: 'offline fixture forbids sockets' });
   });
   await context.route('**/*', async route => {
     const handler = handleRoute(s, route); s.handlers.add(handler);
+    observeA(s, 'route:tracked', route.request());
     try { await handler; }
     catch (error) {
       s.faults.push(`ROUTE:${String(error)}`);
       try { await route.abort('blockedbyclient'); } catch (abortError) { s.faults.push(`ABORT:${String(abortError)}`); }
-    } finally { s.handlers.delete(handler); }
+    } finally { s.handlers.delete(handler); observeA(s, 'route:settled', route.request()); }
   });
   try {
     await page.goto(`${ORIGIN}/`); await page.addScriptTag({ content: bundle });
@@ -449,6 +504,7 @@ async function open(kind: Kind, suite: Suite): Promise<Session> {
 }
 async function dispose(s: Session): Promise<void> {
   const failures: string[] = [];
+  s.nativeObservation.phase = 'dispose:drain'; observeA(s, 'dispose:entry');
   try {
     for (const run of s.runs) {
       if (run.phase === 'pending') run.phase = 'completed';
@@ -466,7 +522,9 @@ async function dispose(s: Session): Promise<void> {
   // Unmount is attempted even if a drain/readiness check failed. Closing the
   // context alone is not reported as successful React cleanup.
   try {
+    s.nativeObservation.phase = 'dispose:unmount'; observeA(s, 'unmount:start');
     if (s.mounted && !s.page.isClosed()) await bounded(s.page.evaluate(() => window.additionalAFixture.unmount()), 3000, 'UNMOUNT');
+    observeA(s, 'unmount:settled');
     await bounded(Promise.all([...s.handlers]), 3000, 'AFTER_UNMOUNT_DRAIN'); await waitIdle(s);
     if (!s.page.isClosed()) {
       const errors = await s.page.evaluate(() => window.additionalAFixture?.state.errors || []);
@@ -476,7 +534,8 @@ async function dispose(s: Session): Promise<void> {
   } catch (error) { failures.push(`UNMOUNT:${String(error)}`); }
   finally {
     s.closing = true;
-    try { await bounded(s.context.close(), 5000, 'CONTEXT_CLOSE'); }
+    s.nativeObservation.phase = 'dispose:context-close'; observeA(s, 'context-close:start');
+    try { await bounded(s.context.close(), 5000, 'CONTEXT_CLOSE'); observeA(s, 'context-close:resolved'); }
     catch (error) { failures.push(String(error)); }
     live.delete(s);
   }
@@ -491,8 +550,11 @@ async function waitIdle(s: Session): Promise<void> {
 }
 async function withSession(kind: Kind, suite: Suite, body: (s: Session) => Promise<void>): Promise<void> {
   const s = await open(kind, suite); let failure: unknown; let failed = false; let cleanup: unknown;
+  s.nativeObservation.phase = 'body'; observeA(s, 'body:start');
   try { await body(s); } catch (error) { failed = true; failure = error; }
+  observeA(s, 'body:settled', undefined, { bodyFailed: failed });
   try { await dispose(s); } catch (error) { cleanup = error; }
+  emitObservationA(s, failed, Boolean(cleanup));
   // Infrastructure takes precedence over geometry failures. Never forge a RED.
   if (s.faults.length || cleanup) throw new Error(`A_FIXTURE_INFRASTRUCTURE_ERROR:\n${s.faults.join('\n')}\n${cleanup ? String(cleanup) : ''}`);
   if (failed) throw failure;
@@ -679,6 +741,7 @@ function applyControl(s: Session): Locator {
   return panel(s).getByRole('button', { name: s.kind === 'scene' ? '加入画布' : '添加到画布', exact: true });
 }
 async function finish(s: Session, run: Run): Promise<void> {
+  observeA(s, 'finish:release', undefined, { runIndex: run.index });
   run.phase = 'completed'; run.release();
   await resultImage(s).waitFor({ state: 'visible' });
   await resultImage(s).evaluate(async element => {
@@ -707,7 +770,14 @@ async function screenBox(s: Session, target: Locator, hitTarget = false, minimum
   const box = await rect(target);
   const view = await s.page.evaluate(() => ({ x: visualViewport!.offsetLeft, y: visualViewport!.offsetTop,
     width: visualViewport!.width, height: visualViewport!.height }));
-  expect(box.width).toBeGreaterThanOrEqual(minimum); expect(box.height).toBeGreaterThanOrEqual(minimum);
+  // Keep compact desktop controls separate from touch targets and containers.
+  const compactDesktop = hitTarget && minimum === 44 && await target.evaluate(() => (
+    !matchMedia('(max-width: 767px), (pointer: coarse)').matches
+    && matchMedia('(min-width: 768px) and (hover: hover) and (pointer: fine)').matches
+  ));
+  const targetMinimum = compactDesktop ? 24 : minimum;
+  expect(box.width, compactDesktop ? 'A desktop width' : 'A retained width floor').toBeGreaterThanOrEqual(targetMinimum);
+  expect(box.height, compactDesktop ? 'A desktop height' : 'A retained height floor').toBeGreaterThanOrEqual(targetMinimum);
   expect(box.x).toBeGreaterThanOrEqual(view.x + 8); expect(box.y).toBeGreaterThanOrEqual(view.y + 8);
   expect(box.x + box.width).toBeLessThanOrEqual(view.x + view.width - 8);
   expect(box.y + box.height).toBeLessThanOrEqual(view.y + view.height - 8);
@@ -846,7 +916,9 @@ async function geometry(s: Session, control: Locator): Promise<void> {
   }
 }
 async function closeNormally(s: Session): Promise<void> {
+  observeA(s, 'public-close:start');
   const before = s.cancels.length; await click(closeControl(s)); await settle(s);
+  observeA(s, 'public-close:settled');
   const state = await s.page.evaluate(() => window.additionalAFixture.state);
   if (state.closes !== 1 || s.cancels.length !== before) throw new Error('A_FIXTURE_CLOSE_CALLBACK_OR_CANCEL_MISMATCH');
 }
@@ -954,7 +1026,9 @@ describe('mobile additional-a continuity', () => {
       }
       await viewport(s, 1440, 900);
       if (kind === 'agent' || kind === 'ecommerce') {
+        observeA(s, 'public-cancel:start', undefined, { runIndex: run.index });
         await click(panel(s).getByRole('button', { name: '取消', exact: true }));
+        observeA(s, 'public-cancel:click-settled', undefined, { runIndex: run.index });
         await mainControl(s).waitFor({ state: 'visible' });
         expect(s.cancels).toEqual([`footer:${run.taskId}`]);
         if (kind === 'ecommerce') {

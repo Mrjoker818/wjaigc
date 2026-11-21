@@ -1339,7 +1339,7 @@ ${themeDesc}
             <Minus size={14} />
           </button>
           <button
-            className="flex items-center justify-center p-1 rounded transition-colors duration-150"
+            className="[@media(min-width:768px)_and_(hover:hover)_and_(pointer:fine)]:min-h-[24px] [@media(min-width:768px)_and_(hover:hover)_and_(pointer:fine)]:min-w-[24px] flex items-center justify-center p-1 rounded transition-colors duration-150"
             style={{ color: t.textDim }}
             onMouseEnter={e => (e.currentTarget.style.color = t.btnClose)}
             onMouseLeave={e => (e.currentTarget.style.color = t.textDim)}

@@ -13,7 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { findProviderForFeature, findProviderForModel, findProviderById } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
 import { parseAgentGenerateResult, parseEcommerceGenerateResult, type AgentTemplateCategory, type EcommerceConfig } from '@/lib/omp-agent-parsers';
-import { toUserFacingError, translateApiError } from '@/lib/api-error-translate';
+import { toUserFacingError } from '@/lib/api-error-translate';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
 import { normalizeModelForApi } from '@/lib/model-capabilities';
@@ -236,6 +236,18 @@ export async function POST(request: NextRequest) {
   // 每个请求最多退一次款；同一编号的重复退款会被退款记录拒绝
   const refundReference = `refund-omp-agent-${randomUUID()}`;
   let sessionUser: import('@/lib/user-types').User | null = null;
+
+  async function refundFailedGeneration(reason: string): Promise<void> {
+    if (deductedCredits <= 0 || !sessionUser) return;
+    const amount = deductedCredits;
+    // 在等待退款前标记已处理；退款落库不明或后续响应抛错时不得再次发起。
+    deductedCredits = 0;
+    try {
+      const result = await refundCredits(sessionUser.id, amount, `Agent生成失败退款: ${String(reason).substring(0, 100)}`, refundReference);
+      if (!result.success) console.error('[omp-agent] Refund failed:', refundReference);
+    } catch (refundErr) { console.error('[omp-agent] Refund failed:', refundErr); }
+  }
+
   try {
     // 鉴权：要求 Web 登录态 或 桌面端 Token 二选一（P0 修复：防止未授权盗刷）
     sessionUser = await getSessionUser(request).catch(() => null);
@@ -285,6 +297,7 @@ export async function POST(request: NextRequest) {
       provider = await findProviderForFeature('chat');
     }
     if (!provider) {
+      await refundFailedGeneration('未配置聊天模型');
       return NextResponse.json({ success: false, error: '未配置聊天模型，请先在管理面板添加 LLM 模型提供商' }, { status: 400 });
     }
 
@@ -294,6 +307,7 @@ export async function POST(request: NextRequest) {
     const { apiModelName: selectedModel } = normalizeModelForApi(rawSelectedModel);
 
     if (!selectedModel) {
+      await refundFailedGeneration('未选择聊天模型');
       return NextResponse.json({ success: false, error: '未选择聊天模型' }, { status: 400 });
     }
 
@@ -355,7 +369,8 @@ export async function POST(request: NextRequest) {
           if (errorBody?.error?.message) errorDetail = errorBody.error.message;
           else if (errorBody?.message) errorDetail = errorBody.message;
         } catch { /* ignore */ }
-        return NextResponse.json({ success: false, error: translateApiError(errorDetail) }, { status: response.status });
+        await refundFailedGeneration(errorDetail);
+        return NextResponse.json({ success: false, error: toUserFacingError(errorDetail) }, { status: response.status });
       }
 
       // Handle both SSE stream and JSON responses
@@ -382,6 +397,7 @@ export async function POST(request: NextRequest) {
       const promptText = extractOpenAITextContent(data);
 
       if (!promptText) {
+        await refundFailedGeneration('API 返回空内容');
         return NextResponse.json({ success: false, error: 'API 返回空内容' }, { status: 500 });
       }
 
@@ -406,6 +422,7 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       clearTimeout(timeoutId);
       if (error instanceof Error && error.name === 'AbortError') {
+        await refundFailedGeneration('请求超时，请重试');
         return NextResponse.json({ success: false, error: '请求超时，请重试' }, { status: 408 });
       }
       throw error;
@@ -413,11 +430,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('[omp-agent API] Error:', error);
     // 退款：Agent生成失败时退还积分
-    if (deductedCredits > 0 && sessionUser) {
-      try {
-        await refundCredits(sessionUser.id, deductedCredits, `Agent生成失败退款: ${(error instanceof Error ? error.message : 'Unknown').substring(0, 100)}`, refundReference);
-      } catch (refundErr) { console.error('[omp-agent] Refund failed:', refundErr); }
-    }
+    await refundFailedGeneration(error instanceof Error ? error.message : 'Unknown');
     return NextResponse.json(
       { success: false, error: toUserFacingError(error instanceof Error ? error.message : '') },
       { status: 500 }

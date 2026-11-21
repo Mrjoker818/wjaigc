@@ -129,13 +129,24 @@ describe('venue analysis task admission', () => {
     expect(fixture.requests[0].model).toBe('vision-two');
   });
 
-  it('uses an authorized discovered model when no selected default exists', async () => {
+  it('requires administrator selection for discovered venue models', async () => {
     fixture.provider.selectedModels=[];
     fixture.provider.discoveredModels=[{id:'discovered-chat',name:'合成聊天模型',providerId:'synthetic-provider',type:'chat'}];
+    const rejected=await POST(request({model:undefined}));
+    expect(rejected.status).toBe(403);
+    expect(await rejected.json()).toEqual({error:'所选模型不可用或未获得授权'});
+    expect(fixture.registered).toHaveLength(0);
+    expect(fixture.requests).toHaveLength(0);
+    expect(fixture.bases).toHaveLength(0);
+    expect(fixture.updates).toHaveLength(0);
+
+    fixture.provider.selectedModels=['discovered-chat'];
     const result=await POST(request({model:undefined}));
     expect(result.status).toBe(200);
     await vi.waitFor(() => expect(fixture.requests).toHaveLength(1));
     expect(fixture.requests[0].model).toBe('discovered-chat');
+    expect(fixture.bases).toEqual(['https://provider.invalid/v1']);
+    expect(fixture.registered).toHaveLength(1);
   });
 
   it('preserves the configured default when no model was selected', async () => {

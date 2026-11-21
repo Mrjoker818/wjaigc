@@ -343,7 +343,7 @@ async function resetCanvasView(page: Page): Promise<void> {
 
 async function openSelectedImageAction(
   page: Page,
-  options: { label: string; testId: string },
+  options: { label: string; testId?: string },
 ): Promise<void> {
   if (usesMobileCanvasToolbar(page)) {
     const toolbar = page.locator('[data-mobile-image-actions]');
@@ -358,7 +358,9 @@ async function openSelectedImageAction(
 
   const toolbar = page.locator('[data-toolbar="image-action-toolbar"]');
   await expect(toolbar).toBeVisible();
-  const action = page.getByTestId(options.testId);
+  const action = options.testId
+    ? page.getByTestId(options.testId)
+    : toolbar.getByRole('button', { name: options.label, exact: true });
   if (!await action.isVisible().catch(() => false)) {
     const more = toolbar.getByRole('button', { name: '展开更多工具', exact: true });
     await more.click();
@@ -629,11 +631,16 @@ test.describe('Stage 3 Canvas kernel baseline', () => {
     await resetCanvasView(page);
     await hittableCardCenter(page, card);
     await card.click();
-    await openSelectedImageAction(page, { label: '擦除', testId: 'canvas-erase' });
-    await expect(viewport).toHaveAttribute('data-canvas-active-tool', 'erase');
-    await expect(page.locator('[data-floating-panel="erase"]')).toBeVisible();
+    // 3fd9d9c6 retired erase/mask entry points. Crop is the current local
+    // image-editing session: entering and cancelling must not change the source.
+    const originalImage = projectImage(await readStage3Projects(page), projectId, nodeId);
+    await openSelectedImageAction(page, { label: '裁切' });
+    await expect(viewport).toHaveAttribute('data-canvas-active-tool', 'crop');
+    await expect(page.locator('[data-toolbar="edit-mode"]')).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(viewport).toHaveAttribute('data-canvas-active-tool', '');
+    await expect(page.locator('[data-toolbar="edit-mode"]')).toHaveCount(0);
+    expect(projectImage(await readStage3Projects(page), projectId, nodeId)).toEqual(originalImage);
 
     await clickCanvasBlankSpace(page);
     await page.keyboard.press('c');

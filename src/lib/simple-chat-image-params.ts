@@ -78,7 +78,7 @@ export function parseImageRequest(text: string): RequestedImageParams {
   return result;
 }
 
-const CN_NUM: Record<string, number> = { 一: 1, 两: 2, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6 };
+const CN_NUM: Record<string, number> = { 零: 0, 一: 1, 两: 2, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6 };
 
 /**
  * How many image variations the user asked for. Returns 1 when unspecified.
@@ -193,6 +193,44 @@ export function describeFittedParams(params: FittedImageParams): string {
 /** Most images one chat turn may generate; each one is billed. */
 export const MAX_IMAGES_PER_TURN = 4;
 
+export interface ImageRequestBudget {
+  limit: number;
+  copies: number;
+  clarification?: string;
+}
+
+/** Only the user's current request may set a total; model tool calls cannot increase it. */
+export function resolveImageRequestBudget(text: string, max = MAX_IMAGES_PER_TURN): ImageRequestBudget {
+  const source = text || '';
+  const counts = [...source.matchAll(/(?<!\d)(\d{1,2}|[零一两二三四五六])\s*(?:张|幅|版|款|套|个(?=\s*(?:不同\s*)?(?:的\s*)?(?:方案|设计|版本|图|海报|效果图|变体|选择|option)))/gi)];
+  const budgetOf = (match: RegExpMatchArray): ImageRequestBudget => {
+    const numeric = Number(match[1]);
+    const count = Math.min(Number.isNaN(numeric) ? (CN_NUM[match[1]] ?? 1) : numeric, max);
+    return { limit: count, copies: count, ...(count === 0
+      ? { clarification: '按本轮0张的要求，未提交任何图片生成任务。' } : {}) };
+  };
+  const last = counts.at(-1);
+  if (counts.length > 1 && last) {
+    const previous = counts[counts.length - 2];
+    const between = source.slice(previous.index! + previous[0].length, last.index);
+    const referenceThenOutput = counts.length === 2
+      && /(?:参考|上传|原图)/.test(source.slice(0, counts[0].index))
+      && /(?:生成|画|做|出|来|要)\s*$/.test(between);
+    if (referenceThenOutput || /(?:改成|改为|改到|改要|现在(?:要|生成|画|做)?)/.test(between)) {
+      return budgetOf(last);
+    }
+  }
+  // Distributive requests deliberately describe several images, not a turn-wide total of one.
+  if (/(?:分别|各)/.test(source) && !/(?:总共|一共|合计|只(?:要|生成|画|出)|仅)/.test(source)) {
+    return { limit: max, copies: parseImageCount(source, max) };
+  }
+  if (counts.length > 1) {
+    return { limit: 0, copies: 0, clarification: '请确认本次一共要生成几张图片，再继续生成。' };
+  }
+  if (last) return budgetOf(last);
+  return { limit: max, copies: parseImageCount(source, max) };
+}
+
 export interface GenerateImageToolArgs {
   prompt?: string;
   size?: string;
@@ -217,18 +255,18 @@ function parseToolArgs(raw: string): GenerateImageToolArgs {
 
 /**
  * One job per image to generate. Every generate_image call gets one image ("分别画猫和狗" is two
- * calls). When the model made a single call, the number the user wrote decides how many copies
- * run; the model cannot raise it on its own. The total is capped at MAX_IMAGES_PER_TURN.
+ * calls). An explicit user total bounds all calls together. A single call repeats only up to
+ * the user's requested copies. Ambiguous totals admit no jobs until the user clarifies.
  */
 export function planImageToolJobs<T extends { arguments: string }>(
   calls: readonly T[],
   userText: string,
   max = MAX_IMAGES_PER_TURN,
 ): ImageToolJob<T>[] {
+  const budget = resolveImageRequestBudget(userText, max);
   const jobs = calls.map(call => ({ call, args: parseToolArgs(call.arguments) }));
   if (jobs.length === 1) {
-    const copies = parseImageCount(userText, max);
-    return Array.from({ length: copies }, () => jobs[0]);
+    return Array.from({ length: budget.copies }, () => jobs[0]);
   }
-  return jobs.slice(0, max);
+  return jobs.slice(0, budget.limit);
 }

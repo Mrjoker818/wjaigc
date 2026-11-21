@@ -2099,6 +2099,7 @@ export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAutho
   const messageListRef = useRef<HTMLDivElement>(null);
   const shouldStickToBottomRef = useRef(true);
   const autoScrollRafRef = useRef<number | null>(null);
+  const lastScrollPositionRef = useRef<{ element: HTMLDivElement; top: number } | null>(null);
 
   useEffect(() => {
     if (!externalPrompt?.trim()) return;
@@ -2109,7 +2110,13 @@ export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAutho
 
   const handleMessageListScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const element = event.currentTarget;
-    shouldStickToBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < (window.matchMedia('(max-height: 400px)').matches ? 2 : 100);
+    if (element !== messageListRef.current) return;
+    const top = element.scrollTop;
+    const previous = lastScrollPositionRef.current;
+    const nearBottom = element.scrollHeight - top - element.clientHeight < (window.matchMedia('(max-height: 400px)').matches ? 2 : 100);
+    if (nearBottom) shouldStickToBottomRef.current = true;
+    else if (previous?.element === element && top < previous.top) shouldStickToBottomRef.current = false;
+    lastScrollPositionRef.current = { element, top };
   }, []);
 
   // Select a prompt template from / trigger
@@ -2615,23 +2622,44 @@ export function ChatPanel({ isVisible = true, themeStyle, projectId, canvasAutho
     setThirdPartyChatModels(chatModels);
   }, [showThirdPartyDialog]);
 
-  // 自动滚动到底部 — 仅在用户已在底部附近时才跟随滚动，避免思考时强制回滚
-  useEffect(() => {
-    if (!shouldStickToBottomRef.current || autoScrollRafRef.current !== null) return;
+  // 消息与尺寸变化共用一次 RAF；用户上滚阅读时不跟随。
+  const scheduleBottomFollow = useCallback(() => {
+    const element = messageListRef.current;
+    if (!element || !shouldStickToBottomRef.current || autoScrollRafRef.current !== null) return;
     autoScrollRafRef.current = requestAnimationFrame(() => {
       autoScrollRafRef.current = null;
-      const container = messageListRef.current;
-      if (container && shouldStickToBottomRef.current) {
-        container.scrollTop = container.scrollHeight;
-      }
+      if (messageListRef.current !== element || !shouldStickToBottomRef.current) return;
+      element.scrollTop = element.scrollHeight;
+      lastScrollPositionRef.current = { element, top: element.scrollTop };
     });
+  }, []);
+
+  useEffect(() => {
+    scheduleBottomFollow();
+  }, [messages, scheduleBottomFollow]);
+
+  useEffect(() => {
+    const element = messageListRef.current;
+    if (!element) return;
+    const composer = composerRef.current;
+    lastScrollPositionRef.current = { element, top: element.scrollTop };
+    let active = true;
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
+      if (active && messageListRef.current === element) scheduleBottomFollow();
+    });
+    observer?.observe(element);
+    if (composer) observer?.observe(composer);
+    scheduleBottomFollow();
     return () => {
+      active = false;
+      observer?.disconnect();
       if (autoScrollRafRef.current !== null) {
         cancelAnimationFrame(autoScrollRafRef.current);
         autoScrollRafRef.current = null;
       }
+      if (lastScrollPositionRef.current?.element === element) lastScrollPositionRef.current = null;
     };
-  }, [messages]);
+  }, [activeTab, scheduleBottomFollow]);
 
   // 自动调整textarea高度
   useEffect(() => {

@@ -31,6 +31,7 @@ await vi.hoisted(async (): Promise<void> => {
 const boundary = vi.hoisted(() => ({
   media: vi.fn<(url: string) => Promise<Buffer>>(),
   config: vi.fn<() => Promise<ApiProvider[]>>(),
+  byId: vi.fn<(id: string) => Promise<ApiProvider | null>>(),
   sends: [] as string[],
   mediaReads: [] as string[],
   safeDownload: vi.fn<(url: string) => Promise<{ buffer: Buffer; mimeType: string }>>(),
@@ -73,8 +74,7 @@ vi.mock('@/lib/api-auth', async original => {
 });
 vi.mock('@/lib/server-api-config', async original => ({
   ...await original<typeof import('@/lib/server-api-config')>(), getApiProviders: boundary.config,
-  findProviderById: async (id: string): Promise<ApiProvider | null> =>
-    (await boundary.config()).find(provider => provider.id === id && provider.isEnabled) || null,
+  findProviderById: boundary.byId,
 }));
 vi.mock('@/lib/fetch-image-buffer', () => ({ fetchImageBuffer: boundary.media }));
 vi.mock('@/lib/safe-image-download', async original => {
@@ -198,6 +198,8 @@ beforeEach(async (): Promise<void> => {
   boundary.sends.length = 0;
   boundary.mediaReads.length = 0;
   boundary.safeDownload.mockReset();
+  boundary.byId.mockReset().mockImplementation(async (id: string): Promise<ApiProvider | null> =>
+    (await boundary.config()).find(provider => provider.id === id && provider.isEnabled) || null);
   boundary.config.mockResolvedValue([{ id: 'source-302', name: 'Offline 302', type: 'upscaler', modelType: 'upscaler',
     isEnabled: true, baseUrl: 'https://api.302.ai', apiKey: 'offline-source', selectedModels: ['302-esrgan'],
     createdAt: 1, updatedAt: 1 }]);
@@ -1725,7 +1727,7 @@ it('uses only the authorized vision model after an explicit image editor is reje
     await query("INSERT INTO wujie_projects(id,owner_id,name) VALUES ('source-personal','source-editor','Personal')");
     await query(`UPDATE wujie_users SET chat_models=ARRAY['vision-allowed::gpt-4o']::text[],
       image_models=ARRAY['source-image::gpt-image-1']::text[] WHERE id='source-editor'`);
-    boundary.config.mockResolvedValue([
+    const providers: ApiProvider[] = [
       { id: 'source-image', name: 'Image A', type: 'image', modelType: 'image', isEnabled: true,
         baseUrl: 'https://image-provider.invalid/v1', apiKey: 'offline-image',
         selectedModels: ['gpt-image-1'], createdAt: 1, updatedAt: 1 },
@@ -1735,7 +1737,10 @@ it('uses only the authorized vision model after an explicit image editor is reje
       { id: 'vision-allowed', name: 'Allowed Vision', type: 'chat', modelType: 'chat', isEnabled: true,
         baseUrl: 'https://vision-allowed.invalid/v1', apiKey: 'offline-vision-allowed',
         selectedModels: ['gpt-4o'], createdAt: 1, updatedAt: 1 },
-    ]);
+    ];
+    boundary.config.mockResolvedValue(providers);
+    boundary.byId.mockImplementation(async (id: string): Promise<ApiProvider | null> =>
+      providers.find(provider => provider.id === id && provider.isEnabled) || null);
     const maskUrl = '/api/serve-upload/vision-grant-mask.png';
     const maskPixels = Buffer.alloc(32 * 32 * 3);
     for (let y = 12; y < 20; y += 1) for (let x = 12; x < 20; x += 1) {
@@ -1774,6 +1779,7 @@ it('uses only the authorized vision model after an explicit image editor is reje
         imageUrl: canonicalUrl, maskImage: maskUrl, model: 'source-image::gpt-image-1' }),
     });
     const configCallsBeforeSubmit = boundary.config.mock.calls.length;
+    const byIdCallsBeforeSubmit = boundary.byId.mock.calls.length;
     const submitted = await POST(makeRequest());
     const payload = await submitted.json() as { taskId?: string };
     expect(submitted.status, JSON.stringify(payload)).toBe(200);
@@ -1788,6 +1794,7 @@ it('uses only the authorized vision model after an explicit image editor is reje
       .toEqual([{ remote_task_id: 'vision-grant-image-accepted', status: 'processing', credit_status: 'pending',
         actual_provider_id: 'source-image' }]);
     expect(boundary.config.mock.calls.length - configCallsBeforeSubmit).toBe(1);
+    expect(boundary.byId.mock.calls.slice(byIdCallsBeforeSubmit)).toEqual([['source-image']]);
     expect((await query("SELECT type,amount FROM wujie_credit_transactions WHERE user_id='source-editor'")).rows)
       .toEqual([{ type: 'consume', amount: -15 }]);
     const sent = requests.length;

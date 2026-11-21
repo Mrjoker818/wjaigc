@@ -262,7 +262,9 @@ describe('review regressions: pending image admission and original placement int
     const { f, inserted, drawer } = placementRecoveryFixture(mode);
     let view = render(drawer());
     const choose = async (id: string): Promise<void> => {
-      fireEvent.click(await screen.findByRole('button', { name: new RegExp(`^${mode === 'image' ? '草图生图' : '草图转代码'} · ${id} ·`) }));
+      const button = await screen.findByRole('button', { name: new RegExp(`^${mode === 'image' ? '草图生图' : '草图转代码'} · ${id} ·`) });
+      await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+      fireEvent.click(button);
       await screen.findByText('已完成 · 100%');
       expect((mode === 'image' ? f.imageSession.client.task : f.session.client.task)?.taskId).toBe(id);
       await waitForRecoveryChoice(f, mode, id);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   clampNormalizedRegion,
@@ -613,11 +613,16 @@ function createClientAnnotationId(): string {
   return `ann_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function useAnnotationController(initialAnnotations: CanvasAnnotationV2[] = []) {
+export function useAnnotationController(
+  initialAnnotations: CanvasAnnotationV2[] = [],
+  currentSource?: AnnotationSourceIdentity | null,
+) {
   const [state, setReactState] = useState<AnnotationControllerState>(() =>
     createInitialAnnotationControllerState(initialAnnotations),
   );
   const stateRef = useRef(state);
+  const activeSourceRef = useRef(currentSource);
+  const mountedRef = useRef(true);
 
   const updateState = useCallback((
     update: AnnotationControllerState | ((current: AnnotationControllerState) => AnnotationControllerState),
@@ -626,6 +631,26 @@ export function useAnnotationController(initialAnnotations: CanvasAnnotationV2[]
     stateRef.current = next;
     setReactState(next);
     return next;
+  }, []);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+  useEffect(() => {
+    activeSourceRef.current = currentSource;
+    const gesture = stateRef.current.gesture;
+    if (gesture.kind === 'semantic-object' && currentSource !== undefined
+      && (!currentSource || !sourceIdentityEquals(gesture.source, currentSource))) {
+      updateState(current => ({ ...current, gesture: { kind: 'idle' } }));
+    }
+  }, [currentSource, updateState]);
+  const isSemanticGestureCurrent = useCallback((
+    gesture: Extract<AnnotationGesture, { kind: 'semantic-object' }>,
+  ): boolean => {
+    const current = stateRef.current;
+    const source = activeSourceRef.current;
+    return mountedRef.current && current.isOpen && current.gesture === gesture
+      && (source === undefined || (source !== null && sourceIdentityEquals(gesture.source, source)));
   }, []);
   const getState = useCallback((): AnnotationControllerState => stateRef.current, []);
   const migrateSource = useCallback((
@@ -656,7 +681,11 @@ export function useAnnotationController(initialAnnotations: CanvasAnnotationV2[]
       commitTextAnnotation(current, text, createClientAnnotationId(), Date.now()),
     );
   }, [updateState]);
-  const commitResolvedSemantic = useCallback((target: ResolvedSemanticTarget) => {
+  const commitResolvedSemantic = useCallback((
+    target: ResolvedSemanticTarget,
+    gesture: Extract<AnnotationGesture, { kind: 'semantic-object' }>,
+  ) => {
+    if (!isSemanticGestureCurrent(gesture)) return;
     updateState((current) =>
       commitResolvedSemanticAnnotation(
         current,
@@ -665,7 +694,7 @@ export function useAnnotationController(initialAnnotations: CanvasAnnotationV2[]
         Date.now(),
       ),
     );
-  }, [updateState]);
+  }, [isSemanticGestureCurrent, updateState]);
   const escape = useCallback(() => {
     updateState((current) => cancelGestureOrCloseMode(current));
   }, [updateState]);
@@ -698,6 +727,7 @@ export function useAnnotationController(initialAnnotations: CanvasAnnotationV2[]
     pointerMove,
     pointerUp,
     commitText,
+    isSemanticGestureCurrent,
     commitResolvedSemantic,
     updateInstruction,
     moveText,

@@ -5,9 +5,10 @@ import { resolve } from 'node:path';
 import { chromium, type Browser, type Page } from '@playwright/test';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { SimpleChatAgent, SimpleChatProject } from '@/components/simple-chat/simple-chat-types';
+import { assertReviewedChatFontSource } from '../helpers/approved-chat-font-source';
 
-// Task5 is appended after the frozen 14994-byte / 22-case prefix. This suite
-// runs React in Chromium; the unchanged outer jsdom hooks do not drive its UI.
+// Retain the frozen 22-case source and its one reviewed work-mode count amendment.
+// This suite runs React in Chromium; the outer jsdom hooks do not drive its UI.
 // No code below is executed while preparing this fixture for controller review.
 const T5_PAGE_ENTRY = String.raw`
 import React from 'react';
@@ -222,12 +223,8 @@ describe('mobile simple-chat page layout', () => {
     ]);
     t5Validate = validation.validateSimpleChatProjects; t5Equal = utils.isDeepStrictEqual;
     const frozen = JSON.parse(await readFile(resolve('.superpowers/sdd/2026-10-09-sketch-to-code/android-mobile-task5-before-20261018.frozen.json'), 'utf8')) as { originalChatFontTestText: string };
-    const { Buffer } = await import('node:buffer');
-    const prefix = Buffer.from(frozen.originalChatFontTestText, 'utf8');
-    const current = await readFile(resolve('src/__tests__/components/chat-font-mobile-layout.test.tsx'));
-    if (prefix.length !== 14994 || !current.equals(prefix)) {
-      throw new Error('TASK5_FROZEN_22_CASE_FILE_CHANGED');
-    }
+    const current = await readFile(resolve('src/__tests__/components/chat-font-mobile-layout.test.tsx'), 'utf8');
+    assertReviewedChatFontSource(frozen.originalChatFontTestText, current);
     // Use Next's own browser siblings, exactly as its browser compiler does
     // (create-compiler-aliases.js / browser-variant-modules.js). No hook mocks.
     const browserVariants = require('next/dist/build/browser-variant-modules') as { browserVariantModules: string[] };
@@ -709,7 +706,9 @@ describe('mobile simple-chat page layout', () => {
       // For the armed phase, a different synthetic writer advances the remote
       // revision immediately before CAS. Stale manual retry is also refused.
       if (fault.active && body.expectedRevision === s.revision) s.revision++;
-      await route.fulfill({ status: 409, json: { code: 'SYNTHETIC_REVISION_CONFLICT', message: '合成版本冲突', retryable: true } }); return true;
+      // Only the real revision-conflict contract is replayable. Other 409 codes
+      // correctly reject identity and must never be treated as a CAS conflict.
+      await route.fulfill({ status: 409, json: { code: 'CHAT_SYNC_CONFLICT', message: '合成版本冲突', retryable: true } }); return true;
     }
     fault.successes++; return false; // Original exact success branch below.
   }
@@ -784,20 +783,26 @@ describe('mobile simple-chat page layout', () => {
       if (s.u5?.preservePending) await u5DisposePending(s); else await t5Dispose(s);
       if (s.faults.length) throw new Error(s.faults.join('\n'));
     } catch (error) { cleanup = error; }
-    if (primary && cleanup) throw new AggregateError([primary, cleanup], 'U5_TEST_AND_CLEANUP');
+    if (primary && cleanup) throw new AggregateError([primary, cleanup], `U5_TEST_AND_CLEANUP: primary=${String(primary)}; cleanup=${String(cleanup)}`);
     if (cleanup) throw cleanup;
     if (primary) throw primary;
   }
 
   async function u5Status(s: T5Session, text: string): Promise<void> {
-    await s.page.waitForFunction(text => document.querySelector('[data-testid="simple-chat-sync-status"]')?.textContent?.includes(text), text);
+    try {
+      await s.page.waitForFunction(text => document.querySelector('[data-testid="simple-chat-sync-status"]')?.textContent?.includes(text), text);
+    } catch (error) {
+      throw new Error(`U5_STATUS expected=${text}; actual=${await s.page.getByTestId('simple-chat-sync-status').textContent()}; attempts=${s.u5?.attempts}; cause=${String(error)}`);
+    }
     await t5Settle(s);
   }
 
   async function u5Frame(s: T5Session, width: number, height: number): Promise<void> {
     const sync = s.page.getByTestId('simple-chat-sync-status');
     await t5Inside(sync, width, height);
-    const geometry = await s.page.locator('#task5-root header + div + div').evaluate(element => {
+    const messages = s.page.locator('#task5-root div.overflow-y-auto').filter({ has: s.page.getByText(T5_MESSAGE, { exact: true }) });
+    expect(await messages.count(), 'one actual scrollable conversation contains the retained message').toBe(1);
+    const geometry = await messages.evaluate(element => {
       const own = element.getBoundingClientRect();
       let left = Math.max(0, own.left), right = Math.min(innerWidth, own.right);
       let top = Math.max(0, own.top), bottom = Math.min(innerHeight, own.bottom);
@@ -832,9 +837,18 @@ describe('mobile simple-chat page layout', () => {
     await u5Frame(s, width, height);
   }
 
-  async function u5Retained(s: T5Session, input: import('@playwright/test').ElementHandle<HTMLElement | SVGElement>): Promise<void> {
-    expect(await input.evaluate(element => element.isConnected && element === document.querySelector('#task5-root textarea')), 'real page sync u same live input').toBe(true);
-    expect(await s.page.getByPlaceholder(T5_PLACEHOLDER).inputValue()).toBe(T5_DRAFT);
+  async function u5Retained(s: T5Session, input: import('@playwright/test').ElementHandle<HTMLElement | SVGElement>, identityRejected = false): Promise<void> {
+    if (identityRejected) {
+      // A 403 invalidates the current identity. Keep its pending envelope, but
+      // never continue exposing that account's conversation or editable input.
+      expect(await input.evaluate(element => element.isConnected), 'identity rejection detaches the old account input').toBe(false);
+      expect(await s.page.getByPlaceholder(T5_PLACEHOLDER).count(), 'rejected identity cannot edit the cached conversation').toBe(0);
+      expect(await s.page.getByText(T5_MESSAGE, { exact: true }).count(), 'rejected identity cannot read cached messages').toBe(0);
+      expect(await s.page.getByText('选择或创建一个对话', { exact: true }).count()).toBe(1);
+    } else {
+      expect(await input.evaluate(element => element.isConnected && element === document.querySelector('#task5-root textarea')), 'real page sync u same live input').toBe(true);
+      expect(await s.page.getByPlaceholder(T5_PLACEHOLDER).inputValue()).toBe(T5_DRAFT);
+    }
     const stored = await s.page.evaluate(async () => await window.task5PageFixture?.envelope());
     expect(stored?.userId).toBe('task5-user');
     expect(stored?.currentProjects.map(project => project.id)).toEqual(['task5-project']);
@@ -1017,6 +1031,7 @@ describe('mobile simple-chat page layout', () => {
               messages: rect(messages), composer: rect(composer), footer: rect(footer),
               scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth };
           }, T5_MESSAGE);
+          if ((width === 320 && height === 640) || (width === 844 && height === 390)) await u5Capture(s, `layout-${theme}-${width}x${height}`);
           expect(geometry.scrollWidth, 'no overall horizontal overflow').toBeLessThanOrEqual(geometry.clientWidth);
           for (const [name, box] of Object.entries(geometry).filter((entry): entry is [string, typeof geometry.host] => typeof entry[1] === 'object')) {
             expect(box.x, `${name} left`).toBeGreaterThanOrEqual(0);
@@ -1297,8 +1312,13 @@ describe('mobile simple-chat page layout', () => {
               await u5Status(s, kind === 'conflict' ? '同步冲突' : kind === 'offline' ? '离线' : '同步失败');
               await u5PendingQuiet(s);
             }
-            await u5Frame(s, width, height);
-            if (width === 640) await u5NativeFooter(s, width, height);
+            if (kind === 'permission') {
+              await t5Inside(s.page.getByTestId('simple-chat-sync-status'), width, height);
+              await u5Retained(s, identity, true);
+            } else {
+              await u5Frame(s, width, height);
+              if (width === 640) await u5NativeFooter(s, width, height);
+            }
             await u5Capture(s, kind + '-' + theme + '-' + width + 'x' + height);
             if (kind === 'permission' || kind === 'invalid') {
               expect(await s.page.getByTestId('simple-chat-sync-status').textContent(), 'real page sync u nonretryable status must not promise retry').not.toContain('点击重试');
@@ -1319,7 +1339,8 @@ describe('mobile simple-chat page layout', () => {
               expect(await details.evaluate(element => element === document.activeElement), 'real page sync u details focus restores').toBe(true);
               expect(fault.attempts, 'real page sync u read-only reason does not trigger retry').toBe(attempts);
               expect(fault.successes, 'real page sync u denial never ACKed').toBe(0);
-              await u5Retained(s, identity); return;
+              await u5PendingQuiet(s);
+              await u5Retained(s, identity, kind === 'permission'); return;
             }
             if (kind === 'failed' || kind === 'conflict') {
               const retry = s.page.getByRole('button', { name: '重试同步', exact: true });
@@ -1437,7 +1458,9 @@ describe('mobile simple-chat page layout', () => {
           const box = await operations.boundingBox(); if (!box) throw new Error('V5_OPERATIONS_REQUIRED');
           expect(box.height, 'real page reading v low-height actions reserve one row rather than displace body').toBeLessThanOrEqual(52);
           expect(await operations.evaluate(element => Number(getComputedStyle(element).opacity)), 'real page reading v low-height actions never depend on hover').toBe(1);
-          expect((await v5Observe(s, 'short-initial')).readable, 'real page reading v actual last message remains painted').toBe(true);
+          const initialReading = await v5Observe(s, 'short-initial');
+          if (!initialReading.readable) console.info('MOBILE_READING_DIAGNOSTIC', JSON.stringify(initialReading));
+          expect(initialReading.readable, 'real page reading v actual last message remains painted').toBe(true);
           const titles = ['复制', '重新生成', '更短', '更长', '继续', '转生图提示词', '从此分支', '保存为 Artifact', '发送到短剧工作台', '有帮助', '无帮助', '在 Canvas 中编辑'];
           const buttons = operations.getByRole('button');
           expect(await buttons.evaluateAll(elements => elements.map(element => element.getAttribute('title'))), 'real page reading v retains every original action').toEqual(titles);

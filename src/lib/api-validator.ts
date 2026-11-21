@@ -193,6 +193,10 @@ export function withValidation(fields: FieldMap, handler: PostHandler) {
       return NextResponse.json({ error: '请求体不是有效的 JSON' }, { status: 400 });
     }
 
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: '请求体必须是对象' }, { status: 400 });
+    }
+
     // 逐字段校验
     for (const [key, def] of Object.entries(fields)) {
       const validateFn = typeof def === 'function' ? def : def.validate;
@@ -336,7 +340,7 @@ export function validateApiInputs(
   schema: Record<string, FieldType>
 ): string | null {
   // 确保 body 是对象
-  if (!body || typeof body !== 'object') return '请求体必须是对象';
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return '请求体必须是对象';
   const bodyObj = body as Record<string, unknown>;
   
   for (const [field, type] of Object.entries(schema)) {

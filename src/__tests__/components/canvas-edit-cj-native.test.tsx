@@ -11,7 +11,54 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
 type Theme='gold'|'mono';
 interface Options {admin?:boolean; requireMissing?:boolean; touch?:boolean;holdRecovery?:boolean;catalogLoading?:boolean}
 interface FixtureWindow extends Window {canvasUi:{png:string;mount(theme:Theme,options:Options):void;unmount():void;state:{mounts:number;disposed:boolean;scopeChecks:number;images:unknown[];groups:unknown[];actions:string[];view:{offsetX:number;offsetY:number;zoom:number}|null;events:Array<{type:string;target:string}>}}}
-interface Session {context:BrowserContext;page:Page;options:Options;errors:string[];counts:Map<string,number>;handlers:Set<Promise<void>>;mounted:boolean;pending:Set<Request>;completed:Set<Request>;failed:Set<Request>;refused:Set<Request>;responseStatus:Map<Request,number>;nativeWaiters:Set<()=>void>;png:Buffer;releaseRecovery:()=>void;recoveryCalls:number}
+interface Session {context:BrowserContext;page:Page;options:Options;errors:string[];counts:Map<string,number>;handlers:Set<Promise<void>>;mounted:boolean;pending:Set<Request>;completed:Set<Request>;failed:Set<Request>;refused:Set<Request>;responseStatus:Map<Request,number>;nativeWaiters:Set<()=>void>;png:Buffer;releaseRecovery:()=>void;recoveryCalls:number;nativeObservation:NativeObservationCJ}
+type NativeReceiptCJ = Record<string, string | number | boolean | null>;
+interface NativeObservationCJ {
+  phase: string; started: number; sequence: number; nextRequestId: number; dropped: number; evicted: number;
+  requests: Map<Request, number>; events: NativeReceiptCJ[]; lastFailure: NativeReceiptCJ | null;
+}
+// At most 63 recent events plus one retained native failure; route labels contain no URL data.
+function observeCJ(s: Session, event: string, request?: Request, details: NativeReceiptCJ = {}): void {
+  const observation = s.nativeObservation;
+  let requestId = request ? observation.requests.get(request) : undefined;
+  if (request && requestId === undefined) {
+    if (observation.requests.size >= 64) {
+      const oldest = observation.requests.keys().next().value;
+      if (oldest) observation.requests.delete(oldest);
+      observation.evicted++;
+    }
+    requestId = ++observation.nextRequestId;
+    observation.requests.set(request, requestId);
+  }
+  const url = request?.url();
+  const route = !request ? null : url === ORIGIN + '/api/task-events' ? 'task-events'
+    : url === ORIGIN + '/api/session' ? 'session' : url === ORIGIN + '/api/auth/me' ? 'auth-me'
+    : url === ORIGIN + '/api/tasks/recover?projectId=canvas-ui-project' ? 'canvas-recovery'
+    : url === ORIGIN + '/api/models?type=3d' ? 'models-3d'
+    : url === ORIGIN + '/api/models?type=upscaler' ? 'models-upscaler'
+    : url === ORIGIN + '/api/models?type=removebg' ? 'models-removebg'
+    : url === ORIGIN + '/api/upscayl' ? 'upscayl' : url === ORIGIN + '/logo.png' ? 'logo'
+    : HELP_FILES.some(file => url === ORIGIN + '/api/help-image?file=' + file) ? 'help-image'
+    : url === ORIGIN + '/' ? 'document' : 'fixture-other';
+  const entry: NativeReceiptCJ = { sequence: ++observation.sequence, ms: Date.now() - observation.started,
+    phase: observation.phase, event, requestId: requestId ?? null, route,
+    method: request?.method() ?? null, resourceType: request?.resourceType() ?? null,
+    statusAtEvent: request ? s.responseStatus.get(request) ?? null : null,
+    statusAtFailure: event === 'requestfailed' && request ? s.responseStatus.get(request) ?? null : null,
+    error: event === 'requestfailed' ? request?.failure()?.errorText.slice(0, 160) ?? null : null,
+    nativePending: s.pending.size, routePending: s.handlers.size, ...details };
+  if (event === 'requestfailed') observation.lastFailure = entry;
+  if (observation.events.length >= 63) { observation.events.shift(); observation.dropped++; }
+  observation.events.push(entry);
+}
+function emitObservationCJ(s: Session, cleanupFailureCount: number): void {
+  try {
+    console.log('CJ_NATIVE_TIMING_DIAGNOSTIC', JSON.stringify({ cleanupFailureCount,
+      nativePending: s.pending.size, routePending: s.handlers.size, errorCount: s.errors.length,
+      dropped: s.nativeObservation.dropped, evicted: s.nativeObservation.evicted,
+      events: s.nativeObservation.events, lastFailure: s.nativeObservation.lastFailure }));
+  } catch { /* Passive diagnostics must not replace the original failure. */ }
+}
 const ORIGIN='https://canvas-shell-mobile.invalid';
 const THEMES:readonly Theme[]=['gold','mono'];
 const HELP_FILES=['canvas-overview.jpeg','erase-tool.jpeg','mask-tool.jpeg','remove-bg.jpeg','upscale.jpeg','lang-edit.jpeg','svg-trace.jpeg','extend.jpeg','oh-my-prompt.jpeg'];
@@ -118,14 +165,16 @@ async function session(theme: Theme = 'gold', width: number = 390, height: numbe
     const page = await context.newPage(); page.setDefaultTimeout(1500);
     let releaseRecovery:()=>void=()=>{};const recoveryGate=options.holdRecovery?new Promise<void>(resolve=>{releaseRecovery=resolve;}):Promise.resolve();
     const s: Session = { context, page, options, errors: [], counts: new Map(), handlers: new Set(), mounted: false,
-      pending: new Set(), completed: new Set(), failed: new Set(), refused: new Set(), responseStatus: new Map(), nativeWaiters: new Set(), png: Buffer.alloc(0),releaseRecovery,recoveryCalls:0 }; value = s; live.add(s);
-    context.on('request', request => s.pending.add(request));
-    context.on('response', response => s.responseStatus.set(response.request(),response.status()));
-    context.on('requestfinished', request => { s.pending.delete(request); s.completed.add(request); for (const notify of s.nativeWaiters) notify(); });
+      pending: new Set(), completed: new Set(), failed: new Set(), refused: new Set(), responseStatus: new Map(), nativeWaiters: new Set(), png: Buffer.alloc(0),releaseRecovery,recoveryCalls:0,nativeObservation:{phase:'open',started:Date.now(),sequence:0,nextRequestId:0,dropped:0,evicted:0,requests:new Map(),events:[],lastFailure:null} }; value = s; live.add(s);
+    observeCJ(s, 'session:created', undefined, { theme, width, height });
+    context.on('request', request => { s.pending.add(request); observeCJ(s, 'request', request); });
+    context.on('response', response => { s.responseStatus.set(response.request(),response.status()); observeCJ(s, 'response', response.request()); });
+    context.on('requestfinished', request => { s.pending.delete(request); s.completed.add(request); observeCJ(s, 'requestfinished', request); for (const notify of s.nativeWaiters) notify(); });
     context.on('requestfailed', request => {
       s.pending.delete(request);
       const completed = isCompletedCanvasFixtureEventStream(request, s.responseStatus.get(request), ORIGIN);
       (completed ? s.completed : s.failed).add(request);
+      observeCJ(s, 'requestfailed', request, { admittedByExistingHelperAtFailure: completed });
       for (const notify of s.nativeWaiters) notify();
     });
     page.on('pageerror', error => s.errors.push(String(error)));
@@ -143,24 +192,27 @@ async function session(theme: Theme = 'gold', width: number = 390, height: numbe
         }
         if(key==='/api/tasks/recover?projectId=canvas-ui-project'){if(headers['x-wujie-expected-actor-id']!=='omp-mobile-user'||headers['content-type']!=='application/json')throw Error('BB_RECOVERY_ACTOR_HEADERS');s.recoveryCalls++;await recoveryGate;await route.fulfill({json:{success:true,tasks:[]}});return;}
         if (key === '/api/session' || key === '/api/auth/me') { await route.fulfill({ json: { success:true,user:{id:'omp-mobile-user',username:'离线用户',role:'user'} } }); return; }
-        if (key === '/api/task-events') { await route.fulfill({ status:503,json:{success:false,error:'OFFLINE_FIXTURE_EVENTS_UNAVAILABLE'} });return; }
+        if (key === '/api/task-events') { observeCJ(s, 'eventsource:503-fulfill-start', request); await route.fulfill({ status:503,json:{success:false,error:'OFFLINE_FIXTURE_EVENTS_UNAVAILABLE'} }); observeCJ(s, 'eventsource:503-fulfill-resolved', request); return; }
         if (key === '/api/models?type=3d') { await route.fulfill({json:{success:true,capabilityCatalogVersion:1,providers:[],models:[],taskModelCatalog:[],modelAuthorizationMigration:{resolved:[],required:[]},quickCreatePolicy:{autoModelRouting:false,globalDefault:'',quickCreateDefault:''}}});return; }
         if (key === '/api/upscayl' || key === '/api/models?type=upscaler' || key === '/api/models?type=removebg') { await route.fulfill({json:key==='/api/upscayl'?{available:false,models:[]}:{success:true,providers:[],models:[]}});return; }
         if (HELP_FILES.some(file => key === '/api/help-image?file=' + file)) { await route.fulfill({contentType:'image/png',body:s.png});return; }
         if (key === '/logo.png') { await route.fulfill({contentType:'image/png',body:s.png});return; }
         throw Error('CANVAS_UI_FIXTURE_UNKNOWN_HTTP ' + key);
       })().catch(async error => { s.errors.push(String(error)); s.refused.add(route.request()); await route.abort('blockedbyclient'); });
-      s.handlers.add(operation); try { await operation; } finally { s.handlers.delete(operation); }
+      s.handlers.add(operation); observeCJ(s, 'route:tracked', route.request()); try { await operation; } finally { s.handlers.delete(operation); observeCJ(s, 'route:settled', route.request()); }
     });
     await context.addInitScript(() => { const actor='omp-mobile-user',user={id:actor,username:'离线用户',password:'',role:'user',status:'active',createdAt:1,updatedAt:1};localStorage.setItem('unbounded_ai_current_user',actor);localStorage.setItem('wujie_selected_model',JSON.stringify({model:'bx-provider::bx-image',providerId:'bx-provider'}));localStorage.setItem('unbounded_ai_user_data',JSON.stringify({users:[user],userData:{[actor]:{user,projects:[],apiKeys:[],usageStats:[]}}})); });
     await page.goto(ORIGIN); await page.addScriptTag({ content: bundle });
     console.log('BB_FETCH_RECEIVER_DIAG',JSON.stringify(await page.evaluate(async()=>{const errors:string[]=[];const holder={fetcher:window.fetch};try{await holder.fetcher('http://[');}catch(error){errors.push(String(error));}try{await window.fetch('http://[');}catch(error){errors.push(String(error));}return errors;})));
     s.png=Buffer.from((await page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.png)).split(',')[1],'base64');
+    s.nativeObservation.phase = 'mount'; observeCJ(s, 'mount:start');
     await page.evaluate(v => (window as unknown as FixtureWindow).canvasUi.mount(v.theme,v.options), {theme,options}); s.mounted = true;
+    observeCJ(s, 'mount:resolved');
     await page.locator('[data-canvas-viewport]').waitFor();
     await nativeRequestsFinished(s); await settle(page);
     await page.waitForFunction(()=>(window as unknown as FixtureWindow).canvasUi.state.view!==null,undefined,{timeout:1500});
     expect(await page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state.view),'initial public canvas view').toEqual({offsetX:0,offsetY:0,zoom:1});
+    s.nativeObservation.phase = 'ready'; observeCJ(s, 'session:ready');
     return s;
   } catch (error) {
     try { if (value) await dispose(value); else { await context.close(); contexts.delete(context); } }
@@ -178,14 +230,21 @@ async function nativeRequestsFinished(s: Session): Promise<void> {
 }
 async function dispose(s: Session, expectedRefusal?: 'http' | 'websocket', cleanupProbe?: () => void): Promise<void> {
   const failures: unknown[] = [];
+  s.nativeObservation.phase = 'dispose:unmount'; observeCJ(s, 'dispose:entry');
   try {
     if (s.mounted) await bounded('unmount', () => s.page.evaluate(() => (window as unknown as FixtureWindow).canvasUi.unmount()));
     cleanupProbe?.(); // Used only by the cleanup-fault selftest, after real unmount.
+    observeCJ(s, 'unmount:resolved');
   } catch (error) { failures.push(error); }
+  s.nativeObservation.phase = 'dispose:routes'; observeCJ(s, 'routes:drain-start');
   try { await bounded('routes', () => Promise.all([...s.handlers])); } catch (error) { failures.push(String(error)); }
+  s.nativeObservation.phase = 'dispose:native-drain'; observeCJ(s, 'native-drain:start');
   try { await nativeRequestsFinished(s); await bounded('final routes', () => Promise.all([...s.handlers])); } catch (error) { failures.push(String(error)); }
   const unresolvedBeforeClose = s.pending.size !== 0 || s.handlers.size !== 0;
-  try { await s.context.close(); contexts.delete(s.context); live.delete(s); } catch (error) { failures.push(String(error)); }
+  observeCJ(s, 'native-drain:settled', undefined, { unresolvedBeforeClose });
+  s.nativeObservation.phase = 'dispose:context-close'; observeCJ(s, 'context-close:start');
+  try { await s.context.close(); contexts.delete(s.context); live.delete(s); observeCJ(s, 'context-close:resolved'); } catch (error) { failures.push(String(error)); }
+  emitObservationCJ(s, failures.length);
   // Cleanup/lifecycle/allowlist failures can never share the expected-refusal
   // prefix. A boundary selftest must not succeed merely because close failed.
   const invalid=(code:string):never=>{if(failures.length)throw new AggregateError([Error(code),...failures],'CANVAS_UI_FIXTURE_VALIDATION_AND_CLEANUP');throw Error(code);};
@@ -211,7 +270,7 @@ async function dispose(s: Session, expectedRefusal?: 'http' | 'websocket', clean
   if (s.errors.length) throw Error('CANVAS_UI_FIXTURE_INFRASTRUCTURE: ' + s.errors.join('; '));
 }
 
-async function withSession(theme:Theme,width:number,height:number,options:Options,run:(s:Session)=>Promise<void>):Promise<void>{const s=await session(theme,width,height,options);let primary:unknown;try{await run(s);}catch(e){primary=e;}try{await dispose(s);}catch(cleanup){if(primary)throw new AggregateError([primary,cleanup],'CANVAS_UI_FIXTURE_TEST_AND_CLEANUP');throw cleanup;}if(primary)throw primary;}
+async function withSession(theme:Theme,width:number,height:number,options:Options,run:(s:Session)=>Promise<void>):Promise<void>{const s=await session(theme,width,height,options);let primary:unknown;s.nativeObservation.phase='body';observeCJ(s,'body:start');try{await run(s);}catch(e){primary=e;}observeCJ(s,'body:settled');try{await dispose(s);}catch(cleanup){if(primary)throw new AggregateError([primary,cleanup],'CANVAS_UI_FIXTURE_TEST_AND_CLEANUP');throw cleanup;}if(primary)throw primary;}
 
 
 

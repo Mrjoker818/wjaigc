@@ -98,18 +98,44 @@ export function isSimpleChatFileSkill(skillId: string | undefined): boolean {
   return SIMPLE_CHAT_AUTO_SKILL_RULES.some(rule => rule.id === skillId && rule.file);
 }
 
+const fileRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+const fileText = (value: unknown): value is string => typeof value === 'string' && Boolean(value.trim());
+
+/** Minimum input required by the click-to-generate endpoints; not proof a binary was rendered. */
+function isFileData(data: unknown, skillId?: string): data is Record<string, unknown> {
+  if (!fileRecord(data)) return false;
+  const rows = (key: string) => Array.isArray(data[key]) && data[key].length > 0 && data[key].every(fileRecord);
+  switch (skillId) {
+    case 'ppt-master': return rows('slides');
+    case 'excel-master': return rows('sheets');
+    case 'word-master': return rows('sections');
+    case 'mindmap-master': return fileText(data.title) && fileRecord(data.root) && fileText(data.root.text);
+    case 'flowchart-master': return fileText(data.title) && fileText(data.mermaid);
+    case undefined: return ['ppt-master', 'excel-master', 'word-master', 'mindmap-master', 'flowchart-master'].some(id => isFileData(data, id));
+    default: return false;
+  }
+}
+
+/** Shared by the skill trace, download buttons and download handlers. PDF has its own contract. */
+export function readSimpleChatFileData(content: string, skillId?: string): Record<string, unknown> | null {
+  const block = content.match(/```json\s*([\s\S]*?)\s*```/i);
+  if (!block) return null;
+  try {
+    const data: unknown = JSON.parse(block[1]);
+    return isFileData(data, skillId) ? data : null;
+  } catch { return null; }
+}
+
 /**
  * Steps of a file skill, read from the reply so far: nothing yet, prose, an open ```json block,
- * a closed block. A finished reply whose block does not parse fails the third step.
+ * then data accepted by that skill's download entry. Invalid finished data fails the third step.
  */
-export function deriveSkillFileSteps(content: string, finished: boolean): SkillFileStepStatus[] {
+export function deriveSkillFileSteps(content: string, finished: boolean, skillId?: string): SkillFileStepStatus[] {
   const open = content.search(/```json\s/i);
   const block = content.match(/```json\s*([\s\S]*?)\s*```/i);
   let reached: number;
   if (block) {
-    let parsed = false;
-    try { JSON.parse(block[1]); parsed = true; } catch { parsed = false; }
-    if (!parsed) {
+    if (!readSimpleChatFileData(content, skillId)) {
       return finished ? ['done', 'done', 'failed', 'pending'] : ['done', 'done', 'running', 'pending'];
     }
     reached = 4;

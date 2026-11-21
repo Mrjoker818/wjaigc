@@ -8,6 +8,9 @@ import { getPool } from '@/lib/db-client';
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 
+const INLINE_RESULT = 'data:image/png;base64,ZmFrZQ==';
+const PERSISTED_RESULT_URL = '/api/serve-upload/generate/project-admission-result.png';
+
 vi.mock('server-only', () => ({}));
 const state = vi.hoisted(() => ({
   denyProject: false,
@@ -21,6 +24,7 @@ const state = vi.hoisted(() => ({
   session: vi.fn(), desktop: vi.fn(), providerLookup: vi.fn(), model: vi.fn(),
   task: vi.fn(), charge: vi.fn(), consume: vi.fn(), check: vi.fn(), cost: vi.fn(), billable: vi.fn(),
   register: vi.fn(), update: vi.fn(), network: vi.fn(), kickoff: vi.fn(), identify: vi.fn(),
+  persistImage: vi.fn(),
   after: [] as Array<() => Promise<void>>,
   persisted: new Map<string, unknown>(),
 }));
@@ -74,7 +78,7 @@ vi.mock('@/lib/task-registry', () => ({
   isTaskCancelled: () => false, getTaskInfo: vi.fn(),
 }));
 vi.mock('@/lib/task-core/durable-generation-kickoff', () => ({ kickoffDurableGenerationTasks: state.kickoff }));
-vi.mock('@/lib/s3-storage', () => ({ persistRemoteImage: async (url: string) => url }));
+vi.mock('@/lib/s3-storage', () => ({ persistRemoteImage: state.persistImage }));
 vi.mock('@/lib/server-user-storage', () => ({ appendUserJsonl: vi.fn() }));
 vi.mock('@/lib/op-log', () => ({
   logOperation: vi.fn(), logError: vi.fn(), startTimer: () => ({ end: () => 0 }),
@@ -140,6 +144,7 @@ beforeEach(() => {
   state.check.mockResolvedValue({ sufficient: true, balance: 100 });
   state.consume.mockResolvedValue({ success: true, cost: 7 });
   state.identify.mockResolvedValue({ en: 'an approved reference image', zh: '已核准参考图' });
+  state.persistImage.mockImplementation(async (url: string) => url === INLINE_RESULT ? PERSISTED_RESULT_URL : url);
   state.network.mockImplementation(async (url: string) => {
     expect(new URL(url).hostname).toBe('provider.invalid');
     state.events.push('network');
@@ -282,6 +287,7 @@ describe('real generation POST admission before effects', () => {
 
       expect(response.status).toBe(200);
       expect((await response.json()).success).toBe(true);
+      expect(state.persistImage.mock.calls).toEqual([[INLINE_RESULT]]);
       expect(state.consume).toHaveBeenCalledTimes(1);
       expect(state.identify).toHaveBeenCalledWith(
         `data:image/png;base64,${Buffer.from('approved-reference').toString('base64')}`, 8000);
@@ -339,6 +345,7 @@ describe('real generation POST admission before effects', () => {
 
       expect(response.status).toBe(200);
       expect((await response.json()).success).toBe(true);
+      expect(state.persistImage.mock.calls).toEqual([[INLINE_RESULT]]);
       expect(state.consume).toHaveBeenCalledTimes(1);
       expect(state.network).toHaveBeenCalledTimes(2);
       const [providerUrl, init] = state.network.mock.calls[1] as [string, RequestInit];
@@ -661,6 +668,7 @@ describe('real generation POST admission before effects', () => {
       }));
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({ success: true });
+      expect(state.persistImage.mock.calls).toEqual([[INLINE_RESULT]]);
       expect(state.consume).toHaveBeenCalledWith('actor', 'image_generate', undefined, undefined, 'exact-image', expect.objectContaining({ providerId: 'provider-exact' }));
       expect(state.network).toHaveBeenCalledTimes(1);
       const [url, init] = state.network.mock.calls[0] as [string, RequestInit];

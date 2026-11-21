@@ -1907,7 +1907,7 @@ export async function POST(request: NextRequest) {
           );
           if (!terminal.transitioned) {
             const current = await getCloudTaskForUser(upscaleCreditTaskId, authResult.userId);
-            return { success: false, error: message, code: 'TASK_TERMINAL_CONFLICT', providerStatus: 409,
+            return { success: false, error: toUserFacingError(message), code: 'TASK_TERMINAL_CONFLICT', providerStatus: 409,
               providerCode: null, retryable: false, refunded: false, taskId: upscaleCreditTaskId,
               status: current?.status || 'unknown' };
           }
@@ -1922,7 +1922,7 @@ export async function POST(request: NextRequest) {
 
         return {
           success: false,
-          error: message,
+          error: toUserFacingError(message),
           code: sourceError?.code || providerError?.code || 'UPSCALE_PROVIDER_UNAVAILABLE',
           providerStatus: sourceError?.status || providerError?.status || 502,
           providerCode: providerError?.providerCode || null,

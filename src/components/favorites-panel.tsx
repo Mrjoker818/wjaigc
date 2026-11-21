@@ -385,7 +385,7 @@ function FavoritesPanelForUser({ userId, onClose, isMonochrome, onApplyParams }:
                             value={searchQuery}
                             onChange={e => setSearchQuery(e.target.value)}
                             placeholder="搜索关键词、模型、用户..."
-                            className="min-w-0 w-full flex-1 bg-transparent text-sm outline-none"
+                            className="[@media(min-width:768px)_and_(hover:hover)_and_(pointer:fine)]:min-h-[24px] min-w-0 w-full flex-1 bg-transparent text-sm outline-none"
                             style={{ color: textPrimary }}
                         />
                     </div>

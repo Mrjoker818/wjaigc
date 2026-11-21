@@ -10,6 +10,8 @@
  */
 import { findProviderForFeature, findProviderById, getApiProviders } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
+import { downloadVectorizeResultSvg } from '@/lib/vectorize-result-download';
+import { DOMParser } from '@xmldom/xmldom';
 
 export interface RecraftVectorizeOptions {
   /** 图片 URL 或 data URL */
@@ -18,6 +20,8 @@ export interface RecraftVectorizeOptions {
   imageBuffer?: Buffer;
   /** 输出格式，默认 svg */
   outputFormat?: 'svg' | 'eps' | 'pdf';
+  /** 取消结果回读，不再尝试其他端点。 */
+  signal?: AbortSignal;
 }
 
 export interface RecraftVectorizeResult {
@@ -29,6 +33,38 @@ export interface RecraftVectorizeResult {
   pathCount?: number;
   /** SVG 文件大小 */
   svgSize?: number;
+}
+
+/** Validate the complete document, not an SVG substring inside an error reply. */
+function parseRecraftSvgResult(value: unknown): RecraftVectorizeResult {
+  if (typeof value !== 'string' || !value.trim()) throw new Error('Recraft did not return an SVG document');
+  const errors: string[] = [];
+  const document = new DOMParser({
+    errorHandler: {
+      warning: message => errors.push(message),
+      error: message => errors.push(message),
+      fatalError: message => errors.push(message),
+    },
+  }).parseFromString(value, 'image/svg+xml');
+  const root = document.documentElement;
+  let rootCount = 0;
+  let outsideText = false;
+  for (let node = document.firstChild; node; node = node.nextSibling) {
+    if (node.nodeType === 1) rootCount++;
+    if ((node.nodeType === 3 || node.nodeType === 4) && node.textContent?.trim()) outsideText = true;
+  }
+  if (errors.length || !root || root.localName !== 'svg' || rootCount !== 1 || outsideText
+    || (!root.namespaceURI && (root.prefix || root.hasAttribute('xmlns')))
+    || (root.namespaceURI && root.namespaceURI !== 'http://www.w3.org/2000/svg')) {
+    throw new Error('Recraft did not return a valid SVG root document');
+  }
+  return {
+    success: true,
+    engine: 'recraft',
+    svg: value,
+    pathCount: (value.match(/<path/g) || []).length,
+    svgSize: value.length,
+  };
 }
 
 /**
@@ -99,7 +135,9 @@ export async function recraftVectorize(
   options: RecraftVectorizeOptions,
   providerOverride?: { baseUrl: string; apiKey: string },
 ): Promise<RecraftVectorizeResult> {
+  options.signal?.throwIfAborted();
   const provider = providerOverride || (await findRecraftProvider());
+  options.signal?.throwIfAborted();
   if (!provider) {
     return {
       success: false,
@@ -149,6 +187,7 @@ export async function recraftVectorize(
   // 原 60s 超时会把正常处理误判为失败并盲目切换到下一个端点，造成总耗时成倍增长。
   let lastError = '';
   for (const endpoint of endpoints) {
+    options.signal?.throwIfAborted();
     try {
       const formData = new FormData();
       formData.append('image', imageBlob, 'image.png');
@@ -161,7 +200,9 @@ export async function recraftVectorize(
           'Authorization': `Bearer ${apiKey}`,
         },
         body: formData,
+        signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(180000)]) : undefined,
       }, true, 180000);
+      options.signal?.throwIfAborted();
 
       if (!response.ok) {
         const errorText = await response.text().catch(() => '');
@@ -183,13 +224,7 @@ export async function recraftVectorize(
       // 如果直接返回 SVG
       if (contentType.includes('svg') || contentType.includes('text/xml')) {
         const svg = await response.text();
-        return {
-          success: true,
-          engine: 'recraft',
-          svg,
-          pathCount: (svg.match(/<path/g) || []).length,
-          svgSize: svg.length,
-        };
+        return parseRecraftSvgResult(svg);
       }
 
       // 如果返回 JSON
@@ -198,55 +233,31 @@ export async function recraftVectorize(
       // Recraft API 可能返回多种格式
       // 格式1: { image: { svg: "..." } }
       if (data.image?.svg) {
-        return {
-          success: true,
-          engine: 'recraft',
-          svg: data.image.svg,
-          pathCount: (data.image.svg.match(/<path/g) || []).length,
-          svgSize: data.image.svg.length,
-        };
+        return parseRecraftSvgResult(data.image.svg);
       }
 
       // 格式2: { data: [{ svg: "..." }] } (OpenAI images 格式)
       if (data.data?.[0]?.svg) {
-        return {
-          success: true,
-          engine: 'recraft',
-          svg: data.data[0].svg,
-          pathCount: (data.data[0].svg.match(/<path/g) || []).length,
-          svgSize: data.data[0].svg.length,
-        };
+        return parseRecraftSvgResult(data.data[0].svg);
       }
 
       // 格式3: { svg: "..." } 直接返回
       if (data.svg) {
-        return {
-          success: true,
-          engine: 'recraft',
-          svg: data.svg,
-          pathCount: (data.svg.match(/<path/g) || []).length,
-          svgSize: data.svg.length,
-        };
+        return parseRecraftSvgResult(data.svg);
       }
 
       // 格式4: { url: "..." } 返回 SVG URL
       if (data.url || data.data?.[0]?.url) {
         const svgUrl = data.url || data.data[0].url;
-        const svgResponse = await fetchWithV1Retry(svgUrl, '', {}, true, 30000);
-        if (svgResponse.ok) {
-          const svg = await svgResponse.text();
-          return {
-            success: true,
-            engine: 'recraft',
-            svg,
-            pathCount: (svg.match(/<path/g) || []).length,
-            svgSize: svg.length,
-          };
+        const svg = await downloadVectorizeResultSvg(String(svgUrl), options.signal);
+        if (svg) {
+          return parseRecraftSvgResult(svg);
         }
       }
 
       lastError = `端点 ${endpoint} 返回了无法解析的响应格式: ${JSON.stringify(data).slice(0, 300)}`;
     } catch (err) {
+      options.signal?.throwIfAborted();
       lastError = `端点 ${endpoint} 请求失败: ${err instanceof Error ? err.message : String(err)}`;
     }
   }

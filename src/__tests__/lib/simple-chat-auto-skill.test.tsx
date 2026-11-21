@@ -52,7 +52,7 @@ describe('skill file steps', () => {
     expect(deriveSkillFileSteps('', false)).toEqual(['running', 'pending', 'pending', 'pending']);
     expect(deriveSkillFileSteps('好的，大纲如下', false)).toEqual(['done', 'running', 'pending', 'pending']);
     expect(deriveSkillFileSteps('大纲\n```json\n{"slides":', false)).toEqual(['done', 'done', 'running', 'pending']);
-    expect(deriveSkillFileSteps('```json\n{"slides":[]}\n```', true)).toEqual(['done', 'done', 'done', 'done']);
+    expect(deriveSkillFileSteps('```json\n{"slides":[{"title":"汇报"}]}\n```', true)).toEqual(['done', 'done', 'done', 'done']);
   });
 
   it('fails the data step when the finished block does not parse', () => {
@@ -66,7 +66,7 @@ describe('skill file steps', () => {
 
 describe('skill trace', () => {
   it('names the skill and how it was chosen, with steps only for file skills', () => {
-    const ppt = renderToStaticMarkup(<SkillTraceCard skill={{ id: 'ppt-master', name: 'PPT大师', source: 'auto' }} content="```json\n{}\n```" finished />);
+    const ppt = renderToStaticMarkup(<SkillTraceCard skill={{ id: 'ppt-master', name: 'PPT大师', source: 'auto' }} content={'```json\n{"slides":[{"title":"汇报"}]}\n```'} finished />);
     expect(ppt).toContain('技能 · PPT大师');
     expect(ppt).toContain('自动匹配');
     expect(ppt).toContain('可以下载');
