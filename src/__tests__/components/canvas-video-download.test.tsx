@@ -77,7 +77,7 @@ describe('real canvas original-format video download', () => {
     const root = view.container.querySelector('[data-canvas-image-id="clip"]')!;
     fireEvent.mouseEnter(root); await settle();
     fireEvent.click(within(root as HTMLElement).getByRole('button', { name: '下载' })); await settle();
-    const popup = view.container.querySelector<HTMLElement>('[data-popup="download"]')!;
+    const popup = document.querySelector<HTMLElement>('[data-popup="download"]')!;
     expect(within(popup).getByRole('button', { name: new RegExp(label) })).toBeTruthy();
     fireEvent.click(within(popup).getByRole('button', { name: '确认下载' })); await settle();
     expect(requests).toEqual([`/api/video/download?url=${encodeURIComponent(source)}`]);
@@ -85,7 +85,7 @@ describe('real canvas original-format video download', () => {
     expect(downloads[0].filename).toMatch(new RegExp(`^wujie_.*\\.${extension}$`));
     expect(downloads[0].href).toBe('blob:original-download');
     expect(new Uint8Array(await readBlob(capturedBlob!))).toEqual(bytes);
-    expect(view.container.querySelector('[data-popup="download"]')).toBeNull();
+    expect(document.querySelector('[data-popup="download"]')).toBeNull();
   });
 
   it.each([204, 200])('refuses an empty successful %s response and reports a retryable download error', async (status) => {
@@ -105,7 +105,7 @@ describe('real canvas original-format video download', () => {
     const root = view.container.querySelector<HTMLElement>('[data-canvas-image-id="clip"]')!;
     fireEvent.mouseEnter(root); await settle();
     fireEvent.click(within(root).getByRole('button', { name: '下载' })); await settle();
-    const popup = view.container.querySelector<HTMLElement>('[data-popup="download"]')!;
+    const popup = document.querySelector<HTMLElement>('[data-popup="download"]')!;
     fireEvent.click(within(popup).getByRole('button', { name: '确认下载' })); await settle();
     expect(downloads).toEqual([]);
     expect(objectUrls).toBe(0);

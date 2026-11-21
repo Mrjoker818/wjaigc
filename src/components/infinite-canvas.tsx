@@ -8,7 +8,8 @@ import { claimUpscaleSubmissionMarker, clearUpscaleSubmissionMarker,
 import { claimRemoveBgSubmissionMarker, clearRemoveBgSubmissionMarker,
   findRemoveBgSubmissionMarker, type RemoveBgSubmissionMarker } from '@/lib/canvas-removebg-submission-marker';
 import { getTransparentOutputWarning } from '@/lib/image-generation-output';
-import { loadBrowserImageBlob } from '@/lib/browser-image-blob';
+import { loadCanvasPngBlob } from '@/lib/canvas-png-export';
+import { CanvasDownloadPopup } from '@/lib/canvas-download-popup';
 import { getVideoDownloadLabel, resolveVideoDownloadFormat } from '@/lib/video-download-format';
 import { toast } from 'sonner';
 import { CHAT_CANVAS_ACTION_EVENT, isChatCanvasActionRequest, type ChatCanvasActionRequest } from '@/lib/chat-canvas-action';
@@ -12536,7 +12537,8 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         setActiveTool('none');
         return;
       }
-      // PNG format - try direct fetch, fallback to server proxy for CORS
+      // PNG format - encode both direct and proxy results before downloading.
+      setDownloadProgress('正在导出 PNG...');
       let downloadSuccess = false;
       let downloadError = '';
 
@@ -12563,7 +12565,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
 
       // Step 2: 下载图片
       try {
-        const blob = await loadBrowserImageBlob(downloadUrl);
+        const blob = await loadCanvasPngBlob(downloadUrl);
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -12584,8 +12586,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           const proxyData = await proxyRes.json();
           const proxyUrl = proxyData.url || proxyData.savedUrl || proxyData.localUrl;
           if (proxyUrl) {
-            const response = await fetch(proxyUrl);
-            const blob = await response.blob();
+            const blob = await loadCanvasPngBlob(proxyUrl);
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
@@ -12599,7 +12600,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
             downloadError = proxyData.error || '服务器无法获取图片';
           }
         } catch (proxyError) {
-          downloadError = '下载失败：无法从服务器获取图片';
+          downloadError = proxyError instanceof Error ? `下载失败：${proxyError.message}` : '下载失败：无法从服务器获取图片';
           console.error('Download proxy also failed:', proxyError);
         }
       }
@@ -12612,6 +12613,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       setDownloadProgress(null);
       if (format === 'video') toast.error(error instanceof Error ? error.message : '视频下载失败，请稍后重试');
     }
+    setDownloadProgress(null);
     setShowDownloadPopup(false);
     setActiveTool('none');
   };
@@ -16696,16 +16698,9 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         {/* ====== DOWNLOAD FLOATING PANEL ====== */}
         {showDownloadPopup && selectedImageData && editMode === 'none' && (() => {
           const pos = getToolbarPosition();
-          const isMobileDownload = typeof window !== 'undefined' && window.innerWidth < 768;
-          const downloadPanel = (
-            <div
-              className={isMobileDownload ? 'fixed z-[180] pointer-events-auto overflow-y-auto overscroll-contain' : 'absolute z-50 pointer-events-auto'}
-              data-popup="download"
-              style={isMobileDownload ? { right: 'max(12px, env(safe-area-inset-right))', bottom: 'max(112px, calc(env(safe-area-inset-bottom) + 96px))', width: 'min(360px, calc(100vw - max(12px, env(safe-area-inset-left)) - max(12px, env(safe-area-inset-right))))', maxHeight: 'calc(100dvh - max(12px, env(safe-area-inset-top)) - max(112px, calc(env(safe-area-inset-bottom) + 96px)))', touchAction: 'pan-y' } : { left: pos.left, top: pos.top, transform: pos.transform }}
-              onMouseDown={(e) => e.stopPropagation()}
-              onWheel={(e) => e.stopPropagation()}
-            >
-              <div className={`${panelBaseClass} flex-col !items-stretch !gap-2 !p-3 ${isMobileDownload ? 'w-full min-w-0 [&_button]:min-h-11 [&_button]:min-w-11' : 'min-w-[260px]'}`}  onMouseDown={(e) => e.stopPropagation()}>
+          return (
+            <CanvasDownloadPopup anchor={pos} viewportElement={canvasRef.current}>
+              <div className={`${panelBaseClass} flex-col !items-stretch !gap-2 !p-3 w-full min-w-0 max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11`} onMouseDown={(e) => e.stopPropagation()}>
                 <div className="flex items-center gap-2">
                   <Download size={14} className={isMonochrome ? 'text-blue-500' : 'text-gold'} />
                   <span className={panelLabelClass}>下载</span>
@@ -16815,9 +16810,8 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
                   </button>
                 </div>
               </div>
-            </div>
+            </CanvasDownloadPopup>
           );
-          return isMobileDownload ? createPortal(downloadPanel, document.body) : downloadPanel;
         })()}
 
 

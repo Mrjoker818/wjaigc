@@ -25,6 +25,7 @@ import {
   type SimpleChatSyncSnapshot,
 } from "@/lib/simple-chat-sync-client";
 import { createIndexedDbSimpleChatEnvelopeStore } from "@/lib/simple-chat-sync-storage";
+import { diffSimpleChatProjects, replaySimpleChatOperations } from '@/lib/simple-chat-project-sync';
 
 type ProjectUpdater = Project[] | ((current: Project[]) => Project[]);
 
@@ -32,6 +33,7 @@ interface PreReadyProjectCandidate {
   userId: string;
   projects: Project[];
   dirty: boolean;
+  recoveredBase?: Project[];
 }
 
 function generateId() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36); }
@@ -80,6 +82,7 @@ export default function SimpleChatPage() {
   const coordinatorRef = useRef<SimpleChatSyncCoordinator | null>(null);
   const coordinatorUserIdRef = useRef<string | null>(null);
   const coordinatorReadyRef = useRef(false);
+  const identityRejectedRef = useRef(false);
   const coordinatorTransitionRef = useRef<Promise<void>>(Promise.resolve());
   const latestUserIdRef = useRef<string | null>(user?.id ?? null);
   latestUserIdRef.current = user?.id ?? null;
@@ -100,11 +103,9 @@ export default function SimpleChatPage() {
     if (window.innerWidth < 768) setSidebarOpen(false);
   }, []);
 
-  const visibleProjects = user && dataOwnerUserId === user.id
-    ? projects
-    : user && preReadyCandidate?.userId === user.id
-      ? preReadyCandidate.projects
-      : [];
+  const visibleProjects = user && preReadyCandidate?.userId === user.id
+    ? preReadyCandidate.projects
+    : user && dataOwnerUserId === user.id ? projects : [];
   const visibleActiveProjectId = visibleProjects.some(project => project.id === activeProjectId)
     ? activeProjectId
     : null;
@@ -114,14 +115,14 @@ export default function SimpleChatPage() {
     : null;
 
   const getCurrentUserProjects = useCallback((userId: string): Project[] => {
-    if (dataOwnerUserIdRef.current === userId) return projectsRef.current;
     const candidate = preReadyCandidateRef.current;
-    return candidate?.userId === userId ? candidate.projects : [];
+    if (candidate?.userId === userId) return candidate.projects;
+    return dataOwnerUserIdRef.current === userId ? projectsRef.current : [];
   }, []);
 
   const commitProjects = useCallback((updater: ProjectUpdater): Project[] => {
     const userId = user?.id;
-    if (!userId) return [];
+    if (!userId || identityRejectedRef.current) return [];
     const current = getCurrentUserProjects(userId);
     const next = typeof updater === 'function' ? updater(current) : updater;
     if (coordinatorReadyRef.current && coordinatorUserIdRef.current === userId) {
@@ -129,7 +130,10 @@ export default function SimpleChatPage() {
       setProjects(next);
       coordinatorRef.current?.update(next);
     } else {
-      const nextCandidate = { userId, projects: next, dirty: true };
+      const previous = preReadyCandidateRef.current;
+      const recoveredBase = previous?.userId === userId ? previous.recoveredBase
+        : dataOwnerUserIdRef.current === userId ? projectsRef.current : undefined;
+      const nextCandidate = { userId, projects: next, dirty: true, recoveredBase };
       preReadyCandidateRef.current = nextCandidate;
       setPreReadyCandidate(nextCandidate);
       const coordinator = coordinatorUserIdRef.current === userId ? coordinatorRef.current : null;
@@ -231,14 +235,41 @@ export default function SimpleChatPage() {
     const applySnapshot = (nextSnapshot: SimpleChatSyncSnapshot): void => {
       if (cancelled) return;
       setSyncSnapshot(nextSnapshot);
-      if (nextSnapshot.status !== 'synced' && nextSnapshot.status !== 'syncing') return;
+      if (nextSnapshot.error?.identityRejected) {
+        identityRejectedRef.current = true;
+        coordinatorReadyRef.current = false;
+        preReadyCandidateRef.current = null;
+        setPreReadyCandidate(null);
+        projectsRef.current = [];
+        setProjects([]);
+        dataOwnerUserIdRef.current = null;
+        setDataOwnerUserId(null);
+        setActiveProjectId(null);
+        setActiveTaskId(null);
+        return;
+      }
+      if (nextSnapshot.status !== 'synced' && nextSnapshot.status !== 'syncing') {
+        if ((nextSnapshot.status === 'failed' || nextSnapshot.status === 'offline')
+          && nextSnapshot.projects.length > 0) {
+          const candidate = preReadyCandidateRef.current;
+          publishProjects(candidate?.userId === userId && candidate.dirty
+            ? candidate.projects
+            : nextSnapshot.projects);
+        }
+        return;
+      }
 
       coordinatorReadyRef.current = true;
+      identityRejectedRef.current = false;
       const candidate = preReadyCandidateRef.current?.userId === userId
         ? preReadyCandidateRef.current
         : null;
       let loaded = candidate?.dirty
-        ? mergeProjects(nextSnapshot.projects, candidate.projects)
+        ? candidate.recoveredBase
+          ? replaySimpleChatOperations(nextSnapshot.projects,
+            diffSimpleChatProjects(candidate.recoveredBase, candidate.projects, 0),
+            { localProjects: candidate.projects }).projects
+          : mergeProjects(nextSnapshot.projects, candidate.projects)
         : nextSnapshot.projects;
       let shouldUpdate = candidate?.dirty === true;
       if (loaded.length === 0) {
@@ -260,6 +291,7 @@ export default function SimpleChatPage() {
       coordinatorRef.current = coordinator;
       coordinatorUserIdRef.current = userId;
       coordinatorReadyRef.current = false;
+      identityRejectedRef.current = false;
       setSyncSnapshot({ status: 'loading', projects: [], pendingOperations: [], error: null });
       unsubscribe = coordinator.subscribe(applySnapshot);
       const initialized = await coordinator.initialize(userId);

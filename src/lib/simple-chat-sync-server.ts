@@ -3,7 +3,8 @@ import 'server-only';
 import type { SimpleChatProject } from '@/components/simple-chat/simple-chat-types';
 import { getPool } from '@/lib/db-client';
 import { parseWorkspaceSourceTrace } from '@/lib/asset-core/source-trace';
-import { validateSimpleChatProjects } from '@/lib/simple-chat-project-sync';
+import { SIMPLE_CHAT_SYNC_LIMITS, validateSimpleChatProjects } from '@/lib/simple-chat-project-sync';
+import { SimpleChatSnapshotValidationError } from '@/lib/simple-chat-sync-read-error';
 
 export interface SimpleChatStoredSnapshot {
   schemaVersion: 1;
@@ -35,10 +36,12 @@ function assertValidProjects(
   errorPrefix = 'Invalid simple chat snapshot',
 ): asserts value is SimpleChatProject[] {
   if (!Array.isArray(value)) {
+    if (errorPrefix === 'Invalid simple chat snapshot') throw new SimpleChatSnapshotValidationError('projects');
     throw new Error(`${errorPrefix}: projects`);
   }
   const validation = validateSimpleChatProjects(value as SimpleChatProject[]);
   if (!validation.success) {
+    if (errorPrefix === 'Invalid simple chat snapshot') throw new SimpleChatSnapshotValidationError(validation.field);
     throw new Error(`${errorPrefix}: ${validation.field}`);
   }
 }
@@ -65,10 +68,36 @@ function sanitizeSnapshotProjects(projects: SimpleChatProject[]): SimpleChatProj
   return sanitized;
 }
 
+/** Old array snapshots used null to mean that a reply had no selected skill. */
+function normalizeLegacyReplySkills(projects: unknown[]): unknown[] {
+  if (projects.length > SIMPLE_CHAT_SYNC_LIMITS.projects) return projects;
+  return projects.map(project => {
+    if (!isRecord(project) || !Array.isArray(project.tasks)
+      || project.tasks.length > SIMPLE_CHAT_SYNC_LIMITS.tasksPerProject) return project;
+    return {
+      ...project,
+      tasks: project.tasks.map(task => {
+        if (!isRecord(task) || !Array.isArray(task.messages)
+          || task.messages.length > SIMPLE_CHAT_SYNC_LIMITS.messagesPerTask) return task;
+        return {
+          ...task,
+          messages: task.messages.map(message => {
+            if (!isRecord(message) || message.skill !== null) return message;
+            const normalized = { ...message };
+            delete normalized.skill;
+            return normalized;
+          }),
+        };
+      }),
+    };
+  });
+}
+
 export function parseStoredSimpleChatSnapshot(value: unknown): SimpleChatStoredSnapshot {
   if (Array.isArray(value)) {
-    assertValidProjects(value);
-    return { schemaVersion: 1, revision: 0, projects: sanitizeSnapshotProjects(value) };
+    const projects = normalizeLegacyReplySkills(value);
+    assertValidProjects(projects);
+    return { schemaVersion: 1, revision: 0, projects: sanitizeSnapshotProjects(projects) };
   }
 
   if (
@@ -77,7 +106,7 @@ export function parseStoredSimpleChatSnapshot(value: unknown): SimpleChatStoredS
     || !Number.isSafeInteger(value.revision)
     || (value.revision as number) < 0
   ) {
-    throw new Error('Invalid simple chat snapshot: schema or revision');
+    throw new SimpleChatSnapshotValidationError('schema-or-revision');
   }
   assertValidProjects(value.projects);
   return {

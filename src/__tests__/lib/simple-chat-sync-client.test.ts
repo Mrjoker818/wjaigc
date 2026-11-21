@@ -14,6 +14,7 @@ import {
   jsonResponse,
   project,
   sequenceFetch,
+  taskWithMessages,
 } from '@/__tests__/fixtures/simple-chat-sync';
 
 function requestMethod(init?: RequestInit): string {
@@ -34,6 +35,142 @@ function sequentialUuid(): () => string {
 }
 
 describe('simple chat sync coordinator', () => {
+  it('restores staged local messages after reopening during a server read failure without uploading them', async () => {
+    const store = createMemorySimpleChatEnvelopeStore();
+    const failedFetch = vi.fn<typeof fetch>(async () => jsonResponse(500, {
+      success: false, code: 'CHAT_SYNC_READ_FAILED', retryable: false,
+    }));
+    const first = createSimpleChatSyncCoordinator({
+      store, fetchImpl: failedFetch, sleep: async () => undefined, createId: sequentialUuid(),
+    });
+    await first.initialize('user-a');
+    const local = project('local-only', [taskWithMessages('saved-conversation', 1)]);
+    await first.stageLocalProjectsForRecovery([local]);
+    await first.dispose({ flush: false });
+    const saved = await store.get('user-a');
+    const reopened = createSimpleChatSyncCoordinator({
+      store, fetchImpl: failedFetch, sleep: async () => undefined,
+    });
+
+    expect(await reopened.initialize('user-a')).toMatchObject({
+      status: 'failed', projects: [local],
+      error: { code: 'CHAT_SYNC_READ_FAILED' },
+    });
+    await reopened.flush('pagehide');
+    expect(failedFetch.mock.calls.every(([, init]) => requestMethod(init) === 'GET')).toBe(true);
+    expect(await store.get('user-a')).toEqual(saved);
+    await reopened.dispose({ flush: false });
+  });
+
+  it.each([401, 403, 409])('does not expose cached projects when the server rejects the current identity (%i)', async status => {
+    const store = createMemorySimpleChatEnvelopeStore();
+    await store.put({ ...envelope('user-a'), currentProjects: [project('private')] });
+    const coordinator = createSimpleChatSyncCoordinator({
+      store, fetchImpl: sequenceFetch(jsonResponse(status, { success: false })),
+    });
+    expect((await coordinator.initialize('user-a')).projects).toEqual([]);
+    await coordinator.dispose({ flush: false });
+  });
+
+  it('does not retain a previous account snapshot after the new account read fails', async () => {
+    const coordinator = createSimpleChatSyncCoordinator({
+      store: createMemorySimpleChatEnvelopeStore(),
+      fetchImpl: sequenceFetch(
+        jsonResponse(200, { success: true, value: [project('private-a')], syncRevision: 1 }),
+        ...Array.from({ length: 4 }, () => jsonResponse(500, { success: false })),
+      ),
+      sleep: async () => undefined,
+    });
+    await coordinator.initialize('user-a');
+    expect((await coordinator.initialize('user-b')).projects).toEqual([]);
+    await coordinator.dispose({ flush: false });
+  });
+
+  it('does not upload a recovered account cache when the coordinator switches accounts', async () => {
+    const store = createMemorySimpleChatEnvelopeStore();
+    const calls: string[] = [];
+    const fetchImpl = vi.fn<typeof fetch>(async (_input, init) => {
+      calls.push(requestMethod(init));
+      if (calls.length <= 4) return jsonResponse(503, { success: false });
+      return jsonResponse(200, { success: true, value: [], syncRevision: 0 });
+    });
+    const coordinator = createSimpleChatSyncCoordinator({ store, fetchImpl, sleep: async () => undefined });
+    await coordinator.initialize('user-a');
+    await coordinator.stageLocalProjectsForRecovery([project('private-a')]);
+    await coordinator.initialize('user-b');
+    expect(calls.every(method => method === 'GET')).toBe(true);
+    expect((await store.get('user-a'))?.pendingOperations.length).toBeGreaterThan(0);
+    await coordinator.dispose({ flush: false });
+  });
+
+  it('does not publish a previous account when saving it fails during account switching', async () => {
+    const store = createMemorySimpleChatEnvelopeStore();
+    const coordinator = createSimpleChatSyncCoordinator({ store,
+      fetchImpl: sequenceFetch(jsonResponse(200, { success: true, value: [project('private-a')], syncRevision: 1 })),
+    });
+    await coordinator.initialize('user-a');
+    store.put = async () => { throw new Error('storage unavailable'); };
+    expect((await coordinator.initialize('user-b')).projects).toEqual([]);
+    await coordinator.dispose({ flush: false });
+  });
+
+  it('keeps recovery operations staged while the authoritative GET is in flight', async () => {
+    const store = createMemorySimpleChatEnvelopeStore();
+    const remote = deferred<Response>();
+    const fetchImpl = vi.fn(sequenceFetch(remote.promise));
+    const coordinator = createSimpleChatSyncCoordinator({ store,
+      fetchImpl, createId: sequentialUuid(),
+    });
+    const initialize = coordinator.initialize('user-a');
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledOnce());
+    await coordinator.stageLocalProjectsForRecovery([project('during-read')]);
+    remote.resolve(jsonResponse(200, { success: true, value: [], syncRevision: 2 }));
+    expect((await initialize).projects).toEqual([project('during-read')]);
+    expect((await store.get('user-a'))?.pendingOperations.length).toBeGreaterThan(0);
+    await coordinator.dispose({ flush: false });
+  });
+
+  it('binds coordinator requests to the expected account and rejects a different response account', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse(200, {
+      success: true, userId: 'user-b', value: [project('private-b')], syncRevision: 1,
+    }));
+    const store = createMemorySimpleChatEnvelopeStore();
+    const coordinator = createSimpleChatSyncCoordinator({ store, fetchImpl });
+    expect(await coordinator.initialize('user-a')).toMatchObject({ status: 'failed', projects: [],
+      error: { identityRejected: true } });
+    expect(new Headers(fetchImpl.mock.calls[0][1]?.headers).get('x-wujie-expected-actor-id')).toBe('user-a');
+    expect(await store.get('user-a')).toBeNull();
+    await coordinator.dispose({ flush: false });
+  });
+
+  it('stops an identity-rejected write before rebase and retains the pending local batch', async () => {
+    const store = createMemorySimpleChatEnvelopeStore();
+    const fetchImpl = vi.fn(sequenceFetch(
+      jsonResponse(200, { success: true, value: [], syncRevision: 1 }),
+      jsonResponse(409, { success: false, code: 'CHAT_SYNC_USER_MISMATCH', retryable: false }),
+    ));
+    const coordinator = createSimpleChatSyncCoordinator({ store, fetchImpl, sleep: async () => undefined });
+    await coordinator.initialize('user-a');
+    coordinator.update([project('keep-pending')]);
+    await coordinator.flush('manual');
+    expect(coordinator.snapshot().error?.identityRejected).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(new Headers(fetchImpl.mock.calls[1][1]?.headers).get('x-wujie-expected-actor-id')).toBe('user-a');
+    expect((await store.get('user-a'))?.pendingOperations.length).toBeGreaterThan(0);
+    await coordinator.dispose({ flush: false });
+  });
+
+  it('recognizes a non-JSON authentication rejection without exposing a recovered cache', async () => {
+    const store = createMemorySimpleChatEnvelopeStore();
+    await store.put({ ...envelope('user-a'), currentProjects: [project('private-a')] });
+    const coordinator = createSimpleChatSyncCoordinator({ store,
+      fetchImpl: sequenceFetch(new Response('Login required', { status: 401 })),
+    });
+    expect(await coordinator.initialize('user-a')).toMatchObject({ projects: [], error: { identityRejected: true } });
+    expect((await store.get('user-a'))?.currentProjects).toEqual([project('private-a')]);
+    await coordinator.dispose({ flush: false });
+  });
+
   it('initializes from the authoritative remote snapshot and persists it', async () => {
     const store = createMemorySimpleChatEnvelopeStore();
     const coordinator = createSimpleChatSyncCoordinator({
@@ -857,7 +994,7 @@ describe('simple chat sync coordinator', () => {
     expect(coordinator.snapshot()).toMatchObject({ status: 'synced', pendingOperations: [] });
   });
 
-  it('keeps the active envelope when the next user store read fails', async () => {
+  it('preserves the previous account locally without exposing it when the next account store read fails', async () => {
     const memoryStore = createMemorySimpleChatEnvelopeStore();
     const store: SimpleChatEnvelopeStore = {
       get: async userId => {
@@ -881,9 +1018,11 @@ describe('simple chat sync coordinator', () => {
 
     expect(failedSwitch).toMatchObject({
       status: 'failed',
-      projects: [project('private-a')],
+      projects: [],
     });
-    expect(failedSwitch.pendingOperations).not.toHaveLength(0);
+    expect(failedSwitch.pendingOperations).toHaveLength(0);
+    expect((await memoryStore.get('user-a'))?.currentProjects).toEqual([project('private-a')]);
+    expect((await memoryStore.get('user-a'))?.pendingOperations).not.toHaveLength(0);
     expect(await memoryStore.get('user-b')).toBeNull();
   });
 

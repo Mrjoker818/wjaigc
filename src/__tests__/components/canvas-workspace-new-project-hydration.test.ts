@@ -123,7 +123,9 @@ describe('dashboard new project waits for current-account hydration', () => {
     await manager.upsertUserFromServer(user);
     hydrationOperations.push(manager.waitForProjectHydration(user.id));
     const opened: string[] = [];
+    const showError = vi.fn();
     const create = loadActualCallback({ UserManagerCore: UserManager, currentUser: user,
+      toast: { error: showError },
       loadProjectById: (id: string): void => { opened.push(id); }, setAppMode: (): void => undefined });
     const operation = create();
     releaseRead(Response.json({ success: false }));
@@ -131,6 +133,7 @@ describe('dashboard new project waits for current-account hydration', () => {
     await operation;
     expect(manager.getProjects().filter(project => project.name === '未命名项目')).toEqual([]);
     expect(opened).toEqual([]); expect(persistedProjects).toEqual([]);
+    expect(showError).toHaveBeenCalledWith('项目同步不可用，暂时无法新建项目，请稍后重试或联系管理员');
   });
 
   it('does not create in a different account after a delayed read', async () => {

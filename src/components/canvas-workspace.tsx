@@ -6878,7 +6878,11 @@ export function CanvasWorkspace({ initialUser, onLoggedOut, renameDraftStore }: 
             // Creating during the first GET invalidates its mutation generation,
             // leaving server sync unready and Presence unable to authorize the room.
             const hydrated = await mgr.waitForProjectHydration(userId);
-            if (!hydrated || mgr.getCurrentUserId() !== userId) return;
+            if (!projectLoadActiveRef.current || mgr.getCurrentUserId() !== userId) return;
+            if (!hydrated) {
+              toast.error('项目同步不可用，暂时无法新建项目，请稍后重试或联系管理员');
+              return;
+            }
             const newProject = mgr.createProject('未命名项目');
             // Collaboration reads project ownership from the saved server snapshot.
             const { projectIdMap } = await mgr.flushProjectsToServerWithConflictRecovery();

@@ -592,6 +592,13 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
   // ─── Credits state ───
   const [creditsBalance, setCreditsBalance] = useState(0);
+  const creditsAccount = useMemo(() => ({ latestRead: 0 }), [user.id, isAdmin]);
+  const activeCreditsAccount = useRef<typeof creditsAccount | null>(null);
+  useLayoutEffect(() => {
+    activeCreditsAccount.current = creditsAccount;
+    setCreditsBalance(0);
+    return () => { activeCreditsAccount.current = null; };
+  }, [creditsAccount]);
   const [creditsTotalRecharged, setCreditsTotalRecharged] = useState(0);
   const [creditsTotalUsed, setCreditsTotalUsed] = useState(0);
   const [creditsTransactions, setCreditsTransactions] = useState<Array<{ id: string; type: string; amount: number; balanceAfter: number; description: string; createdAt: number }>>([]);
@@ -2108,11 +2115,16 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
 
   // ─── Credits handlers ───
   const loadCreditsData = useCallback(async () => {
+    if (activeCreditsAccount.current !== creditsAccount) return;
+    const read = ++creditsAccount.latestRead;
+    const isCurrent = () => activeCreditsAccount.current === creditsAccount && creditsAccount.latestRead === read;
     try {
       const resp = await fetch('/api/credits');
       const data = await resp.json();
-      if (data.success) {
-        setCreditsBalance(data.credits?.balance ?? 0);
+      if (!isCurrent()) return;
+      if (resp.ok && data.success) {
+        const balance = data.credits?.balance;
+        if (typeof balance === 'number' && Number.isFinite(balance)) setCreditsBalance(balance);
         setCreditsTotalRecharged(data.credits?.totalRecharged ?? 0);
         setCreditsTotalUsed(data.credits?.totalUsed ?? 0);
         if (data.pricing) setCreditsPricing(data.pricing);
@@ -2121,10 +2133,10 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
       try {
         const txResp = await fetch('/api/credits?transactions=true&limit=30');
         const txData = await txResp.json();
-        if (txData.success) setCreditsTransactions(txData.transactions || []);
+        if (isCurrent() && txData.success) setCreditsTransactions(txData.transactions || []);
       } catch { /* ignore */ }
     } catch { /* ignore */ }
-  }, []);
+  }, [creditsAccount]);
 
   const handleCreateOrder = useCallback(async (credits: number, method: 'alipay' | 'wechat') => {
     if (credits <= 0) {
@@ -3061,7 +3073,12 @@ export default function DashboardView({ user, onOpenProject, onNewProject, onLog
               created_at: String(group.created_at),
               updated_at: String(group.updated_at),
             }))}
-            onRefreshAdmin={refreshAdmin}
+            onRefreshAdmin={() => {
+              if (activeCreditsAccount.current !== creditsAccount) return;
+              // The recharge modal reports success through this callback without a target ID.
+              if (activeTab === 'credits') void loadCreditsData();
+              return refreshAdmin();
+            }}
             onCreateUser={async (name: string, password: string, email?: string, groupId?: string) => {
               const res = await fetch('/api/admin/users', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',

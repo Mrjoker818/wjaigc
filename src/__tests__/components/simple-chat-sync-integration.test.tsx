@@ -225,6 +225,77 @@ describe('simple chat synchronization integration', () => {
     vi.unstubAllGlobals();
   });
 
+  it('shows recovered local messages while keeping failed sync visible and stages further edits locally', async () => {
+    const project = createProject();
+    window.history.replaceState(null, '', '/chat?projectId=project-1&taskId=task-1');
+    const harness = createCoordinatorHarness(createSnapshot('failed', [project]));
+    await renderAuthenticatedPage(harness);
+
+    await waitFor(() => expect(mocks.chatAreaProps?.task?.messages[0]?.content).toBe('不要丢失'));
+    expect(screen.getByText('同步失败，点击重试')).toBeTruthy();
+    expect(harness.update).not.toHaveBeenCalled();
+    act(() => mocks.chatAreaProps?.onUpdateProject({ ...project, name: '本地修改' }));
+    await waitFor(() => expect(harness.stageLocalProjectsForRecovery).toHaveBeenCalledWith([
+      expect.objectContaining({ id: project.id, name: '本地修改' }),
+    ]));
+    expect(harness.update).not.toHaveBeenCalled();
+  });
+
+  it('preserves successive local edits before recovery staging emits a snapshot', async () => {
+    const project = createProject();
+    const harness = createCoordinatorHarness(createSnapshot('failed', [project]));
+    await renderAuthenticatedPage(harness);
+    await waitFor(() => expect(mocks.chatAreaProps?.task?.id).toBe('task-1'));
+    const activeTask = mocks.chatAreaProps!.task!;
+    await act(async () => {
+      mocks.chatAreaProps?.onUpdateProject({ ...project, name: '尚未同步的新名称' });
+      await mocks.chatAreaProps?.onPersistTask({
+        ...activeTask, messages: [...activeTask.messages, {
+          id: 'local-message-2', role: 'user', content: '第二处本地修改', createdAt: 2,
+        }],
+      });
+    });
+    expect(harness.stageLocalProjectsForRecovery).toHaveBeenLastCalledWith([
+      expect.objectContaining({ name: '尚未同步的新名称', tasks: [expect.objectContaining({
+        messages: expect.arrayContaining([expect.objectContaining({ content: '第二处本地修改' })]),
+      })] }),
+    ]);
+    expect(mocks.chatAreaProps?.project?.name).toBe('尚未同步的新名称');
+  });
+
+  it.each([false, true])('replays recovered-cache edits without reverting remote renames or reviving deleted projects (already replayed: %s)', async alreadyReplayed => {
+    const project = createProject();
+    const removedRemotely = createProject({ id: 'remote-deleted', tasks: [] });
+    const harness = createCoordinatorHarness(createSnapshot('failed', [project, removedRemotely]));
+    await renderAuthenticatedPage(harness);
+    await waitFor(() => expect(mocks.chatAreaProps?.project?.id).toBe(project.id));
+    act(() => mocks.chatAreaProps?.onUpdateProject({ ...project, description: '本地补充描述' }));
+    act(() => harness.emit(createSnapshot('synced', [{
+      ...project, name: '其他设备的新名称', ...(alreadyReplayed ? { description: '本地补充描述' } : {}),
+    }])));
+    await waitFor(() => expect(mocks.sidebarProps?.projects).toHaveLength(1));
+    expect(mocks.chatAreaProps?.project).toMatchObject({
+      id: project.id, name: '其他设备的新名称', description: '本地补充描述',
+    });
+  });
+
+  it('hides recovered local content after an explicit identity rejection without deleting the cache', async () => {
+    const harness = createCoordinatorHarness(createSnapshot('failed', [createProject()]));
+    await renderAuthenticatedPage(harness);
+    await waitFor(() => expect(mocks.chatAreaProps?.project?.id).toBe('project-1'));
+    act(() => mocks.chatAreaProps?.onUpdateProject({ ...createProject(), name: '本地候选' }));
+    const latePersist = mocks.chatAreaProps!.onPersistTask;
+    const oldTask = mocks.chatAreaProps!.task!;
+    const stagesBeforeRejection = harness.stageLocalProjectsForRecovery.mock.calls.length;
+    act(() => harness.emit({ ...createSnapshot('failed', []), error: {
+      code: 'CHAT_SYNC_HTTP_401', message: '需要重新登录', retryable: false, identityRejected: true,
+    } }));
+    expect(mocks.sidebarProps?.projects).toEqual([]);
+    expect(mocks.chatAreaProps?.project).toBeNull();
+    await act(async () => { await latePersist(oldTask); });
+    expect(harness.stageLocalProjectsForRecovery).toHaveBeenCalledTimes(stagesBeforeRejection);
+  });
+
   it('preserves the latest tasks when stale project metadata is updated after task persistence', async () => {
     const harness = createCoordinatorHarness(createSnapshot('synced', [createProject()]));
     await renderAuthenticatedPage(harness);

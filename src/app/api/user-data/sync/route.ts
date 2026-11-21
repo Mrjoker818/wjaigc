@@ -37,6 +37,7 @@ import type { SimpleChatProject } from '@/components/simple-chat/simple-chat-typ
 import { errorResponse, getRequestId, withRequestId } from '@/lib/request-id';
 import { logOperation } from '@/lib/op-log';
 import { readOwnerProjectsWithDocuments } from '@/lib/collaboration/document-project-bridge';
+import { diagnoseSimpleChatSyncReadError } from '@/lib/simple-chat-sync-read-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -495,8 +496,11 @@ export async function GET(request: NextRequest) {
       let snapshot;
       try {
         snapshot = await readSimpleChatSnapshot(sessionUser.id);
-      } catch {
+      } catch (error) {
         const errorCode = 'CHAT_SYNC_READ_FAILED';
+        console.error('[simple-chat-sync] Read failed', {
+          ...diagnoseSimpleChatSyncReadError(error), requestId,
+        });
         auditSimpleChatSync({
           userId: sessionUser.id,
           userName: sessionUser.name,
@@ -632,6 +636,11 @@ export async function POST(request: NextRequest) {
     }
 
     if (key === SIMPLE_CHAT_PROJECTS_KEY) {
+      const expectedActor = readExpectedActor(request.headers);
+      if (expectedActor.status === 'invalid'
+        || (expectedActor.status === 'present' && expectedActor.actorId !== sessionUser.id)) {
+        return errorResponse(409, 'CHAT_SYNC_USER_MISMATCH', 'Session account changed', requestId, false);
+      }
       const operationCount = Array.isArray(body.value) ? body.value.length : 0;
       if (
         !Number.isSafeInteger(body.expectedRevision)
@@ -683,6 +692,7 @@ export async function POST(request: NextRequest) {
           success: true,
           key,
           syncRevision: snapshot.revision,
+          ...(expectedActor.status === 'present' ? { userId: sessionUser.id } : {}),
         }), requestId);
       } catch (error) {
         if (error instanceof SimpleChatSyncConflictError) {

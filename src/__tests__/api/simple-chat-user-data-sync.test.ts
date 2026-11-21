@@ -165,6 +165,24 @@ describe('simple chat user data sync route', () => {
     expect(JSON.stringify(mocks.logOperation.mock.calls)).not.toContain('postgres password leaked');
   });
 
+  it('retains a safe diagnostic for a failed read without leaking database details', async () => {
+    const logger = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      mocks.readSimpleChatSnapshot.mockRejectedValue(Object.assign(new Error('private database details'), {
+        code: '42P01', detail: 'private database row',
+      }));
+      const response = await GET(getRequest({ 'x-request-id': 'req_schema_failure' }));
+      expect(response.status).toBe(500);
+      expect(logger).toHaveBeenCalledWith('[simple-chat-sync] Read failed', {
+        kind: 'storage-schema', sqlState: '42P01', requestId: 'req_schema_failure',
+      });
+      expect(JSON.stringify(logger.mock.calls)).not.toContain('private database');
+      expect(JSON.stringify(await response.json())).not.toContain('42P01');
+    } finally {
+      logger.mockRestore();
+    }
+  });
+
   it('writes with CAS and returns only the server revision contract', async () => {
     const response = await POST(postJson({
       key: CHAT_KEY,
@@ -182,6 +200,14 @@ describe('simple chat user data sync route', () => {
       expectedRevision: 7,
     });
     expect(mocks.dbSetUserData).not.toHaveBeenCalled();
+  });
+
+  it('rejects a write if the authenticated account changed before the expected-actor request arrived', async () => {
+    const response = await POST(postJson({ key: CHAT_KEY, value: validProjects, expectedRevision: 7 }, {
+      'x-wujie-expected-actor-id': 'another-user',
+    }));
+    expect(response.status).toBe(409);
+    expect(mocks.compareAndSetSimpleChatSnapshot).not.toHaveBeenCalled();
   });
 
   it('returns a stable audited error when the chat snapshot write fails', async () => {

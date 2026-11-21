@@ -74,6 +74,48 @@ describe('simple chat server snapshots', () => {
     expect(parseStoredSimpleChatSnapshot(stored)).toEqual(stored);
   });
 
+  it('reads legacy null reply skills as absent without mutating stored messages', async () => {
+    const value = project('legacy-null-skill', [taskWithMessages('legacy-task', 2)]);
+    value.tasks[0].messages[0].skill = null as never;
+    const skill = { id: 'pdf-master', name: 'PDF', source: 'command' as const };
+    value.tasks[0].messages[1].skill = skill;
+    const before = structuredClone(value);
+    const query = vi.fn().mockResolvedValue({ rows: [{ data_value: [value] }] });
+    mocks.getPool.mockReturnValue({ query });
+
+    const snapshot = await readSimpleChatSnapshot('legacy-owner');
+
+    expect(snapshot.revision).toBe(0);
+    expect(snapshot.projects[0].tasks[0].messages[0]).not.toHaveProperty('skill');
+    expect(snapshot.projects[0].tasks[0].messages[1].skill).toEqual(skill);
+    expect(value).toEqual(before);
+    expect(query).toHaveBeenCalledOnce();
+    expect(query.mock.calls[0][0]).toMatch(/^SELECT data_value/);
+  });
+
+  it('still rejects a malformed non-null legacy skill', () => {
+    const value = project('invalid-skill', [taskWithMessages('legacy-task', 1)]);
+    value.tasks[0].messages[0].skill = { id: 'pdf-master' } as never;
+    expect(() => parseStoredSimpleChatSnapshot([value])).toThrow(/skill/);
+  });
+
+  it('keeps versioned snapshot and incoming write skill validation strict', async () => {
+    const value = project('versioned-null', [taskWithMessages('task', 1)]);
+    value.tasks[0].messages[0].skill = null as never;
+    expect(() => parseStoredSimpleChatSnapshot({ schemaVersion: 1, revision: 1, projects: [value] }))
+      .toThrow(/skill/);
+    await expect(compareAndSetSimpleChatSnapshot({ userId: 'owner', expectedRevision: 0, projects: [value] }))
+      .rejects.toThrow(/Invalid simple chat projects: skill/);
+    expect(mocks.getPool).not.toHaveBeenCalled();
+  });
+
+  it('does not hide another invalid field beside a legacy null skill', () => {
+    const value = project('invalid-role', [taskWithMessages('legacy-task', 1)]);
+    value.tasks[0].messages[0].skill = null as never;
+    value.tasks[0].messages[0].role = 'unexpected' as never;
+    expect(() => parseStoredSimpleChatSnapshot([value])).toThrow();
+  });
+
   it('sanitizes image source traces when reading stored snapshots', () => {
     const validProject = projectWithSourceTrace({ ...sourceTrace, privateValue: 'drop-me' });
     const invalidProject = projectWithSourceTrace({ ...sourceTrace, source: 'forged' });

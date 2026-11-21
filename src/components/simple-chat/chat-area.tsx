@@ -8,6 +8,7 @@ import { WorkPlanCard } from "./work-plan-card";
 import { DramaDraftCard } from "./drama-draft-card";
 import { SkillTraceCard } from "./skill-trace-card";
 import { SIMPLE_CHAT_SKILL_COMMANDS, selectSimpleChatAutoSkill } from '@/lib/simple-chat-auto-skill';
+import { readSimpleChatPdfRequest, type SimpleChatPdfRequest, type SimpleChatPdfGenerationStatus } from '@/lib/simple-chat-pdf-output';
 import { readDramaDraft } from '@/lib/simple-chat-drama-draft';
 import { readWorkPlan } from "@/lib/chatgpt-work-mode";
 import { ImageLightbox } from "./image-lightbox";
@@ -437,6 +438,7 @@ export default function ChatArea({
   const [input, setInput] = useState("");
   const inputEditEpochRef = useRef(0);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [pdfGenerations, setPdfGenerations] = useState<Record<string, { content: string; status: SimpleChatPdfGenerationStatus; error?: string }>>({});
   const [uploadedImages, setUploadedImages] = useState<ChatAttachment[]>([]);
   const [webSearch, setWebSearch] = useState(false);
   const [workModeEnabled, setWorkModeEnabled] = useState(task?.workMode === 'work');
@@ -2489,10 +2491,6 @@ export default function ChatArea({
     return /```json\s*[\s\S]*?"mermaid"\s*:/.test(content);
   }, []);
 
-  const hasPdfJson = useCallback((content: string) => {
-    return /```json\s*[\s\S]*?"type"\s*:\s*"(?:markdown|merge|split|form|watermark|extract)"/.test(content);
-  }, []);
-
   const extractJsonFromContent = useCallback((content: string): object | null => {
     const match = content.match(/```json\s*([\s\S]*?)\s*```/);
     if (!match) return null;
@@ -2550,13 +2548,35 @@ export default function ChatArea({
     window.URL.revokeObjectURL(url);
   }, []);
 
-  const downloadPdf = useCallback(async (data: object) => {
-    const resp = await fetch('/api/pdf/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-    if (!resp.ok) return;
-    const blob = await resp.blob();
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `${(data as Record<string,unknown>).title || 'document'}.pdf`; a.click();
-    window.URL.revokeObjectURL(url);
+  const downloadPdf = useCallback(async (data: SimpleChatPdfRequest, messageKey: string, content: string) => {
+    const updateStatus = (status: SimpleChatPdfGenerationStatus, error?: string) => {
+      setPdfGenerations(previous => ({ ...previous, [messageKey]: { content, status, error } }));
+    };
+    updateStatus('generating');
+    try {
+      const resp = await fetch('/api/pdf/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+      if (!resp.ok) {
+        const result = await resp.json().catch(() => null) as { error?: unknown } | null;
+        throw new Error(typeof result?.error === 'string' ? result.error.slice(0, 300) : `PDF 生成失败（${resp.status}）`);
+      }
+      if (resp.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/pdf') {
+        throw new Error('未收到 PDF 文件，请重试');
+      }
+      const bytes = await resp.arrayBuffer();
+      if (new TextDecoder().decode(bytes.slice(0, 5)) !== '%PDF-') {
+        throw new Error('收到的文件不是有效 PDF，请重试');
+      }
+      const blob = new Blob([bytes], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      try {
+        const a = document.createElement('a'); a.href = url; a.download = `${data.title || 'document'}.pdf`; a.click();
+        updateStatus('completed');
+      } finally {
+        window.URL.revokeObjectURL(url);
+      }
+    } catch (error) {
+      updateStatus('failed', error instanceof Error ? error.message : 'PDF 下载失败，请重试');
+    }
   }, []);
 
   const sendImagesToCanvas = useCallback(async (
@@ -3115,7 +3135,12 @@ export default function ChatArea({
               </span>
             </div>
           )}
-          {messages.map((msg, idx) => (
+          {messages.map((msg, idx) => {
+            const pdfRequest = msg.role === 'assistant' ? readSimpleChatPdfRequest(msg.content) : null;
+            const pdfMessageKey = `${project?.id}:${task?.id}:${msg.id}`;
+            const pdfGeneration = pdfGenerations[pdfMessageKey];
+            const pdfGenerationStatus = pdfGeneration?.content === msg.content ? pdfGeneration.status : 'idle';
+            return (
             <div
               key={msg.id}
               data-chat-message-id={msg.id}
@@ -3142,7 +3167,8 @@ export default function ChatArea({
                     : 'bg-card border border-border rounded-bl-md'
                 }`}>
                   {msg.role === 'assistant' && msg.skill ? (
-                    <SkillTraceCard skill={msg.skill} content={msg.content} finished={msg.status !== 'streaming'} />
+                    <SkillTraceCard skill={msg.skill} content={msg.content} finished={msg.status !== 'streaming'} pdfGenerationStatus={pdfGenerationStatus}
+                      pdfGenerationError={pdfGeneration?.content === msg.content ? pdfGeneration.error : undefined} />
                   ) : null}
                   {msg.role === 'assistant' && msg.workPlan ? (
                     <WorkPlanCard plan={msg.workPlan} content={msg.content} finished={msg.status !== 'streaming'} />
@@ -3299,8 +3325,8 @@ export default function ChatArea({
                         <Download className="w-3 h-3" />
                       </button>
                     )}
-                    {hasPdfJson(msg.content) && (
-                      <button onClick={() => { const d = extractJsonFromContent(msg.content); if (d) downloadPdf(d); }}
+                    {pdfRequest && (
+                      <button disabled={pdfGenerationStatus === 'generating'} onClick={() => { void downloadPdf(pdfRequest, pdfMessageKey, msg.content); }}
                         className="inline-flex min-h-11 min-w-11 items-center justify-center p-1 rounded hover:bg-red-500/10 text-red-500 transition-colors" title="下载 PDF">
                         <Download className="w-3 h-3" />
                       </button>
@@ -3369,7 +3395,8 @@ export default function ChatArea({
               )}
               </>)}
             </div>
-          ))}
+            );
+          })}
           <div ref={messagesEndRef} />
         </div>
       </div>

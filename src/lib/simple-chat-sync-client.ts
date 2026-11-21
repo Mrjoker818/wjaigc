@@ -36,6 +36,7 @@ export interface SimpleChatSyncError {
   message: string;
   retryable: boolean;
   requestId?: string;
+  identityRejected?: boolean;
 }
 
 export interface SimpleChatSyncSnapshot {
@@ -237,6 +238,7 @@ export function createSimpleChatSyncCoordinator(
   let initializeTargetUserId: string | null = null;
   let initializeInProgressGeneration: number | null = null;
   let authoritativeReadPending = false;
+  const accountsAwaitingAuthoritativeRead = new Set<string>();
   let initializeController: AbortController | null = null;
   const activeRequestControllers = new Set<AbortController>();
   let flushDrainController: AbortController | null = null;
@@ -245,10 +247,11 @@ export function createSimpleChatSyncCoordinator(
   let envelopeMutationVersion = 0;
 
   function snapshot(): SimpleChatSyncSnapshot {
+    const visibleEnvelope = envelope?.userId === initializeTargetUserId ? envelope : null;
     return cloneValue({
       status,
-      projects: envelope?.currentProjects ?? [],
-      pendingOperations: envelope?.pendingOperations ?? [],
+      projects: visibleEnvelope?.currentProjects ?? [],
+      pendingOperations: visibleEnvelope?.pendingOperations ?? [],
       error,
     });
   }
@@ -351,6 +354,7 @@ export function createSimpleChatSyncCoordinator(
     initializeTargetUserId = userId;
     initializeInProgressGeneration = generation;
     authoritativeReadPending = true;
+    accountsAwaitingAuthoritativeRead.add(userId);
     clearDebounce();
     setState('loading', null, true);
     try {
@@ -378,6 +382,12 @@ export function createSimpleChatSyncCoordinator(
     }
     if (!isCurrentInitialization(generation, userId)) return snapshot();
 
+    // A failed read for a new account must never publish the previous account's cache.
+    if (envelope !== null && envelope.userId !== userId) {
+      envelope = null;
+      envelopeMutationVersion += 1;
+    }
+
     let localEnvelope: SimpleChatSyncEnvelopeV1 | null;
     try {
       localEnvelope = await waitWithSignal(options.store.get(userId), controller.signal);
@@ -404,53 +414,62 @@ export function createSimpleChatSyncCoordinator(
     );
     if (!isCurrentInitialization(generation, userId)) return snapshot();
     if (!remote.ok) {
+      const recovery = envelope?.userId === userId ? envelope : localEnvelope;
+      envelope = remote.allowLocalRecovery && recovery !== null
+        && validateSimpleChatProjects(recovery.currentProjects).success
+        ? cloneValue(recovery)
+        : null;
+      envelopeMutationVersion += 1;
+      automaticSyncBlocked = true;
       finishInitialization(generation, userId, remote.offline ? 'offline' : 'failed', remote.error);
       return snapshot();
     }
 
-    const pendingOperations = cloneValue(localEnvelope?.pendingOperations ?? []);
-    const replayed = pendingOperations.length === 0
-      ? cloneValue(remote.body.value)
-      : replaySimpleChatOperations(remote.body.value, pendingOperations, {
-        createId,
-        now,
-        localProjects: localEnvelope?.currentProjects ?? [],
-      }).projects;
-
-    const candidate: SimpleChatSyncEnvelopeV1 = {
-      schemaVersion: 1,
-      userId,
-      baseRevision: remote.body.syncRevision,
-      baseProjects: cloneValue(remote.body.value) as SimpleChatSyncedProject[],
-      currentProjects: recoverInterruptedSimpleChatProjects(replayed) as SimpleChatSyncedProject[],
-      pendingOperations,
-      updatedAt: now(),
-    };
-
-    try {
-      if (!await persistInitializationCandidate(
-        candidate,
-        localEnvelope,
-        generation,
-        controller.signal,
-      )) {
+    for (let rewrite = 0; rewrite < MAX_ENVELOPE_REWRITES; rewrite += 1) {
+      try {
+        await waitWithSignal(persistenceQueue, controller.signal);
+        if (!isCurrentInitialization(generation, userId)) return snapshot();
+        // Recovery staging may have changed while GET or IndexedDB was in flight.
+        const local = envelope?.userId === userId ? cloneValue(envelope) : localEnvelope;
+        const mutationVersion = envelopeMutationVersion;
+        const pendingOperations = cloneValue(local?.pendingOperations ?? []);
+        const replayed = pendingOperations.length === 0 ? cloneValue(remote.body.value)
+          : replaySimpleChatOperations(remote.body.value, pendingOperations, {
+            createId, now, localProjects: local?.currentProjects ?? [],
+          }).projects;
+        const candidate: SimpleChatSyncEnvelopeV1 = {
+          schemaVersion: 1, userId,
+          baseRevision: remote.body.syncRevision,
+          baseProjects: cloneValue(remote.body.value) as SimpleChatSyncedProject[],
+          currentProjects: recoverInterruptedSimpleChatProjects(replayed) as SimpleChatSyncedProject[],
+          pendingOperations, updatedAt: now(),
+        };
+        if (!await persistInitializationCandidate(candidate, local, generation, controller.signal)) {
+          if (controller.signal.aborted) return snapshot();
+          finishInitialization(generation, userId, 'failed', localStorageError());
+          return snapshot();
+        }
+        if (!isCurrentInitialization(generation, userId)) return snapshot();
+        if (envelopeMutationVersion !== mutationVersion) continue;
+        envelope = candidate;
+        envelopeMutationVersion += 1;
+        automaticSyncBlocked = false;
+        authoritativeReadPending = false;
+        accountsAwaitingAuthoritativeRead.delete(userId);
+        finishInitialization(generation, userId, pendingOperations.length === 0 ? 'synced' : 'syncing');
+        if (pendingOperations.length > 0) scheduleDebounce();
+        if (initializeController === controller) initializeController = null;
+        return snapshot();
+      } catch {
         if (controller.signal.aborted) return snapshot();
         finishInitialization(generation, userId, 'failed', localStorageError());
         return snapshot();
       }
-    } catch {
-      if (controller.signal.aborted) return snapshot();
-      finishInitialization(generation, userId, 'failed', localStorageError());
-      return snapshot();
     }
-    if (!isCurrentInitialization(generation, userId)) return snapshot();
-    envelope = candidate;
-    envelopeMutationVersion += 1;
-    automaticSyncBlocked = false;
-    authoritativeReadPending = false;
-    finishInitialization(generation, userId, pendingOperations.length === 0 ? 'synced' : 'syncing');
-    if (pendingOperations.length > 0) scheduleDebounce();
-    if (initializeController === controller) initializeController = null;
+    await enqueueEnvelopePersistence();
+    finishInitialization(generation, userId, 'failed', {
+      code: 'CHAT_SYNC_INITIALIZE_BUSY', message: 'Local changes are still being saved; retry sync', retryable: true,
+    });
     return snapshot();
   }
 
@@ -602,6 +621,9 @@ export function createSimpleChatSyncCoordinator(
       if (signal.aborted) setState('failed', lifecycleTimeoutError());
       return;
     }
+    // Cache recovery is not an authoritative read. Keep local operations until
+    // initialize has read the current revision and safely replayed them.
+    if (accountsAwaitingAuthoritativeRead.has(initialBatch?.userId ?? envelope?.userId ?? '')) return;
     if (initialBatch === null) {
       if (envelope !== null && status !== 'failed') {
         if (envelope.pendingOperations.length === 0) setState('synced');
@@ -645,7 +667,7 @@ export function createSimpleChatSyncCoordinator(
         response = await withUserNetworkLock(batch.userId, requestController.controller.signal, () => abortableFetch(
           fetchImpl(SIMPLE_CHAT_SYNC_URL, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...expectedActorHeaders(batch.userId) },
             body: JSON.stringify({
               key: SIMPLE_CHAT_SYNC_KEY,
               value: batch.projects,
@@ -703,12 +725,20 @@ export function createSimpleChatSyncCoordinator(
         return;
       }
       if (!parsed.ok) {
-        setState('failed', invalidResponseError(response));
+        if ([401, 403, 409].includes(response.status)) {
+          automaticSyncBlocked = true;
+          setState('failed', identityRejectedError());
+        } else setState('failed', invalidResponseError(response));
         await awaitFlushPersistence(enqueueEnvelopePersistence(), signal);
         return;
       }
 
       if (response.ok) {
+        if (isRecord(parsed.value) && 'userId' in parsed.value && parsed.value.userId !== batch.userId) {
+          automaticSyncBlocked = true;
+          setState('failed', identityRejectedError());
+          return;
+        }
         if (!isWriteSuccess(parsed.value, batch.expectedRevision)) {
           setState('failed', invalidResponseError(response, parsed.value));
           await awaitFlushPersistence(enqueueEnvelopePersistence(), signal);
@@ -757,6 +787,12 @@ export function createSimpleChatSyncCoordinator(
       }
 
       const responseError = normalizeResponseError(response, parsed.value);
+      if (responseError.identityRejected) {
+        automaticSyncBlocked = true;
+        setState('failed', { ...responseError, retryable: false });
+        await awaitFlushPersistence(enqueueEnvelopePersistence(), signal);
+        return;
+      }
       if (response.status === 409) {
         conflictSeen = true;
         if (conflictReplays >= MAX_CONFLICT_REPLAYS || postAttempts >= 3) {
@@ -868,12 +904,13 @@ export function createSimpleChatSyncCoordinator(
     signal?: AbortSignal,
   ): Promise<
     | { ok: true; body: SyncReadBody }
-    | { ok: false; offline: boolean; error: SimpleChatSyncError }
+    | { ok: false; offline: boolean; error: SimpleChatSyncError; allowLocalRecovery?: boolean }
   > {
     if (isOffline()) {
       return {
         ok: false,
         offline: true,
+        allowLocalRecovery: true,
         error: {
           code: 'CHAT_SYNC_OFFLINE',
           message: 'Simple chat sync is waiting for a network connection',
@@ -892,6 +929,8 @@ export function createSimpleChatSyncCoordinator(
           fetchImpl(`${SIMPLE_CHAT_SYNC_URL}?key=${SIMPLE_CHAT_SYNC_KEY}`, {
             method: 'GET',
             credentials: 'include',
+            cache: 'no-store',
+            headers: expectedActorHeaders(userId),
             signal: requestController.controller.signal,
           }),
           requestController.controller.signal,
@@ -909,6 +948,7 @@ export function createSimpleChatSyncCoordinator(
         return {
           ok: false,
           offline: isOffline(),
+          allowLocalRecovery: true,
           error: lifecycleTimedOut ? lifecycleTimeoutError() : networkError(),
         };
       } finally {
@@ -924,6 +964,9 @@ export function createSimpleChatSyncCoordinator(
         return staleReadResult();
       }
       if (!isCurrent() || signal?.aborted) return staleReadResult();
+      if (parsed.ok && isRecord(parsed.value) && 'userId' in parsed.value && parsed.value.userId !== userId) {
+        return { ok: false, offline: false, error: identityRejectedError() };
+      }
       if (RETRYABLE_STATUSES.has(response.status) && transientRetries < MAX_TRANSIENT_RETRIES) {
         try {
           await waitForRetry(transientRetries++, signal);
@@ -936,9 +979,10 @@ export function createSimpleChatSyncCoordinator(
         return {
           ok: false,
           offline: false,
+          allowLocalRecovery: response.status === 429 || response.status >= 500,
           error: parsed.ok
             ? normalizeResponseError(response, parsed.value)
-            : invalidResponseError(response),
+            : [401, 403, 409].includes(response.status) ? identityRejectedError() : invalidResponseError(response),
         };
       }
       return { ok: true, body: parsed.value };
@@ -1264,6 +1308,8 @@ function normalizeResponseError(response: Response, value: unknown): SimpleChatS
   const body: SyncErrorBody = isRecord(value) ? value : {};
   const headerRequestId = response.headers.get('x-request-id') ?? undefined;
   return {
+    ...([401, 403].includes(response.status) || (response.status === 409 && body.code !== 'CHAT_SYNC_CONFLICT')
+      ? { identityRejected: true } : {}),
     code: typeof body.code === 'string' ? body.code : `CHAT_SYNC_HTTP_${response.status}`,
     message: typeof body.message === 'string' ? body.message : `Simple chat sync failed (${response.status})`,
     retryable: typeof body.retryable === 'boolean'
@@ -1273,6 +1319,10 @@ function normalizeResponseError(response: Response, value: unknown): SimpleChatS
       ? { requestId: body.requestId }
       : headerRequestId === undefined ? {} : { requestId: headerRequestId }),
   };
+}
+
+function identityRejectedError(): SimpleChatSyncError {
+  return { code: 'CHAT_SYNC_USER_MISMATCH', message: 'Session account changed', retryable: false, identityRejected: true };
 }
 
 function invalidResponseError(response: Response, value?: unknown): SimpleChatSyncError {
