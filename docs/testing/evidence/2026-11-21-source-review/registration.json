@@ -1,0 +1,500 @@
+{
+  "reviewId": "source-review-20261121-unchanged",
+  "approved": [
+    {
+      "path": ".dockerignore",
+      "blob": "054f5c1f7483b2e88b893f51f97d6c9631c8f9a9",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/0",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "AGENTS.md",
+      "blob": "af80a38a0be2e85149b79e6d4dd7794d6460436f",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/2",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "package.json",
+      "blob": "08f7e39606d629e5a94e19e6e81d66dbb378c168",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/3",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "blob": "f12725bd0017dda9c7b8cfb3d1d2623dc9013602",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/4",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "scripts/verify-deploy-package.mjs",
+      "blob": "52a6bdca8d67463607b114cb571e5cd2200b4160",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/7",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/app/api/public/media/[...parts]/route.ts",
+      "blob": "37732171f1fa0651117e7055725b1fa36aa1917a",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/15",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/app/api/video/director/diagnose/route.ts",
+      "blob": "7fb18db1b6e2811ff7915cb1a22c1039b0e89622",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/17",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/app/api/video/tools/route.ts",
+      "blob": "f3d9698913071ecef700ff56a22ed2d384568fa9",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/19",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/app/canvas/page.tsx",
+      "blob": "bd4119f6e4ec83b9770b5908974e81ed9e3ad000",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/22",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/app/chat/layout.tsx",
+      "blob": "3cd90aae083db1a9bf86411cdd42b9d842e5394d",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/23",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/app/chat/page.tsx",
+      "blob": "0890f0ee19c3b6fd8a039c5493828ce8cc8df942",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/24",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/app/video/page.tsx",
+      "blob": "94854abc937ca0a3433e0a43eb8acf63d8f49450",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/25",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/components/brand-ecommerce/BrandAssetManager.tsx",
+      "blob": "05c7bd7dc5d53ac68334f6697909517528788402",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/26",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/components/dashboard/admin-tabs.tsx",
+      "blob": "6e228141eaaae01b99bca4701848807b7cd7967f",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/29",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/components/dashboard/data-manager-tab.tsx",
+      "blob": "e5e3fb4423040cf1106dc51e7644912a6ec9c8de",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/30",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/components/dashboard/desktop-admin-tab.tsx",
+      "blob": "0bb499a59921160c22e12af95573acd4174f85ea",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/31",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/components/help-guide.tsx",
+      "blob": "767067b7b614a1cec3d547d05284e13bf02906ee",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/32",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/components/image-preview.tsx",
+      "blob": "7f697978fba48a55f15a358ebcd591a86b8c6e5a",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/33",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/components/platform/platform-switcher.tsx",
+      "blob": "09b016836e71d32438df14e8a8fd70d3a28f1133",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/36",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/components/simple-chat/work-plan-card.tsx",
+      "blob": "6e055719816833d2f55468bf27c58d21ded656cf",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/40",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/components/ui/dropdown-menu.tsx",
+      "blob": "e56ff8304bf165e22cefe002869d23165e96eccd",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/41",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/components/ui/select.tsx",
+      "blob": "a70cca8bfd6347d2d153eb2ba288275caf9da361",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/42",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/apimart-video-models.ts",
+      "blob": "944317077f7627197acbed4f50a59a489af1d596",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/52",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/canvas-chat-history.ts",
+      "blob": "dc9132e28636be9539b47bfc1c4293707626ac7c",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/53",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/canvas-download-popup.tsx",
+      "blob": "512e73a26c7cb9479e6faaaae96cbd78527aa930",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/54",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/canvas-png-export.ts",
+      "blob": "9f7565761d9938495e3a83a0afbc4b86ee7608e3",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/55",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/chat-canvas-action.ts",
+      "blob": "715c223d3bba03228b2d10bd91d70258f42d6d7a",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/56",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/chat-generation-controls.ts",
+      "blob": "17a54a1d5708a1c57a2fe9239c05cb89197686e1",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/57",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/chatgpt-work-mode.ts",
+      "blob": "172cd9b744e58f722a900df7ccb2e36c61f1b35f",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/58",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/collaboration/yjs-singleton.ts",
+      "blob": "a3b01e4b80217398953c058991465ba60b66c6ee",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/60",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/element-decomposition/board-task.ts",
+      "blob": "d13f9f571530ae059e6054328405fd68272b94d5",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/63",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/input-validation.ts",
+      "blob": "48098ab1b5f55891997348e120535300f052a8fa",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/64",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/pear-image-models.ts",
+      "blob": "2904aef689a5f4e820473bfd2f06d62878b03620",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/66",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/pear-video-models.ts",
+      "blob": "2b3e4a6918b51ae6d85be2ecf0464006992b2e79",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/67",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/platform-routes.ts",
+      "blob": "f664a52aaa17377b1161d2b900c3bcbefd306a34",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/68",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/provider-audio-url.ts",
+      "blob": "a4ac3de58623208b23e5df19c0a2321d793d0488",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/69",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/provider-media-url.ts",
+      "blob": "b6acd2698e72355e4ba6b13e558985b9d6875806",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/70",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/public-media-link.ts",
+      "blob": "adaf08450a2c3aa59855771cbc25c964ed930a61",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/71",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/simple-chat-pdf-output.ts",
+      "blob": "45b48f25fcd7d9d7aae8d66144959a8b6d3bd2a3",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/75",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/simple-chat-sync-client.ts",
+      "blob": "a0f321208f277484a4e49d04e0088efee814b8f0",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/76",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/simple-chat-sync-read-error.ts",
+      "blob": "c755c74cd0b9d88b36e895c51a101aaf98d3804c",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/77",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/simple-chat-tools.ts",
+      "blob": "dea6784594c33113d1a8cc57fc8310ae477b61fa",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/78",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/vendor-pricing.ts",
+      "blob": "12558bae347060eaab61f384c37e60f3c0a06fab",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/80",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/workspace-panel-layout.ts",
+      "blob": "9d0e0ac1d222eebb841293320a7a448752c10ed3",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-other.json/entries/111",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/app/api/drama/import-script/route.ts",
+      "blob": "8d25428f4894c41ac3ae6be5425646bdae2505cd",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/2",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/app/api/drama/music/route.ts",
+      "blob": "683ca01900819a75d33caaf6d75bce2197d56892",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/3",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/app/api/drama/take-receipt/route.ts",
+      "blob": "3f7455054bad6bdc71b84388132aa8cc70563d63",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/4",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/app/api/drama/voice-sample/route.ts",
+      "blob": "349d662964a67826ecb373f5ef949aa2049475ac",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/5",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/components/drama/drama-autopilot.tsx",
+      "blob": "8f98e65f232fd26f0ef18d3260cb34255a3437f6",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/7",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/components/drama/drama-planner-picker.tsx",
+      "blob": "08fee72cc9d148b2e7aec44f0c992cb0ff28b10c",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/9",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/components/drama/drama-production-status.tsx",
+      "blob": "f379e4c5119fd00fa451c60d8cb69bc4181ef619",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/10",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/components/drama/drama-readiness.tsx",
+      "blob": "fe833fcc09fec2468f44147fa384550c7e69868b",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/11",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/components/drama/drama-source-form.tsx",
+      "blob": "1c8aa16ae0c0903dc20285579c566ca0a38e99cc",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/13",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/components/drama/drama-task-panel.tsx",
+      "blob": "d41ad072a2e4d0e979b4d9b6af4dc1bb97709730",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/14",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/components/drama/drama-voice-sample.tsx",
+      "blob": "56552083f04d3d49a87126d0dcf766afca164e58",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/15",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/components/drama/mention-textarea.tsx",
+      "blob": "7246837e1d736732ca256e9a735215840c051401",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/16",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/components/simple-chat/drama-draft-card.tsx",
+      "blob": "448718d6d5e17b7d1ea0186105637a6d444277a9",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/17",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/drama/access.ts",
+      "blob": "0423807038be3575eb02c72200c11605ecfdee95",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/18",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/drama/adapt.ts",
+      "blob": "622d645e66abea9146a5ce49962cdd5a3833b88d",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/19",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/drama/audio-upload.ts",
+      "blob": "ee2f0a04a23dec0ed3426611760434207244e39f",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/20",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/drama/autopilot.ts",
+      "blob": "e521408fc9bc7203792c779c70e4044eb7a5986c",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/21",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/drama/bible-images.ts",
+      "blob": "5b67cd6149f78b2cd72ba615de871abf5c0b23e2",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/22",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/drama/chat-handoff.ts",
+      "blob": "9eb417715dfb18c724ac327f32ee9ae54792ce6f",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/23",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/drama/export-client.ts",
+      "blob": "fa81de457ee1c53b35fe61a1452ed036caa1b242",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/24",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/drama/export.ts",
+      "blob": "b3fe355787c5993f933809b5c4b748f46d29e3b3",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/25",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/drama/import-client.ts",
+      "blob": "47e3c670df3ab0d49d16d8da64d00b3a4cdd08f2",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/26",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/drama/library.ts",
+      "blob": "d88154a3e34a0f83cac09f728c44c9140f17da20",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/27",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/drama/mentions.ts",
+      "blob": "3bb084f4b9c69296b6be23ee71e20027b1cb09ca",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/28",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/drama/package.ts",
+      "blob": "b1993dae1c94a028030fe3cca02d4d6e9d9924c2",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/29",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/drama/polish.ts",
+      "blob": "231f34012c87969edbddf6f16bcf096cffc0c7f8",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/30",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/drama/production-version.ts",
+      "blob": "6713644b062c677792c30197de123717413c0591",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/33",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/drama/readiness.ts",
+      "blob": "32cccfb0aedb99eb6828217a6500d27931d934fd",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/34",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/drama/receipt-client.ts",
+      "blob": "7866483f6880e3be12a27f2fda428f502c5790ff",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/35",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/drama/script-file.ts",
+      "blob": "72aa884d720da62ffc5df8ed1b76e0a8b4020f8c",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/36",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/drama/shot-language.ts",
+      "blob": "c613e1366e461013631dae60657890a1d23ea350",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/37",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/drama/source-script.ts",
+      "blob": "27f060e2751fc089bf70fb0077692e25840466b5",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/38",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/drama/task-list.ts",
+      "blob": "4127a2a2bb6195d027d7505e9ca1ba8ae6c06c5a",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/39",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/drama/voiceover.ts",
+      "blob": "34c7392b8497f0576c66be4ebbf5bc02e713e6fa",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/40",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/simple-chat-drama-draft.ts",
+      "blob": "65712e2899d99f4dd4a7ea791a3222e6f3c7e382",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/41",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/video-reference-audio.ts",
+      "blob": "99be33fe8ab06a6bf7a5b6163618172be59c057a",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/45",
+      "formalAcceptance": "pending"
+    },
+    {
+      "path": "src/lib/video-task-polling.ts",
+      "blob": "1e97dd85a14436634c95c84a9edc90ac8da862b7",
+      "review": "docs/testing/evidence/2026-11-21-source-review/review-drama.json/items/46",
+      "formalAcceptance": "pending"
+    }
+  ],
+  "skipped": [
+    ".github/workflows/quality.yml",
+    "src/__tests__/scripts/deploy-package-guard.test.ts",
+    "src/components/simple-chat/skill-trace-card.tsx"
+  ],
+  "scope": "Unchanged exact blobs independently read in the linked reviews. No current-source hold, retirement or changed working blob is authorized by this registration.",
+  "formalAcceptance": "pending",
+  "historicalComparisonBaselinePreserved": "7fdc0108952fb3a68415ca3a2a26b5d33641dc6b",
+  "historicalReviewedParentPreserved": "c8dac11754b7b6dd9de8d4829e44777f1ca0ce88"
+}

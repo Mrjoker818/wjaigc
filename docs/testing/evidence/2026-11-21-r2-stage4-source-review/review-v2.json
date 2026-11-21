@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 1,
+  "kind": "r2-exact-two-existing-source-record-evidence-candidate",
+  "version": 2,
+  "date": "2026-11-21",
+  "status": "parent-bound-source-reviewed-new-ci-and-formal-pending",
+  "intendedVersionedPath": "docs/testing/evidence/2026-11-21-r2-stage4-source-review/review-v2.json",
+  "exactPathCount": 2,
+  "records": [
+    {
+      "canonicalPointer": "/additionalPaths/27",
+      "path": ".github/workflows/quality.yml",
+      "previousReviewedBlob": "5b057b53563c65e098e46d7207fa4ae2d52201f3",
+      "reviewedBlob": "67c630b6f18450f1e9763f317f7f2da55ed4e4b7",
+      "reviewStatus": "source-reviewed-parent-path-filtered-blob-bound",
+      "changeKind": "stage4-ci-split-wiring",
+      "summary": "Source-reviewed/runtime-pending: r2将Stage4旧Agent与current-lineage精确分流；独立fresh PG/四DB别名、migrate→十账号→build、production agent-v2/strictOrigin真实WS入口及PID归属清理接线。相对旧已审内容完整+120/-0；当前是有意源码增量，不再沿用unchanged-index身份。新Actions/五profile真实运行与正式验收仍pending。",
+      "evidence": [
+        "完整diff来自已审原始内容快照12.intermediate-1.txt（raw SHA与旧record完整64位记录相符）到本次已读r2 quality工作树；共+120/-0，仅两个hunk。",
+        "旧job命令新增workers=1/retries=0/grep-invert；新job用互补grep与同五profile、独立service/data/log/PID/artifact；其余job与顶层gate未改。",
+        "migrate先于十账号setup与build；四个DB alias一致；production presence-server承载真实WS，localhost public origin精确一致；仅归属PID匹配时TERM；这些是source wiring，不是实际joined/cleanup完成证据。",
+        "独立静态复审ci-r2-stage4-split-independent.md未发现明确P1/P2；fresh库实跑、完整五profile、CI与正式验收均pending。"
+      ],
+      "fullDiff": {
+        "status": "read-complete",
+        "draftPath": "output/canvas-chat-audit/ci-20261121/r2-canonical-stage4-two/v1/quality.old-reviewed-to-r2.complete.patch",
+        "addedLines": 120,
+        "removedLines": 0,
+        "oldRawArchive": "output/canvas-chat-audit/ci-20261121/canonical-present-drift-review/old-blobs/12.intermediate-1.txt",
+        "oldRawSha256": "070030b1b3b73691620e2312a14b3932d11df06010be74c4e86494b3aace6974",
+        "newReviewedRawSha256": "6da4815cc9e076fed2bf88a67fb4b1d49a7195c305569c3c7ce53c66095ff1cf",
+        "gitFilteredIdentity": "not computed; parent must verify by exact path"
+      },
+      "independentReviews": [
+        "output/canvas-chat-audit/ci-20261121/ci-r2-stage4-split-independent.md"
+      ],
+      "ciStatus": "pending",
+      "realRuntimeStatus": "pending",
+      "formalAcceptance": "pending",
+      "newExecutionByPreparer": false
+    },
+    {
+      "canonicalPointer": "/additionalPaths/38",
+      "path": "tests/e2e/stage-4-node-chat-agent.spec.ts",
+      "previousReviewedBlob": "6c6632114a96738fa0aaee8775ff17d44b0b8f88",
+      "reviewedBlob": "7f63b3cd346c7e4d846f80c5bba34a8652203290",
+      "reviewStatus": "source-reviewed-parent-path-filtered-blob-bound",
+      "changeKind": "source-trace-test-stage-correction",
+      "summary": "Source-reviewed/runtime-new-CI-pending: v13纠正source-trace测试阶段与polling事件分类；唯一无progress准入严格绑定真实saved agentRunId/PG task，progress仅缺省runId合法、字段存在则同值；完整真实saved逐图引用及请求/目标PG trace等值保留，原Agent/receipt唯一effect/刷新/A-B-A不变。Russell最新窄复读P2 closed；父ownC817业务快照+当前v13测试单例1pass/23.1s，仅此运行范围，非r2CI或Coze，正式验收仍pending。",
+      "evidence": [
+        "最终spec L744–745仅对无progress的admissionReceipts要求恰好1条，不再固定全部polling总数；L747–749要求savedMessage.agentRunId为非空字符串且等于实际PG sourcePlacement.task_id。",
+        "L750–754：无progress初始事件无条件严格比较；progress仅在完全没有runId字段时允许缺省，显式存在的undefined/null/空字符串/错ID仍须等于真实saved ID而失败；legacy/shadow逐条runId===undefined保留。",
+        "真实producer route:1474发带progress且不带runId的后续事件，:1521–1527仅初始准入附prepared runId；send直接JSON.stringify；chat-area payload声明runId可选，消费者仅string时写消息身份，不为进度回填或伪造运行。",
+        "savedImageRef仍由真实snapshot按assetVersionId/placementId找出并完整等于generated；expectedTransferTrace保留其全部sourceTrace，仅合入已核实savedMessage.agentRunId；L782真实transfer request和L795目标PG source_trace均完整toEqual，不调用业务binder计算期望、不删除字段或宽松匹配。",
+        "完整阶段差异已读：相对本线程留存pre-v12整文件快照+45/-8；仅新case本地类型、三处v13 fresh后缀、准入/进度核对与完整转送trace比较。新case开始前以及waiting-notice至文件末尾全部原始bytes不变，原Agent正文/timeout/PG唯一command/receipt/双刷新/A-B-A/三个拒绝/provider计数保留。",
+        "Russell报告最后“18:58指令后的最新窄复核：v13 runId P2 closed”覆盖较早未关闭段；本线程已复读该closed段及当前实际for，先前v12/较早v13错误不再列为当前未决P2。",
+        "父最新确认ownC817业务快照+当前v13 test在production/strictOrigin/真实WS/agent-v2单例全链1pass、23.1s；本线程不独立运行或外推r2CI、五profile/Coze，原run11证据仍仅归其旧版本。"
+      ],
+      "fullDiff": {
+        "status": "read-complete-final-v13-stage-diff",
+        "path": "output/canvas-chat-audit/ci-20261121/r2-canonical-stage4-two/v2/spec.pre-v12-reviewed-snapshot-to-v13.complete.patch",
+        "addedLines": 45,
+        "removedLines": 8,
+        "baseline": {
+          "source": "complete pre-v12 source snapshot retained by this thread during independent split review",
+          "rawSha256": "7096e35c2fe4fca867e30499ccca91848b56178dd0fe58db27ec72ae2baa5ae6",
+          "canonicalPreviousReviewedBlob": "6c6632114a96738fa0aaee8775ff17d44b0b8f88",
+          "identityBoundary": "Raw snapshot is not claimed as Git filtered blob; prior record remains unchanged and parent owns filtered identity verification.",
+          "archivedAt": "output/canvas-chat-audit/ci-20261121/r2-canonical-stage4-two/v2/spec.pre-v12.readonly-snapshot.txt"
+        },
+        "finalSnapshot": {
+          "rawSha256": "c16c1c378d440bb3c45871213c983320015af2b650ebe2f118d6a5067b99d6a4",
+          "crlfPreserved": true,
+          "gitFilteredBlob": "7f63b3cd346c7e4d846f80c5bba34a8652203290",
+          "archivedAt": "output/canvas-chat-audit/ci-20261121/r2-canonical-stage4-two/v2/spec.v13.readonly-snapshot.txt"
+        },
+        "unchangedScopes": [
+          "all bytes before new current-lineage case",
+          "all bytes from waiting notice through receipt/refresh/A-B-A/metrics/finally tail"
+        ],
+        "notClaimed": "No Git command, object hash, canonical mutation or runtime execution by preparer."
+      },
+      "independentReviews": [
+        {
+          "path": "output/canvas-chat-audit/ci-20261121/stage4-current-lineage-followup/production-agent-v2-trace-test-wiring-v12-independent-review.md",
+          "section": "18:58指令后的最新窄复核：v13 runId P2 closed",
+          "sha256": "44554d3e12b20dfdfc72dc618ee987ccef2609baa6bd72cd4e8e5fe258e7c9a4",
+          "status": "P2-closed-source-only",
+          "scope": "latest narrow for/admission/progress reread; prior complete trace/identity static agreement retained",
+          "runtimeByReviewer": false
+        }
+      ],
+      "ciStatus": "pending",
+      "realRuntimeStatus": "parent-reported-scoped-pass-new-ci-pending",
+      "formalAcceptance": "pending",
+      "newExecutionByPreparer": false,
+      "producerCorrection": {
+        "path": "output/canvas-chat-audit/ci-20261121/stage4-current-lineage-followup/production-agent-v2-polling-protocol-v13.md",
+        "sha256": "8788125848b49655617d9313eb5945e9ec69dbee95d46f3792c3acc1edf86a05",
+        "status": "corrected-v13-author-handoff-not-runtime-proof"
+      },
+      "scopedRuntimeEvidence": {
+        "status": "passed",
+        "passedCases": 1,
+        "parentReportedDurationSeconds": 23.1,
+        "scope": "single current-lineage case; parent ownC817 business snapshot plus current corrected v13 test",
+        "profile": "chromium",
+        "applicationSnapshot": "C817 frozen isolated production build unverified-c4d08ffd34aea011fb830f266f978e52; not the r2 application snapshot",
+        "testStage": "v13 producer-corrected",
+        "runtime": {
+          "production": true,
+          "agentMode": "agent-v2",
+          "strictOrigin": true,
+          "documentPresenceTransport": "real WebSocket"
+        },
+        "provenance": "parent latest message; not executed, not independently replayed or log-parsed by preparer",
+        "logReference": "output/canvas-chat-audit/current-lineage-production-v13-agent-v2-check-20261121.log",
+        "timingBreakdown": "case versus runner duration breakdown not supplied",
+        "r2Ci": "pending",
+        "coze": "pending",
+        "fiveProfileCi": "pending",
+        "formalAcceptance": "pending",
+        "runnerDurationSeconds": 26,
+        "processStopReceipt": "output/canvas-chat-audit/current-lineage-production-v13-stopped-20261121.json"
+      }
+    }
+  ],
+  "scope": {
+    "canonicalRegistration": "only existing /additionalPaths/27 and /additionalPaths/38",
+    "newCanonicalPaths": 0,
+    "original160Entries": "preserved",
+    "original286Authorizations": "preserved",
+    "retirementV2Evidence": "all38 preserved",
+    "execution": "none",
+    "sourceWrites": "none"
+  },
+  "parentCompletionRequired": [
+    "Parent verifies both exact path-filtered Git blobs against these fixed reviewed sources; replace all matching PENDING tokens consistently without raw-SHA substitution.",
+    "Finalize and version the short evidence candidate under parent authorization, preserving v1 old objects and any original source/retirement evidence.",
+    "Parent alone executes the unchanged record aggregates after binding; source-only records and scoped parent runtime do not mean r2CI/Coze/formal acceptance passed."
+  ]
+}
