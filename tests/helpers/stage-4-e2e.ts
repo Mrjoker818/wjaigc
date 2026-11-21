@@ -461,6 +461,30 @@ export function assertStage4SeedIsolation(
   }
 }
 
+// This entry point never registers or provisions users; its callers retain the same
+// origin's storage while switching between parent-provisioned, run-scoped accounts.
+export async function loginExistingStage4Session(
+  page: Page,
+  fixture: Stage4FixtureUser,
+): Promise<Stage4AuthContext> {
+  await assertStage4IsolationDatabaseConfigured();
+  if (!isRunScopedStage4FixtureUsername(fixture.username) || !fixture.password) {
+    throw new Error('BLOCKED: existing Stage 4 login requires a run-scoped fixture user and password');
+  }
+  // Unmount the previous actor's receivers before replacing its session cookies.
+  await page.goto('about:blank');
+  await page.context().clearCookies();
+  const login = await loginWithPassword(page, fixture.username, fixture.password);
+  if (!login.ok) {
+    throw new Error(`BLOCKED: parent-provisioned Stage 4 fixture login failed with HTTP ${login.status}`);
+  }
+  const session = await currentSessionUser(page);
+  if (session.name !== fixture.username) {
+    throw new Error('BLOCKED: existing Stage 4 session does not match the requested fixture user');
+  }
+  return { userId: session.id, username: session.name, strategy: 'env-login', disposable: true };
+}
+
 export async function ensureStage4Session(
   page: Page,
   fixture: Stage4FixtureUser,

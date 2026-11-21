@@ -262,22 +262,26 @@ export async function downloadPublicImage(
       },
       ...(url.protocol === 'https:' ? { servername: url.hostname } : {}),
     }, (response) => {
+      const rejectResponse = (error: SafeImageDownloadError): void => {
+        rejectOnce(error);
+        // Refused headers must close the transport, not drain an unbounded body
+        // after rejectOnce has removed the overall-deadline abort listener.
+        response.destroy();
+        req.destroy(error);
+      };
       const status = response.statusCode || 0;
       if (expectedStatus !== undefined && status !== expectedStatus) {
-        response.destroy();
-        rejectOnce(new SafeImageDownloadError(
+        rejectResponse(new SafeImageDownloadError(
           `Remote range request returned HTTP ${status} instead of ${expectedStatus}`,
         ));
         return;
       }
       if (status >= 300 && status < 400) {
-        response.resume();
-        rejectOnce(new SafeImageDownloadError('Remote image redirects are not allowed'));
+        rejectResponse(new SafeImageDownloadError('Remote image redirects are not allowed'));
         return;
       }
       if (status < 200 || status >= 300) {
-        response.resume();
-        rejectOnce(new SafeImageDownloadError(`Remote image returned HTTP ${status}`));
+        rejectResponse(new SafeImageDownloadError(`Remote image returned HTTP ${status}`));
         return;
       }
       const responseMimeType = (response.headers['content-type'] || '')
@@ -287,8 +291,7 @@ export async function downloadPublicImage(
       const mimeType = responseMimeType || (options.allowMissingContentTypeAsOctetStream
         ? 'application/octet-stream' : '');
       if (!isAllowedRemoteMimeType(mimeType, acceptedMimeTypes)) {
-        response.resume();
-        rejectOnce(new SafeImageDownloadError('Remote response is not an allowed image type'));
+        rejectResponse(new SafeImageDownloadError('Remote response is not an allowed image type'));
         return;
       }
       const declaredBytes = Number(response.headers['content-length'] || 0);
@@ -298,8 +301,7 @@ export async function downloadPublicImage(
         Number.isSafeInteger(mimeLimit) && Number(mimeLimit) > 0 ? Number(mimeLimit) : maxBytes,
       );
       if (declaredBytes > responseLimit) {
-        response.resume();
-        rejectOnce(new SafeImageDownloadError('Remote image exceeds the size limit'));
+        rejectResponse(new SafeImageDownloadError('Remote image exceeds the size limit'));
         return;
       }
 

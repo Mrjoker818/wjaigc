@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { toUserFacingError } from '@/lib/api-error-translate';
 import { createHash, randomUUID } from 'node:crypto';
-import { findProviderForModel, getApiProviders, normalizeApiBaseUrl } from '@/lib/server-api-config';
+import { getApiProviders, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { getRequestUser } from '@/lib/api-auth';
 import type { User } from '@/lib/user-types';
 import {
@@ -11,9 +11,7 @@ import {
   InsufficientCreditsError,
 } from '@/lib/credits';
 import { getRuntimeSettings } from '@/lib/runtime-settings';
-import { getServerDataRoot } from '@/lib/server-data-root';
-import fsSync from 'fs';
-import path from 'path';
+import { decodeSafeImageInput, loadSafeImageInput, SafeImageInputError, withSafeSharp } from '@/lib/safe-image-input';
 import { validateApiInputs } from '@/lib/api-validator';
 import { logOperation, logError, OP_ACTIONS } from '@/lib/op-log';
 import {
@@ -86,126 +84,49 @@ interface ImageTo3DRequest {
   pose?: 'a-pose' | 't-pose' | '';  // 姿态模式
 }
 
-// ==================== Image URL to Base64 Helper ====================
+// ==================== Bounded Image Input Preparation ====================
 
-async function imageUrlToBase64(imageUrl: string): Promise<string | null> {
-  try {
-    // If already a base64 data URL, extract the base64 part
-    if (imageUrl.startsWith('data:')) {
-      const base64Match = imageUrl.match(/^data:[^;]+;base64,(.+)$/);
-      if (base64Match) return base64Match[1];
-    }
-
-    // Blob URLs cannot be resolved server-side
-    if (imageUrl.startsWith('blob:')) {
-      console.warn('[image-to-3d] Blob URLs cannot be resolved server-side');
-      return null;
-    }
-
-    // Local path (e.g. /uploads/xxx.png or /api/serve-upload/xxx.png)
-    // Read from filesystem first, then try localhost fetch
-    if (imageUrl.startsWith('/')) {
-      const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
-
-      // Try direct public path
-      const localPath = path.join(workspacePath, 'public', imageUrl);
-      if (fsSync.existsSync(localPath)) {
-        const buffer = await fsSync.promises.readFile(localPath);
-        return buffer.toString('base64');
-      }
-
-      // Try persistent data directory (DEV + PROD)
-      const dataRoot = getServerDataRoot();
-      const persistentPath = path.join(dataRoot, imageUrl.replace(/^\//, ''));
-      if (fsSync.existsSync(persistentPath)) {
-        const buffer = await fsSync.promises.readFile(persistentPath);
-        return buffer.toString('base64');
-      }
-
-      // /api/serve-upload/filename → search upload directories
-      const serveUploadMatch = imageUrl.match(/^\/api\/serve-upload\/(.+)$/);
-      if (serveUploadMatch) {
-        const filename = serveUploadMatch[1];
-        const uploadDirs = [
-          path.join(dataRoot, 'uploads'),
-          path.join(workspacePath, 'public', 'uploads'),
-        ];
-        for (const dir of uploadDirs) {
-          const filePath = path.join(dir, filename);
-          if (fsSync.existsSync(filePath)) {
-            const buffer = await fsSync.promises.readFile(filePath);
-            return buffer.toString('base64');
-          }
-        }
-      }
-
-      // Fallback: fetch from localhost
-      const fullUrl = `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${imageUrl}`;
-      const response = await fetch(fullUrl, { signal: AbortSignal.timeout(10000) });
-      if (response.ok) {
-        const arrayBuffer = await response.arrayBuffer();
-        return Buffer.from(arrayBuffer).toString('base64');
-      }
-      console.warn('[image-to-3d] Failed to fetch local image:', imageUrl);
-      return null;
-    }
-
-    // External URL - fetch and convert
-    const response = await fetch(imageUrl, {
-      signal: AbortSignal.timeout(15000), // 15s timeout
-    });
-    if (!response.ok) {
-      console.warn('[image-to-3d] Failed to fetch image for base64 conversion:', response.status);
-      return null;
-    }
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    return buffer.toString('base64');
-  } catch (err) {
-    console.warn('[image-to-3d] Could not convert image URL to base64:', err instanceof Error ? err.message : String(err));
-    return null;
+// All views share one deadline and byte budget. Only validated data URLs reach
+// adapters, so a supplier cannot refetch an unchecked source or follow redirects.
+async function prepareRequestImages(request: ImageTo3DRequest, signal: AbortSignal): Promise<ImageTo3DRequest> {
+  if (request.imageUrl !== undefined && typeof request.imageUrl !== 'string') {
+    throw new SafeImageInputError('Invalid main image');
   }
+  if (request.images !== undefined && (
+    !Array.isArray(request.images)
+    || request.images.length > 8
+    || request.images.some(image => !image || typeof image !== 'object' || typeof image.url !== 'string' || !image.url.trim())
+  )) {
+    throw new SafeImageInputError('Invalid image views');
+  }
+  const images = request.images || [];
+  const mainUrl = request.imageUrl || (request.mode === 'multi-image' ? images[0]?.url : '') || '';
+  const urls = new Set([mainUrl, ...images.map(image => image.url)].filter(Boolean).map(url => url.trim()));
+  if (urls.size > 8) throw new SafeImageInputError('Too many image inputs');
+
+  const prepared = new Map<string, string>();
+  let remainingBytes = 25 * 1024 * 1024;
+  for (const url of urls) {
+    if (remainingBytes <= 0) throw new SafeImageInputError('Image inputs exceed the total size limit');
+    const image = await loadSafeImageInput(url, { maxBytes: remainingBytes, maxPixels: 40_000_000, signal });
+    // Metadata can be readable while the pixel stream is corrupt. Decode before
+    // admission, under the same pixel/deadline bounds, without changing the bytes.
+    await withSafeSharp(image.buffer, { maxPixels: 40_000_000, signal },
+      pipeline => pipeline.timeout({ seconds: 30 }).raw().toBuffer());
+    remainingBytes -= image.buffer.byteLength;
+    prepared.set(url, `data:${image.mimeType};base64,${image.buffer.toString('base64')}`);
+  }
+  return {
+    ...request,
+    imageUrl: mainUrl ? prepared.get(mainUrl.trim())! : '',
+    images: request.images?.map(image => ({ ...image, url: prepared.get(image.url.trim())! })),
+  };
 }
 
-/**
- * Resolve a local image URL to a publicly accessible URL or data URL.
- * External APIs (Meshy, Tripo, etc.) can't access local paths like /uploads/xxx.png,
- * so we convert them to data URLs or use the server's public domain.
- */
-async function resolveImageUrlForProvider(imageUrl: string): Promise<string> {
-  // Already accessible formats
-  if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://') || imageUrl.startsWith('data:')) {
-    return imageUrl;
-  }
-
-  // Blob URL - cannot be resolved server-side
-  if (imageUrl.startsWith('blob:')) {
-    console.warn('[image-to-3d] Blob URL cannot be resolved for external API');
-    return imageUrl;
-  }
-
-  // Local path - convert to data URL
-  if (imageUrl.startsWith('/')) {
-    const base64 = await imageUrlToBase64(imageUrl);
-    if (base64) {
-      // Determine MIME type from extension
-      const ext = imageUrl.split('.').pop()?.toLowerCase();
-      const mimeMap: Record<string, string> = {
-        png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
-        gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
-      };
-      const mime = mimeMap[ext || ''] || 'image/png';
-      return `data:${mime};base64,${base64}`;
-    }
-
-    // Fallback: try localhost URL
-    const port = process.env.DEPLOY_RUN_PORT || 5000;
-    const localhostUrl = `http://localhost:${port}${imageUrl}`;
-    console.warn('[image-to-3d] Could not convert local image to base64, trying localhost URL:', localhostUrl);
-    return localhostUrl;
-  }
-
-  return imageUrl;
+// These adapter conversions never read files or access the network. Input bytes
+// were already bounded and decoded before any credit/task admission.
+function imageUrlToBase64(imageUrl: string): string {
+  return decodeSafeImageInput(imageUrl).buffer.toString('base64');
 }
 
 // ==================== Provider Detection ====================
@@ -213,6 +134,7 @@ async function resolveImageUrlForProvider(imageUrl: string): Promise<string> {
 type ProviderType = 'hunyuan3d' | 'meshy' | 'tripo' | 'rodin' | 'generic';
 
 function detectProviderType(request: ImageTo3DRequest): ProviderType {
+  if (request.backend === 'local') return 'generic';
   const modelName = (request.provider?.model || '').toLowerCase();
   const providerName = (request.provider?.name || '').toLowerCase();
   const providerPreset = (request.provider?.providerPreset || '').toLowerCase();
@@ -422,7 +344,7 @@ function buildMeshyBody(request: ImageTo3DRequest): Record<string, unknown> {
   if (request.mode === 'text-to-3d' && request.prompt) {
     const body: Record<string, unknown> = {
       prompt: request.prompt,
-      ai_model: 'meshy-6',
+      ai_model: request.provider?.model,
     };
     if (request.texture === 'pbr' || request.texture === '4k' || request.enablePBR) body.enable_pbr = true;
     if (request.texture === '4k' || request.texture === '4096') body.hd_texture = true;
@@ -439,7 +361,7 @@ function buildMeshyBody(request: ImageTo3DRequest): Record<string, unknown> {
     const imageUrls = request.images.map(img => img.url);
     const body: Record<string, unknown> = {
       image_urls: imageUrls,
-      ai_model: 'meshy-6',
+      ai_model: request.provider?.model,
       should_texture: request.texture !== 'none',
       image_enhancement: true,
       remove_lighting: true,
@@ -458,7 +380,7 @@ function buildMeshyBody(request: ImageTo3DRequest): Record<string, unknown> {
   // 单图转3D
   const body: Record<string, unknown> = {
     image_url: request.imageUrl,
-    ai_model: 'meshy-6',
+    ai_model: request.provider?.model,
     should_texture: request.texture !== 'none',
     image_enhancement: true,
     remove_lighting: true,
@@ -551,32 +473,9 @@ function is302Ai(request: ImageTo3DRequest): boolean {
   return baseUrl.includes('302.ai') || baseUrl.includes('302ai');
 }
 
-/** Download an image from URL or data URL into a Buffer */
-async function fetchImageAsBuffer(url: string): Promise<Buffer> {
-  if (url.startsWith('data:')) {
-    const b64 = url.split(',')[1];
-    return Buffer.from(b64, 'base64');
-  }
-  // Local path: read from disk
-  if (url.startsWith('/')) {
-    const fs = await import('fs/promises');
-    const publicPath = url.startsWith('/api/serve-upload/')
-      ? `/tmp/uploads/${url.split('/').pop()}`
-      : url;
-    try {
-      return await fs.readFile(publicPath);
-    } catch {
-      // Try with /tmp prefix
-      return await fs.readFile(`/tmp${url}`);
-    }
-  }
-  // Remote URL
-  const resp = await fetch(url, { signal: AbortSignal.timeout(TRIPO_UPLOAD_TIMEOUT_MS) });
-  if (!resp.ok) {
-    throw new Error(`Unable to download 3D source image: HTTP ${resp.status}`);
-  }
-  const arrayBuf = await resp.arrayBuffer();
-  return Buffer.from(arrayBuf);
+/** Decode previously validated image bytes for the Tripo upload adapter. */
+function imageDataUrlToBuffer(url: string): Buffer {
+  return decodeSafeImageInput(url).buffer;
 }
 
 /** Upload a single image to 302.ai Tripo and return the file_token */
@@ -597,6 +496,7 @@ async function uploadImageTo302Tripo(
 
   const uploadResp = await fetch(uploadUrl, {
     method: 'POST',
+    redirect: 'error',
     headers: { Authorization: `Bearer ${apiKey}` },
     body: formData,
     signal: AbortSignal.timeout(TRIPO_UPLOAD_TIMEOUT_MS),
@@ -708,34 +608,59 @@ function splitProviderSelection(selection?: string): { providerId?: string; mode
     if (parts.length >= 3) {
       return {
         providerId: parts[1] || undefined,
-        model: parts.slice(2).join('::').trim() || undefined,
+        model: parts.slice(2).join('::') || undefined,
       };
-    }
-    // Fallback: admin-3d::modelId
-    if (parts.length === 2) {
-      return { model: parts[1].trim() || undefined };
     }
     return {};
   }
 
   const [providerId, ...modelParts] = selection.split('::');
-  const model = modelParts.join('::').trim();
+  const model = modelParts.join('::');
   return {
     providerId: providerId || undefined,
     model: model || undefined,
   };
 }
 
-async function resolveServerProvider(request: ImageTo3DRequest): Promise<ImageTo3DRequest> {
-  if (request.backend !== 'api') return request;
+async function resolveServerProvider(request: ImageTo3DRequest, user: User): Promise<ImageTo3DRequest | null> {
+  if (request.backend === 'local') {
+    // A local worker is a server-declared admin capability, never caller-supplied
+    // network access. Both endpoint and model must be explicitly configured.
+    const endpoint = process.env.WUJIE_3D_LOCAL_WORKER_URL?.trim();
+    const model = process.env.WUJIE_3D_LOCAL_WORKER_MODEL?.trim();
+    if (user.role !== 'admin' || user.status === 'disabled' || !endpoint || !model) return null;
+    try {
+      const url = new URL(endpoint);
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) return null;
+    } catch { return null; }
+    if ((request.local?.endpoint !== undefined && request.local.endpoint !== endpoint)
+      || (request.local?.model !== undefined && request.local.model !== model)) return null;
+    return {
+      ...request,
+      provider: { id: 'local-3d-worker', model },
+      local: { endpoint, model },
+    };
+  }
+  if (request.backend !== 'api') return null;
 
-  const selection = splitProviderSelection(request.providerId || request.provider?.id);
-  const selectedModel = request.provider?.model || selection.model;
+  // Every supplied identity must describe the same exact pair. Never recover a
+  // missing/disabled provider by model name, or infer a model from catalog order.
+  const identifiers = [request.providerId, request.provider?.id].filter(id => id !== undefined);
+  if (!identifiers.length || identifiers.some(id => typeof id !== 'string' || !id.trim())) return null;
+  const selections = identifiers.map(id => splitProviderSelection(id));
+  const providerId = selections[0].providerId;
+  const selectedModel = request.provider?.model ?? selections.find(item => item.model)?.model;
+  if (!providerId || typeof selectedModel !== 'string' || !selectedModel.trim()) return null;
+  if (selections.some(item => item.providerId !== providerId || (item.model !== undefined && item.model !== selectedModel))) return null;
+
   const providers = await getApiProviders();
-  const byId = selection.providerId ? providers.find(item => item.id === selection.providerId && item.isEnabled) : null;
-  const byModel = !byId && selectedModel ? await findProviderForModel(selectedModel, '3d') : null;
-  const provider = byId || byModel;
-  if (!provider) return request;
+  const provider = providers.find(item => item.id === providerId);
+  if (!provider?.isEnabled || !provider.apiKey || !provider.baseUrl || !provider.selectedModels?.includes(selectedModel)) return null;
+  if (user.role !== 'admin' && (
+    user.status === 'disabled'
+    || (user.apiPermissions && user.apiPermissions.threeD !== true)
+    || !user.imageModels?.includes(`${provider.id}::${selectedModel}`)
+  )) return null;
 
   return {
     ...request,
@@ -744,9 +669,9 @@ async function resolveServerProvider(request: ImageTo3DRequest): Promise<ImageTo
       name: provider.displayName || provider.name,
       baseUrl: provider.baseUrl,
       apiKey: provider.apiKey,
-      model: selectedModel || provider.selectedModel || provider.selectedModels?.[0],
-      providerPreset: provider.providerPreset || request.provider?.providerPreset,
-      advancedParams: provider.advancedParams || request.provider?.advancedParams,
+      model: selectedModel,
+      providerPreset: provider.providerPreset,
+      advancedParams: provider.advancedParams,
     },
   };
 }
@@ -952,7 +877,7 @@ async function tryExternalRequest(request: ImageTo3DRequest): Promise<{
       const imagesToUpload = await mapWithConcurrency(
         imageSources,
         TRIPO_UPLOAD_CONCURRENCY,
-        async (image) => ({ data: await fetchImageAsBuffer(image.url), name: image.name }),
+        async (image) => ({ data: imageDataUrlToBuffer(image.url), name: image.name }),
       );
       const fileTokens = await mapWithConcurrency(
         imagesToUpload,
@@ -979,6 +904,7 @@ async function tryExternalRequest(request: ImageTo3DRequest): Promise<{
       try {
         const submitResp = await fetch(endpoint, {
           method: 'POST',
+          redirect: 'error',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${apiKey}`,
@@ -1041,6 +967,7 @@ async function tryExternalRequest(request: ImageTo3DRequest): Promise<{
 
     const response = await fetch(endpoint, {
       method: 'POST',
+      redirect: 'error',
       headers,
       body: JSON.stringify(requestBody),
       signal: controller.signal,
@@ -1118,7 +1045,10 @@ export async function POST(request: NextRequest) {
     const requestedBody = await request.json() as ImageTo3DRequest;
     const requestedProviderId = requestedBody.providerId || requestedBody.provider?.id;
     const requestedModelId = requestedBody.provider?.model;
-    const body = await resolveServerProvider(requestedBody);
+    const body = await resolveServerProvider(requestedBody, authenticatedUser);
+    if (!body) {
+      return NextResponse.json({ success: false, error: '所选 3D 提供商或模型未启用，或未获得精确授权' }, { status: 403 });
+    }
     // 输入校验
     const _validationError = validateApiInputs(body as unknown as Record<string, unknown>, {
         imageUrl: 'optionalImageUrl'
@@ -1144,6 +1074,14 @@ export async function POST(request: NextRequest) {
     }
     if (body.backend === 'api' && !body.provider?.apiKey) {
       return NextResponse.json({ success: false, error: '请先在管理员系统配置可用的 3D 模型' }, { status: 400 });
+    }
+
+    let preparedBody: ImageTo3DRequest;
+    try {
+      preparedBody = await prepareRequestImages(body, AbortSignal.any([request.signal, AbortSignal.timeout(30_000)]));
+    } catch {
+      // A bad image never creates a charge, billable task, receipt or refund.
+      return NextResponse.json({ success: false, code: 'UNSAFE_IMAGE_INPUT', error: '图片输入不安全、无法解码或超出限制' }, { status: 400 });
     }
 
     type ThreeDAdmission = {
@@ -1297,19 +1235,6 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Resolve local image URLs to accessible format for external APIs
-    if (body.imageUrl) {
-      body.imageUrl = await resolveImageUrlForProvider(body.imageUrl);
-    }
-    // Resolve multi-image URLs
-    if (body.images && Array.isArray(body.images)) {
-      for (let i = 0; i < body.images.length; i++) {
-        if (body.images[i].url) {
-          body.images[i].url = await resolveImageUrlForProvider(body.images[i].url);
-        }
-      }
-    }
-
     const providerType = detectProviderType(body);
     console.log('[image-to-3d] Request:', JSON.stringify({
       backend: body.backend,
@@ -1340,7 +1265,7 @@ export async function POST(request: NextRequest) {
       creditCost: deductedCredits,
       creditStatus: deductedCredits > 0 ? 'charged' : 'not-applicable',
     });
-    const external = await tryExternalRequest(body);
+    const external = await tryExternalRequest(preparedBody);
     if (external?.assetUrl || external?.taskId) {
       if (usesAtomicBilling && localTaskId) {
         if (external.taskId) {

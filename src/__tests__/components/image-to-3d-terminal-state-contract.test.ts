@@ -7,12 +7,20 @@ const componentSource = readFileSync(
   'utf8',
 ).replace(/\r\n/g, '\n');
 
+function readThreeDHandlerSource(): string {
+  const handlerStart = componentSource.indexOf('const handle3DConfirm = useCallback');
+  const handlerEnd = componentSource.indexOf('const colorAdjustingRef = useRef(false);', handlerStart);
+  expect(handlerStart).toBeGreaterThanOrEqual(0);
+  expect(handlerEnd).toBeGreaterThan(handlerStart);
+  return componentSource.slice(handlerStart, handlerEnd);
+}
+
 describe('image-to-3d terminal state contract', () => {
   it('keeps failed 3D tasks visible instead of deleting their processing card', () => {
-    const handlerStart = componentSource.indexOf('const handle3DConfirm = useCallback');
-    const handlerEnd = componentSource.indexOf('// 4. ERASE', handlerStart);
-    const handlerSource = componentSource.slice(handlerStart, handlerEnd);
-    const submittedTaskPath = handlerSource.slice(handlerSource.indexOf('let placeholderId ='));
+    const handlerSource = readThreeDHandlerSource();
+    const submittedTaskStart = handlerSource.indexOf('let placeholderId =');
+    expect(submittedTaskStart).toBeGreaterThanOrEqual(0);
+    const submittedTaskPath = handlerSource.slice(submittedTaskStart);
 
     expect(submittedTaskPath).toContain('const failThreeDGeneration');
     expect(submittedTaskPath).toContain('buildFailedProcessingFrame');
@@ -24,10 +32,12 @@ describe('image-to-3d terminal state contract', () => {
   });
 
   it('closes the provider event stream before returning a terminal failure', () => {
-    const handlerStart = componentSource.indexOf('const handle3DConfirm = useCallback');
-    const handlerEnd = componentSource.indexOf('// 4. ERASE', handlerStart);
-    const handlerSource = componentSource.slice(handlerStart, handlerEnd);
+    const handlerSource = readThreeDHandlerSource();
 
     expect(handlerSource).toContain('streamSource?.close();\n            failThreeDGeneration');
+    expect(handlerSource).toContain('while (Date.now() - taskStartedAt < THREE_D_TASK_TIMEOUT_MS)');
+    expect(handlerSource).toMatch(
+      /streamSource\?\.close\(\);\s+if \(!previewUrl\) \{\s+failThreeDGeneration\([^\n]+\);\s+setThreeDProgress\(null\);\s+return;\s+\}/,
+    );
   });
 });

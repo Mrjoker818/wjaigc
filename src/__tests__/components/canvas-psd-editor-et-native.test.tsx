@@ -148,7 +148,23 @@ async function session(theme: Theme = 'gold', width: number = 390, height: numbe
         if (key === '/api/models?type=3d') { await route.fulfill({json:{success:true,capabilityCatalogVersion:1,providers:[],models:[],taskModelCatalog:[],modelAuthorizationMigration:{resolved:[],required:[]},quickCreatePolicy:{autoModelRouting:false,globalDefault:'',quickCreateDefault:''}}});return; }
         if (key === '/api/upscayl' || key === '/api/models?type=upscaler' || key === '/api/models?type=removebg') { await route.fulfill({json:key==='/api/upscayl'?{available:false,models:[]}:{success:true,providers:[],models:[]}});return; }
         if (HELP_FILES.some(file => key === '/api/help-image?file=' + file)) { await route.fulfill({contentType:'image/png',body:s.png});return; }
-        if (key === '/api/layer-documents?projectId=canvas-ui-project&sourceImageId=br-A&sourceVersionId=et-owned-source-v1') { await route.fulfill({status:404,json:{success:false,code:'LAYER_DOCUMENT_NOT_FOUND',message:'Owned synthetic source has no saved layer document'}});return; }
+        if (key === '/api/layer-documents?projectId=canvas-ui-project&sourceImageId=br-A&sourceVersionId=et-owned-source-v1') { const background=await s.page.evaluate(()=>{const found=(window as unknown as FixtureWindow).canvasUi.state.images.find(image=>typeof image==='object'&&image!==null&&'id' in image&&image.id==='br-A');if(typeof found!=='object'||found===null||!('url' in found)||typeof found.url!=='string')throw Error('ET_OWNED_SOURCE_REQUIRED');return found.url;});const foreground='data:image/png;base64,'+s.png.toString('base64');if(!background.startsWith('data:image/png;base64,')||background===foreground)throw Error('ET_DISTINCT_OWNED_PNGS');const document={id:'et-owned-document',userId:'omp-mobile-user',projectId:'canvas-ui-project',sourceImageId:'br-A',sourceVersionId:'et-owned-source-v1',taskId:'et-owned-historical-task',engine:'local',schemaVersion:1,revision:7,createdAt:1,updatedAt:1,content:{schemaVersion:1,title:'ET 合成图层文档',width:256,height:128,exportMode:'basic',layers:[{id:'et-background',name:'ET 合成背景',role:'background',imageUrl:background,width:256,height:128,offsetX:0,offsetY:0,opacity:1,blendMode:'normal',visible:true,locked:false,order:0,source:'local-enhanced'},{id:'et-subject',name:'ET 合成主体',role:'subject',imageUrl:foreground,width:64,height:64,offsetX:80,offsetY:32,opacity:1,blendMode:'normal',visible:true,locked:false,order:1,source:'local-enhanced'}]}};await route.fulfill({json:{success:true,document}});return; }
+
+        // 3fd9d9c6 retired direct edit-elements. Restore an owned, completed
+        // element-decomposition task at the real API boundary; no AI or DB runs.
+        if (key === '/api/element-decompose?projectId=canvas-ui-project') {
+          const source = await s.page.evaluate(() => {
+            const image = (window as unknown as FixtureWindow).canvasUi.state.images.find(value => typeof value === 'object' && value !== null && 'id' in value && value.id === 'br-A');
+            if (!image || typeof image !== 'object' || !('url' in image) || typeof image.url !== 'string') throw Error('F04_OWNED_SOURCE_REQUIRED');
+            return image.url;
+          });
+          await route.fulfill({ json: { success: true, taskId: 'et-owned-historical-task', status: 'completed', overallStatus: 'completed', progress: 100,
+            source: { sourceImageId: 'br-A', sourceVersionId: 'et-owned-source-v1', canonicalUrl: source, managedUrl: source, sha256: 'a'.repeat(64), width: 256, height: 128, mimeType: 'image/png' },
+            branches: { layers: { branch: 'layers', taskId: 'et-owned-layer-task', status: 'completed', progress: 100, result: { width: 256, height: 128, engine: 'local', quality: { status: 'pass', score: 100, warnings: [] },
+              layers: [{ id: 'et-background', name: 'ET 合成背景', role: 'background', imageUrl: source, width: 256, height: 128, offsetX: 0, offsetY: 0, opacity: 1, blendMode: 'normal', visible: true, source: 'local-enhanced' },
+                { id: 'et-subject', name: 'ET 合成主体', role: 'subject', imageUrl: 'data:image/png;base64,' + s.png.toString('base64'), width: 64, height: 64, offsetX: 80, offsetY: 32, opacity: 1, blendMode: 'normal', visible: true, source: 'local-enhanced' }] } } } } });
+          return;
+        }
         if (key === '/logo.png') { await route.fulfill({contentType:'image/png',body:s.png});return; }
         throw Error('CANVAS_UI_FIXTURE_UNKNOWN_HTTP ' + key);
       })().catch(async error => { s.errors.push(String(error)); s.refused.add(route.request()); await route.abort('blockedbyclient'); });
@@ -191,7 +207,7 @@ async function dispose(s: Session, expectedRefusal?: 'http' | 'websocket', clean
   // Cleanup/lifecycle/allowlist failures can never share the expected-refusal
   // prefix. A boundary selftest must not succeed merely because close failed.
   const invalid=(code:string):never=>{if(failures.length)throw new AggregateError([Error(code),...failures],'CANVAS_UI_FIXTURE_VALIDATION_AND_CLEANUP');throw Error(code);};
-  const allowed=['/api/layer-documents?projectId=canvas-ui-project&sourceImageId=br-A&sourceVersionId=et-owned-source-v1','/','/api/session','/api/auth/me','/api/task-events','/api/upscayl','/api/models?type=upscaler','/api/models?type=removebg','/api/models?type=3d','/logo.png','/api/tasks/recover?projectId=canvas-ui-project',...HELP_FILES.map(file=>'/api/help-image?file='+file)];
+  const allowed=['/api/element-decompose?projectId=canvas-ui-project','/api/layer-documents?projectId=canvas-ui-project&sourceImageId=br-A&sourceVersionId=et-owned-source-v1','/','/api/session','/api/auth/me','/api/task-events','/api/upscayl','/api/models?type=upscaler','/api/models?type=removebg','/api/models?type=3d','/logo.png','/api/tasks/recover?projectId=canvas-ui-project',...HELP_FILES.map(file=>'/api/help-image?file='+file)];
   const keys=[...s.counts.keys()];
   if(s.options.requireMissing || s.counts.get('/')!==1 || keys.some(k=>!allowed.includes(k)&&!(expectedRefusal==='http'&&k==='/unexpected'))){
     console.log('CANVAS_UI_FIXTURE_REQUEST_DIAGNOSTIC',JSON.stringify({counts:[...s.counts],errors:s.errors}));
@@ -233,8 +249,75 @@ interface ETCase {theme:Theme;width:number;height:number;kind:'controls'|'escape
 const etCases:ETCase[]=THEMES.flatMap<ETCase>(theme=>[[320,640],[390,844],[640,320]].map(([width,height])=>({theme,width,height,kind:'controls' as const}))).concat([{theme:'mono',width:375,height:812,kind:'escape'},{theme:'gold',width:1024,height:768,kind:'mouse'}]);
 async function etTap(s:Session,el:Locator):Promise<void>{await el.scrollIntoViewIfNeeded();if(s.options.touch)await el.tap();else await el.click();await settle(s.page);}
 async function etHeader(root:Locator):Promise<void>{for(const c of [root.getByRole('heading',{name:'PSD 分层编辑器',exact:true}),root.getByTestId('layer-document-status')]){const v=await c.evaluate(el=>{const r=el.getBoundingClientRect(),range=document.createRange();range.selectNodeContents(el);return {text:el.textContent,lines:range.getClientRects().length,width:r.width,height:r.height,inside:r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight,unclipped:el.scrollWidth<=el.clientWidth};});console.log('EU_HEADER',JSON.stringify(v));expect.soft(v.lines,'single horizontal header '+v.text).toBe(1);expect.soft(v.inside&&v.unclipped,'header readable '+v.text).toBe(true);}}
-async function etDesktopOpen(s:Session):Promise<void>{await etTap(s,s.page.getByRole('button',{name:'展开更多工具',exact:true}));const overflow=s.page.locator('[data-image-toolbar-overflow]');await overflow.waitFor({state:'visible'});await etTap(s,overflow.getByTestId('canvas-edit-elements'));}
+async function etDesktopOpen(s:Session):Promise<void>{await etTap(s,s.page.getByRole('button',{name:'元素拆解',exact:true}));}
 async function etCapture(s:Session,e:ETCase,label:string):Promise<void>{const dir=path.resolve('output/playwright/canvas-psd-editor-et-native-20261020',String(process.pid));await mkdir(dir,{recursive:true});const file=path.join(dir,`${e.theme}-${e.width}x${e.height}-${e.kind}-${label}.png`);await s.page.screenshot({path:file});console.log('ET_CAPTURE',JSON.stringify({path:file,label,notPhysicalDeviceCloudSavedLayerOrPsdOutputAcceptance:true}));}
-async function etOpen(s:Session,e:ETCase):Promise<Locator>{const img=s.page.locator('[data-canvas-image-id="br-A"]');if(s.options.touch)await img.tap({position:{x:200,y:100}});else await img.click({position:{x:200,y:100}});await settle(s.page);if(e.width<768){const bar=s.page.locator('[data-mobile-image-actions]');await bar.waitFor({state:'visible'});await etTap(s,bar.getByRole('button',{name:'更多',exact:true}));const drawer=s.page.getByRole('dialog',{name:'图片工具',exact:true});await drawer.waitFor({state:'visible'});await etTap(s,drawer.getByRole('button',{name:'编辑元素',exact:true}));}else{await etDesktopOpen(s);}const root=s.page.getByTestId('layer-editor');await root.waitFor({state:'visible'});await root.getByTestId('layer-document-status').filter({hasText:'未保存'}).waitFor({state:'visible'});await nativeRequestsFinished(s);await etHeader(root);return root;}
+async function etOpen(s:Session,e:ETCase):Promise<Locator>{
+ const img=s.page.locator('[data-canvas-image-id="br-A"]');
+ if(s.options.touch)await img.tap({position:{x:200,y:100}});else await img.click({position:{x:200,y:100}});await settle(s.page);
+ if(e.width<768){
+  const bar=s.page.locator('[data-mobile-image-actions]');await bar.waitFor({state:'visible'});await etTap(s,bar.getByRole('button',{name:'更多',exact:true}));
+  const drawer=s.page.getByRole('dialog',{name:'图片工具',exact:true});await drawer.waitFor({state:'visible'});await etTap(s,drawer.getByRole('button',{name:'元素拆解',exact:true}));
+ }else await etDesktopOpen(s);
+ const decomposition=s.page.locator('[data-popup="display-decompose"]');await decomposition.waitFor({state:'visible'});
+ // The retired choosing-stage engine selector is no longer this entry's UI.
+ // Keep real single-selection and control checks at the current output chooser.
+ if(e.kind==='controls')for(const name of ['拆解板','可编辑图层','双输出']){
+  const choice=decomposition.getByRole('button',{name,exact:true});await etAudit(choice);await etTap(s,choice);
+  expect(await choice.getAttribute('aria-pressed')).toBe('true');
+  expect(await decomposition.locator('[aria-label="元素拆解输出方式"] [aria-pressed="true"]').count()).toBe(1);
+ }
+ await etTap(s,decomposition.getByRole('button',{name:'打开编辑器',exact:true}));
+ await etTap(s,decomposition.getByRole('button',{name:'关闭元素拆解',exact:true}));await decomposition.waitFor({state:'detached'});
+ const root=s.page.getByTestId('layer-editor');await root.waitFor({state:'visible'});
+ await root.getByTestId('layer-document-status').filter({hasText:'已保存'}).waitFor({state:'visible'});
+ await root.getByTestId('layer-count').filter({hasText:'2 个图层'}).waitFor({state:'visible'});
+ await nativeRequestsFinished(s);await etHeader(root);return root;
+}
 async function etAudit(c:Locator):Promise<void>{await c.scrollIntoViewIfNeeded();const r=await c.evaluate(el=>{const b=el.getBoundingClientRect(),faults:string[]=[];const walker=document.createTreeWalker(el,NodeFilter.SHOW_TEXT);let node:Node|null;while((node=walker.nextNode())){if(!node.textContent?.trim())continue;const range=document.createRange();range.selectNodeContents(node);for(const rect of range.getClientRects())if(rect.left<b.left-.5||rect.right>b.right+.5||rect.top<b.top-.5||rect.bottom>b.bottom+.5)faults.push('clipped-label');}return {width:b.width,height:b.height,inside:b.left>=0&&b.top>=0&&b.right<=innerWidth&&b.bottom<=innerHeight,hit:el.contains(document.elementFromPoint(b.x+b.width/2,b.y+b.height/2)),name:el.getAttribute('aria-label')||el.getAttribute('title')||el.textContent?.trim(),faults};});console.log('ET_CONTROL',JSON.stringify(r));expect.soft(r.width,'touch target width '+r.name).toBeGreaterThanOrEqual(44);expect.soft(r.height,'touch target height '+r.name).toBeGreaterThanOrEqual(44);expect.soft(r.inside&&r.hit,'unoccluded visible '+r.name).toBe(true);expect.soft(r.name,'control purpose').not.toBe('');expect.soft(r.faults,'readable horizontal label '+r.name).toEqual([]);}
-for(const e of etCases)it(`ET ${e.theme} ${e.width}x${e.height} ${e.kind} actual PSD choosing entry`,async()=>{await withSession(e.theme,e.width,e.height,{touch:e.kind!=='mouse'},async s=>{const before=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);try{const root=await etOpen(s,e),panel=root.locator(':scope > div').nth(1),pb=await panel.boundingBox();if(!pb)throw Error('ET_PANEL_BOUNDS');console.log('ET_PANEL',JSON.stringify({...e,b:pb}));expect.soft(pb.x>=0&&pb.y>=0&&pb.x+pb.width<=e.width&&pb.y+pb.height<=e.height,'panel inside actual viewport').toBe(true);expect.soft(await root.getByRole('dialog',{name:'PSD 分层编辑器',exact:true}).count()+(await root.getAttribute('role')==='dialog'&&await root.getAttribute('aria-label')==='PSD 分层编辑器'?1:0),'named protected editor dialog').toBe(1);await etCapture(s,e,'opened');const group=root.getByRole('group',{name:'图片分层引擎'}),start=root.getByTestId('layer-start'),close=root.getByRole('button',{name:'关闭',exact:true});if(e.kind==='controls'){for(const c of [...await group.getByRole('button').all(),close,start])await etAudit(c);for(const [value,label]of [['local','本地'],['cloud','云端'],['smart','智能']]){await etTap(s,group.locator('[data-layer-engine="'+value+'"]'));expect(await group.locator('[aria-pressed="true"]').count()).toBe(1);expect(await group.locator('[data-layer-engine="'+value+'"]').getAttribute('aria-pressed')).toBe('true');expect(await s.page.evaluate(()=>localStorage.getItem('wujie-layer-engine'))).toBe(value);await root.getByText('当前模式：'+label,{exact:true}).waitFor({state:'visible'});}await etCapture(s,e,'choosing');}if(e.kind==='escape'){await close.focus();expect(await close.evaluate(el=>document.activeElement===el)).toBe(true);await s.page.keyboard.press('Escape');}else await etTap(s,close);await root.waitFor({state:'detached'});const after=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);expect(after.images).toEqual(before.images);expect(after.view).toEqual(before.view);expect(after.groups).toEqual(before.groups);expect(after.actions).toEqual([]);expect(s.counts.get('/api/layer-documents?projectId=canvas-ui-project&sourceImageId=br-A&sourceVersionId=et-owned-source-v1'),'one exact readonly restore request').toBe(1);console.log('ET_CHOOSING_BODY',JSON.stringify({...e,notLayeringSavedEditingOrPsdOutputAcceptance:true,bodyNotGate:true}));}finally{await etCapture(s,e,'end-or-failure');}});},25000);
+async function etPixels(root:Locator):Promise<void>{
+ await expect.poll(()=>root.getByTestId('layer-canvas').evaluate(el=>{
+  const canvas=el as HTMLCanvasElement,ctx=canvas.getContext('2d');if(!ctx||!canvas.width||!canvas.height)return false;
+  const data=ctx.getImageData(0,0,canvas.width,canvas.height).data;let orange=0,cyan=0;
+  for(let i=0;i<data.length;i+=4){if(data[i]===209&&data[i+1]===122&&data[i+2]===53&&data[i+3]===255)orange++;if(data[i]===50&&data[i+1]===166&&data[i+2]===163&&data[i+3]===255)cyan++;}
+  return orange>10&&cyan>10;
+ }),{timeout:1500,message:'owned foreground and striped source colors are decoded onto the editor canvas'}).toBe(true);
+}
+for(const e of etCases)it(`ET ${e.theme} ${e.width}x${e.height} ${e.kind} current decomposition editor entry`,async()=>{
+ await withSession(e.theme,e.width,e.height,{touch:e.kind!=='mouse'},async s=>{
+  const before=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);
+  try{
+   const root=await etOpen(s,e),panel=root.getByRole('dialog',{name:'PSD 分层编辑器',exact:true}),pb=await panel.boundingBox();if(!pb)throw Error('ET_PANEL_BOUNDS');
+   console.log('ET_PANEL',JSON.stringify({...e,b:pb}));
+   expect.soft(pb.x>=0&&pb.y>=0&&pb.x+pb.width<=e.width&&pb.y+pb.height<=e.height,'panel inside actual viewport').toBe(true);
+   expect(await panel.count(),'named protected editor dialog').toBe(1);await etCapture(s,e,'opened');await etPixels(root);
+   const close=root.getByRole('button',{name:'关闭',exact:true});
+   if(e.kind==='controls'){
+    const views=root.getByRole('group',{name:'PSD 编辑视图',exact:true});
+    for(const control of [...await views.getByRole('button').all(),close])await etAudit(control);
+    await etTap(s,views.getByRole('button',{name:'图层',exact:true}));
+    for(const [id,name]of [['et-background','ET 合成背景'],['et-subject','ET 合成主体']]){
+     const row=root.locator('[data-layer-row="'+id+'"]'),nameButton=row.getByRole('button',{name,exact:true});
+     await etTap(s,nameButton);expect(await row.getAttribute('data-layer-selected')).toBe('true');expect(await root.locator('[data-layer-selected="true"]').count()).toBe(1);
+     for(const action of ['visibility','lock'])await etAudit(row.locator('[data-layer-action="'+action+'"]'));
+    }
+    const subject=root.locator('[data-layer-row="et-subject"]').getByRole('button',{name:'ET 合成主体',exact:true});
+    await subject.focus();await s.page.keyboard.press('F2');const rename=root.getByRole('textbox',{name:'重命名图层',exact:true});
+    await rename.fill('不应保存的名称');await s.page.keyboard.press('Escape');await rename.waitFor({state:'detached'});
+    expect(await subject.textContent()).toBe('ET 合成主体');expect(await subject.evaluate(el=>document.activeElement===el)).toBe(true);expect(await root.isVisible()).toBe(true);
+    await etTap(s,views.getByRole('button',{name:'属性',exact:true}));
+    const properties=root.getByRole('region',{name:'图层属性',exact:true});await properties.waitFor({state:'visible'});
+    expect(await properties.getByTestId('layer-position').textContent()).toBe('80,32');expect(await properties.getByText('64x64',{exact:true}).isVisible()).toBe(true);
+    const modes=properties.getByRole('group',{name:'PSD 导出模式',exact:true});expect(await modes.getByRole('button').count()).toBe(3);expect(await modes.locator('[aria-pressed="true"]').count()).toBe(1);
+    expect(await modes.getByRole('button',{name:'基础',exact:true}).getAttribute('aria-pressed')).toBe('true');
+    for(const control of await modes.getByRole('button').all())await etAudit(control);await etAudit(properties.getByTestId('layer-export-psd'));
+    await etTap(s,views.getByRole('button',{name:'画布',exact:true}));await etPixels(root);await etCapture(s,e,'editor-controls');
+   }
+   if(e.kind==='escape'){await close.focus();expect(await close.evaluate(el=>document.activeElement===el)).toBe(true);await s.page.keyboard.press('Escape');}else await etTap(s,close);
+   await root.waitFor({state:'detached'});await nativeRequestsFinished(s);
+   const after=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);expect(after.images).toEqual(before.images);expect(after.view).toEqual(before.view);expect(after.groups).toEqual(before.groups);expect(after.actions).toEqual([]);
+   expect(s.counts.get('/api/layer-documents?projectId=canvas-ui-project&sourceImageId=br-A&sourceVersionId=et-owned-source-v1'),'one exact readonly restore request').toBe(1);
+   expect(s.counts.get('/api/element-decompose?projectId=canvas-ui-project'),'one project-scoped task restore').toBe(1);
+   console.log('ET_CURRENT_EDITOR_BODY',JSON.stringify({...e,decodedColors:true,actualEditorControls:true,noSubmitSaveOrExport:true}));
+  }finally{await etCapture(s,e,'end-or-failure');}
+ });
+},25000);

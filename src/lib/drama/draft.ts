@@ -1,7 +1,9 @@
 /** Server-side script drafting shared by the planner route and the chat tool. */
 import 'server-only';
-import { findProviderById, findProviderForFeature } from '@/lib/server-api-config';
+import { findProviderForFeature, getApiProviders } from '@/lib/server-api-config';
 import { isModelAssignedToUser } from '@/lib/model-defaults';
+import { getConfiguredModelsForProviders } from '@/lib/model-type-classification';
+import { resolveTaskModelCatalogResultFromSnapshot, taskModelKey } from '@/lib/task-core/model-catalog';
 import type { User } from '@/lib/user-types';
 import {
   buildDramaScriptPrompt, callDramaLlm, DramaPlannerError, parseDramaScriptResponse,
@@ -18,17 +20,28 @@ export class DramaPlannerSelectionError extends Error {
 
 export interface DramaPlannerSelection { user: User; providerId?: string; modelId?: string }
 
+async function explicitPlannerProvider(selection: DramaPlannerSelection) {
+  // Authorization needs the complete catalog to disambiguate legacy assignments.
+  // Resolve the credentials from that same snapshot, before scheduling any work.
+  const providers = await getApiProviders();
+  const provider = providers.find(item => item.id === selection.providerId);
+  const modelId = selection.modelId!;
+  if (!provider || provider.isEnabled !== true || !provider.selectedModels?.includes(modelId)) throw new DramaPlannerSelectionError();
+  if (!provider.baseUrl || !provider.apiKey) return null;
+  const catalog = resolveTaskModelCatalogResultFromSnapshot(getConfiguredModelsForProviders(providers), selection.user, providers);
+  const key = taskModelKey(provider.id, modelId);
+  if (catalog.effectiveModelTypes.get(key) !== 'chat' || !catalog.authorizedModelKeys.has(key)) throw new DramaPlannerSelectionError();
+  return provider;
+}
+
 export async function dramaPlannerConfig(signal?: AbortSignal, selection?: DramaPlannerSelection): Promise<DramaLlmConfig | null> {
   const explicit = Boolean(selection && ('providerId' in selection || 'modelId' in selection));
   if (explicit && (!selection?.providerId || !selection.modelId)) throw new DramaPlannerSelectionError();
-  const provider = (explicit ? await findProviderById(selection!.providerId!) : await findProviderForFeature('chat')) as unknown as Record<string, unknown> | null;
-  const rejected = () => { if (explicit) throw new DramaPlannerSelectionError(); return null; };
-  if (explicit && (!provider || provider.isEnabled !== true || (provider.type !== 'chat' && provider.modelType !== 'chat'))) return rejected();
+  const provider = (explicit ? await explicitPlannerProvider(selection!) : await findProviderForFeature('chat')) as unknown as Record<string, unknown> | null;
   if (!provider) return null;
   const models = Array.isArray(provider.selectedModels) ? provider.selectedModels : [];
   const modelId = explicit ? selection!.modelId! : String(models[0] || provider.defaultChatModel || '');
-  if (explicit && !models.includes(modelId)) return rejected();
-  if (selection && selection.user.role !== 'admin' && !isModelAssignedToUser(selection.user.chatModels, String(provider.id || ''), modelId)) return rejected();
+  if (!explicit && selection && selection.user.role !== 'admin' && !isModelAssignedToUser(selection.user.chatModels, String(provider.id || ''), modelId)) return null;
   const baseUrl = String(provider.baseUrl || provider.base_url || '').replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
   const apiKey = String(provider.apiKey || provider.api_key || '');
   return baseUrl && apiKey && modelId ? { baseUrl, apiKey, modelId, ...(signal ? { signal } : {}) } : null;

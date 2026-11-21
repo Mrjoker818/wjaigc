@@ -385,6 +385,7 @@ jobs:
           pnpm test:e2e:stage-4
           --project=chromium --project=chromium-1080p
           --project=firefox --project=webkit --project=mobile-chromium
+          --workers=1 --retries=0 --grep-invert '@stage4-current-lineage'
       - name: Upload Stage 4 browser evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -395,6 +396,125 @@ jobs:
             playwright-report/
             .playwright-output/
             /tmp/wujie-stage4-server.log
+          if-no-files-found: error
+
+  stage-4-current-lineage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: wujie_stage4_ci_${{ github.run_id }}_${{ github.run_attempt }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PGDATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/wujie_stage4_ci_${{ github.run_id }}_${{ github.run_attempt }}
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/wujie_stage4_ci_${{ github.run_id }}_${{ github.run_attempt }}
+      POSTGRES_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/wujie_stage4_ci_${{ github.run_id }}_${{ github.run_attempt }}
+      E2E_STAGE4_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/wujie_stage4_ci_${{ github.run_id }}_${{ github.run_attempt }}
+      E2E_STAGE4_RUN_ID: ci_${{ github.run_id }}_${{ github.run_attempt }}
+      E2E_BASE_URL: http://localhost:5000
+      WUJIE_AUTH_SECRET: stage4-ci-auth-secret-minimum-32-bytes-${{ github.run_id }}-${{ github.run_attempt }}
+      INTERNAL_API_SECRET: stage4-ci-internal-${{ github.run_id }}-${{ github.run_attempt }}
+      WUJIE_ADMIN_PASSWORD: Stage4-Admin-${{ github.run_id }}!
+      WUJIE_DATA_DIR: /tmp/wujie-stage4-current-lineage-data
+      WUJIE_AGENT_RUNTIME_MODE: agent-v2
+      E2E_STAGE4_EXPECTED_AGENT_MODE: agent-v2
+      PLAYWRIGHT_WORKERS: '1'
+      PORT: '5000'
+      DEPLOY_RUN_PORT: '5000'
+      COZE_PROJECT_DOMAIN_DEFAULT: http://localhost:5000
+      WUJIE_YJS_ENABLED: 'true'
+      WUJIE_YJS_HTTP_ENABLED: 'false'
+      WUJIE_PRESENCE_ENABLED: 'true'
+      WUJIE_ASSET_GRAPH_MODE: legacy
+      WUJIE_AUTH_PERSISTENCE_MODE: DB_ONLY
+      WUJIE_DEPLOYMENT_DB_ONLY: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install browsers
+        run: pnpm exec playwright install --with-deps chromium firefox webkit
+      - name: Generate Stage 4 inventory
+        run: pnpm test:inventory:stage-4
+      - name: Prepare Stage 4 application database
+        run: pnpm migrate
+      - name: Prepare ten current-lineage CI accounts
+        shell: bash
+        env:
+          NODE_ENV: test
+          TSX_TSCONFIG_PATH: ${{ github.workspace }}/tsconfig.json
+        run: >-
+          node --require next/dist/server/node-environment
+          --conditions=react-server --import tsx
+          scripts/stage-4-current-lineage-fixtures.ts
+      - name: Build production application
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: pnpm build
+      - name: Start document and presence application
+        env:
+          NODE_ENV: production
+        shell: bash
+        run: |
+          node --require next/dist/server/node-environment --conditions=react-server --import tsx scripts/presence-server.ts > /tmp/wujie-stage4-current-lineage-server.log 2>&1 &
+          echo $! > /tmp/wujie-stage4-current-lineage-server.pid
+          for attempt in {1..90}; do
+            if curl --fail --silent "$E2E_BASE_URL/" > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/wujie-stage4-current-lineage-server.log
+          exit 1
+      - name: Run five-browser current-lineage matrix
+        run: >-
+          pnpm test:e2e:stage-4
+          --project=chromium --project=chromium-1080p
+          --project=firefox --project=webkit --project=mobile-chromium
+          --workers=1 --retries=0 --grep '@stage4-current-lineage'
+      - name: Stop owned current-lineage application
+        if: always()
+        shell: bash
+        run: |
+          pid_file=/tmp/wujie-stage4-current-lineage-server.pid
+          if [[ -f "$pid_file" ]]; then
+            app_pid=$(cat "$pid_file")
+            [[ "$app_pid" =~ ^[0-9]+$ ]] || exit 1
+            if kill -0 "$app_pid" 2>/dev/null; then
+              [[ -r "/proc/$app_pid/cmdline" ]] || exit 1
+              command_line=$(tr '\0' ' ' < "/proc/$app_pid/cmdline")
+              [[ "$command_line" == *"scripts/presence-server.ts"* ]] || exit 1
+              [[ "$(readlink "/proc/$app_pid/cwd")" == "$GITHUB_WORKSPACE" ]] || exit 1
+              kill -TERM "$app_pid"
+            fi
+          fi
+      - name: Upload current-lineage browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-4-current-lineage-evidence-${{ github.sha }}
+          path: |
+            test-results/stage-4-baseline/
+            playwright-report/
+            .playwright-output/
+            /tmp/wujie-stage4-current-lineage-server.log
           if-no-files-found: error
 
   real-p0-browser:

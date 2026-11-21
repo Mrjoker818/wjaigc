@@ -174,12 +174,31 @@ describe('display 3D explicit provider and model', () => {
     expect(result.status).toBe(200);
     await vi.waitFor(() => expect(fixture.requests).toEqual([{base:'https://other.invalid/v1',model:'image-two'}]));
   });
-  it('supports a discovered model when the administrator has no selected model list', async () => {
+  it('requires administrator selection for discovered display models', async () => {
     fixture.provider.selectedModels=[];
     fixture.provider.discoveredModels=[{id:'image-two',name:'Image Two',providerId:'provider-a',type:'image'}];
+    const createdBefore=vi.mocked(createCloudTask).mock.calls.length;
+    const updatedBefore=vi.mocked(updateCloudTask).mock.calls.length;
+    const rejected=await POST(request({providerId:'provider-a',model:'image-two'}));
+    expect(rejected.status).toBe(403);
+    expect(await rejected.json()).toEqual({error:'所选模型不可用或未获得授权'});
+    expect(vi.mocked(createCloudTask).mock.calls).toHaveLength(createdBefore);
+    expect(vi.mocked(updateCloudTask).mock.calls).toHaveLength(updatedBefore);
+    expect(fixture.registered).toHaveLength(0);
+    expect(fixture.requests).toHaveLength(0);
+    expect(fixture.pollRequests).toHaveLength(0);
+    expect(fixture.updates).toHaveLength(0);
+
+    fixture.provider.selectedModels=['image-two'];
     const result=await POST(request({providerId:'provider-a',model:'image-two'}));
     expect(result.status).toBe(200);
     await vi.waitFor(() => expect(fixture.requests).toEqual([{base:'https://provider.invalid/v1',model:'image-two'}]));
+    expect(vi.mocked(createCloudTask).mock.calls).toHaveLength(createdBefore+1);
+    expect(vi.mocked(createCloudTask).mock.calls[createdBefore][0]).toMatchObject({
+      userId: 'synthetic-user', type: 'display3d', providerId: 'provider-a', model: 'image-two',
+      creditCost: 0, creditStatus: 'not-applicable',
+    });
+    expect(fixture.registered).toHaveLength(1);
   });
   it('does not fall back to a different provider for an unknown explicit provider', async () => {
     const result=await POST(request({providerId:'missing',model:'image-two'}));

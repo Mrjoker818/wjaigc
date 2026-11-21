@@ -16,6 +16,7 @@
 import { recraftVectorize, findRecraftProvider, type RecraftVectorizeResult } from './vectorize-recraft';
 import { vlmVectorize, findVlmProvider, type VlmVectorizeResult } from './vectorize-vlm';
 import { analyzeFromMetadata, analyzeWithSharp, type ImageAnalysis } from './vectorize-analyzer';
+import { downloadVectorizeResultSvg } from './vectorize-result-download';
 
 /**
  * 服务端 WASM vtracer 调用（复用 svg-trace 路由的 runWasmVTracer 逻辑）
@@ -100,6 +101,7 @@ async function vectorizeApiCall(
   provider: { baseUrl: string; apiKey: string; model: string },
   imageBuffer: Buffer,
   imageUrl: string,
+  signal?: AbortSignal,
 ): Promise<{ success: boolean; svg?: string; error?: string; pathCount?: number; svgSize?: number }> {
   const { baseUrl, apiKey, model } = provider;
   const mime = detectImageMimeFromBuffer(imageBuffer);
@@ -138,6 +140,7 @@ async function vectorizeApiCall(
   ];
 
   for (const url of pathsToTry) {
+    signal?.throwIfAborted();
     try {
       console.log(`[vectorize-api] Trying: ${url}`);
       const response = await fetch(url, {
@@ -147,8 +150,9 @@ async function vectorizeApiCall(
           'Content-Type': `multipart/form-data; boundary=${boundary}`,
         },
         body,
-        signal: AbortSignal.timeout(120000),
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(120000)]) : AbortSignal.timeout(120000),
       });
+      signal?.throwIfAborted();
 
       if (response.ok) {
         const contentType = response.headers.get('content-type') || '';
@@ -165,8 +169,7 @@ async function vectorizeApiCall(
             if (dataList[0]?.b64_json) {
               svgContent = Buffer.from(String(dataList[0].b64_json), 'base64').toString('utf-8');
             } else if (dataList[0]?.url) {
-              const svgResp = await fetch(String(dataList[0].url), { signal: AbortSignal.timeout(15000) });
-              svgContent = await svgResp.text();
+              svgContent = await downloadVectorizeResultSvg(String(dataList[0].url), signal);
             } else {
               continue;
             }
@@ -190,6 +193,7 @@ async function vectorizeApiCall(
         console.warn(`[vectorize-api] Non-OK: ${url} ${response.status}`, errText.substring(0, 200));
       }
     } catch (e) {
+      signal?.throwIfAborted();
       console.warn(`[vectorize-api] Failed: ${url}`, e instanceof Error ? e.message : String(e));
     }
   }
@@ -236,6 +240,8 @@ export interface VectorizePipelineOptions {
   imageDataUrl?: string;
   /** 进度回调 */
   onProgress?: (engine: VectorizeEngine, status: string) => void;
+  /** 取消结果回读和后续引擎尝试。 */
+  signal?: AbortSignal;
 }
 
 export interface VectorizePipelineResult {
@@ -347,10 +353,13 @@ export async function vectorizePipeline(
     customPrompt,
     imageDataUrl,
     onProgress,
+    signal,
   } = options;
 
   // 1. 检查引擎可用性
+  signal?.throwIfAborted();
   const availability = await checkEngineAvailability();
+  signal?.throwIfAborted();
 
   // 2. 构建引擎降级链
   const engineChain = buildEngineChain(mode, forcedEngine, availability);
@@ -385,6 +394,7 @@ export async function vectorizePipeline(
   const errors: string[] = [];
 
   for (const engine of engineChain) {
+    signal?.throwIfAborted();
     enginesTried.push(engine);
     onProgress?.(engine, `正在使用 ${engine} 引擎矢量化...`);
 
@@ -394,6 +404,7 @@ export async function vectorizePipeline(
       // vtracer 由 svg-trace route 直接执行，管线不重复处理
       // 如果到达这里说明 recraft 和 vlm 都失败了，需要回退到 vtracer
       onProgress?.(engine, '回退到 vtracer 传统描摹引擎');
+      signal?.throwIfAborted();
       return {
         success: true, // 标记为成功，由上层路由执行 vtracer
         engine,
@@ -408,10 +419,13 @@ export async function vectorizePipeline(
       const result = await recraftVectorize({
         imageUrl,
         imageBuffer,
+        signal,
       });
+      signal?.throwIfAborted();
 
       if (result.success && result.svg) {
         onProgress?.(engine, 'Recraft 矢量化成功');
+        signal?.throwIfAborted();
         return {
           success: true,
           svg: result.svg,
@@ -453,15 +467,18 @@ export async function vectorizePipeline(
         const mime = finalBuffer === imageBuffer ? detectImageMimeFromBuffer(imageBuffer) : 'image/jpeg';
         vlmImageDataUrl = `data:${mime};base64,${finalBuffer.toString('base64')}`;
       }
+      signal?.throwIfAborted();
       const result = await vlmVectorize({
         imageUrl,
         imageDataUrl: vlmImageDataUrl,
         customPrompt,
         maxRetries: 1,
       });
+      signal?.throwIfAborted();
 
       if (result.success && result.svg) {
         onProgress?.(engine, `VLM 矢量化成功 (模型: ${result.model})`);
+        signal?.throwIfAborted();
         return {
           success: true,
           svg: result.svg,
@@ -487,9 +504,11 @@ export async function vectorizePipeline(
         continue;
       }
 
-      const result = await vectorizeApiCall(vectorizeApiProvider, imageBuffer, imageUrl);
+      const result = await vectorizeApiCall(vectorizeApiProvider, imageBuffer, imageUrl, signal);
+      signal?.throwIfAborted();
       if (result.success && result.svg) {
         onProgress?.(engine, 'Vectorizer.API 矢量化成功');
+        signal?.throwIfAborted();
         return {
           success: true,
           svg: result.svg,
@@ -519,8 +538,10 @@ export async function vectorizePipeline(
         : quality === 'high' ? 6
         : 7;
       const wasmResult = await runWasmVTracerInPipeline(imageBuffer, wasmColorPrecision);
+      signal?.throwIfAborted();
       if (wasmResult.success && wasmResult.svg) {
         onProgress?.(engine, 'WASM VTracer 矢量化成功');
+        signal?.throwIfAborted();
         console.log(`[vectorize-pipeline] wasm-vtracer succeeded, pathCount=${wasmResult.pathCount}`);
         return {
           success: true,

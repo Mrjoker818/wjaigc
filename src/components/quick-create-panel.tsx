@@ -26,6 +26,8 @@ import type {
   QuickCreateQuality,
 } from '@/lib/quick-create-compile';
 import type { QuickCreateModelCandidate, ResolvedQuickCreateModel } from '@/lib/model-defaults';
+import { useTaskModelCatalog } from '@/hooks/use-task-model-catalog';
+import { taskModelKey } from '@/lib/task-core/model-capability-contract';
 
 export interface QuickCreateCompileViewState {
   phase: QuickCreateCompilePhase | null;
@@ -236,6 +238,7 @@ const QUALITY_OPTIONS = [
   { value: 'standard', label: '标准' },
   { value: 'high', label: '高清' },
 ] as const;
+const MAX_QUICK_CREATE_REFERENCES = 4;
 
 function parseExplicitCount(prompt: string): number | null {
   const arabicMatch = prompt.match(/(?:生成|设计|制作|创建|出|要)?\s*(\d+)\s*(?:张|幅|款|版|个|套|组)/i);
@@ -379,11 +382,29 @@ export function QuickCreatePanel({
   const [imageModelOverride, setImageModelOverride] = useState('');
   const [chatModelOverride, setChatModelOverride] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const pendingUploadsRef = useRef(0);
+  const asyncScopeRef = useRef(0);
+  const draftVersionRef = useRef(0);
+  const submittingRef = useRef(false);
+  const imageCatalog = useTaskModelCatalog('image');
+  const reloadImageCatalog = imageCatalog.reload;
+  const imageCandidatesKey = JSON.stringify(imageModels.map(model => [model.id, model.providerId, model.modelId]));
+  const previousCatalogInputs = useRef({ key: imageCandidatesKey, loading: modelsLoading });
 
+  useEffect(() => {
+    const previous = previousCatalogInputs.current;
+    previousCatalogInputs.current = { key: imageCandidatesKey, loading: modelsLoading };
+    if (previous.key !== imageCandidatesKey || (previous.loading && !modelsLoading)) {
+      void reloadImageCatalog().catch(() => undefined);
+    }
+  }, [imageCandidatesKey, modelsLoading, reloadImageCatalog]);
+
+  const selectedImageUrl = selectedImage?.url;
   const referenceImages = useMemo(() => {
-    const selected = includeSelectedImage && selectedImage?.url ? [selectedImage.url] : [];
+    const selected = includeSelectedImage && selectedImageUrl ? [selectedImageUrl] : [];
     return Array.from(new Set([...selected, ...uploadedReferences]));
-  }, [includeSelectedImage, selectedImage, uploadedReferences]);
+  }, [includeSelectedImage, selectedImageUrl, uploadedReferences]);
 
   const intent = useMemo(
     () => classifyIntent(prompt, {
@@ -404,23 +425,56 @@ export function QuickCreatePanel({
   }), [aspectRatioOverride, inferredParameters, intent, outputCountOverride, prompt, qualityOverride]);
 
   const effectiveImageModel = useMemo<ResolvedQuickCreateModel>(() => {
-    if (!imageModelOverride) return resolvedImageModel;
+    if (!imageModelOverride) {
+      const model = imageModels.find(candidate => candidate.id === resolvedImageModel.id
+        && candidate.providerId === resolvedImageModel.model?.providerId && candidate.modelId === resolvedImageModel.model?.modelId) ?? null;
+      return model ? { ...resolvedImageModel, model } : { id: '', model: null, source: 'none' };
+    }
     const model = imageModels.find((candidate: QuickCreateModelCandidate) => candidate.id === imageModelOverride) ?? null;
     return model
       ? { id: model.id, model, source: 'task-override' }
-      : resolvedImageModel;
+      : { id: imageModelOverride, model: null, source: 'task-override' };
   }, [imageModelOverride, imageModels, resolvedImageModel]);
 
   const effectiveChatModel = useMemo<ResolvedQuickCreateModel>(() => {
-    if (!chatModelOverride) return resolvedChatModel;
+    if (!chatModelOverride) {
+      const model = chatModels.find(candidate => candidate.id === resolvedChatModel.id
+        && candidate.providerId === resolvedChatModel.model?.providerId && candidate.modelId === resolvedChatModel.model?.modelId) ?? null;
+      return model ? { ...resolvedChatModel, model } : { id: '', model: null, source: 'none' };
+    }
     const model = chatModels.find((candidate: QuickCreateModelCandidate) => candidate.id === chatModelOverride) ?? null;
     return model
       ? { id: model.id, model, source: 'task-override' }
-      : resolvedChatModel;
+      : { id: chatModelOverride, model: null, source: 'task-override' };
   }, [chatModelOverride, chatModels, resolvedChatModel]);
 
   const requiresImageModel = recommendation.route === '图像生成' || recommendation.route === '品牌设计 Skill';
   const imageModelUnavailable = requiresImageModel && !effectiveImageModel.model;
+  const imageOverrideUnavailable = Boolean(imageModelOverride && !effectiveImageModel.model);
+  const chatOverrideUnavailable = Boolean(chatModelOverride && !effectiveChatModel.model);
+  const imageDescriptor = effectiveImageModel.model
+    ? imageCatalog.descriptorsByKey.get(taskModelKey(effectiveImageModel.model.providerId, effectiveImageModel.model.modelId))
+    : undefined;
+  const hasReferenceContract = imageDescriptor && typeof imageDescriptor.supportsReferenceImages === 'boolean'
+    && (imageDescriptor.maxReferenceImages === undefined
+      || (Number.isInteger(imageDescriptor.maxReferenceImages) && imageDescriptor.maxReferenceImages >= 0));
+  const modelReferenceLimit = hasReferenceContract
+    ? imageDescriptor.supportsReferenceImages
+      ? Math.min(MAX_QUICK_CREATE_REFERENCES, imageDescriptor.maxReferenceImages ?? MAX_QUICK_CREATE_REFERENCES)
+      : 0
+    : undefined;
+  const referenceCapabilityRequired = requiresImageModel && referenceImages.length > 0;
+  const referenceLimitError = referenceImages.length > MAX_QUICK_CREATE_REFERENCES
+    ? `参考图片最多 ${MAX_QUICK_CREATE_REFERENCES} 张，当前共 ${referenceImages.length} 张。请移除参考图片或取消画布引用后再提交。`
+    : referenceCapabilityRequired && imageCatalog.loading
+      ? '正在读取当前图像模型的引用能力，请稍后提交。'
+      : referenceCapabilityRequired && (imageCatalog.error || !hasReferenceContract)
+        ? '当前图像模型的引用能力不可用，请重试后再提交。'
+        : referenceCapabilityRequired && modelReferenceLimit !== undefined && referenceImages.length > modelReferenceLimit
+          ? modelReferenceLimit === 0
+            ? '参考图片：当前图像模型不支持引用，请移除参考图片或取消画布引用后再提交。'
+            : `当前图像模型参考图片最多 ${modelReferenceLimit} 张，当前共 ${referenceImages.length} 张。请移除参考图片或取消画布引用后再提交。`
+          : undefined;
 
   const visibleGoals = useMemo(
     () => QUICK_GOALS.filter((goal: QuickGoal) => goal.group === activeGoalGroup),
@@ -428,8 +482,18 @@ export function QuickCreatePanel({
   );
 
   useEffect(() => {
+    draftVersionRef.current += 1;
     setSubmitted(false);
-  }, [includeSelectedImage, uploadedReferences]);
+  }, [
+    prompt, referenceImages, includeSelectedImage, selectedImage?.id,
+    recommendation.aspectRatio, recommendation.quality, recommendation.outputCount,
+    imageModelOverride, chatModelOverride, effectiveImageModel.id, effectiveChatModel.id,
+    imageOverrideUnavailable, chatOverrideUnavailable, referenceLimitError,
+  ]);
+
+  useEffect(() => () => {
+    asyncScopeRef.current += 1;
+  }, []);
 
   const applyPrompt = (nextPrompt: string): void => {
     setPrompt(nextPrompt);
@@ -441,16 +505,18 @@ export function QuickCreatePanel({
 
   const handleFiles = async (event: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
     const files = Array.from(event.target.files ?? []).filter((file: File) => file.type.startsWith('image/'));
-    const remainingSlots = Math.max(0, 4 - uploadedReferences.length);
-    const selectedFiles = files.slice(0, remainingSlots);
     event.target.value = '';
 
-    if (selectedFiles.length === 0) return;
+    if (files.length === 0) return;
 
+    draftVersionRef.current += 1;
+    setSubmitted(false);
+    const scope = asyncScopeRef.current;
+    pendingUploadsRef.current += 1;
     setIsUploadingReferences(true);
     setReferenceUploadError(undefined);
 
-    const results = await Promise.all(selectedFiles.map(async (file: File): Promise<string | null> => {
+    const uploadResults = Promise.all(files.map(async (file: File): Promise<string | null> => {
       try {
         const formData = new FormData();
         formData.append('file', file);
@@ -464,17 +530,26 @@ export function QuickCreatePanel({
       }
     }));
 
-    const persistedUrls = results.filter((url: string | null): url is string => Boolean(url));
-    if (persistedUrls.length > 0) {
-      setUploadedReferences((current: string[]) => Array.from(new Set([...current, ...persistedUrls])).slice(0, 4));
-    }
-    if (persistedUrls.length !== selectedFiles.length) setReferenceUploadError('部分参考图片上传失败，请重试');
-    setIsUploadingReferences(false);
+    // Start transfers immediately, but apply batches in picker order, not response order.
+    const completion = uploadQueueRef.current.then(async () => {
+      const results = await uploadResults;
+      if (scope !== asyncScopeRef.current) return;
+      const persistedUrls = results.filter((url: string | null): url is string => Boolean(url));
+      if (persistedUrls.length > 0) {
+        setUploadedReferences((current: string[]) => Array.from(new Set([...current, ...persistedUrls])));
+      }
+      if (persistedUrls.length !== files.length) setReferenceUploadError('部分参考图片上传失败，请重试');
+      pendingUploadsRef.current -= 1;
+      setIsUploadingReferences(pendingUploadsRef.current > 0);
+    });
+    uploadQueueRef.current = completion;
+    await completion;
   };
 
   const handleSubmit = async (): Promise<void> => {
     const trimmedPrompt = prompt.trim();
-    if (!trimmedPrompt || isSubmitting) return;
+    if (!trimmedPrompt || submittingRef.current || pendingUploadsRef.current > 0 || referenceLimitError
+      || compileState.isCompiling || modelsLoading || imageModelUnavailable || imageOverrideUnavailable || chatOverrideUnavailable) return;
 
     if (intent.action === 'video' || intent.action === 'video_extend') {
       onOpenVideo(trimmedPrompt);
@@ -485,6 +560,9 @@ export function QuickCreatePanel({
       return;
     }
 
+    const scope = asyncScopeRef.current;
+    const draftVersion = draftVersionRef.current;
+    submittingRef.current = true;
     setIsSubmitting(true);
     try {
       const accepted = await onGenerate({
@@ -497,9 +575,12 @@ export function QuickCreatePanel({
         imageModelOverride: imageModelOverride || undefined,
         chatModelOverride: chatModelOverride || undefined,
       });
-      setSubmitted(accepted);
+      if (scope === asyncScopeRef.current && draftVersion === draftVersionRef.current) setSubmitted(accepted);
     } finally {
-      setIsSubmitting(false);
+      if (scope === asyncScopeRef.current) {
+        submittingRef.current = false;
+        setIsSubmitting(false);
+      }
     }
   };
 
@@ -627,12 +708,12 @@ export function QuickCreatePanel({
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-xs font-semibold text-foreground">参考图片</h3>
-            <p className="mt-1 text-[11px] text-muted-foreground">可选，最多添加 4 张</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">{modelReferenceLimit === 0 ? '当前图像模型不支持参考图片' : modelReferenceLimit !== undefined && modelReferenceLimit < MAX_QUICK_CREATE_REFERENCES ? `当前模型最多添加 ${modelReferenceLimit} 张，本入口最多 4 张` : '可选，最多添加 4 张'}</p>
           </div>
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            disabled={isUploadingReferences || uploadedReferences.length >= 4}
+            disabled={isUploadingReferences || referenceImages.length >= (modelReferenceLimit ?? MAX_QUICK_CREATE_REFERENCES)}
             className="flex min-h-11 cursor-pointer items-center gap-1.5 rounded-lg px-2.5 text-xs text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-45"
           >
             <Upload className="h-3.5 w-3.5" aria-hidden="true" />
@@ -654,6 +735,10 @@ export function QuickCreatePanel({
         )}
 
         {referenceUploadError && <p className="mt-2 text-[11px] text-destructive" role="alert">{referenceUploadError}</p>}
+        {referenceLimitError && <p className="mt-2 text-[11px] text-destructive" role="alert">{referenceLimitError}</p>}
+        {referenceCapabilityRequired && !imageCatalog.loading && (imageCatalog.error || !hasReferenceContract) && (
+          <button type="button" className="mt-2 min-h-9 text-xs text-primary" onClick={() => { void reloadImageCatalog().catch(() => undefined); }}>重试引用能力</button>
+        )}
 
         {uploadedReferences.length > 0 && (
           <div className="mt-3 grid grid-cols-4 gap-2">
@@ -726,14 +811,14 @@ export function QuickCreatePanel({
           <div className="mt-2 grid grid-cols-2 gap-2 rounded-xl border border-border bg-background p-3">
             <div className="min-w-0">
               <p className="text-[10px] text-muted-foreground">图像模型</p>
-              <p className="mt-1 truncate text-xs font-medium text-foreground">{getModelDisplayName(effectiveImageModel)}</p>
+              <p className="mt-1 truncate text-xs font-medium text-foreground">{imageOverrideUnavailable ? '本次选择已失效，请重新选择' : getModelDisplayName(effectiveImageModel)}</p>
               <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
                 {effectiveImageModel.model?.providerName || '等待管理员配置'} · {getModelSourceLabel(effectiveImageModel.source)}
               </p>
             </div>
             <div className="min-w-0">
               <p className="text-[10px] text-muted-foreground">LLM 路由</p>
-              <p className="mt-1 truncate text-xs font-medium text-foreground">{getModelDisplayName(effectiveChatModel)}</p>
+              <p className="mt-1 truncate text-xs font-medium text-foreground">{chatOverrideUnavailable ? '本次选择已失效，请重新选择' : getModelDisplayName(effectiveChatModel)}</p>
               <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
                 {effectiveChatModel.model?.providerName || '当前任务不一定调用'} · {getModelSourceLabel(effectiveChatModel.source)}
               </p>
@@ -751,6 +836,7 @@ export function QuickCreatePanel({
                   className={`mt-1 ${selectClassName} disabled:cursor-not-allowed disabled:opacity-50`}
                 >
                   <option value="">系统智能匹配</option>
+                  {imageOverrideUnavailable && <option value={imageModelOverride} disabled>原图像模型已不可用，请重新选择</option>}
                   {imageModels.map((model: QuickCreateModelCandidate) => (
                     <option key={model.id} value={model.id}>{model.name || model.modelId} · {model.providerName || model.providerId}</option>
                   ))}
@@ -765,6 +851,7 @@ export function QuickCreatePanel({
                   className={`mt-1 ${selectClassName} disabled:cursor-not-allowed disabled:opacity-50`}
                 >
                   <option value="">系统智能匹配</option>
+                  {chatOverrideUnavailable && <option value={chatModelOverride} disabled>原 LLM 已不可用，请重新选择</option>}
                   {chatModels.map((model: QuickCreateModelCandidate) => (
                     <option key={model.id} value={model.id}>{model.name || model.modelId} · {model.providerName || model.providerId}</option>
                   ))}
@@ -776,7 +863,9 @@ export function QuickCreatePanel({
 
           {modelsLoading && <p className="mt-2 text-[11px] text-muted-foreground">正在读取当前账号可用模型…</p>}
           {modelsError && <p className="mt-2 text-[11px] text-destructive" role="alert">{modelsError}</p>}
-          {imageModelUnavailable && !modelsLoading && (
+          {imageOverrideUnavailable && <p className="mt-2 text-[11px] text-destructive" role="alert">本次图像模型选择已失效，请重新选择；草稿和参考图片已保留。</p>}
+          {chatOverrideUnavailable && <p className="mt-2 text-[11px] text-destructive" role="alert">本次 LLM 选择已失效，请重新选择；草稿和参考图片已保留。</p>}
+          {imageModelUnavailable && !imageOverrideUnavailable && !modelsLoading && (
             <p className="mt-2 text-[11px] leading-4 text-destructive" role="alert">当前账号没有可用的图像模型，请联系管理员启用模型、配置服务端凭证并分配权限。</p>
           )}
         </div>
@@ -913,7 +1002,7 @@ export function QuickCreatePanel({
         <button
           type="button"
           onClick={handleSubmit}
-          disabled={!prompt.trim() || compileState.isCompiling || isSubmitting || isUploadingReferences || modelsLoading || imageModelUnavailable}
+          disabled={!prompt.trim() || compileState.isCompiling || isSubmitting || isUploadingReferences || modelsLoading || imageModelUnavailable || imageOverrideUnavailable || chatOverrideUnavailable || Boolean(referenceLimitError)}
           className="flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-card transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Sparkles className="h-4 w-4" aria-hidden="true" />

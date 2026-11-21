@@ -4,10 +4,10 @@ set -euo pipefail
 echo "[coze-preview-build] Starting build process..."
 
 # Step 1: Install dependencies
-# Try frozen-lockfile first (fast, reproducible), fall back to normal install
+# Retry without lifecycle scripts if needed, always keeping the lock frozen.
 if ! pnpm install --frozen-lockfile 2>&1; then
-  echo "[coze-preview-build] frozen-lockfile failed, trying normal install with --ignore-scripts..."
-  pnpm install --ignore-scripts
+  echo "[coze-preview-build] frozen-lockfile failed, retrying frozen install with --ignore-scripts..."
+  pnpm install --ignore-scripts --frozen-lockfile
   # Manually run postinstall hooks that --ignore-scripts skipped
   echo "[coze-preview-build] Running postinstall hooks manually..."
   node scripts/prepare-tools.mjs 2>/dev/null || true

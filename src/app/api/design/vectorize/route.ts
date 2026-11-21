@@ -3,12 +3,11 @@ import { toUserFacingError } from '@/lib/api-error-translate';
 import { randomUUID } from 'node:crypto';
 import { findProviderForFeature, normalizeApiBaseUrl } from '@/lib/server-api-config';
 import { fetchWithV1Retry } from '@/lib/api-helpers';
-import { getServerDataRoot } from '@/lib/server-data-root';
 import { getSessionUser } from '@/lib/server-auth';
 import { consumeCredits, refundCredits } from '@/lib/credits';
-import { vectorizePipeline, type VectorizeEngine } from '@/lib/vectorize-pipeline';
-import fsSync from 'fs';
-import path from 'path';
+import { vectorizePipeline } from '@/lib/vectorize-pipeline';
+import { assertSafePixelDimensions, loadSafeImageInput } from '@/lib/safe-image-input';
+import { downloadPublicImage } from '@/lib/safe-image-download';
 import sharp from 'sharp';
 import { validateApiInputs } from '@/lib/api-validator';
 import { logOperation, logError, OP_ACTIONS, startTimer } from '@/lib/op-log';
@@ -26,78 +25,6 @@ function normalizeMode(value: unknown) {
   return ['auto', 'logo', 'illustration', 'photo', 'line-art'].includes(mode) ? mode : 'auto';
 }
 
-/**
- * Resolve an image URL to a Buffer for APIs that need raw image data.
- * Handles local paths, data URLs, and external URLs.
- */
-async function resolveImageToBuffer(imageUrl: string): Promise<Buffer | null> {
-  try {
-    // Data URL - extract base64 part
-    if (imageUrl.startsWith('data:')) {
-      const match = imageUrl.match(/^data:[^;]+;base64,(.+)$/);
-      return match ? Buffer.from(match[1], 'base64') : null;
-    }
-
-    // Blob URL - cannot be resolved server-side
-    if (imageUrl.startsWith('blob:')) {
-      console.warn('[vectorize] Blob URLs cannot be resolved server-side');
-      return null;
-    }
-
-    // Local path - read from filesystem
-    if (imageUrl.startsWith('/')) {
-      const workspacePath = process.env.COZE_WORKSPACE_PATH || '/workspace/projects';
-
-      // Try direct public path
-      const localPath = path.join(workspacePath, 'public', imageUrl);
-      if (fsSync.existsSync(localPath)) {
-        return await fsSync.promises.readFile(localPath);
-      }
-
-      // Try dataRoot path (images stored via save-image API)
-      const dataRoot = getServerDataRoot();
-      const dataRootPath = path.join(dataRoot, imageUrl);
-      if (fsSync.existsSync(dataRootPath)) {
-        return await fsSync.promises.readFile(dataRootPath);
-      }
-
-      // /api/serve-upload/filename → search upload directories
-      const serveUploadMatch = imageUrl.match(/^\/api\/serve-upload\/(.+)$/);
-      if (serveUploadMatch) {
-        const filename = serveUploadMatch[1];
-        const dataRoot = getServerDataRoot();
-        const uploadDirs = [
-          path.join(dataRoot, 'uploads'),
-          path.join(workspacePath, 'public', 'uploads'),
-        ];
-        for (const dir of uploadDirs) {
-          const filePath = path.join(dir, filename);
-          if (fsSync.existsSync(filePath)) {
-            return await fsSync.promises.readFile(filePath);
-          }
-        }
-      }
-
-      // Fallback: fetch from localhost
-      const fullUrl = `http://localhost:${process.env.DEPLOY_RUN_PORT || 5000}${imageUrl}`;
-      const response = await fetch(fullUrl, { signal: AbortSignal.timeout(10000) });
-      if (response.ok) {
-        return Buffer.from(await response.arrayBuffer());
-      }
-      console.warn('[vectorize] Failed to fetch local image:', imageUrl);
-      return null;
-    }
-
-    // External URL - fetch
-    const response = await fetch(imageUrl, { signal: AbortSignal.timeout(15000) });
-    if (!response.ok) return null;
-    return Buffer.from(await response.arrayBuffer());
-  } catch (err) {
-    console.warn('[vectorize] Could not resolve image to buffer:', err instanceof Error ? err.message : String(err));
-    return null;
-  }
-}
-
 /** Build a publicly accessible URL for a local image path. */
 function buildPublicImageUrl(imageUrl: string): string {
   if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://') || imageUrl.startsWith('data:')) {
@@ -107,20 +34,15 @@ function buildPublicImageUrl(imageUrl: string): string {
   return `http://localhost:${port}${imageUrl}`;
 }
 
-/** Detect MIME type from image URL or buffer header */
-function detectImageMime(imageUrl: string, buffer: Buffer): string {
-  // Check URL extension
-  const ext = imageUrl.split('?')[0].split('.').pop()?.toLowerCase();
-  if (ext === 'png') return 'image/png';
-  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
-  if (ext === 'webp') return 'image/webp';
-  if (ext === 'gif') return 'image/gif';
-  // Check buffer magic bytes
-  if (buffer[0] === 0x89 && buffer[1] === 0x50) return 'image/png';
-  if (buffer[0] === 0xFF && buffer[1] === 0xD8) return 'image/jpeg';
-  if (buffer[0] === 0x47 && buffer[1] === 0x49) return 'image/gif';
-  if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[4] === 0x57 && buffer[5] === 0x45) return 'image/webp';
-  return 'image/png'; // default
+/** Provider-returned URLs are untrusted, unlike explicitly configured endpoints. */
+async function downloadVectorSvg(url: string): Promise<string> {
+  const downloaded = await downloadPublicImage(url, {
+    maxBytes: 25 * 1024 * 1024,
+    timeoutMs: 15000,
+    signal: AbortSignal.timeout(15000),
+    allowedMimeTypes: ['image/svg+xml', 'application/xml', 'text/xml'],
+  });
+  return downloaded.buffer.toString('utf-8');
 }
 
 /**
@@ -230,31 +152,29 @@ function sanitizeGeneratedSvg(svg: string): { safe: boolean; reason?: string; sa
  * Returns the normalized SVG string.
  */
 function normalizeVectorSvg(svg: string, targetWidth: number, targetHeight: number): string {
-  // Ensure viewBox exists and matches target dimensions
-  const viewBoxMatch = svg.match(/viewBox\s*=\s*["']([^"']+)["']/i);
-  let viewBox: string;
-
-  if (viewBoxMatch) {
-    // Use existing viewBox — it defines the coordinate space
-    viewBox = viewBoxMatch[1];
-  } else {
-    // Create viewBox from target dimensions
-    viewBox = `0 0 ${targetWidth} ${targetHeight}`;
-  }
-
-  // Remove existing width/height/viewBox attributes to rewrite them
-  let normalized = svg
-    .replace(/width\s*=\s*["'][^"']*["']/gi, '')
-    .replace(/height\s*=\s*["'][^"']*["']/gi, '')
-    .replace(/viewBox\s*=\s*["'][^"']*["']/gi, '');
-
-  // Insert normalized attributes into <svg> tag
-  normalized = normalized.replace(
-    /<svg\b/i,
-    `<svg width="${targetWidth}" height="${targetHeight}" viewBox="${viewBox}"`
-  );
-
-  return normalized;
+  assertSafePixelDimensions(targetWidth, targetHeight);
+  // Match the complete root opening tag, including quoted values containing >.
+  return svg.replace(/<svg\b(?:[^"'<>]|"[^"]*"|'[^']*')*>/i, root => {
+    let viewBox = `0 0 ${targetWidth} ${targetHeight}`;
+    let hasXmlns = false;
+    const attributes = root.slice(4).replace(
+      /\s+([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|[^\s>]+))?/g,
+      (attribute, name: string, doubleQuoted?: string, singleQuoted?: string) => {
+        if (name === 'xmlns') hasXmlns = true;
+        if (name.toLowerCase() === 'viewbox') {
+          const value = doubleQuoted ?? singleQuoted ?? '';
+          const values = value.trim().split(/[\s,]+/).map(Number);
+          if (values.length === 4 && values.every(Number.isFinite) && values[2] > 0 && values[3] > 0) {
+            viewBox = value;
+          }
+          return '';
+        }
+        return /^(width|height|standalone|preserveAspectRatio)$/i.test(name) ? '' : attribute;
+      },
+    );
+    const xmlns = hasXmlns ? '' : ' xmlns="http://www.w3.org/2000/svg"';
+    return `<svg width="${targetWidth}" height="${targetHeight}" viewBox="${viewBox}"${xmlns}${attributes}`;
+  });
 }
 
 /**
@@ -264,11 +184,9 @@ async function tryMultipartVectorize(
   baseUrl: string,
   apiKey: string,
   imageBuffer: Buffer,
-  imageUrl: string,
+  mime: string,
   model: string,
 ): Promise<{ svg: string; engine: string } | null> {
-  const mime = detectImageMime(imageUrl, imageBuffer);
-
   // Build multipart form-data manually
   const boundary = '----FormBoundary' + Math.random().toString(36).substring(2);
   const parts: Buffer[] = [];
@@ -342,8 +260,7 @@ async function tryMultipartVectorize(
             if (dataList[0]?.b64_json) {
               svgContent = Buffer.from(String(dataList[0].b64_json), 'base64').toString('utf-8');
             } else if (dataList[0]?.url) {
-              const svgResp = await fetch(String(dataList[0].url), { signal: AbortSignal.timeout(15000) });
-              svgContent = await svgResp.text();
+              svgContent = await downloadVectorSvg(String(dataList[0].url));
             } else {
               console.warn('[vectorize] Multipart response OK but no SVG found:', JSON.stringify(data).substring(0, 200));
               continue;
@@ -661,12 +578,9 @@ async function tryOpenAIFormat(
           }
         }
         if (url) {
-          const svgResp = await fetch(url, { signal: AbortSignal.timeout(15000) });
-          if (svgResp.ok) {
-            const svgContent = await svgResp.text();
-            if (svgContent.includes('<svg')) {
-              return { svg: svgContent, engine: 'openai-vectorize' };
-            }
+          const svgContent = await downloadVectorSvg(url);
+          if (svgContent.includes('<svg')) {
+            return { svg: svgContent, engine: 'openai-vectorize' };
           }
         }
       }
@@ -709,26 +623,9 @@ function sanitizeSvgForAI(svg: string): string {
   s = s.replace(/<!DOCTYPE[\s\S]*?>/gi, '');
   // Remove metadata blocks
   s = s.replace(/<metadata[\s\S]*?<\/metadata>/gi, '');
-  // Remove standalone attribute
-  s = s.replace(/\sstandalone="[^"]*"/gi, '');
   // Remove comments
   s = s.replace(/<!--[\s\S]*?-->/g, '');
-  // Remove preserveAspectRatio (causes issues in AI)
-  s = s.replace(/\s*preserveAspectRatio="[^"]*"/gi, '');
-  // Replace pt units with unitless values
-  s = s.replace(/(width|height)="([0-9.]+)pt"/gi, '$1="$2"');
-  // Ensure xmlns exists
-  if (!s.includes('xmlns=')) {
-    s = s.replace(/<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');
-  }
-  // Ensure viewBox exists
-  if (!s.includes('viewBox')) {
-    const wMatch = s.match(/width="([0-9.]+)"/);
-    const hMatch = s.match(/height="([0-9.]+)"/);
-    if (wMatch && hMatch) {
-      s = s.replace(/<svg/, `<svg viewBox="0 0 ${wMatch[1]} ${hMatch[1]}"`);
-    }
-  }
+  // Root dimensions, xmlns and Illustrator attributes are handled by normalizeVectorSvg.
   // Remove xlink:href (deprecated) and replace with href
   s = s.replace(/xlink:href=/g, 'href=');
   // Remove any external resource references that could cause "missing links"
@@ -760,6 +657,13 @@ export async function POST(req: NextRequest) {
   let selectedMode = '';
   const engineUsed = '';
   try {
+    sessionUser = await getSessionUser(req).catch(() => null);
+    if (!sessionUser) {
+      return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
+    }
+    if (sessionUser.status === 'disabled' || sessionUser.apiPermissions?.vectorize !== true) {
+      return NextResponse.json({ success: false, error: '当前用户未获得矢量化权限' }, { status: 403 });
+    }
     const body = await req.json();
     // 输入校验
     const _validationError = validateApiInputs(typeof body !== 'undefined' ? body : {}, {
@@ -778,34 +682,36 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: '缺少 imageUrl' }, { status: 400 });
     }
 
-    // 积分检查与扣除
-    deductedCredits = 0;
-    sessionUser = await getSessionUser(req).catch(() => null);
-    if (sessionUser) {
-      const creditResult = await consumeCredits(sessionUser.id, 'vectorize');
-      if (!creditResult.success) {
-        return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
-      }
-      deductedCredits = creditResult.cost;
+    // Validate bounded real media before billing or entering any provider pipeline.
+    let imageBuffer: Buffer;
+    let imageMime: string;
+    let origWidth: number;
+    let origHeight: number;
+    try {
+      const image = await loadSafeImageInput(imageUrl, {
+        maxBytes: 25 * 1024 * 1024,
+        maxPixels: 40_000_000,
+        signal: AbortSignal.any([req.signal, AbortSignal.timeout(30000)]),
+      });
+      imageBuffer = image.buffer;
+      imageMime = image.mimeType;
+      const meta = await sharp(imageBuffer).metadata();
+      origWidth = meta.width || 0;
+      origHeight = meta.height || 0;
+      assertSafePixelDimensions(origWidth, origHeight);
+    } catch {
+      return NextResponse.json({ success: false, error: '图片无法安全读取，请使用有效的托管图片、图片数据或公网图片' }, { status: 400 });
     }
 
-    console.debug('[vectorize] Request:', { imageUrl: imageUrl.substring(0, 100), layerId, mode });
+    const creditResult = await consumeCredits(sessionUser.id, 'vectorize');
+    if (!creditResult.success) {
+      return NextResponse.json({ success: false, error: creditResult.message || '积分不足' }, { status: 402 });
+    }
+    deductedCredits = creditResult.cost;
 
-    // Pre-resolve image to buffer (needed for multipart form upload and base64)
-    const imageBuffer = await resolveImageToBuffer(imageUrl);
-    const imageBase64 = imageBuffer ? imageBuffer.toString('base64') : null;
+    console.debug('[vectorize] Request:', { layerId, mode });
+    const imageBase64 = imageBuffer.toString('base64');
     const publicImageUrl = imageUrl.startsWith('http') ? imageUrl : buildPublicImageUrl(imageUrl);
-
-    // Get original image dimensions for SVG normalization
-    let origWidth = 0;
-    let origHeight = 0;
-    if (imageBuffer) {
-      try {
-        const meta = await sharp(imageBuffer).metadata();
-        origWidth = meta.width || 0;
-        origHeight = meta.height || 0;
-      } catch { /* ignore */ }
-    }
 
     /** Build SVG response with automatic sanitization for AI compatibility + normalization + quality control */
     const svgResponse = (svg: string, engine: string) => {
@@ -827,9 +733,7 @@ export async function POST(req: NextRequest) {
     console.debug('[vectorize] Using unified pipeline...');
     try {
       // 为 VLM 准备 base64 data URL（外部 API 无法访问本地路径）
-      const pipelineImageDataUrl = imageBase64
-        ? `data:${detectImageMime(imageUrl, imageBuffer || Buffer.alloc(0))};base64,${imageBase64}`
-        : undefined;
+      const pipelineImageDataUrl = `data:${imageMime};base64,${imageBase64}`;
 
       const pipelineResult = await vectorizePipeline({
         imageUrl,
@@ -876,7 +780,7 @@ export async function POST(req: NextRequest) {
 
       // Strategy 2: Multipart form-data
       if (imageBuffer) {
-        const multipartResult = await tryMultipartVectorize(baseUrl, vectorizeProvider.apiKey, imageBuffer, imageUrl, model);
+        const multipartResult = await tryMultipartVectorize(baseUrl, vectorizeProvider.apiKey, imageBuffer, imageMime, model);
         if (multipartResult) {
           return svgResponse(multipartResult.svg, multipartResult.engine);
         }

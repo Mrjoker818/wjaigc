@@ -149,6 +149,22 @@ async function session(theme: Theme = 'gold', width: number = 390, height: numbe
         if (key === '/api/upscayl' || key === '/api/models?type=upscaler' || key === '/api/models?type=removebg') { await route.fulfill({json:key==='/api/upscayl'?{available:false,models:[]}:{success:true,providers:[],models:[]}});return; }
         if (HELP_FILES.some(file => key === '/api/help-image?file=' + file)) { await route.fulfill({contentType:'image/png',body:s.png});return; }
         if (key === '/api/layer-documents?projectId=canvas-ui-project&sourceImageId=br-A&sourceVersionId=et-owned-source-v1') { const background=await s.page.evaluate(()=>{const found=(window as unknown as FixtureWindow).canvasUi.state.images.find(image=>typeof image==='object'&&image!==null&&'id' in image&&image.id==='br-A');if(typeof found!=='object'||found===null||!('url' in found)||typeof found.url!=='string')throw Error('EW_OWNED_SOURCE_REQUIRED');return found.url;});const foreground='data:image/png;base64,'+s.png.toString('base64');if(!background.startsWith('data:image/png;base64,')||background===foreground)throw Error('EW_DISTINCT_OWNED_PNGS');const document={id:'ew-owned-document',userId:'omp-mobile-user',projectId:'canvas-ui-project',sourceImageId:'br-A',sourceVersionId:'et-owned-source-v1',taskId:'ew-owned-historical-task',engine:'local',schemaVersion:1,revision:7,createdAt:1,updatedAt:1,content:{schemaVersion:1,title:'EW 合成图层文档',width:256,height:128,exportMode:'basic',layers:[{id:'ew-background',name:'EW 合成背景',role:'background',imageUrl:background,width:256,height:128,offsetX:0,offsetY:0,opacity:1,blendMode:'normal',visible:true,locked:false,order:0,source:'local-enhanced'},{id:'ew-subject',name:'EW 合成主体',role:'subject',imageUrl:foreground,width:64,height:64,offsetX:80,offsetY:32,opacity:1,blendMode:'normal',visible:true,locked:false,order:1,source:'local-enhanced'}]}};await route.fulfill({json:{success:true,document}});return; }
+
+        // 3fd9d9c6 retired direct edit-elements. Restore an owned, completed
+        // element-decomposition task at the real API boundary; no AI or DB runs.
+        if (key === '/api/element-decompose?projectId=canvas-ui-project') {
+          const source = await s.page.evaluate(() => {
+            const image = (window as unknown as FixtureWindow).canvasUi.state.images.find(value => typeof value === 'object' && value !== null && 'id' in value && value.id === 'br-A');
+            if (!image || typeof image !== 'object' || !('url' in image) || typeof image.url !== 'string') throw Error('F04_OWNED_SOURCE_REQUIRED');
+            return image.url;
+          });
+          await route.fulfill({ json: { success: true, taskId: 'ew-owned-historical-task', status: 'completed', overallStatus: 'completed', progress: 100,
+            source: { sourceImageId: 'br-A', sourceVersionId: 'et-owned-source-v1', canonicalUrl: source, managedUrl: source, sha256: 'a'.repeat(64), width: 256, height: 128, mimeType: 'image/png' },
+            branches: { layers: { branch: 'layers', taskId: 'ew-owned-layer-task', status: 'completed', progress: 100, result: { width: 256, height: 128, engine: 'local', quality: { status: 'pass', score: 100, warnings: [] },
+              layers: [{ id: 'ew-background', name: 'EW 合成背景', role: 'background', imageUrl: source, width: 256, height: 128, offsetX: 0, offsetY: 0, opacity: 1, blendMode: 'normal', visible: true, source: 'local-enhanced' },
+                { id: 'ew-subject', name: 'EW 合成主体', role: 'subject', imageUrl: 'data:image/png;base64,' + s.png.toString('base64'), width: 64, height: 64, offsetX: 80, offsetY: 32, opacity: 1, blendMode: 'normal', visible: true, source: 'local-enhanced' }] } } } } });
+          return;
+        }
         if (key === '/logo.png') { await route.fulfill({contentType:'image/png',body:s.png});return; }
         throw Error('CANVAS_UI_FIXTURE_UNKNOWN_HTTP ' + key);
       })().catch(async error => { s.errors.push(String(error)); s.refused.add(route.request()); await route.abort('blockedbyclient'); });
@@ -191,7 +207,7 @@ async function dispose(s: Session, expectedRefusal?: 'http' | 'websocket', clean
   // Cleanup/lifecycle/allowlist failures can never share the expected-refusal
   // prefix. A boundary selftest must not succeed merely because close failed.
   const invalid=(code:string):never=>{if(failures.length)throw new AggregateError([Error(code),...failures],'CANVAS_UI_FIXTURE_VALIDATION_AND_CLEANUP');throw Error(code);};
-  const allowed=['/api/layer-documents?projectId=canvas-ui-project&sourceImageId=br-A&sourceVersionId=et-owned-source-v1','/','/api/session','/api/auth/me','/api/task-events','/api/upscayl','/api/models?type=upscaler','/api/models?type=removebg','/api/models?type=3d','/logo.png','/api/tasks/recover?projectId=canvas-ui-project',...HELP_FILES.map(file=>'/api/help-image?file='+file)];
+  const allowed=['/api/element-decompose?projectId=canvas-ui-project','/api/layer-documents?projectId=canvas-ui-project&sourceImageId=br-A&sourceVersionId=et-owned-source-v1','/','/api/session','/api/auth/me','/api/task-events','/api/upscayl','/api/models?type=upscaler','/api/models?type=removebg','/api/models?type=3d','/logo.png','/api/tasks/recover?projectId=canvas-ui-project',...HELP_FILES.map(file=>'/api/help-image?file='+file)];
   const keys=[...s.counts.keys()];
   if(s.options.requireMissing || s.counts.get('/')!==1 || keys.some(k=>!allowed.includes(k)&&!(expectedRefusal==='http'&&k==='/unexpected'))){
     console.log('CANVAS_UI_FIXTURE_REQUEST_DIAGNOSTIC',JSON.stringify({counts:[...s.counts],errors:s.errors}));
@@ -233,7 +249,13 @@ interface EWCase {theme:Theme;width:number;height:number;kind:'layout'|'readonly
 const ewCases:EWCase[]=[{theme:'gold',width:390,height:844,kind:'layout'},{theme:'mono',width:640,height:320,kind:'layout'},...THEMES.flatMap<EWCase>(theme=>[[320,640],[390,844],[640,320]].map(([width,height])=>({theme,width,height,kind:'readonly' as const}))),{theme:'mono',width:375,height:812,kind:'escape'},{theme:'gold',width:1024,height:768,kind:'mouse'}];
 async function ewTap(s:Session,el:Locator):Promise<void>{await el.scrollIntoViewIfNeeded();if(s.options.touch)await el.tap();else await el.click();await settle(s.page);}
 async function ewCapture(s:Session,e:EWCase,label:string):Promise<void>{const dir=path.resolve('output/playwright/canvas-psd-editor-ew-native-20261020',String(process.pid));await mkdir(dir,{recursive:true});const file=path.join(dir,`${e.theme}-${e.width}x${e.height}-${e.kind}-${label}.png`);await s.page.screenshot({path:file});console.log('EW_CAPTURE',JSON.stringify({path:file,label,notPhysicalDeviceBusinessStorageOrPsdOutputAcceptance:true}));}
-async function ewOpen(s:Session,e:EWCase):Promise<Locator>{const img=s.page.locator('[data-canvas-image-id="br-A"]');if(s.options.touch)await img.tap({position:{x:200,y:100}});else await img.click({position:{x:200,y:100}});await settle(s.page);if(e.width<768){await ewTap(s,s.page.locator('[data-mobile-image-actions]').getByRole('button',{name:'更多',exact:true}));await ewTap(s,s.page.getByRole('dialog',{name:'图片工具',exact:true}).getByRole('button',{name:'编辑元素',exact:true}));}else{await ewTap(s,s.page.getByRole('button',{name:'展开更多工具',exact:true}));const overflow=s.page.locator('[data-image-toolbar-overflow]');await overflow.waitFor({state:'visible'});await ewTap(s,overflow.getByTestId('canvas-edit-elements'));}const root=s.page.getByTestId('layer-editor');await root.waitFor({state:'visible'});await root.getByTestId('layer-document-status').filter({hasText:'已保存'}).waitFor({state:'visible'});await root.getByTestId('layer-count').filter({hasText:'2 个图层'}).waitFor({state:'visible'});await nativeRequestsFinished(s);return root;}
+async function ewOpen(s:Session,e:EWCase,keepDecompositionOpen=false):Promise<Locator>{const img=s.page.locator('[data-canvas-image-id="br-A"]');if(s.options.touch)await img.tap({position:{x:200,y:100}});else await img.click({position:{x:200,y:100}});await settle(s.page);if(e.width<768){await ewTap(s,s.page.locator('[data-mobile-image-actions]').getByRole('button',{name:'更多',exact:true}));await ewTap(s,s.page.getByRole('dialog',{name:'图片工具',exact:true}).getByRole('button',{name:'元素拆解',exact:true}));}else{await ewTap(s,s.page.getByRole('button',{name:'元素拆解',exact:true}));}const decomposition=s.page.locator('[data-popup="display-decompose"]');await decomposition.waitFor({state:'visible'});
+ await decomposition.getByRole('button',{name:'打开编辑器',exact:true}).click();
+ // The decomposition portal remains open above the editor; dismiss it through
+ // its real close control before auditing editor hit targets.
+ if(!keepDecompositionOpen){await decomposition.getByRole('button',{name:'关闭元素拆解',exact:true}).click();await decomposition.waitFor({state:'detached'});}
+ expect(s.counts.get('/api/element-decompose?projectId=canvas-ui-project'),'one project-scoped restore through current entry').toBe(1);
+ const root=s.page.getByTestId('layer-editor');await root.waitFor({state:'visible'});await root.getByTestId('layer-document-status').filter({hasText:'已保存'}).waitFor({state:'visible'});await root.getByTestId('layer-count').filter({hasText:'2 个图层'}).waitFor({state:'visible'});await nativeRequestsFinished(s);return root;}
 async function ewAudit(c:Locator):Promise<void>{await c.scrollIntoViewIfNeeded();const v=await c.evaluate(el=>{const r=el.getBoundingClientRect(),style=getComputedStyle(el);return {width:r.width,height:r.height,name:el.getAttribute('aria-label')||el.getAttribute('title')||el.textContent?.trim()||'',inside:r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight,hit:el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)),opacity:Number(style.opacity),clipped:el.scrollWidth>el.clientWidth};});console.log('EW_CONTROL',JSON.stringify(v));expect.soft(v.width,'touch width '+v.name).toBeGreaterThanOrEqual(44);expect.soft(v.height,'touch height '+v.name).toBeGreaterThanOrEqual(44);expect.soft(v.inside&&v.hit&&v.opacity>0,'visible control '+v.name).toBe(true);expect.soft(v.name).not.toBe('');expect.soft(v.clipped,'unclipped label '+v.name).toBe(false);}
 async function ewCanvas(root:Locator):Promise<{width:number;height:number;hit:boolean}>{return root.getByTestId('layer-canvas').evaluate(el=>{const r=el.getBoundingClientRect();return {width:r.width,height:r.height,hit:el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))};});}
 async function ewPixels(root:Locator):Promise<void>{await expect.poll(async()=>root.getByTestId('layer-canvas').evaluate(el=>{const c=el as HTMLCanvasElement,ctx=c.getContext('2d');if(!ctx||!c.width||!c.height)return false;const d=ctx.getImageData(0,0,c.width,c.height).data;let orange=0,cyan=0;for(let i=0;i<d.length;i+=4){if(d[i]===209&&d[i+1]===122&&d[i+2]===53&&d[i+3]===255)orange++;if(d[i]===50&&d[i+1]===166&&d[i+2]===163&&d[i+3]===255)cyan++;}return orange>10&&cyan>10;}),{timeout:1500,message:'two actual decoded owned PNG colors drawn, not just nonempty canvas'}).toBe(true);}
@@ -265,4 +287,76 @@ it('EW PSD row keyboard selects layers and cancels rename with focus restored', 
 }, 25000);
 for(const e of ewCases)it(`EW ${e.theme} ${e.width}x${e.height} ${e.kind} restored readonly PSD UI`,async()=>{await withSession(e.theme,e.width,e.height,{touch:e.kind!=='mouse'},async s=>{const before=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);try{const root=await ewOpen(s,e);await ewCapture(s,e,'restored');const rect=await ewCanvas(root);console.log('EW_CANVAS',JSON.stringify({...e,canvas:rect}));expect.soft(rect.width,'usable document canvas width').toBeGreaterThanOrEqual(160);expect.soft(rect.height,'usable document canvas height').toBeGreaterThanOrEqual(96);expect.soft(rect.hit,'document surface exposed on entry').toBe(true);
  if(e.kind==='layout'){for(const c of await root.locator('button:visible').all())if(!await c.isDisabled())await ewAudit(c);}else{await ewPixels(root);if(e.width<768)await ewTab(s,root,'图层');const row=root.locator('[data-layer-row="ew-subject"]');await ewTap(s,row.getByText('EW 合成主体',{exact:true}));expect(await row.getAttribute('data-layer-selected')).toBe('true');expect(await root.locator('[data-layer-selected="true"]').count()).toBe(1);if(e.width<768){await ewAudit(row.locator('[data-layer-action="visibility"]'));await ewAudit(row.locator('[data-layer-action="lock"]'));await ewTab(s,root,'属性');}const inspector=root.getByRole('region',{name:'图层属性',exact:true});await inspector.waitFor({state:'visible'});expect(await inspector.getByTestId('layer-position').textContent()).toBe('80,32');expect(await inspector.getByText('64x64',{exact:true}).textContent()).toBe('64x64');await inspector.getByText('EW 合成主体',{exact:true}).waitFor({state:'visible'});const modes=inspector.getByRole('group',{name:'PSD 导出模式',exact:true});expect(await modes.getByRole('button').count()).toBe(3);expect(await modes.locator('[aria-pressed="true"]').count()).toBe(1);expect(await modes.getByRole('button',{name:'基础',exact:true}).getAttribute('aria-pressed')).toBe('true');if(e.width<768){for(const c of await modes.getByRole('button').all())await ewAudit(c);await ewAudit(inspector.getByTestId('layer-export-psd'));await ewTab(s,root,'画布');const back=await ewCanvas(root);expect(back.width).toBeCloseTo(rect.width,1);expect(back.height).toBeCloseTo(rect.height,1);expect(back.hit).toBe(true);await ewPixels(root);await ewTab(s,root,'属性');await ewTap(s,inspector.getByRole('button',{name:'关闭属性面板',exact:true}));expect(await root.getByRole('button',{name:'画布',exact:true}).getAttribute('aria-pressed')).toBe('true');expect((await ewCanvas(root)).hit).toBe(true);await ewPixels(root);}await ewCapture(s,e,'readonly-operations');}
- await root.getByTestId('layer-document-status').filter({hasText:'已保存'}).waitFor({state:'visible'});const close=root.getByRole('button',{name:'关闭',exact:true});if(e.kind==='escape'){await close.focus();await s.page.keyboard.press('Escape');}else await ewTap(s,close);await root.waitFor({state:'detached'});const after=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);expect(after.images).toEqual(before.images);expect(after.groups).toEqual(before.groups);expect(after.view).toEqual(before.view);expect(after.actions).toEqual([]);expect(s.counts.get('/api/layer-documents?projectId=canvas-ui-project&sourceImageId=br-A&sourceVersionId=et-owned-source-v1')).toBe(1);expect([...s.counts.keys()].filter(k=>k.startsWith('/api/layer-documents'))).toHaveLength(1);console.log('EW_READONLY_BODY',JSON.stringify({...e,noLayerMutationSaveTaskOrExport:true,bodyNotGate:true}));}finally{await ewCapture(s,e,'end-or-failure');}});},25000);
+ await root.getByTestId('layer-document-status').filter({hasText:'已保存'}).waitFor({state:'visible'});const close=root.getByRole('button',{name:'关闭',exact:true});if(e.kind==='escape'){
+ // A child rename consumes Escape; only the following modal-level Escape
+ // should invoke the editor's existing close guard.
+ await ewTab(s,root,'图层');
+ const subject=root.locator('[data-layer-row="ew-subject"]').getByRole('button',{name:'EW 合成主体',exact:true});
+ await subject.focus();await s.page.keyboard.press('F2');
+ const rename=root.getByRole('textbox',{name:'重命名图层',exact:true});
+ await rename.fill('不应提交的重命名');await s.page.keyboard.press('Escape');await rename.waitFor({state:'detached'});
+ expect(await root.isVisible(),'rename Escape must not close the PSD modal').toBe(true);
+ expect(await subject.evaluate(el=>document.activeElement===el),'rename Escape restores focus').toBe(true);
+ expect(await subject.textContent(),'rename Escape preserves the saved layer name').toBe('EW 合成主体');
+ await close.focus();await s.page.keyboard.press('Escape');await settle(s.page);
+ console.log('F04_PSD_ESCAPE_STATE',JSON.stringify(await s.page.evaluate(()=>({
+  editorVisible:Boolean(document.querySelector('[data-testid="layer-editor"]')),
+  decompositionVisible:Boolean(document.querySelector('[data-popup="display-decompose"]')),
+  toolHostState:document.querySelector('[data-canvas-tool-host-state]')?.getAttribute('data-canvas-tool-host-state'),
+  activeTool:document.querySelector('[data-canvas-viewport]')?.getAttribute('data-canvas-active-tool'),
+  focusedButton:(document.activeElement as HTMLElement|null)?.getAttribute('aria-label'),
+ }))));
+}else await ewTap(s,close);await root.waitFor({state:'detached'});const after=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);expect(after.images).toEqual(before.images);expect(after.groups).toEqual(before.groups);expect(after.view).toEqual(before.view);expect(after.actions).toEqual([]);expect(s.counts.get('/api/layer-documents?projectId=canvas-ui-project&sourceImageId=br-A&sourceVersionId=et-owned-source-v1')).toBe(1);expect([...s.counts.keys()].filter(k=>k.startsWith('/api/layer-documents'))).toHaveLength(1);console.log('EW_READONLY_BODY',JSON.stringify({...e,noLayerMutationSaveTaskOrExport:true,bodyNotGate:true}));}finally{await ewCapture(s,e,'end-or-failure');}});},25000);
+
+
+for(const natural of [
+ {theme:'gold' as Theme,width:390,height:844,touch:true},
+ {theme:'mono' as Theme,width:1024,height:768,touch:false},
+])it('R3 PSD natural Escape '+natural.theme+' '+natural.width+'x'+natural.height+' after decomposition close',async()=>{
+ await withSession(natural.theme,natural.width,natural.height,{touch:natural.touch},async s=>{
+  const before=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);
+  const root=await ewOpen(s,{...natural,kind:'readonly'});
+  // No focus(), PSD clicks, or synthetic key dispatch after the real close of
+  // the decomposition portal: the very next user action is native Escape.
+  const focusBefore=await s.page.evaluate(()=>({
+   tag:document.activeElement?.tagName,
+   owned:Boolean(document.querySelector('[data-testid="layer-editor"]')?.contains(document.activeElement)),
+   label:document.activeElement?.getAttribute('aria-label'),
+  }));
+  console.log('R3_NATURAL_FOCUS',JSON.stringify({...natural,...focusBefore}));
+  await s.page.keyboard.press('Escape');await root.waitFor({state:'detached'});
+  expect(focusBefore.owned,'closing decomposition must naturally hand focus to the remaining PSD').toBe(true);
+  await nativeRequestsFinished(s);
+  const after=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);
+  expect(after.images).toEqual(before.images);expect(after.groups).toEqual(before.groups);expect(after.view).toEqual(before.view);expect(after.actions).toEqual([]);
+  expect(s.counts.get('/api/layer-documents?projectId=canvas-ui-project&sourceImageId=br-A&sourceVersionId=et-owned-source-v1')).toBe(1);
+ });
+},25000);
+
+
+it('R3 PSD foreground decomposition consumes only its own Escape before handing focus back',async()=>{
+ await withSession('mono',1024,768,{touch:false},async s=>{
+  const root=await ewOpen(s,{theme:'mono',width:1024,height:768,kind:'readonly'},true),decomposition=s.page.locator('[data-popup="display-decompose"]');
+  expect(await decomposition.evaluate(el=>el.contains(document.activeElement)),'the real open-editor click keeps focus in the foreground decomposition').toBe(true);
+  await s.page.keyboard.press('Escape');await decomposition.waitFor({state:'detached'});
+  expect(await root.isVisible(),'one Escape must not close both stacked windows').toBe(true);
+  expect(await root.evaluate(el=>el.contains(document.activeElement)),'remaining PSD owns focus').toBe(true);
+  await s.page.keyboard.press('Escape');await root.waitFor({state:'detached'});await nativeRequestsFinished(s);
+  expect(s.counts.get('/api/layer-documents?projectId=canvas-ui-project&sourceImageId=br-A&sourceVersionId=et-owned-source-v1')).toBe(1);
+ });
+},25000);
+
+it('R3 PSD rename Escape remains local and the next natural Escape closes only the editor',async()=>{
+ await withSession('gold',390,844,{touch:true},async s=>{
+  const root=await ewOpen(s,{theme:'gold',width:390,height:844,kind:'readonly'});
+  await ewTab(s,root,'图层');
+  const subject=root.locator('[data-layer-row="ew-subject"]').getByRole('button',{name:'EW 合成主体',exact:true});
+  await ewTap(s,subject);await s.page.keyboard.press('F2');
+  const rename=root.getByRole('textbox',{name:'重命名图层',exact:true});await rename.fill('仅取消，不保存');
+  await s.page.keyboard.press('Escape');await rename.waitFor({state:'detached'});
+  expect(await root.isVisible()).toBe(true);expect(await subject.textContent()).toBe('EW 合成主体');
+  expect(await subject.evaluate(el=>document.activeElement===el),'cancelled rename restores the actual row control').toBe(true);
+  await s.page.keyboard.press('Escape');await root.waitFor({state:'detached'});await nativeRequestsFinished(s);
+  expect([...s.counts.keys()].filter(key=>key.startsWith('/api/layer-documents'))).toHaveLength(1);
+ });
+},25000);

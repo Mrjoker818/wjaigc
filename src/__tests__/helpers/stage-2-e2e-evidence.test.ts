@@ -17,6 +17,17 @@ import {
 } from '../../../tests/helpers/stage-2-e2e';
 import { stage2RunStatus } from '../../../tests/helpers/stage-2-reporter';
 
+function crossWorkspaceScenarios(): { transfers: string[]; deletion: string } {
+  const source = readFileSync(resolve(process.cwd(), 'tests/e2e/stage-2-cross-workspace.spec.ts'), 'utf8');
+  const scenarios = source.split("\n  test('").slice(1);
+  expect(scenarios.map(scenario => scenario.slice(0, scenario.indexOf("', async")))).toEqual([
+    'bridges a real embedded-chat result back onto the canvas through the UI',
+    'sends a real standalone-chat result into the designated canvas through the UI',
+    'keeps seeded chat views usable after deleting only the canvas placement',
+  ]);
+  return { transfers: scenarios.slice(0, 2), deletion: scenarios[2] };
+}
+
 describe('Stage 2 E2E evidence safety', () => {
   it('waits for the requested project identity before interacting with the canvas', () => {
     const canvasSource = readFileSync(resolve(process.cwd(), 'src/components/infinite-canvas.tsx'), 'utf8');
@@ -92,25 +103,64 @@ describe('Stage 2 E2E evidence safety', () => {
   });
 
   it('asserts exact transfer placement identity before destructive E2E cleanup', () => {
-    const source = readFileSync(resolve(process.cwd(), 'tests/e2e/stage-2-cross-workspace.spec.ts'), 'utf8');
-    expect(source.match(/assertSingleNewProjectPlacement\(/g)?.length).toBeGreaterThanOrEqual(3);
-    const scenarios = source.split('finally {');
-    expect(scenarios.slice(0, 3).every(scenario => scenario.includes('assertSingleNewProjectPlacement('))).toBe(true);
+    const { transfers, deletion } = crossWorkspaceScenarios();
+    for (const [index, scenario] of transfers.entries()) {
+      const projectId = index === 0 ? 'projectId' : 'targetProjectId';
+      expect(scenario.match(/assertSingleNewProjectPlacement\(/g)).toHaveLength(1);
+      const identity = scenario.indexOf('const created = expect');
+      const exact = scenario.indexOf(`await assertSingleNewProjectPlacement(placementBaseline, ${projectId}, created);`);
+      const finallyStart = scenario.indexOf('} finally {');
+      const disposed = scenario.indexOf('saves.dispose();');
+      const cleanup = scenario.indexOf('await cleanupNewProjectPlacements(page, stage2Evidence, originalProject!, placementIds, placementBaseline);');
+      expect(identity).toBeGreaterThan(-1);
+      expect(exact).toBeGreaterThan(identity);
+      expect(finallyStart).toBeGreaterThan(exact);
+      expect(disposed).toBeGreaterThan(finallyStart);
+      expect(cleanup).toBeGreaterThan(disposed);
+    }
+
+    const identity = deletion.indexOf('`/api/assets?projectId=${encodeURIComponent(projectId)}&assetVersionId=${encodeURIComponent(versionId)}&placementId=${encodeURIComponent(placementId)}`');
+    const deleted = deletion.indexOf('const deleted = page.waitForResponse(');
+    const finallyStart = deletion.indexOf('} finally {');
+    const restored = deletion.indexOf('await ensurePlacementRestored(page, stage2Evidence, {');
+    expect(identity).toBeGreaterThan(-1);
+    expect(deleted).toBeGreaterThan(identity);
+    expect(finallyStart).toBeGreaterThan(deleted);
+    expect(restored).toBeGreaterThan(finallyStart);
+    expect(deletion.slice(restored)).toMatch(/ensurePlacementRestored\(page, stage2Evidence, \{\s*projectId,\s*assetId,\s*versionId,\s*placementId,\s*url: String\(reference.url\),/u);
   });
 
   it('checks unique placement only after canvas visibility and durable project sync', () => {
-    const source = readFileSync(resolve(process.cwd(), 'tests/e2e/stage-2-cross-workspace.spec.ts'), 'utf8');
-    const scenarios = source.split('finally {').slice(0, 3);
+    const { transfers, deletion } = crossWorkspaceScenarios();
 
-    expect(source).toContain('observeProjectGraphSaves');
-    for (const scenario of scenarios) {
-      const visible = scenario.lastIndexOf('canvasImageByUrl(page, created.url)).toBeVisible');
-      const saved = scenario.lastIndexOf('await saves.waitFor(created');
+    for (const scenario of transfers) {
+      expect(scenario).toContain('const saves = observeProjectGraphSaves(');
+      const visible = scenario.lastIndexOf('await expect(await canvasImageByUrl(page, created.url)).toBeVisible(');
+      const saved = scenario.lastIndexOf('await saves.waitFor(created);');
       const exact = scenario.lastIndexOf('assertSingleNewProjectPlacement(');
       expect(visible).toBeGreaterThan(-1);
       expect(saved).toBeGreaterThan(visible);
       expect(exact).toBeGreaterThan(saved);
     }
+
+    const visible = deletion.indexOf('await expect(image).toBeVisible(');
+    const placementTrashed = deletion.indexOf('expect(deletePayload.placementTrashed).toBe(true);');
+    const assetRetained = deletion.indexOf('expect(deletePayload.assetTrashed).toBe(false);');
+    const saved = deletion.indexOf('expect(saveResponse.ok()).toBeTruthy();');
+    const missing = deletion.indexOf("expect(missingPayload.error).toBe('ASSET_NOT_FOUND');");
+    const chatVisible = deletion.indexOf("await expect(await imageByUrl(page, 'img[src]', String(reference.url))).toBeVisible(");
+    const restored = deletion.indexOf('await ensurePlacementRestored(page, stage2Evidence, {');
+    const reopened = deletion.lastIndexOf('await openCanvasProject(page, projectId);');
+    const visibleAgain = deletion.lastIndexOf('await expect(await canvasImageByUrl(page, String(reference.url))).toBeVisible(');
+    expect(visible).toBeGreaterThan(-1);
+    expect(placementTrashed).toBeGreaterThan(visible);
+    expect(assetRetained).toBeGreaterThan(placementTrashed);
+    expect(saved).toBeGreaterThan(assetRetained);
+    expect(missing).toBeGreaterThan(saved);
+    expect(chatVisible).toBeGreaterThan(missing);
+    expect(restored).toBeGreaterThan(chatVisible);
+    expect(reopened).toBeGreaterThan(restored);
+    expect(visibleAgain).toBeGreaterThan(reopened);
   });
 
   it('binds the durable save observation to the transferred entity, version, and placement', () => {

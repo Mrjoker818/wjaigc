@@ -33,7 +33,9 @@ export function DramaLibraryPicker({ open, onOpenChange, title, onPick }: {
 }) {
   const { doc, dramaId, projectId, canvasMedia } = useDrama();
   const [filter, setFilter] = useState<LibrarySource | 'all'>('all');
-  const [others, setOthers] = useState<LibraryItem[] | null>(null);
+  const [cache, setCache] = useState<{ projectId?: string; dramaId: string; items: LibraryItem[] } | null>(null);
+  // Scope changes must hide old choices in this render, before the next read's effect runs.
+  const others = cache?.projectId === projectId && cache?.dramaId === dramaId ? cache.items : null;
 
   useEffect(() => {
     if (!open) return;
@@ -43,9 +45,9 @@ export function DramaLibraryPicker({ open, onOpenChange, title, onPick }: {
       const records = await Promise.all(list.map(item => loadDramaProject(item.id).catch(() => null)));
       return records.flatMap(record => (record ? dramaLibraryItems(record.doc, record.title || record.doc.title) : []));
     })().then(
-      items => { if (live) setOthers(items); },
+      items => { if (live) setCache({ projectId, dramaId, items }); },
       // The current drama and the canvas still fill the list when other dramas cannot be read.
-      () => { if (live) setOthers([]); },
+      () => { if (live) setCache({ projectId, dramaId, items: [] }); },
     );
     return () => { live = false; };
   }, [open, projectId, dramaId]);

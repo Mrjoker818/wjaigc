@@ -401,7 +401,7 @@ describe.sequential('server authentication sessions', () => {
     });
   });
 
-  it('restores the default administrator’s existing canvas and chat defaults in the session', async () => {
+  it('restores the default administrator’s existing canvas, video and chat defaults in the session', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(sessionNow);
     configureServerAuth();
@@ -420,7 +420,7 @@ describe.sequential('server authentication sessions', () => {
 
     await expect(getSessionUser(requestWithSession(token))).resolves.toMatchObject({
       id: sessionUser.id,
-      productType: 'canvas,chat',
+      productType: 'canvas,video,chat',
     });
     expect(serverAuthMocks.dbWriteUsers).not.toHaveBeenCalled();
   });

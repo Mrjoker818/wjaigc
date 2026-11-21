@@ -127,7 +127,8 @@ describe('dual-output element decomposition canvas wiring', () => {
 
   it('supports cancelling the active parent task', () => {
     expect(canvasSource).toContain('handleCancelElementDecomposition');
-    expect(canvasSource).toContain('cancelElementDecomposition(elementDecomposeTask.taskId)');
+    expect(canvasSource).toContain('await cancelElementDecompositionObserved(elementDecomposeTask.taskId, elementDecomposeControllerRef.current)');
+    expect(canvasSource).toContain('onClick={() => void handleCancelElementDecomposition()}');
   });
 
   it('reuses the completed layers branch instead of submitting a second layer task', () => {

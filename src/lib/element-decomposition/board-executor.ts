@@ -85,6 +85,7 @@ export async function submitElementBoard(input: {
       resultUrl,
       sourceHash: input.sourceHash,
       background: input.background,
+      sourceUrl: input.sourceUrl,
       modelId: resolved.modelId,
       providerId: resolved.provider.id,
     }),
@@ -151,12 +152,13 @@ export async function pollElementBoard(input: {
   }
 
   if (polled.status === 'completed' && polled.imageUrl) {
-    const request = (task.result?.request || {}) as { sourceHash?: unknown; background?: unknown };
+    const request = (task.result?.request || {}) as { sourceHash?: unknown; sourceUrl?: unknown; background?: unknown };
     let finalized: Awaited<ReturnType<typeof finalizeElementBoardResult>>;
     try {
       finalized = await finalizeElementBoardResult({
         resultUrl: polled.imageUrl,
         sourceHash: typeof request.sourceHash === 'string' ? request.sourceHash : '',
+        sourceUrl: typeof request.sourceUrl === 'string' ? request.sourceUrl : undefined,
         background: request.background === 'transparent' ? 'transparent' : 'light-gray',
         modelId: resolved.modelId,
         providerId: resolved.provider.id,

@@ -74,11 +74,20 @@ describe('ordinary chat scope epochs',()=>{
   await waitFor(()=>expect(posts.filter(p=>!p.assetAction)).toHaveLength(1));
   await releaseRegistration();
   expect(posts.filter(p=>!p.assetAction)).toHaveLength(1);
+  expect(posts.filter(p=>p.assetAction==='register')).toHaveLength(1);
   expect(readback.b.messages.some(m=>m.content==='新账号明确发送')).toBe(true);
-  fireEvent.change(input(),{target:{value:'后续草稿'}});fireEvent.click(screen.getByRole('button',{name:'发送消息'}));
+  expect(screen.getByRole('button',{name:'停止生成'})).toBeTruthy();
+  expect(screen.queryByRole('button',{name:'发送消息'})).toBeNull();
+  fireEvent.change(input(),{target:{value:'后续草稿'}});
+  fireEvent.keyDown(input(),{key:'Enter',code:'Enter'});
+  fireEvent.keyDown(input(),{key:'Enter',code:'Enter'});
   expect(posts.filter(p=>!p.assetAction)).toHaveLength(1);expect(input().value).toBe('后续草稿');
+  expect(streamResponse.cancelled()).toBe(false);
   await act(async()=>{streamResponse.emit({type:'text',content:'新账号结果'});streamResponse.close()});
   await screen.findByText('新账号结果');
+  expect(screen.queryByRole('button',{name:'停止生成'})).toBeNull();
+  expect(screen.getByRole('button',{name:'发送消息'})).toBeTruthy();
+  expect(posts.filter(p=>!p.assetAction)).toHaveLength(1);expect(input().value).toBe('后续草稿');
  });
  it('same-account send continues and renders the ordinary response',async()=>{await startUpload();await releaseRegistration();await waitFor(()=>expect(posts.filter(p=>!p.assetAction)).toHaveLength(1));await act(async()=>{streamResponse.emit({type:'text',content:'正常回答'});streamResponse.close()});await screen.findByText('正常回答')});
  it('same-account typing during attachment registration preserves the newer unsent draft',async()=>{

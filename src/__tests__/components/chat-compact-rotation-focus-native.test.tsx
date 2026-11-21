@@ -231,48 +231,133 @@ describe('canvas chat compact streaming scroll', () => {
       compactStreamFixture: { emit: (content: string) => void };
     }).compactStreamFixture.emit(value), text);
     const settle = () => page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const mark = (phase: string) => page.evaluate(value => (window as unknown as {
+      compactScrollObservation?: { mark: (phase: string) => void };
+    }).compactScrollObservation?.mark(value), phase);
     try {
       await input.waitFor();
+      // Read-only observations for this failing fixture; never scroll, focus, or resize it.
+      await list.evaluate(element => {
+        const document = element.ownerDocument;
+        const editors = document.querySelectorAll('textarea');
+        const editor = editors.item(editors.length - 1);
+        const composer = element.nextElementSibling;
+        const rows: Array<Record<string, unknown>> = [];
+        const removers: Array<() => void> = [];
+        let phase = 'installed', total = 0, stopped = false;
+        const describe = (target: EventTarget | null) => target instanceof Element ? {
+          tag: target.tagName, role: target.getAttribute('role'), slot: target.getAttribute('data-slot'),
+          inList: element.contains(target), inComposer: composer?.contains(target) ?? false,
+        } : null;
+        const box = (node: Element | null) => {
+          if (!node) return null;
+          const rect = node.getBoundingClientRect();
+          return { width: rect.width, height: rect.height, clientHeight: node.clientHeight };
+        };
+        const font = (node: Element | null) => {
+          if (!node) return null;
+          const style = getComputedStyle(node);
+          return { size: style.fontSize, lineHeight: style.lineHeight, family: style.fontFamily };
+        };
+        const record = (kind: string, details: Record<string, unknown> = {}) => {
+          if (stopped) return;
+          const row = {
+            at: performance.now(), phase, kind, top: element.scrollTop,
+            streamCalls: (window as unknown as { compactStreamFixture?: { calls: number } }).compactStreamFixture?.calls ?? null,
+            height: element.clientHeight, total: element.scrollHeight,
+            distance: element.scrollHeight - element.scrollTop - element.clientHeight,
+            composer: box(composer), editor: box(editor), editorDisabled: editor?.disabled ?? null,
+            fonts: { list: font(element), editor: font(editor) }, active: describe(document.activeElement),
+            viewport: { width: innerWidth, height: innerHeight, visualHeight: visualViewport?.height ?? null },
+            ...details,
+          };
+          total++;
+          if (rows.length === 64) rows.shift();
+          rows.push(row);
+        };
+        const listen = (target: EventTarget, type: string) => {
+          const listener = (event: Event) => {
+            const details: Record<string, unknown> = { target: describe(event.target), trusted: event.isTrusted };
+            if (event instanceof WheelEvent) details.deltaY = event.deltaY;
+            if (event instanceof KeyboardEvent) details.key = event.key;
+            if (event instanceof PointerEvent) details.pointerType = event.pointerType;
+            record(type, details);
+          };
+          target.addEventListener(type, listener, { capture: true, passive: true });
+          removers.push(() => target.removeEventListener(type, listener, true));
+        };
+        for (const type of ['scroll', 'wheel', 'touchstart', 'touchmove', 'touchend', 'pointerdown']) listen(element, type);
+        for (const type of ['focusin', 'keydown']) listen(document, type);
+        const resize = new ResizeObserver(entries => record('resize', { targets: entries.map(entry => describe(entry.target)) }));
+        for (const target of [element, composer, editor]) if (target) resize.observe(target);
+        const mutation = new MutationObserver(records => record('mutation', { count: records.length }));
+        mutation.observe(element, { subtree: true, childList: true, characterData: true });
+        if (composer) mutation.observe(composer, { subtree: true, childList: true, characterData: true });
+        Object.assign(window, { compactScrollObservation: {
+          mark(value: string): void { phase = value; record('phase'); },
+          stop() {
+            if (!stopped) {
+              record('finally');
+              stopped = true;
+              resize.disconnect(); mutation.disconnect(); removers.forEach(remove => remove());
+            }
+            return { maxRows: 64, total, dropped: total - rows.length, rows };
+          },
+        } });
+        record('installed');
+      });
       await input.fill('合成提问');
+      await mark('before-submit');
       await input.press('Enter');
       await page.waitForFunction(() => (window as unknown as { compactStreamFixture?: { calls: number } }).compactStreamFixture?.calls === 1);
+      await mark('request-open');
       await page.locator('input[type=file][accept="image/*"]').setInputFiles([0, 1].map(i => ({
         name: `流中${i}.png`, mimeType: 'image/png', buffer: Buffer.concat([png, Buffer.from([i])]),
       })));
       const references = page.getByText('2张图片引用', { exact: true });
       await references.waitFor();
+      await mark('references-visible');
       // The editor is disabled while streaming. Exercise the existing workspace
       // externalPrompt prop instead of pretending a user can type into it.
       expect(await input.isDisabled()).toBe(true);
       await page.evaluate(() => (window as unknown as { rotationInjectPrompt: (value: string) => void })
         .rotationInjectPrompt('流式中保留草稿'));
       await expect.poll(() => input.inputValue()).toBe('流式中保留草稿');
+      await mark('external-prompt-ready');
+      await expect.poll(async () => (await measure()).distance).toBeLessThanOrEqual(2);
       const images = references.locator('xpath=../..').locator('div.group img');
       expect(await images.count()).toBe(2);
       const imageSources = await images.evaluateAll(elements => elements.map(element => element.getAttribute('src')));
       expect(imageSources[0]).not.toBe(imageSources[1]);
+      await mark('before-first-delta');
 
       await emit('起始回复 '.repeat(20));
       await page.getByText(/起始回复/).first().waitFor();
+      await mark('first-delta-visible');
       await expect.poll(async () => (await measure()).distance).toBeLessThanOrEqual(2);
       const box = await list.boundingBox();
       if (!box) throw new Error('message list is not visible');
       expect(box.height).toBeGreaterThanOrEqual(96);
+      await mark('before-manual-scroll');
       await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
       await page.mouse.wheel(0, -45);
       await expect.poll(async () => (await measure()).distance).toBeGreaterThan(5);
       const reading = await measure();
       expect(reading.distance).toBeLessThan(100);
+      await mark('manual-reading');
       await emit(' 新的流式内容 '.repeat(20));
       await page.getByText(/新的流式内容/).first().waitFor();
       await settle();
       const after = await measure();
       expect(after.total).toBeGreaterThan(reading.total);
       expect(Math.abs(after.top - reading.top)).toBeLessThanOrEqual(3);
+      await mark('before-return-to-bottom');
 
       await page.mouse.wheel(0, 10000);
       await expect.poll(async () => (await measure()).distance).toBeLessThanOrEqual(2);
+      await mark('returned-to-bottom');
       await emit(' 结束前的新内容 '.repeat(20));
+      await mark('resumed-follow-delta');
       await page.getByText(/结束前的新内容/).first().waitFor();
       await expect.poll(async () => (await measure()).distance).toBeLessThanOrEqual(2);
       expect(await input.inputValue()).toBe('流式中保留草稿');
@@ -281,6 +366,14 @@ describe('canvas chat compact streaming scroll', () => {
       expect(await page.getByRole('button', { name: '移除第2张参考图 流中1.png', exact: true }).count()).toBe(1);
       expect(await images.evaluateAll(elements => elements.map(element => element.getAttribute('src')))).toEqual(imageSources);
     } finally {
+      try {
+        const observation = await page.evaluate(() => (window as unknown as {
+          compactScrollObservation?: { stop: () => unknown };
+        }).compactScrollObservation?.stop() ?? null);
+        console.log('CHAT_COMPACT_SCROLL_OBSERVATION', JSON.stringify({ observation, faults }));
+      } catch (error) {
+        console.log('CHAT_COMPACT_SCROLL_OBSERVATION_UNAVAILABLE', JSON.stringify({ error: String(error), faults }));
+      }
       try {
         await page.evaluate(() => {
           const fixture = window as unknown as { compactStreamFixture?: { close: () => void }; rotationFixtureUnmount: () => void };

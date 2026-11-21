@@ -5,7 +5,7 @@ import { readFile, mkdir } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { isDeepStrictEqual } from 'node:util';
 import type { LayerDocumentRecord } from '@/lib/layer-documents/types';
-type HFScenario='error'|'server'|'local'|'reload';
+type HFScenario='error'|'server'|'local'|'reload'|'pending';
 import path from 'node:path';
 import { compile } from 'tailwindcss';
 import { Scanner } from '@tailwindcss/oxide';
@@ -14,7 +14,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
 type Theme='gold'|'mono';
 interface Options {admin?:boolean; requireMissing?:boolean; touch?:boolean;holdRecovery?:boolean;catalogLoading?:boolean;hfScenario?:HFScenario}
 interface FixtureWindow extends Window {canvasUi:{png:string;mount(theme:Theme,options:Options):void;unmount():void;state:{mounts:number;disposed:boolean;scopeChecks:number;images:unknown[];groups:unknown[];actions:string[];view:{offsetX:number;offsetY:number;zoom:number}|null;events:Array<{type:string;target:string}>}}}
-interface Session {context:BrowserContext;page:Page;options:Options;errors:string[];counts:Map<string,number>;handlers:Set<Promise<void>>;mounted:boolean;pending:Set<Request>;completed:Set<Request>;failed:Set<Request>;refused:Set<Request>;responseStatus:Map<Request,number>;nativeWaiters:Set<()=>void>;png:Buffer;releaseRecovery:()=>void;recoveryCalls:number;hf:{scenario:HFScenario;base:LayerDocumentRecord|null;document:LayerDocumentRecord|null;patches:unknown[];reads:number;statuses:number[];audits:unknown[]}}
+interface Session {context:BrowserContext;page:Page;options:Options;errors:string[];counts:Map<string,number>;handlers:Set<Promise<void>>;mounted:boolean;pending:Set<Request>;completed:Set<Request>;failed:Set<Request>;refused:Set<Request>;responseStatus:Map<Request,number>;nativeWaiters:Set<()=>void>;png:Buffer;releaseRecovery:()=>void;releaseSave:()=>void;recoveryCalls:number;hf:{scenario:HFScenario;base:LayerDocumentRecord|null;document:LayerDocumentRecord|null;patches:unknown[];reads:number;statuses:number[];audits:unknown[]}}
 const ORIGIN='https://canvas-shell-mobile.invalid';
 const HF_QUERY='/api/layer-documents?projectId=canvas-ui-project&sourceImageId=br-A&sourceVersionId=et-owned-source-v1';
 const HELP_FILES=['canvas-overview.jpeg','erase-tool.jpeg','mask-tool.jpeg','remove-bg.jpeg','upscale.jpeg','lang-edit.jpeg','svg-trace.jpeg','extend.jpeg','oh-my-prompt.jpeg'];
@@ -122,8 +122,9 @@ async function session(theme: Theme = 'gold', width: number = 390, height: numbe
   try {
     const page = await context.newPage(); page.setDefaultTimeout(1500);
     let releaseRecovery:()=>void=()=>{};const recoveryGate=options.holdRecovery?new Promise<void>(resolve=>{releaseRecovery=resolve;}):Promise.resolve();
+    let releaseSave:()=>void=()=>{};const saveGate=new Promise<void>(resolve=>{releaseSave=resolve;});
     const s: Session = { context, page, options, errors: [], counts: new Map(), handlers: new Set(), mounted: false,
-      pending: new Set(), completed: new Set(), failed: new Set(), refused: new Set(), responseStatus: new Map(), nativeWaiters: new Set(), png: Buffer.alloc(0),releaseRecovery,recoveryCalls:0,hf:{scenario:options.hfScenario,base:null,document:null,patches:[],reads:0,statuses:[],audits:[]} }; value = s; live.add(s);
+      pending: new Set(), completed: new Set(), failed: new Set(), refused: new Set(), responseStatus: new Map(), nativeWaiters: new Set(), png: Buffer.alloc(0),releaseRecovery,releaseSave,recoveryCalls:0,hf:{scenario:options.hfScenario,base:null,document:null,patches:[],reads:0,statuses:[],audits:[]} }; value = s; live.add(s);
     context.on('request', request => s.pending.add(request));
     context.on('response', response => s.responseStatus.set(response.request(),response.status()));
     context.on('requestfinished', request => { s.pending.delete(request); s.completed.add(request); for (const notify of s.nativeWaiters) notify(); });
@@ -164,6 +165,10 @@ async function session(theme: Theme = 'gold', width: number = 390, height: numbe
           if(!isDeepStrictEqual(body,expected))throw Error('HF_PATCH_ID_REVISION_OR_CONTENT_MISMATCH');
           s.hf.patches.push(body);
           if(s.hf.patches.length===1){
+            if(s.hf.scenario==='pending'){
+              await saveGate;s.hf.document={...s.hf.document,revision:8,updatedAt:2,content:expectedContent};
+              s.hf.statuses.push(200);await route.fulfill({json:{success:true,document:s.hf.document}});return;
+            }
             if(s.hf.scenario==='error'){s.hf.statuses.push(503);await route.fulfill({status:503,json:{success:false,code:'HF_SAVE_FAILURE',message:'隔离夹具：保存失败，当前修改仍保留，请检查连接后重试。',retryable:true}});return;}
             s.hf.document={...structuredClone(s.hf.base),revision:8,updatedAt:2,content:{...structuredClone(s.hf.base.content),layers:s.hf.base.content.layers.map((layer,index)=>index===1?{...layer,name:'HF 服务器主体'}:{...layer})}};
             s.hf.statuses.push(409);await route.fulfill({status:409,json:{success:false,code:'LAYER_DOCUMENT_REVISION_CONFLICT',message:'隔离版本冲突',retryable:false}});return;
@@ -178,6 +183,22 @@ async function session(theme: Theme = 'gold', width: number = 390, height: numbe
           const audit=body as Record<string,unknown>,expectedStatus=s.hf.statuses[s.hf.audits.length];
           if(!isDeepStrictEqual(Object.keys(audit).sort(),['action','durationMs','method','path','status'])||audit.action!=='patch_api_request'||audit.method!=='PATCH'||audit.path!=='/api/layer-documents'||audit.status!==expectedStatus||expectedStatus===undefined||typeof audit.durationMs!=='number'||!Number.isInteger(audit.durationMs)||audit.durationMs<0||audit.durationMs>25000)throw Error('HF_AUDIT_EXACT_PATCH_RECEIPT');
           s.hf.audits.push(body);await route.fulfill({json:{success:true}});return;
+        }
+
+        // 3fd9d9c6 retired direct edit-elements. Restore an owned, completed
+        // element-decomposition task at the real API boundary; no AI or DB runs.
+        if (key === '/api/element-decompose?projectId=canvas-ui-project') {
+          const source = await s.page.evaluate(() => {
+            const image = (window as unknown as FixtureWindow).canvasUi.state.images.find(value => typeof value === 'object' && value !== null && 'id' in value && value.id === 'br-A');
+            if (!image || typeof image !== 'object' || !('url' in image) || typeof image.url !== 'string') throw Error('F04_OWNED_SOURCE_REQUIRED');
+            return image.url;
+          });
+          await route.fulfill({ json: { success: true, taskId: 'ew-owned-historical-task', status: 'completed', overallStatus: 'completed', progress: 100,
+            source: { sourceImageId: 'br-A', sourceVersionId: 'et-owned-source-v1', canonicalUrl: source, managedUrl: source, sha256: 'a'.repeat(64), width: 256, height: 128, mimeType: 'image/png' },
+            branches: { layers: { branch: 'layers', taskId: 'ew-owned-layer-task', status: 'completed', progress: 100, result: { width: 256, height: 128, engine: 'local', quality: { status: 'pass', score: 100, warnings: [] },
+              layers: [{ id: 'ew-background', name: 'EW 合成背景', role: 'background', imageUrl: source, width: 256, height: 128, offsetX: 0, offsetY: 0, opacity: 1, blendMode: 'normal', visible: true, source: 'local-enhanced' },
+                { id: 'ew-subject', name: 'EW 合成主体', role: 'subject', imageUrl: 'data:image/png;base64,' + s.png.toString('base64'), width: 64, height: 64, offsetX: 80, offsetY: 32, opacity: 1, blendMode: 'normal', visible: true, source: 'local-enhanced' }] } } } } });
+          return;
         }
         if (key === '/logo.png') { await route.fulfill({contentType:'image/png',body:s.png});return; }
         throw Error('CANVAS_UI_FIXTURE_UNKNOWN_HTTP ' + key);
@@ -221,7 +242,7 @@ async function dispose(s: Session, expectedRefusal?: 'http' | 'websocket', clean
   // Cleanup/lifecycle/allowlist failures can never share the expected-refusal
   // prefix. A boundary selftest must not succeed merely because close failed.
   const invalid=(code:string):never=>{if(failures.length)throw new AggregateError([Error(code),...failures],'CANVAS_UI_FIXTURE_VALIDATION_AND_CLEANUP');throw Error(code);};
-  const allowed=['/api/activity','/api/layer-documents','/api/layer-documents?projectId=canvas-ui-project&sourceImageId=br-A&sourceVersionId=et-owned-source-v1','/','/api/session','/api/auth/me','/api/task-events','/api/upscayl','/api/models?type=upscaler','/api/models?type=removebg','/api/models?type=3d','/logo.png','/api/tasks/recover?projectId=canvas-ui-project',...HELP_FILES.map(file=>'/api/help-image?file='+file)];
+  const allowed=['/api/element-decompose?projectId=canvas-ui-project','/api/activity','/api/layer-documents','/api/layer-documents?projectId=canvas-ui-project&sourceImageId=br-A&sourceVersionId=et-owned-source-v1','/','/api/session','/api/auth/me','/api/task-events','/api/upscayl','/api/models?type=upscaler','/api/models?type=removebg','/api/models?type=3d','/logo.png','/api/tasks/recover?projectId=canvas-ui-project',...HELP_FILES.map(file=>'/api/help-image?file='+file)];
   const keys=[...s.counts.keys()];
   if(s.options.requireMissing || s.counts.get('/')!==1 || keys.some(k=>!allowed.includes(k)&&!(expectedRefusal==='http'&&k==='/unexpected'))){
     console.log('CANVAS_UI_FIXTURE_REQUEST_DIAGNOSTIC',JSON.stringify({counts:[...s.counts],errors:s.errors}));
@@ -288,8 +309,14 @@ async function hfGuardedClose(s:Session,control:Locator):Promise<void>{
 async function hfOpen(s:Session,e:HFCase):Promise<Locator>{
  const img=s.page.locator('[data-canvas-image-id="br-A"]');
  if(e.touch)await img.tap({position:{x:200,y:100}});else await img.click({position:{x:200,y:100}});await settle(s.page);
- if(e.width<768){await hfTap(s,s.page.locator('[data-mobile-image-actions]').getByRole('button',{name:'更多',exact:true}));await hfTap(s,s.page.getByRole('dialog',{name:'图片工具',exact:true}).getByRole('button',{name:'编辑元素',exact:true}));}
- else{await hfTap(s,s.page.getByRole('button',{name:'展开更多工具',exact:true}));const overflow=s.page.locator('[data-image-toolbar-overflow]');await overflow.waitFor({state:'visible'});await hfTap(s,overflow.getByTestId('canvas-edit-elements'));}
+ if(e.width<768){await hfTap(s,s.page.locator('[data-mobile-image-actions]').getByRole('button',{name:'更多',exact:true}));await hfTap(s,s.page.getByRole('dialog',{name:'图片工具',exact:true}).getByRole('button',{name:'元素拆解',exact:true}));}
+ else{await hfTap(s,s.page.getByRole('button',{name:'元素拆解',exact:true}));}
+ const decomposition=s.page.locator('[data-popup="display-decompose"]');await decomposition.waitFor({state:'visible'});
+ await decomposition.getByRole('button',{name:'打开编辑器',exact:true}).click();
+ // The decomposition portal remains open above the editor; dismiss it through
+ // its real close control before auditing editor hit targets.
+ await decomposition.getByRole('button',{name:'关闭元素拆解',exact:true}).click();await decomposition.waitFor({state:'detached'});
+ expect(s.counts.get('/api/element-decompose?projectId=canvas-ui-project'),'one project-scoped restore through current entry').toBe(1);
  const editor=s.page.getByTestId('layer-editor');await editor.waitFor({state:'visible'});await editor.getByTestId('layer-document-status').filter({hasText:'已保存'}).waitFor({state:'visible'});await editor.getByTestId('layer-count').filter({hasText:'2 个图层'}).waitFor({state:'visible'});await nativeRequestsFinished(s);return editor;
 }
 async function hfCapture(s:Session,e:HFCase,label:string):Promise<void>{
@@ -349,5 +376,52 @@ for(const e of hfCases)it('HF PSD save '+e.theme+' '+e.width+'x'+e.height+' '+e.
    const after=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);expect(after.images).toEqual(before.images);expect(after.groups).toEqual(before.groups);expect(after.view).toEqual(before.view);expect(after.actions).toEqual([]);
    expect(s.hf.audits).toHaveLength(s.hf.patches.length);console.log('HF_SAVE_FLOW_BODY',JSON.stringify({e,reads:s.hf.reads,patches:s.hf.patches.length,audits:s.hf.audits.length,revision:s.hf.document?.revision,originalDebounceUnchanged:true,bodyNotGate:true,notBusinessPersistenceAcceptance:true}));
   }catch(error){await hfCapture(s,e,'failure');throw error;}
+ });
+},25000);
+
+it('R3 PSD failed save Escape respects the close guard without another write',async()=>{
+ const e:HFCase={theme:'gold',width:320,height:568,scenario:'error',touch:true};
+ await withSession(e.theme,e.width,e.height,{touch:e.touch,hfScenario:e.scenario},async s=>{
+  const before=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state),editor=await hfOpen(s,e);
+  await hfTap(s,editor.getByRole('group',{name:'PSD 编辑视图',exact:true}).getByRole('button',{name:'图层',exact:true}));
+  await hfTap(s,editor.locator('[data-layer-row="ew-subject"] [data-layer-action="visibility"]'));
+  const alert=editor.getByTestId('layer-document-save-error');await alert.waitFor({state:'visible'});await nativeRequestsFinished(s);
+  expect(s.hf.statuses).toEqual([503]);expect(s.hf.patches).toHaveLength(1);
+  await s.page.keyboard.press('Escape');await settle(s.page);await nativeRequestsFinished(s);
+  expect(await editor.isVisible(),'Escape cannot bypass a rejected close guard').toBe(true);
+  expect(await alert.isVisible()).toBe(true);
+  expect(await editor.getByTestId('layer-document-status').textContent()).toContain('保存失败');
+  expect(s.hf.patches).toHaveLength(1);expect(s.hf.audits).toHaveLength(1);expect(s.hf.reads).toBe(1);expect(s.hf.document?.revision).toBe(7);
+  const after=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);
+  expect(after.images).toEqual(before.images);expect(after.groups).toEqual(before.groups);expect(after.view).toEqual(before.view);expect(after.actions).toEqual([]);
+  console.log('F04_PSD_ESCAPE_GUARD',JSON.stringify({visible:await editor.isVisible(),patches:s.hf.patches.length,statuses:s.hf.statuses,revision:s.hf.document?.revision}));
+  // Finish through the existing recovery UI so teardown does not flush dirty
+  // state after OperationAuditClient has unmounted. This is fixture cleanup,
+  // separate from the no-write assertion on the rejected Escape above.
+  await hfTap(s,alert.getByRole('button',{name:'重试保存',exact:true}));
+  await editor.getByTestId('layer-document-status').filter({hasText:'已保存'}).waitFor({state:'visible'});await nativeRequestsFinished(s);
+  expect(s.hf.statuses).toEqual([503,200]);expect(s.hf.patches).toHaveLength(2);expect(s.hf.audits).toHaveLength(2);
+  await hfTap(s,editor.getByRole('button',{name:'关闭',exact:true}));await editor.waitFor({state:'detached'});
+ });
+},25000);
+
+
+it('R3 PSD pending save Escape waits for its single in-flight write',async()=>{
+ const e:HFCase={theme:'gold',width:320,height:568,scenario:'pending',touch:true};
+ await withSession(e.theme,e.width,e.height,{touch:e.touch,hfScenario:e.scenario},async s=>{
+  try{
+   const before=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state),editor=await hfOpen(s,e);
+   await hfTap(s,editor.getByRole('group',{name:'PSD 编辑视图',exact:true}).getByRole('button',{name:'图层',exact:true}));
+   await hfTap(s,editor.locator('[data-layer-row="ew-subject"] [data-layer-action="visibility"]'));
+   await expect.poll(()=>s.hf.patches.length,{timeout:1500}).toBe(1);
+   expect(await editor.getByTestId('layer-document-status').textContent()).toContain('保存中');
+   await s.page.keyboard.press('Escape');await settle(s.page);
+   expect(await editor.isVisible(),'pending save must finish before Escape can close').toBe(true);
+   expect(s.hf.patches).toHaveLength(1);expect(s.hf.statuses).toEqual([]);expect(s.hf.reads).toBe(1);
+   s.releaseSave();await editor.waitFor({state:'detached'});await nativeRequestsFinished(s);
+   expect(s.hf.patches).toHaveLength(1);expect(s.hf.statuses).toEqual([200]);expect(s.hf.audits).toHaveLength(1);expect(s.hf.document?.revision).toBe(8);
+   const after=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);
+   expect(after.images).toEqual(before.images);expect(after.groups).toEqual(before.groups);expect(after.view).toEqual(before.view);expect(after.actions).toEqual([]);
+  }finally{s.releaseSave();await nativeRequestsFinished(s);}
  });
 },25000);

@@ -250,6 +250,22 @@ const compareOps=(count=2,reply:Reply='ok',hold=false):Operation[]=>Array.from({
 async function awaitUi(s:Session):Promise<void>{await nativeRequestsFinished(s);await settle(s.page);}
 const applied=(s:Session):Promise<string[]>=>s.page.evaluate(()=>(window as unknown as FixtureWindow).scUi.state.applied);
 
+async function escapeAndRestoreFocus(s:Session,returnTarget:Locator,theme:Theme,surface:'optimizer'|'compare'):Promise<void>{
+ const snapshot=()=>returnTarget.evaluate(e=>({targetFocused:e===document.activeElement,activeTag:document.activeElement?.tagName,activeName:document.activeElement?.getAttribute('aria-label')??document.activeElement?.getAttribute('title')??document.activeElement?.getAttribute('placeholder')}));
+ const time=new Date('2026-11-21T00:00:00Z');await s.page.clock.install({time});await s.page.clock.pauseAt(time);
+ try{
+  expect(await panel(s,surface).evaluate(e=>e.contains(document.activeElement)),'focus starts inside the open tool').toBe(true);
+  await s.page.keyboard.press('Escape');
+  expect(await s.page.getByRole('heading',{name:surface==='optimizer'?'提示词优化器':'多模型对比',exact:true}).count()).toBe(0);
+  const immediate=await snapshot();
+  // Radix schedules onCloseAutoFocus with setTimeout(0). Release that one task,
+  // rather than assuming DOM removal means focus has already returned.
+  await s.page.clock.runFor(1);
+  const afterCloseTask=await snapshot();console.log('SC_MODEL_TOOLS_FOCUS',JSON.stringify({theme,surface,immediate,afterCloseTask}));
+  expect(await returnTarget.evaluate(e=>e===document.activeElement),'focus returns to the opener within one close task').toBe(true);
+ }finally{await s.page.clock.resume();}
+}
+
 describe('model tools layout',()=>{
  it.each((['optimizer','compare'] as const).flatMap(surface=>THEMES.flatMap(theme=>[[320,640],[390,844],[640,320],[1440,900]].map(([width,height])=>({surface,theme,width,height})))))('$surface $theme $width x $height keeps every action reachable without horizontal leakage',async({surface,theme,width,height})=>{await withSession(theme,width,height,{surface},async s=>{const p=panel(s,surface);await capture(s,surface+'-'+theme+'-'+width+'x'+height);await panelBounds(p);for(const b of await p.getByRole('button').all()){await reveal(s,b);await target(b);}expect(await input(p,surface).evaluate(e=>parseFloat(getComputedStyle(e).fontSize)),'model tools input font').toBeGreaterThanOrEqual(16);});},25000);
 });
@@ -284,7 +300,26 @@ describe('model tools compare unavailable',()=>{
  it.each(THEMES.flatMap(theme=>[0,1].map(modelCount=>({theme,modelCount}))))('$theme $modelCount models cannot submit or emit a request',async({theme,modelCount})=>{await withSession(theme,390,844,{surface:'compare',modelCount},async s=>{const p=panel(s,'compare');await input(p,'compare').fill(QUESTION);expect(await p.getByRole('button',{name:'对比',exact:true}).isDisabled()).toBe(true);expect(s.consumed.size).toBe(0);});},25000);
 });
 describe('model tools parent integration',()=>{
- it.each(THEMES)('%s applies an optimized draft to the real ChatArea and receives provider labels from its configured model list',async theme=>{await withSession(theme,390,844,{surface:'chat',ops:[{kind:'optimize',mode:'simplify'}]},async s=>{const composer=s.page.getByPlaceholder('输入消息，Enter 发送，支持 Ctrl+V 粘贴图片',{exact:true});await composer.fill(QUESTION);await composer.focus();await s.page.keyboard.press('Control+Shift+P');let p=panel(s,'optimizer');await click(s,modeControl(p,'simplify'));await click(s,p.getByRole('button',{name:'开始优化',exact:true}));await awaitUi(s);await click(s,p.getByRole('button',{name:'应用结果',exact:true}));expect(await composer.inputValue()).toBe(ANSWER);await composer.focus();await s.page.keyboard.press('Control+m');p=panel(s,'compare');for(const i of [0,1,2])expect(await modelControl(p,i).innerText(),'compare parent supplies vendor name').toContain(MODEL_FIXTURE[i].providerName);await s.page.keyboard.press('Escape');expect(await s.page.getByRole('heading',{name:'多模型对比',exact:true}).count()).toBe(0);expect(await composer.evaluate(e=>e===document.activeElement)).toBe(true);});},25000);
+ it.each(THEMES)('%s applies an optimized draft to the real ChatArea and receives provider labels from its configured model list',async theme=>{
+  await withSession(theme,390,844,{surface:'chat',ops:[{kind:'optimize',mode:'simplify'}]},async s=>{
+   const composer=s.page.getByPlaceholder('输入消息，Enter 发送，支持 Ctrl+V 粘贴图片',{exact:true});
+   await composer.fill(QUESTION);await composer.focus();await s.page.keyboard.press('Control+Shift+P');
+   let p=panel(s,'optimizer');await click(s,modeControl(p,'simplify'));await click(s,p.getByRole('button',{name:'开始优化',exact:true}));
+   await awaitUi(s);await click(s,p.getByRole('button',{name:'应用结果',exact:true}));expect(await composer.inputValue()).toBe(ANSWER);
+   await composer.focus();await s.page.keyboard.press('Control+m');p=panel(s,'compare');
+   for(const i of [0,1,2])expect(await modelControl(p,i).innerText(),'compare parent supplies vendor name').toContain(MODEL_FIXTURE[i].providerName);
+   await escapeAndRestoreFocus(s,composer,theme,'compare');
+  });
+ },25000);
+});
+describe('model tools opener focus',()=>{
+ it.each((['optimizer','compare'] as const).flatMap(surface=>THEMES.map(theme=>({surface,theme}))))('$surface $theme restores the real toolbar opener after Escape',async({surface,theme})=>{
+  await withSession(theme,390,844,{surface:'chat'},async s=>{
+   const opener=s.page.getByTitle(surface==='optimizer'?'提示词优化器 (Ctrl+Shift+P)':'多模型对比 (Ctrl+M)',{exact:true});
+   await click(s,opener);await input(panel(s,surface),surface).fill('保持草稿');
+   await escapeAndRestoreFocus(s,opener,theme,surface);
+  });
+ },25000);
 });
 describe('model tools rotation and focus',()=>{
  it.each((['optimizer','compare'] as const).flatMap(surface=>THEMES.map(theme=>({surface,theme}))))('$surface $theme preserves the same draft and keeps keyboard navigation inside until Escape',async({surface,theme})=>{await withSession(theme,390,844,{surface},async s=>{const p=panel(s,surface),field=input(p,surface);await field.fill('保持同一草稿');for(const[width,height]of [[640,320],[1440,900],[320,640]]){await s.page.setViewportSize({width,height});await settle(s.page);await panelBounds(p);expect(await field.inputValue()).toBe('保持同一草稿');}await field.focus();for(let i=0;i<8;i++){await s.page.keyboard.press('Tab');expect(await p.evaluate(e=>e.contains(document.activeElement)),'model tools focus stays inside').toBe(true);}await s.page.keyboard.press('Escape');expect(await s.page.getByRole('heading',{name:surface==='optimizer'?'提示词优化器':'多模型对比',exact:true}).count()).toBe(0);});},25000);

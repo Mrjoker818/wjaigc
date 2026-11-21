@@ -150,6 +150,10 @@ function modelCapabilityConfigurationErrorResponse(
   }, { status: 400 });
 }
 
+class GeneratedImagePersistenceError extends Error {
+  constructor() { super('生成图片保存失败'); this.name = 'GeneratedImagePersistenceError'; }
+}
+
 export async function POST(request: NextRequest) {
   const opTimer = startTimer();
   const authResult = await requireApiAuthOrReject(request);
@@ -1933,15 +1937,23 @@ export async function POST(request: NextRequest) {
         const rawUrl = directImageUrls[i];
         const directTid = `direct-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}`;
         if (_skipCloudTaskPersistence) {
+          let publishedUrl = rawUrl;
+          if (rawUrl.startsWith('data:')) {
+            const savedUrl = await persistRemoteImage(rawUrl).catch(() => null);
+            if (!savedUrl?.startsWith('/api/serve-upload/')) {
+              throw new GeneratedImagePersistenceError();
+            }
+            publishedUrl = savedUrl;
+          }
           taskIds.push(directTid);
           prepublishedTaskIds.add(directTid);
-          publishedDirectImageUrls.push(rawUrl);
+          publishedDirectImageUrls.push(publishedUrl);
           registerTask(directTid, 'generate', '生成图片', userId);
           updateTaskProgress(directTid, {
             status: 'completed',
             progress: 100,
             result: {
-              imageUrl: rawUrl,
+              imageUrl: publishedUrl,
               usedModel: usedModelId,
               modelName: usedModelName,
               providerName: usedProviderName,
@@ -1962,7 +1974,7 @@ export async function POST(request: NextRequest) {
             providerId: usedProviderId,
             advancedParams: provider?.advancedParams,
           };
-          persistRemoteImage(rawUrl).then(persistedUrl => {
+          if (!rawUrl.startsWith('data:')) persistRemoteImage(rawUrl).then(persistedUrl => {
             if (persistedUrl && persistedUrl !== rawUrl) {
               updateTaskProgress(directTid, {
                 status: 'completed',
@@ -2150,6 +2162,10 @@ export async function POST(request: NextRequest) {
 
   } catch (apiError: unknown) {
     await refundSyncCharge?.();
+    if (apiError instanceof GeneratedImagePersistenceError) {
+      return NextResponse.json({ success: false, code: 'GENERATED_IMAGE_PERSISTENCE_FAILED',
+        error: apiError.message, retryable: false }, { status: 500 });
+    }
     if (apiError instanceof CanvasGenerationAdmissionError) {
       return NextResponse.json({ success: false, code: apiError.code, error: apiError.message,
         taskIds: apiError.partialTaskIds }, { status: apiError.status });

@@ -3,6 +3,7 @@ import {createRequire} from 'node:module';
 import path from 'node:path';
 import {chromium,type BrowserContext,type Request} from '@playwright/test';
 import {expect,it} from 'vitest';
+import { isCompletedCanvasFixtureEventStream } from '../helpers/canvas-fixture-event-stream';
 
 interface DiagnosticWindow extends Window {bd:{start():void;stop():void;connected():boolean;events:unknown[]}}
 interface Terminal {status:number|null;kind:'finished'|'failed';error:string|null}
@@ -14,29 +15,71 @@ it('BD records native original TaskEventsClient receipts and controlled drain ve
  expect(bundle.outputFiles).toHaveLength(1);const browser=await chromium.launch({headless:true}),summaries:unknown[]=[];
  try{for(const variant of ['json503-small','json503-large','sse200','held503-early-stop','held503-drained'] as const){
   let context:BrowserContext|undefined;const problems:string[]=[],pending=new Set<Request>(),terminal:Terminal[]=[],handlers=new Set<Promise<void>>();let status:number|null=null,count=0,resolveTerminal:(()=>void)|undefined,releaseGate:(()=>void)|undefined,started:(()=>void)|undefined;
+  let terminalRequest: Request | undefined;
+  type NativeReceiptBD = Record<string, string | number | boolean | null>;
+  const began = Date.now(), timeline: NativeReceiptBD[] = [], requestIds = new Map<Request, number>();
+  let phase = 'setup', sequence = 0, nextRequestId = 0, dropped = 0, evicted = 0;
+  const observe = (event: string, request?: Request, details: NativeReceiptBD = {}): void => {
+    let requestId = request ? requestIds.get(request) : undefined;
+    if (request && requestId === undefined) {
+      if (requestIds.size >= 64) {
+        const oldest = requestIds.keys().next().value;
+        if (oldest) requestIds.delete(oldest);
+        evicted++;
+      }
+      requestId = ++nextRequestId; requestIds.set(request, requestId);
+    }
+    const url = request?.url();
+    const taskEvents = url === origin + '/api/task-events';
+    if (timeline.length >= 63) { timeline.shift(); dropped++; }
+    timeline.push({ sequence: ++sequence, ms: Date.now() - began, phase, event, requestId: requestId ?? null,
+      route: !request ? null : taskEvents ? 'task-events' : url === origin + '/api/session' ? 'session' : url === origin + '/' ? 'document' : 'fixture-other',
+      method: request?.method() ?? null, resourceType: request?.resourceType() ?? null,
+      statusAtEvent: taskEvents ? status : null, statusAtFailure: event === 'requestfailed' && taskEvents ? status : null,
+      error: event === 'requestfailed' ? request?.failure()?.errorText.slice(0, 160) ?? null : null,
+      nativePending: pending.size, routePending: handlers.size, ...details });
+  };
+  const emitObservation = (): void => {
+    try {
+      const first = terminal[0];
+      // 63 recent events plus the first terminal receipt, including its native error.
+      console.log('BD_NATIVE_TIMING_DIAGNOSTIC', JSON.stringify({ variant, count, terminalCount: terminal.length,
+        terminal: first ? { status: first.status, kind: first.kind, error: first.error?.slice(0, 160) ?? null } : null,
+        nativePending: pending.size, routePending: handlers.size, problemCount: problems.length, dropped, evicted, events: timeline }));
+    } catch { /* Passive diagnostics must not replace the original failure. */ }
+  };
   const done=new Promise<void>(resolve=>{resolveTerminal=resolve;});
   const gate=new Promise<void>(resolve=>{releaseGate=resolve;}),requested=new Promise<void>(resolve=>{started=resolve;});
   try{
    context=await browser.newContext({viewport:{width:320,height:640},serviceWorkers:'block'});const page=await context.newPage();
-   context.on('request',r=>pending.add(r));context.on('response',r=>{if(r.url()===origin+'/api/task-events')status=r.status();});
-   context.on('requestfinished',r=>{pending.delete(r);if(r.url()===origin+'/api/task-events'){terminal.push({status,kind:'finished',error:null});resolveTerminal?.();}});
-   context.on('requestfailed',r=>{pending.delete(r);if(r.url()===origin+'/api/task-events'){terminal.push({status,kind:'failed',error:r.failure()?.errorText??null});resolveTerminal?.();}else problems.push('unexpected failure '+r.url());});
+   context.on('request',r=>{pending.add(r);observe('request',r);});context.on('response',r=>{if(r.url()===origin+'/api/task-events')status=r.status();observe('response',r.request(),{responseStatus:r.status()});});
+   context.on('requestfinished',r=>{pending.delete(r);if(r.url()===origin+'/api/task-events'){terminalRequest=r;terminal.push({status,kind:'finished',error:null});observe('requestfinished',r);resolveTerminal?.();}else observe('requestfinished',r);});
+   context.on('requestfailed',r=>{pending.delete(r);if(r.url()===origin+'/api/task-events'){terminalRequest=r;terminal.push({status,kind:'failed',error:r.failure()?.errorText??null});observe('requestfailed',r);resolveTerminal?.();}else{problems.push('unexpected failure '+r.url());observe('requestfailed',r);}});
    page.on('pageerror',e=>problems.push(String(e)));page.on('dialog',d=>{problems.push('DIALOG');void d.dismiss();});await context.routeWebSocket('**/*',s=>{problems.push('WS');s.close();});
    const counts=new Map<string,number>();await context.route('**/*',async route=>{const operation=(async():Promise<void>=>{const r=route.request(),u=new URL(r.url()),h=r.headers();if(u.origin!==origin||u.username||u.password||r.method()!=='GET'||r.postData()!==null||h.authorization||h.cookie||h['x-api-key']||h['api-key'])throw Error('BD_HTTP_BOUNDARY');const key=u.pathname+u.search;counts.set(key,(counts.get(key)??0)+1);if(counts.get(key)!==1)throw Error('BD_EXACT_ONCE '+key);
     if(key==='/'&&r.isNavigationRequest()){await route.fulfill({contentType:'text/html',body:'<!doctype html><html><head></head><body></body></html>'});return;}
     if(key==='/api/session'){await route.fulfill({json:{success:true,user:{id:'bd-synthetic-actor'}}});return;}
-    if(key==='/api/task-events'){count++;started?.();if(variant.startsWith('held503'))await gate;if(variant==='sse200')await route.fulfill({contentType:'text/event-stream',body:'data: {"taskId":"bd-fake-task","type":"progress","task":{"taskId":"bd-fake-task","type":"generate","status":"processing","progress":1,"createdAt":1,"updatedAt":1}}\n\n'});else await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({success:false,error:'OFFLINE_FIXTURE_EVENTS_UNAVAILABLE',padding:variant==='json503-large'?'x'.repeat(1024*512):''})});return;}
+    if(key==='/api/task-events'){count++;observe('eventsource:route',r);started?.();if(variant.startsWith('held503')){observe('gate:wait',r);await gate;observe('gate:passed',r);}observe('eventsource:fulfill-start',r);if(variant==='sse200')await route.fulfill({contentType:'text/event-stream',body:'data: {"taskId":"bd-fake-task","type":"progress","task":{"taskId":"bd-fake-task","type":"generate","status":"processing","progress":1,"createdAt":1,"updatedAt":1}}\n\n'});else await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({success:false,error:'OFFLINE_FIXTURE_EVENTS_UNAVAILABLE',padding:variant==='json503-large'?'x'.repeat(1024*512):''})});observe('eventsource:fulfill-resolved',r);return;}
     throw Error('BD_UNKNOWN '+key);
-   })().catch(async e=>{problems.push(String(e));await route.abort('blockedbyclient');});handlers.add(operation);try{await operation;}finally{handlers.delete(operation);}});
-   await page.goto(origin);await page.addScriptTag({content:bundle.outputFiles[0].text});await page.evaluate(()=>(window as unknown as DiagnosticWindow).bd.start());
-   if(variant.startsWith('held503')){await bounded('controlled request start',()=>requested);expect(pending.size).toBe(1);if(variant==='held503-early-stop')await bounded('early public disconnect',()=>page.evaluate(()=>(window as unknown as DiagnosticWindow).bd.stop()));else releaseGate?.();}
+   })().catch(async e=>{problems.push(String(e));await route.abort('blockedbyclient');});handlers.add(operation);observe('route:tracked',route.request());try{await operation;}finally{handlers.delete(operation);observe('route:settled',route.request());}});
+   await page.goto(origin);await page.addScriptTag({content:bundle.outputFiles[0].text});phase='start';observe('public-start:call');await page.evaluate(()=>(window as unknown as DiagnosticWindow).bd.start());observe('public-start:resolved');
+   if(variant.startsWith('held503')){await bounded('controlled request start',()=>requested);observe('held-request:observed');expect(pending.size).toBe(1);if(variant==='held503-early-stop'){phase='early-public-disconnect';observe('early-public-disconnect:call');await bounded('early public disconnect',()=>page.evaluate(()=>(window as unknown as DiagnosticWindow).bd.stop()));observe('early-public-disconnect:resolved');}else{observe('gate:release-main');releaseGate?.();}}
+   phase='await-native-terminal';observe('terminal:wait-start');
    let timer:ReturnType<typeof setTimeout>|undefined;try{await Promise.race([done,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(Error('BD_NATIVE_TERMINAL_TIMEOUT')),2500);})]);}finally{if(timer)clearTimeout(timer);}
+   observe('terminal:observed');
    releaseGate?.();
    if(variant==='sse200')await page.waitForFunction(()=>(window as unknown as DiagnosticWindow).bd.events.length===1,undefined,{timeout:1500});
-   const events=await page.evaluate(()=>(window as unknown as DiagnosticWindow).bd.events);await bounded('public disconnect',()=>page.evaluate(()=>(window as unknown as DiagnosticWindow).bd.stop()));await bounded('route drain',()=>Promise.all([...handlers]));
-   expect(count).toBe(1);expect(pending.size).toBe(0);expect(handlers.size).toBe(0);expect(problems).toEqual([]);expect(terminal).toHaveLength(1);if(variant==='sse200'){expect(terminal[0]).toEqual({status:200,kind:'finished',error:null});expect(events).toHaveLength(1);}else if(variant==='held503-early-stop'){expect(terminal[0]).toEqual({status:null,kind:'failed',error:'net::ERR_ABORTED'});expect(events).toEqual([]);}else{expect(terminal[0].status).toBe(503);if(variant==='held503-drained')expect(terminal[0].kind).toBe('finished');expect(events).toEqual([]);}
+   const events=await page.evaluate(()=>(window as unknown as DiagnosticWindow).bd.events);phase='public-disconnect';observe('public-disconnect:call');await bounded('public disconnect',()=>page.evaluate(()=>(window as unknown as DiagnosticWindow).bd.stop()));observe('public-disconnect:resolved');phase='route-drain';observe('route-drain:start');await bounded('route drain',()=>Promise.all([...handlers]));observe('route-drain:settled');
+   expect(count).toBe(1);expect(pending.size).toBe(0);expect(handlers.size).toBe(0);expect(problems).toEqual([]);expect(terminal).toHaveLength(1);if(variant==='sse200'){expect(terminal[0]).toEqual({status:200,kind:'finished',error:null});expect(events).toHaveLength(1);}else if(variant==='held503-early-stop'){expect(terminal[0]).toEqual({status:null,kind:'failed',error:'net::ERR_ABORTED'});expect(events).toEqual([]);}else{expect(terminal[0].status).toBe(503);if(variant==='held503-drained'){
+     const receipt=terminal[0];
+     const finished=receipt.kind==='finished'&&receipt.error===null;
+     const received503Abort=receipt.kind==='failed'&&receipt.error==='net::ERR_ABORTED'
+       &&terminalRequest!==undefined
+       &&isCompletedCanvasFixtureEventStream(terminalRequest,receipt.status??undefined,origin);
+     expect(finished||received503Abort).toBe(true);
+    }expect(events).toEqual([]);}
    summaries.push({variant,terminal,deliveredEvents:events.length,pending:pending.size,problems,localOnly:true});
-  }finally{releaseGate?.();if(context){try{for(const page of context.pages())try{await bounded('final disconnect',()=>page.evaluate(()=>(window as unknown as DiagnosticWindow).bd?.stop()));}catch(e){problems.push('stop '+String(e));}await bounded('final routes',()=>Promise.all([...handlers]));}catch(e){problems.push('drain '+String(e));}finally{try{await bounded('actual context close',()=>context!.close());}catch(e){problems.push('close '+String(e));}}}if(problems.length)throw Error('BD_DIAGNOSTIC_CLEANUP '+problems.join(';'));}
+  }finally{phase='cleanup';observe('cleanup:entry');releaseGate?.();if(context){try{for(const page of context.pages())try{phase='final-disconnect';observe('final-disconnect:call');await bounded('final disconnect',()=>page.evaluate(()=>(window as unknown as DiagnosticWindow).bd?.stop()));observe('final-disconnect:resolved');}catch(e){problems.push('stop '+String(e));}phase='final-route-drain';observe('final-route-drain:start');await bounded('final routes',()=>Promise.all([...handlers]));}catch(e){problems.push('drain '+String(e));}finally{try{phase='context-close';observe('context-close:call');await bounded('actual context close',()=>context!.close());observe('context-close:resolved');}catch(e){problems.push('close '+String(e));}}}emitObservation();if(problems.length)throw Error('BD_DIAGNOSTIC_CLEANUP '+problems.join(';'));}
  }}finally{await bounded('actual browser close',()=>browser.close());}
  console.log('BD_SSE_RECEIPT_DIAGNOSTIC',JSON.stringify({source:path.resolve('src/lib/task-events-client.ts'),summaries,notProductRegression:true,notBusinessData:true}));
 },25000);

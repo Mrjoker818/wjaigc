@@ -149,9 +149,11 @@ describe('production presence CLI controlled signal lifecycle', () => {
       await dispatch(run, signal);
       expect(await exitResult(run)).toEqual({ code, signal: null });
       expectCleanup(run);
-      expect(run.output().trim()).toBe(JSON.stringify({
-        type: 'exit-observed', terminateListeners: 0, interruptListeners: 0,
-      }));
+      expect(run.output().trim().split(/\r?\n/)).toEqual([
+        `> Server listening at http://localhost:${run.port} as production`,
+        '✓ Ready for connections',
+        JSON.stringify({ type: 'exit-observed', terminateListeners: 0, interruptListeners: 0 }),
+      ]);
     } finally { await dispose(run); }
   }, 15_000);
 

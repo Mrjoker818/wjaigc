@@ -178,16 +178,30 @@ async function nativeRequestsFinished(s: Session): Promise<void> {
     }));
   } finally { if (notify) s.nativeWaiters.delete(notify); }
 }
-async function dispose(s: Session, expectedRefusal?: 'http' | 'websocket', cleanupProbe?: () => void): Promise<void> {
+async function dispose(s: Session, expectedRefusal?: 'http' | 'websocket', cleanupProbe?: () => void, phase?: DGPhase): Promise<void> {
   const failures: unknown[] = [];
+  phase?.('dispose.unmount.begin', s, failures.length);
   try {
     if (s.mounted) await bounded('unmount', () => s.page.evaluate(() => (window as unknown as FixtureWindow).canvasUi.unmount()));
     cleanupProbe?.(); // Used only by the cleanup-fault selftest, after real unmount.
   } catch (error) { failures.push(error); }
+  phase?.('dispose.unmount.settled', s, failures.length);
+  phase?.('dispose.routes.begin', s, failures.length);
   try { await bounded('routes', () => Promise.all([...s.handlers])); } catch (error) { failures.push(String(error)); }
-  try { await nativeRequestsFinished(s); await bounded('final routes', () => Promise.all([...s.handlers])); } catch (error) { failures.push(String(error)); }
+  phase?.('dispose.routes.settled', s, failures.length);
+  try {
+    phase?.('dispose.native-drain.begin', s, failures.length);
+    await nativeRequestsFinished(s);
+    phase?.('dispose.native-drain.return', s, failures.length);
+    phase?.('dispose.final-routes.begin', s, failures.length);
+    await bounded('final routes', () => Promise.all([...s.handlers]));
+    phase?.('dispose.final-routes.return', s, failures.length);
+  } catch (error) { failures.push(String(error)); phase?.('dispose.drain.reject', s, failures.length); }
   const unresolvedBeforeClose = s.pending.size !== 0 || s.handlers.size !== 0;
+  phase?.('dispose.context-close.begin', s, failures.length);
   try { await s.context.close(); contexts.delete(s.context); live.delete(s); } catch (error) { failures.push(String(error)); }
+  phase?.('dispose.context-close.settled', s, failures.length);
+  phase?.('dispose.validation.begin', s, failures.length);
   // Cleanup/lifecycle/allowlist failures can never share the expected-refusal
   // prefix. A boundary selftest must not succeed merely because close failed.
   const invalid=(code:string):never=>{if(failures.length)throw new AggregateError([Error(code),...failures],'CANVAS_UI_FIXTURE_VALIDATION_AND_CLEANUP');throw Error(code);};
@@ -211,9 +225,22 @@ async function dispose(s: Session, expectedRefusal?: 'http' | 'websocket', clean
     if (s.errors.length !== 1 || s.errors[0] !== expected) throw Error('CANVAS_UI_FIXTURE_UNEXPECTED_FAILURES: ' + s.errors.join('; '));
   }
   if (s.errors.length) throw Error('CANVAS_UI_FIXTURE_INFRASTRUCTURE: ' + s.errors.join('; '));
+  phase?.('dispose.validation.return', s, failures.length);
 }
 
-async function withSession(theme:Theme,width:number,height:number,options:Options,run:(s:Session)=>Promise<void>):Promise<void>{const s=await session(theme,width,height,options);let primary:unknown;try{await run(s);}catch(e){primary=e;}try{await dispose(s);}catch(cleanup){if(primary)throw new AggregateError([primary,cleanup],'CANVAS_UI_FIXTURE_TEST_AND_CLEANUP');throw cleanup;}if(primary)throw primary;}
+type DGPhase=(phase:string,s?:Session,cleanupFailures?:number)=>void;
+function dgPhaseLog(e:DGEntry):DGPhase|undefined{
+  if(e.theme!=='gold'||e.width!==320||e.height!==640||e.variant!=='controls')return;
+  const start=performance.now();let sequence=0;
+  return (phase,s,cleanupFailures)=>{try{console.log('DG_PHASE',JSON.stringify({...e,sequence:++sequence,elapsedMs:Math.round((performance.now()-start)*1000)/1000,phase,pending:s?.pending.size,handlers:s?.handlers.size,errors:s?.errors.length,completed:s?.completed.size,failed:s?.failed.size,cleanupFailures}));}catch{ /* Observation must not replace the original result. */ }};
+}
+async function withSession(theme:Theme,width:number,height:number,options:Options,run:(s:Session)=>Promise<void>,phase?:DGPhase):Promise<void>{
+  phase?.('session.begin');
+  const s=await session(theme,width,height,options);phase?.('session.return',s);
+  let primary:unknown;try{await run(s);phase?.('run.return',s);}catch(e){primary=e;phase?.('run.reject',s);}
+  try{await dispose(s,undefined,undefined,phase);phase?.('dispose.return',s);}catch(cleanup){phase?.('dispose.reject',s);if(primary)throw new AggregateError([primary,cleanup],'CANVAS_UI_FIXTURE_TEST_AND_CLEANUP');throw cleanup;}
+  if(primary)throw primary;
+}
 
 
 
@@ -240,4 +267,4 @@ for(const e of dgMatrix)it('DG '+e.theme+' '+e.width+'x'+e.height+' '+e.variant+
  else{const controls=panel.locator('button');for(let i=0;i<await controls.count();i++)await dgAudit(controls.nth(i));expect.soft(await panel.getByText(/单指旋转/).count(),'mobile guidance describes touch').toBeGreaterThan(0);await dgTap(s,panel.getByTitle('隐藏侧栏',{exact:true}));expect.soft(await panel.getByTitle('显示侧栏',{exact:true}).getAttribute('aria-expanded'),'sidebar collapsed').toBe('false');expect(await panel.getByAltText('Source',{exact:true}).count()).toBe(0);await dgTap(s,panel.getByTitle('显示侧栏',{exact:true}));expect(await panel.getByAltText('Source',{exact:true}).count()).toBe(1);const solid=await dgPixels(canvas);await dgTap(s,panel.getByTitle('线框模式',{exact:true}));expect.soft(await panel.getByTitle('实体模式',{exact:true}).getAttribute('aria-pressed'),'wireframe selection exposed').toBe('true');await dgFrames(s.page);const wire=await dgPixels(canvas);expect.soft(wire.hash,'wireframe changes actual rendered pixels').not.toBe(solid.hash);await dgTap(s,panel.getByTitle('实体模式',{exact:true}));await dgTap(s,panel.getByTitle('柔和光',{exact:true}));expect.soft(await panel.getByTitle('柔和光',{exact:true}).getAttribute('aria-pressed'),'light selection exposed').toBe('true');await dgTap(s,panel.getByTitle('户外光',{exact:true}));await dgTap(s,panel.getByTitle('影棚光',{exact:true}));await dgTap(s,panel.getByTitle('网格',{exact:true}));const spinBefore=await dgPixels(canvas);await dgTap(s,panel.getByTitle('自动旋转',{exact:true}));expect.soft(await panel.getByTitle('自动旋转',{exact:true}).getAttribute('aria-pressed'),'automatic rotation selected').toBe('true');const spinA=await dgPixels(canvas);await dgFrames(s.page,8);const spinB=await dgPixels(canvas);expect.soft(spinB.hash,'automatic rotation changes actual image').not.toBe(spinA.hash);expect.soft(Math.abs(spinB.cameraDistance-spinBefore.cameraDistance),'automatic rotation does not introduce zoom').toBeLessThan(.01);await dgTap(s,panel.getByTitle('网格',{exact:true}));await dgTap(s,panel.getByTitle('自动旋转',{exact:true}));await dgTap(s,panel.getByTitle('网格',{exact:true}));expect.soft(await panel.getByTitle('网格',{exact:true}).getAttribute('aria-pressed'),'grid off state exposed').toBe('false');
  await dgView(s,panel,'正面');const front=await dgPixels(canvas);await dgGesture(s,canvas,'drag');const rotated=await dgPixels(canvas);expect.soft(rotated.hash,'native single finger rotates actual geometry').not.toBe(front.hash);await dgView(s,panel,'正面');const repeated=await dgPixels(canvas);expect.soft(Math.abs(repeated.bounds.width-front.bounds.width),'same preset re-applies after manual rotation width').toBeLessThanOrEqual(3);expect.soft(Math.abs(repeated.bounds.height-front.bounds.height),'same preset re-applies after manual rotation height').toBeLessThanOrEqual(3);
  await dgView(s,panel,'背面');await dgView(s,panel,'正面');await dgTap(s,panel.getByRole('button',{name:'平移',exact:true}));expect.soft(await panel.getByRole('button',{name:'平移',exact:true}).getAttribute('aria-pressed'),'pan selection exposed').toBe('true');const panA=await dgPixels(canvas);await dgGesture(s,canvas,'drag');const panB=await dgPixels(canvas);expect.soft(panB.centroidX-panA.centroidX,'native one-finger pan moves the subject right').toBeGreaterThan(16);expect.soft(Math.max(...panB.viewRotation.map((v,i)=>Math.abs(v-panA.viewRotation[i]))),'pan keeps camera orientation rather than rotating').toBeLessThan(.01);const zoomA=await dgPixels(canvas);await dgGesture(s,canvas,'pinch');const zoomB=await dgPixels(canvas);expect.soft(zoomB.orange,'native two-finger spread zooms actual model').toBeGreaterThan(zoomA.orange*1.1);await dgTap(s,panel.getByRole('button',{name:'重置',exact:true}));await dgCapture(s,e,'operations');console.log('DG_OPERATIONS_OBSERVED',JSON.stringify({...e,initial,wire,spinBefore,spinA,spinB,front,rotated,repeated,panA,panB,zoomA,zoomB,publicLocatorScrollPreparationNotTouchScrollAcceptance:true,noScreenshotPublishDownloadOrModelPostProcess:true}));await dgTap(s,panel.getByRole('button',{name:'关闭3D模型预览',exact:true}));await overlay.waitFor({state:'detached'});}
- const after=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);expect(after.images).toEqual(before.images);expect(after.view).toEqual(before.view);expect(after.actions).toEqual([]);await nativeRequestsFinished(s);const modelReads=[...s.completed].filter(r=>r.url()===ORIGIN+'/dg-owned-cube.gltf').map(r=>r.method()).sort();expect(modelReads).toEqual(['GET','HEAD']);expect(s.counts.get('/dg-owned-cube.gltf')).toBe(2);console.log('DG_COMPLETE',JSON.stringify({...e,realGeometryDecoded:true,faces:12,vertices:24,modelReads,sourceAndViewUnchanged:true,noAiServiceOrPaidOperation:true}));}finally{await dgCapture(s,e,'end-or-failure');}});},25000);
+ const after=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);expect(after.images).toEqual(before.images);expect(after.view).toEqual(before.view);expect(after.actions).toEqual([]);await nativeRequestsFinished(s);const modelReads=[...s.completed].filter(r=>r.url()===ORIGIN+'/dg-owned-cube.gltf').map(r=>r.method()).sort();expect(modelReads).toEqual(['GET','HEAD']);expect(s.counts.get('/dg-owned-cube.gltf')).toBe(2);console.log('DG_COMPLETE',JSON.stringify({...e,realGeometryDecoded:true,faces:12,vertices:24,modelReads,sourceAndViewUnchanged:true,noAiServiceOrPaidOperation:true}));}finally{await dgCapture(s,e,'end-or-failure');}},dgPhaseLog(e));},25000);

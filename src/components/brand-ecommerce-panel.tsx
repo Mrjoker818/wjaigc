@@ -524,6 +524,11 @@ export function BrandEcommercePanel({ isMonochrome = false, onClose, onAddImages
 
       const poll = async (): Promise<void> => {
         if (activeRunRef.current !== run) return;
+        if (run.cancelling) {
+          const delay = attempts <= 10 ? 1000 : attempts <= 25 ? 1500 : 2000;
+          run.pollTimer = setTimeout(poll, delay);
+          return;
+        }
         if (attempts >= maxAttempts) {
           reportGenerationError(run, timeoutMessage);
           stopGeneration(run);

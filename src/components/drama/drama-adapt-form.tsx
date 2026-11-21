@@ -5,6 +5,7 @@ import { BookOpen, Loader2 } from 'lucide-react';
 import { ADAPT_CHUNK_CHARS, ADAPT_MAX_CHARS, ADAPT_MIN_CHARS } from '@/lib/drama/adapt';
 import type { AdaptRequest } from '@/lib/drama/workbench-client';
 import { DIRECTOR_STYLE_LIST, type DirectorStyle } from '@/lib/video-director/director-styles';
+import { useTaskModelCatalog } from '@/hooks/use-task-model-catalog';
 import { DRAMA_RATIOS } from './drama-idea-form';
 
 /** Paste a novel or a long story; the server adapts it into one episode per part. */
@@ -17,13 +18,19 @@ export function DramaAdaptForm({ busy, progress, onAdapt }: {
   const [title, setTitle] = useState('');
   const [style, setStyle] = useState<DirectorStyle>('cinematic');
   const [aspectRatio, setAspectRatio] = useState<string>('9:16');
+  const { models, loading, error } = useTaskModelCatalog('chat');
+  const [modelKey, setModelKey] = useState('');
+  const model = models.find(item => `${item.providerId}::${item.id}` === modelKey);
+  const missingModel = Boolean(modelKey && !model);
+  const modelReady = !loading && !error && Boolean(model);
   const length = text.trim().length;
   const episodes = Math.max(1, Math.ceil(length / ADAPT_CHUNK_CHARS));
   const valid = length >= ADAPT_MIN_CHARS && length <= ADAPT_MAX_CHARS;
   const adapting = busy === '改编小说';
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (valid && !busy) onAdapt({ text: text.trim(), ...(title.trim() ? { title: title.trim() } : {}), style, aspectRatio, episodeDurationSec: 60 });
+    if (valid && !busy && modelReady && model) onAdapt({ text: text.trim(), ...(title.trim() ? { title: title.trim() } : {}), style, aspectRatio, episodeDurationSec: 60,
+      planner: { providerId: model.providerId, modelId: model.id } });
   };
 
   return (
@@ -41,6 +48,20 @@ export function DramaAdaptForm({ busy, progress, onAdapt }: {
         {length.toLocaleString('zh-CN')} / {ADAPT_MAX_CHARS.toLocaleString('zh-CN')} 字
         {length >= ADAPT_MIN_CHARS ? ` · 约改编成 ${episodes} 集，每集约 1 分钟写完` : ` · 至少 ${ADAPT_MIN_CHARS} 字`}
       </p>
+      <label className="flex min-w-0 flex-col gap-1.5">
+        <span className="drama-label">改编模型</span>
+        <select className="drama-input min-w-0 max-w-full" value={modelKey} aria-invalid={missingModel || undefined}
+          disabled={loading || Boolean(error) || Boolean(busy)} onChange={event => setModelKey(event.target.value)}>
+          <option value="">{loading ? '正在读取授权模型…' : '请选择已授权的编剧模型'}</option>
+          {missingModel ? <option value={modelKey} disabled>原模型已不可用，请重新选择</option> : null}
+          {models.map(item => <option key={`${item.providerId}::${item.id}`} value={`${item.providerId}::${item.id}`}>
+            {item.displayName || item.name || item.id} · {item.providerName || item.providerId}
+          </option>)}
+        </select>
+      </label>
+      {error || missingModel || (!loading && models.length === 0) ? <p role="status" className="text-xs text-[var(--drama-red)]">
+        {error ? '模型目录读取失败，请刷新后重试' : missingModel ? '原模型已不可用，请重新选择；不会自动切换供应商或模型' : '还没有可用的授权对话模型，请联系管理员配置'}
+      </p> : null}
       <div className="grid gap-4 sm:grid-cols-3">
         <label className="flex flex-col gap-1.5">
           <span className="drama-label">片名（可不填）</span>
@@ -62,7 +83,7 @@ export function DramaAdaptForm({ busy, progress, onAdapt }: {
         </fieldset>
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        <button type="submit" className="drama-btn drama-btn--primary" disabled={!valid || Boolean(busy)}>
+        <button type="submit" className="drama-btn drama-btn--primary" disabled={!valid || Boolean(busy) || !modelReady}>
           {adapting ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <BookOpen className="h-4 w-4" />}
           {adapting ? `正在改编 ${progress?.value ?? 0}%` : '开始改编'}
         </button>

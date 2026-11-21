@@ -2057,6 +2057,8 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
                 taskId: recovered.taskId,
                 result: completedResult,
               });
+              const metadataEnrichedResult = await enrichCompletedImageResult(completedResult);
+              completedResult.images = metadataEnrichedResult.images;
               const stabilizedDirectImageUrls = Array.isArray(completedResult.imageUrls)
                 ? completedResult.imageUrls.filter(
                     (url): url is string => typeof url === 'string' && url.length > 0,
@@ -2597,6 +2599,10 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
                 if (!artifactLease) return getDurableVideoTerminalResponse();
               }
               // 视频制品先经过 DNS 固定、类型/签名和流式字节上限校验，再发布终态。
+              const videoSubmissionPayload = (persistedVideoTask?.result?.submissionPayload
+                || regResult.submissionPayload) as Record<string, unknown> | undefined;
+              const requiresMutedVideo = videoProfile === 'pearapi-video'
+                && (regResult.generateAudio === false || videoSubmissionPayload?.generateAudio === false);
               let persistedVideoUrl = videoResult.videoUrl;
               let persistedVideoMetadata: PersistedVideoFileMetadata | undefined;
               let persistedVideoLocalPath: string | undefined;
@@ -2619,12 +2625,8 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
                 videoRecoverySourceUrl = downloaded.resolvedSourceUrl;
                 let videoBuffer = downloaded.buffer;
                 // PearAPI has no audio switch, so a muted request is honoured after download.
-                if (videoProfile === 'pearapi-video' && regResult.generateAudio === false) {
-                  try {
-                    videoBuffer = await stripVideoAudioTrack(downloaded.buffer, downloaded.mediaType.extension);
-                  } catch (muteErr) {
-                    console.warn('[poll-task/video] Could not remove the provider audio track:', muteErr instanceof Error ? muteErr.message : muteErr);
-                  }
+                if (requiresMutedVideo) {
+                  videoBuffer = await stripVideoAudioTrack(downloaded.buffer, downloaded.mediaType.extension);
                 }
                 // The serve-upload URL is an anonymous capability link (providers and shares fetch it),
                 // so the filename carries 122 random bits instead of guessable time/task fragments.
@@ -2661,7 +2663,7 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
                   storageKey: gatewayVideoStorageKey,
                 });
               }
-              if (!gatewayVideoTask && videoPersistenceError) {
+              if (!gatewayVideoTask && !requiresMutedVideo && videoPersistenceError) {
                 persistedVideoUrl = videoResult.videoUrl;
                 persistedVideoMetadata = undefined;
                 gatewayVideoStorageKey = undefined;
@@ -2670,8 +2672,10 @@ async function handlePost(request: NextRequest): Promise<NextResponse> {
               if (gatewayVideoTask && (
                 videoPersistenceError
                 || !persistedVideoUrl.startsWith('/api/serve-upload/video/')
-              )) {
-                const gatewayVideoError = '网关视频结果持久化失败';
+              ) || (requiresMutedVideo && videoPersistenceError)) {
+                const gatewayVideoError = requiresMutedVideo
+                  ? '视频静音结果处理失败，请重试'
+                  : '网关视频结果持久化失败';
                 if (!videoPersistenceError && persistedVideoLocalPath) {
                   await cleanupPersistedGatewayVideoResult({
                     videoUrl: persistedVideoUrl,

@@ -96,6 +96,7 @@ export async function planDramaScript(input: ScriptRequest, fetcher: WorkbenchFe
 
 export interface AdaptRequest {
   text: string;
+  planner: { providerId: string; modelId: string };
   title?: string;
   style?: string;
   aspectRatio?: string;

@@ -8,10 +8,10 @@ echo "[coze-deploy-build] Starting production build process..."
 node scripts/verify-deploy-package.mjs --source
 
 # Step 1: Install dependencies
-# Try frozen-lockfile first (fast, reproducible), fall back to normal install
+# Retry without lifecycle scripts if needed, always keeping the lock frozen.
 if ! pnpm install --frozen-lockfile 2>&1; then
-  echo "[coze-deploy-build] frozen-lockfile failed, trying normal install with --ignore-scripts..."
-  pnpm install --ignore-scripts
+  echo "[coze-deploy-build] frozen-lockfile failed, retrying frozen install with --ignore-scripts..."
+  pnpm install --ignore-scripts --frozen-lockfile
   # Manually run postinstall hooks that --ignore-scripts skipped
   echo "[coze-deploy-build] Running postinstall hooks manually..."
   node scripts/prepare-tools.mjs 2>/dev/null || true
@@ -26,8 +26,9 @@ fi
 # (WUJIE_RUN_MIGRATIONS=1), never via an ambient build.
 # Detect a platform-bound database in any injection form the Coze sandbox uses
 # (URL, libpq split variables, or the Supabase integration surface). Keep in
-# sync with db_binding_present() in scripts/coze-start.sh and
-# resolveDatabaseConnectionString()/isDatabaseConfigured() in src/lib/db-client.ts.
+# mind that these are configuration signals, not proof of a PG connection source.
+# coze-start.sh --deployment separately requires URL/libpq; db-client's HTTP
+# signal continues to retain fail-closed DB_ONLY authentication.
 if [ -n "${DATABASE_URL:+configured}${PGDATABASE_URL:+configured}" ] \
   || { [ -n "${PGHOST:+configured}" ] && [ -n "${PGDATABASE:+configured}" ] && [ -n "${PGUSER:+configured}" ]; } \
   || { [ -n "${COZE_SUPABASE_URL:+configured}" ] && [ -n "${COZE_SUPABASE_SERVICE_ROLE_KEY:+configured}${COZE_SUPABASE_ANON_KEY:+configured}" ]; }; then

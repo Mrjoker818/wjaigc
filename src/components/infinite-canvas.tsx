@@ -1,4 +1,5 @@
 'use client';
+import { cancelElementDecompositionObserved } from '@/lib/element-decomposition/cancel-observation';
 import { WORKSPACE_PANEL_RAIL_WIDTH } from '@/lib/workspace-panel-layout';
 import NextImage from 'next/image';
 import { withClientImageOutputPreference } from '@/lib/image-generation-output-preference';
@@ -228,7 +229,6 @@ import { DISPLAY_DECOMPOSE_SUPPORTED_RATIOS, type DisplayDecomposeRatio } from '
 import { type AspectRecomposeRatio } from '@/lib/aspect-recompose';
 import { AspectRecomposePanel } from '@/components/aspect-recompose-panel';
 import {
-  cancelElementDecomposition,
   createResolvedElementDecompositionRequest,
   describeElementBranchStage,
   getRefundedLocalLayerFallbackMessage,
@@ -2006,7 +2006,15 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
   // ChatCanvas 批注模式
   const [annotationMode, setAnnotationMode] = useState(false);
   const [annotationModelId, setAnnotationModelId] = useState('');
-  const annotationController = useAnnotationController(initialAnnotations);
+  const annotationSelectionSource = useMemo(() => {
+    const image = images.find(item => item.id === selectedImage?.id);
+    return image ? {
+      projectId: projectId || brandProject?.id || '',
+      imageId: image.id,
+      versionId: image.annotationVersionId || buildAnnotationSourceVersionId(image.id, image.createdAt, image.url),
+    } : null;
+  }, [images, selectedImage?.id, projectId, brandProject?.id]);
+  const annotationController = useAnnotationController(initialAnnotations, annotationSelectionSource);
   const {
     state: annotationV2State,
     setState: setAnnotationV2State,
@@ -2016,6 +2024,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     pointerMove: updateAnnotationV2Gesture,
     pointerUp: commitAnnotationV2Gesture,
     commitText: commitAnnotationV2Text,
+    isSemanticGestureCurrent,
     commitResolvedSemantic,
     updateInstruction: updateAnnotationV2Instruction,
     moveText: moveAnnotationV2Text,
@@ -3400,6 +3409,8 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     gesture: Extract<AnnotationGesture, { kind: 'semantic-object' }>,
   ) => {
     const requestSequence = ++annotationSemanticRequestRef.current;
+    const isCurrent = () => requestSequence === annotationSemanticRequestRef.current
+      && isSemanticGestureCurrent(gesture);
     const sourceImage = imagesRef.current.find(
       (image) => image.id === gesture.source.imageId,
     );
@@ -3434,7 +3445,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         sourceImageUrl: sourceImage.url || '',
         point,
       });
-      if (requestSequence !== annotationSemanticRequestRef.current) return;
+      if (!isCurrent()) return;
       if (result.requiresConfirmation) {
         setAnnotationV2State((current) => ({
           ...current,
@@ -3444,9 +3455,9 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
         toast.warning('对象识别置信度较低，请改用框选确认区域');
         return;
       }
-      commitResolvedSemantic(result.target);
+      commitResolvedSemantic(result.target, gesture);
     } catch (error) {
-      if (requestSequence !== annotationSemanticRequestRef.current) return;
+      if (!isCurrent()) return;
       setAnnotationV2State((current) => ({
         ...current,
         gesture: { kind: 'idle' },
@@ -3464,6 +3475,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
     }
   }, [
     commitResolvedSemantic,
+    isSemanticGestureCurrent,
     projectId,
     brandProject?.id,
     selectAnnotationV2Tool,
@@ -10947,14 +10959,14 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
 
   const handleCancelElementDecomposition = useCallback(async () => {
     if (!elementDecomposeTask) return;
-    elementDecomposeControllerRef.current?.abort(new Error('用户取消元素拆解'));
     try {
-      const cancelled = await cancelElementDecomposition(elementDecomposeTask.taskId);
+      const cancelled = await cancelElementDecompositionObserved(elementDecomposeTask.taskId, elementDecomposeControllerRef.current);
       setElementDecomposeTask(cancelled);
       const placeholderId = elementDecomposePlaceholderRef.current;
       if (placeholderId) removeProcessingFrame(placeholderId);
       elementDecomposePlaceholderRef.current = null;
-      toast.success('元素拆解任务已取消');
+      if (cancelled.overallStatus === 'cancelled') toast.success('元素拆解任务已取消');
+      else toast.info('元素拆解任务已结束，已同步实际状态');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '取消元素拆解失败');
     }
@@ -11814,7 +11826,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
       const message = e instanceof Error ? e.message : '全景生成失败';
       if (placeholderId) {
         const failure = buildFailedProcessingFrame(`全景生成失败：${message}`, '全景生成失败');
-        updateProcessingFrame(placeholderId, failure);
+        updateProcessingFrame(placeholderId, { ...failure, label: '全景生成失败', status: 'failed' });
         toast.error(failure.error, { id: tid });
       } else {
         toast.error(message, { id: tid });
@@ -17826,6 +17838,7 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
           >
             <PsdLayerEditor
               imageUrl={psdEditorImageUrl}
+              focusActive={!showDisplayDecomposePanel}
               source={psdEditorSource || undefined}
               mode={psdEditorMode}
               initialResult={psdEditorInitialResult || undefined}
@@ -18655,6 +18668,14 @@ export function InfiniteCanvas({ sketchImageEnabled = false, sketchContext, task
               onMouseDown={(e) => e.stopPropagation()}
               onWheel={(e) => e.stopPropagation()}
               data-popup="display-decompose"
+              onKeyDown={(event) => {
+                if (!showPsdEditor || event.key !== 'Escape' || event.defaultPrevented || event.nativeEvent.isComposing) return;
+                // This foreground popup owns the first Escape. Keep the PSD
+                // beneath it open and let it acquire focus after this unmounts.
+                event.preventDefault();
+                event.stopPropagation();
+                setShowDisplayDecomposePanel(false);
+              }}
             >
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">

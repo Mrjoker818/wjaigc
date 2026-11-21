@@ -1098,6 +1098,17 @@ export async function dbWriteUsers(users: Array<{
   updatedAt: number;
 }>): Promise<boolean> {
   try {
+    const modelColumns = users.length ? await execSql(`
+      SELECT column_name, data_type, udt_name FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = 'wujie_users'
+        AND column_name IN ('chat_models', 'image_models')
+    `) : { rows: [] };
+    const nativeModelColumns = new Set(modelColumns.rows.filter(column => (
+      String(column.data_type).toLowerCase() === 'array' || column.udt_name === '_text'
+    )).map(column => String(column.column_name)));
+    const encodeModels = (models: string[] | null | undefined, column: string) => (
+      models == null ? null : nativeModelColumns.has(column) ? models : JSON.stringify(models)
+    );
     for (const u of users) {
       await execSql(`
         INSERT INTO wujie_users (id, name, password_hash, credential_hash, role, status, product_type, chat_models, image_models, daily_token_limit, monthly_token_limit, daily_image_limit, avatar, nickname, api_permissions, storage_folder, email, group_id, created_at, updated_at)
@@ -1124,8 +1135,8 @@ export async function dbWriteUsers(users: Array<{
       `, [
         u.id, u.name, u.passwordHash, u.credentialHash ?? null, u.role, u.status,
         u.productType || null,
-        u.chatModels ? JSON.stringify(u.chatModels) : null,
-        u.imageModels ? JSON.stringify(u.imageModels) : null,
+        encodeModels(u.chatModels, 'chat_models'),
+        encodeModels(u.imageModels, 'image_models'),
         u.dailyTokenLimit ?? null,
         u.monthlyTokenLimit ?? null,
         u.dailyImageLimit ?? null,

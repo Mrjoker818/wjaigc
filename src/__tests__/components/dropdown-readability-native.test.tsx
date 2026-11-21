@@ -162,10 +162,13 @@ describe.each(['gold', 'monochrome'])('dropdown readability in %s', theme => {
       expect((await paint(option.locator('svg').last())).color).toBe((await paint(option)).color);
       expect(await option.evaluate(el => Boolean(el.closest('body') && !el.closest('#fixture')))).toBe(true);
       console.log('DROPDOWN_RENDERED_CONTRAST', theme, JSON.stringify({ row: await paint(option), description: await paint(option.getByText('模型说明')) }));
+      await expect.poll(() => option.evaluate(element => element.ownerDocument.activeElement === element)).toBe(true);
       await page.keyboard.press('ArrowDown');
+      const nextOption = page.getByRole('option', { name: '模型二', exact: true });
+      await expect.poll(() => nextOption.evaluate(element => element.ownerDocument.activeElement === element)).toBe(true);
       expect(await page.getByRole('option', { name: '禁用模型', exact: true }).getAttribute('data-highlighted')).toBeNull();
       await page.keyboard.press('Enter');
-      expect(await page.getByRole('combobox', { name: '聊天模型' }).textContent()).toContain('模型二');
+      await expect.poll(() => page.getByRole('combobox', { name: '聊天模型' }).textContent()).toContain('模型二');
     });
   }, 15000);
 

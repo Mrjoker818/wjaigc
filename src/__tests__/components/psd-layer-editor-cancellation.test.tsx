@@ -94,6 +94,24 @@ describe('PsdLayerEditor cancellation registration race', () => {
     expect(screen.getByTestId('layer-start')).toBeTruthy();
   });
 
+  it('R3 PSD Escape waits for registration and cancels the task exactly once', async () => {
+    const onClose = vi.fn();
+    render(<PsdLayerEditor imageUrl="/api/serve-upload/source.png" onClose={onClose} />);
+    fireEvent.click(screen.getByTestId('layer-start'));
+    await waitFor(() => expect(deliverTaskId).not.toBeNull());
+
+    fireEvent.keyDown(screen.getByTestId('layer-editor'), { key: 'Escape' });
+    fireEvent.keyDown(screen.getByTestId('layer-editor'), { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(layerClientMocks.cancelLayerDecomposition).not.toHaveBeenCalled();
+    await act(async () => { await deliverTaskId?.('r3-escape-cancel-task'); });
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(layerClientMocks.cancelLayerDecomposition)
+      .toHaveBeenCalledExactlyOnceWith('r3-escape-cancel-task');
+    expect(layerClientMocks.runLayerDecomposition).toHaveBeenCalledTimes(1);
+  });
+
   it('waits for server cancellation before closing the editor', async () => {
     const onClose = vi.fn();
     render(<PsdLayerEditor imageUrl="/api/serve-upload/source.png" onClose={onClose} />);

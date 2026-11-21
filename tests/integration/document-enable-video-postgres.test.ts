@@ -197,6 +197,11 @@ interface VideoRouteFixture {
   provider: ProviderObservation;
   request(actor: string, endpoint: string, body: Record<string, unknown>, key?: string): Promise<NextRequest>;
 }
+function expectProviderMediaDataUrl(value: unknown, mimeType: string, originalBytes: Buffer): void {
+  const data = /^data:([^;,]+);base64,([A-Za-z0-9+/]+={0,2})$/u.exec(String(value));
+  expect(data?.[1]).toBe(mimeType);
+  expect(Buffer.from(data?.[2] ?? '', 'base64')).toEqual(originalBytes);
+}
 async function videoBilling(query: QueryFn): Promise<Record<string, unknown[]>> {
   return {
     tasks: (await query('SELECT * FROM cloud_tasks ORDER BY id')).rows,
@@ -468,10 +473,11 @@ describe('real video routes, billing and document completion (proposed PG covera
       expect(f.provider.calls).toHaveLength(1);
       expect(f.provider.calls[0].body.model).toBe(routeModel);
       if (operation === 'extend') {
-        expect(f.provider.calls[0].body.video_url).toBe(routeOrigin + parent.videoUrl);
+        expectProviderMediaDataUrl(f.provider.calls[0].body.video_url, 'video/mp4', mp4);
         expect(f.provider.persistenceStatuses).toEqual([200]);
       } else {
-        expect(f.provider.calls[0].body.image_url).toBe(routeOrigin + parent.url);
+        expectProviderMediaDataUrl(f.provider.calls[0].body.image_url, 'image/png',
+          await readFile(path.join(mediaRoot, 'uploads', 'image.png')));
         expect(f.provider.persistenceStatuses).toEqual([]);
       }
       const receipt = await assertVideoPublished(f, taskId, parent);
@@ -708,7 +714,7 @@ describe('real video routes, billing and document completion (proposed PG covera
       await drainVideoAfter();
       const secondReceipt = await assertVideoPublished(f, secondId, managedFrame);
       expect(f.provider.calls).toHaveLength(2);
-      expect(f.provider.calls[1].body.image_url).toBe(routeOrigin + managedFrame.url);
+      expectProviderMediaDataUrl(f.provider.calls[1].body.image_url, 'image/jpeg', jpeg);
       expect((await f.query('SELECT user_id,balance FROM wujie_credits ORDER BY user_id')).rows)
         .toEqual([{ user_id: 'route-editor', balance: 80 }, { user_id: 'route-outsider', balance: 100 },
           { user_id: 'route-owner', balance: 100 }]);

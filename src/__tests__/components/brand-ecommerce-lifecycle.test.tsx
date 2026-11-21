@@ -278,6 +278,70 @@ describe('brand ecommerce generation lifecycle', () => {
     expect(cancelRequests).toEqual([]);
   });
 
+  it.each(['http-failure', 'unconfirmed'] as const)('holds polls during a pending cancellation and resumes the same task after %s', async cancelOutcome => {
+    replies.push(reply({ success: true, taskId: 'cancel-window-task' }));
+    const originalFetch = globalThis.fetch;
+    const pollSignals: Array<AbortSignal | null | undefined> = [];
+    let cancelInit: RequestInit | undefined;
+    let releaseCancel!: (response: Response) => void;
+    const pendingCancel = new Promise<Response>(resolve => { releaseCancel = resolve; });
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      if (String(input) === '/api/cancel-task') {
+        cancelRequests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        cancelInit = init;
+        return pendingCancel;
+      }
+      if (String(input) === '/api/poll-task') pollSignals.push(init?.signal);
+      return originalFetch(input, init);
+    }));
+
+    try {
+      await open();
+      await click('批量生成');
+      await advance(1000);
+      expect(requests).toHaveLength(1);
+      const idempotencyKey = generationIdempotencyKeys[0];
+      expect(idempotencyKey).toBeTruthy();
+      const expectedPoll = { taskId: 'cancel-window-task', model: requests[0].model, providerId: requests[0].providerId };
+      expect(polls).toEqual([expectedPoll]);
+      expect(pollSignals.map(signal => signal?.aborted)).toEqual([false]);
+
+      await click('取消');
+      expect(cancelRequests).toEqual([{ taskId: 'cancel-window-task' }]);
+      expect(cancelInit?.method).toBe('POST');
+      expect(new Headers(cancelInit?.headers).get('content-type')).toBe('application/json');
+      expect(cancelInit?.signal?.aborted).toBe(false);
+      // Cross the original 2000ms and 3000ms poll ticks with cancellation still held.
+      await advance(2500);
+      expect(polls).toHaveLength(1);
+      expect(polls).toEqual([expectedPoll]);
+      expect(requests).toHaveLength(1);
+      expect(generationIdempotencyKeys).toEqual([idempotencyKey]);
+      expect(cancelInit?.signal?.aborted).toBe(false);
+      expect(pollSignals.map(signal => signal?.aborted)).toEqual([false]);
+      expect(screen.getByRole('button', { name: '取消' })).toBeTruthy();
+
+      await act(async () => {
+        releaseCancel(cancelOutcome === 'http-failure'
+          ? Response.json({ success: false, error: 'LOCAL_CANCEL_UNAVAILABLE' }, { status: 503 })
+          // No success receipt: the existing confirmation predicate must reject this.
+          : Response.json({ cancelled: false }));
+      });
+      await advance(1000);
+      expect(polls).toEqual([expectedPoll, expectedPoll]);
+      expect(requests).toHaveLength(1);
+      expect(generationIdempotencyKeys).toEqual([idempotencyKey]);
+      expect(cancelRequests).toEqual([{ taskId: 'cancel-window-task' }]);
+      expect(pollSignals.map(signal => signal?.aborted)).toEqual([false, false]);
+      expect(cancelInit?.signal?.aborted).toBe(false);
+      expect(screen.getByRole('button', { name: '取消' })).toBeTruthy();
+      expect(addImages).not.toHaveBeenCalled();
+    } finally {
+      // Release the local promise even on the expected RED assertion; suite cleanup owns timers.
+      await act(async () => { releaseCancel(Response.json({ cancelled: false })); });
+    }
+  });
+
   it('keeps reading the same task after transient status HTTP errors', async () => {
     replies.push(reply({ success: true, taskId: 'transient-task' }));
     pollReplies.push(reply({ error: 'Temporarily unavailable' }, 503), reply({ success: true, status: 'completed', result: { results: [success()] } }));
