@@ -270,14 +270,30 @@
     "surface": "workspaces",
     "workspace": "canvas",
     "name": "视频生成与编辑",
-    "entrances": ["底部工具栏视频生成", "视频浮动工具栏"],
-    "routes": ["/api/video/generate", "/api/video/extend", "/api/video/*"],
-    "components": ["src/components/video-generation-panel.tsx", "src/components/infinite-canvas.tsx"],
+    "entrances": ["/video 短剧工作台的镜头制作", "选中视频后的浮动工具栏及右键菜单"],
+    "routes": ["/api/video/generate", "/api/video/extend", "/api/video/tools", "/api/video/extract-frame", "/api/video/download"],
+    "components": ["src/components/drama/drama-workbench.tsx", "src/components/drama/drama-inspector.tsx", "src/components/drama/use-drama-workbench.ts", "src/components/infinite-canvas.tsx"],
     "actions": ["文生视频", "图生视频", "延长视频", "抽帧", "配音", "压缩", "下载"],
     "resultKinds": ["video-task", "video", "image-frame", "audio"],
     "preservesOriginal": true,
     "risk": "P0",
-    "status": "protected-unverified"
+    "status": "protected-unverified",
+    "entryReview": {
+      "date": "2026-11-21",
+      "retiredComponent": "src/components/video-generation-panel.tsx",
+      "deletionCommit": "9c8249e9fef309b55152060ce412160ef80456b0",
+      "reason": "Upstream moved video creation into the drama workbench. Current literal component paths replace the deleted panel; this is not an equivalence or runtime acceptance claim.",
+      "actionCoverage": {
+        "文生视频": "Current drama shot generation entry; runtime acceptance pending.",
+        "图生视频": "Current drama shot generation with keyframes; runtime acceptance pending.",
+        "延长视频": "API remains, but no current UI entry or equivalent has been verified. Coverage gap retained.",
+        "抽帧": "Current canvas tool supports time/uniform/keyframe modes; individual media assertions remain required.",
+        "配音": "Current canvas and drama entries exist; distinct workflows must be verified independently.",
+        "压缩": "Current selected-video tool entry; real output verification pending.",
+        "下载": "Current canvas video and drama package entries; byte and persistence verification pending."
+      },
+      "formalAcceptance": "pending"
+    }
   },
   {
     "featureId": "workspace.canvas.three-d",

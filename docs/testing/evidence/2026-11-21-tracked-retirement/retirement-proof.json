@@ -1,0 +1,3520 @@
+{
+  "schemaVersion": 2,
+  "kind": "source-only-retirement-with-tracked-obligations-evidence",
+  "reviewedHead": "29f7e2df5cb53619c2f5401fa587fbea7882b079",
+  "intent": {
+    "basis": "upstream-deletion-and-current-user-direction",
+    "commits": {
+      "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9": {
+        "tree": "767798612f76ced500440b7f456c92863cc65efa",
+        "parent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "subjectAndBody": "Remove node mode and the workflow hub\n\nThe canvas is the main workspace; node mode and the workflow hub are retired\nahead of the drama workbench.\n\n- WorkspaceMode is now canvas | drama | dashboard. Legacy mode=node and\n  mode=workflow-hub URLs open drama. The canvas toolbar shows one drama entry.\n- Delete NodeEditor, WorkflowHub, /api/workflow/*, workflow-engine,\n  workflow-renderer and the workflow image/edit publication code.\n- /api/edit rejects assetWorkspace=workflow with 410 before charging.\n- Drop @xyflow/react.\n- Migration 20261118_wj_remove_node_workflows clears saved workflows,\n  strips metadata.workflow from projects and drops the workflow edit tables.\n- Remove tests that only covered node mode; mark the three workflow\n  protected features as retired.\n"
+      },
+      "9c8249e9fef309b55152060ce412160ef80456b0": {
+        "tree": "0f95df1007b0c1a3c62aa8aaa3b97c4d5d8bf421",
+        "parent": "738ed3c835fb7a0d602cc17019788460b1e2537b",
+        "subjectAndBody": "feat(video): make videos only in the drama workbench, and fold the director layer into it\n\nThe canvas video panel, its edit/extend panel and their routes are removed. The canvas\nkeeps playing, comparing and processing existing videos. Its video entries (toolbar,\nShift+4, command palette, quick create) now open the drama workbench, carrying a typed\nidea into the \"start from one sentence\" form.\n\n/api/video/generate and /api/video/extend no longer wrap the prompt in the director\ncompiler's LLM instructions (【导演编排】). That text was written for a language model\nand went straight to the video model.\n\nWhat was useful from that layer (Seedance 2.0 Skill OS directing notes) moves into the\ndrama inspector: a free 润色 action that rewrites one shot through the chat model and\nfills shot size, camera move, light and sound, plus fields to edit them. The chosen\nvalues are sent as one \"镜头：…\" line after the description.\n"
+      }
+    },
+    "warning": "20b4 commit text describing destructive migrations is source intent only, never authorization to execute SQL or erase historical data."
+  },
+  "scope": {
+    "exactPathCount": 38,
+    "originalEntries": 34,
+    "additionalPaths": 4,
+    "replacementEquivalence": "not-claimed",
+    "existingPureV1Unchanged": true
+  },
+  "retirements": [
+    {
+      "path": "src/app/api/workflow/image-actions/route.ts",
+      "canonicalPointer": "/entries/49",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "5b3dda0c8fb8fda51470e70dedeb151079e5f818",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "当前画布图像工具；无旧grid重放接口",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/components/canvas-workspace.tsx"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "普通裁切/拆解不等价64格原子发布和原operation恢复"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "旧operationId与unknown COMMIT回执是否仍需对账未知",
+        "categories": [
+          "operation-receipts",
+          "grid-publication"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/0"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/0",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/49",
+        "previousRecordSha256": "9b040611bf9699407b24e0936820d0a66482e57eca9f3af243abd4ea61b1a64f",
+        "originalSourceTupleSha256": "306654c8cf8078d4e5019ed27c34ef1014882672c342732af8212fffe17bda1a"
+      },
+      "observedDeletionFacts": {
+        "path": "src/app/api/workflow/image-actions/route.ts",
+        "canonicalPointer": "/entries/49",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "5b3dda0c8fb8fda51470e70dedeb151079e5f818",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/app/api/workflow/image-actions/route.ts",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "6b86cebe43ca0f24bc1e0456545d4262045513c6"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/components/video-edit-panel.tsx",
+      "canonicalPointer": "/entries/93",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "9c8249e9fef309b55152060ce412160ef80456b0",
+      "deletionParent": "738ed3c835fb7a0d602cc17019788460b1e2537b",
+      "deletedParentBlob": "336c172e1ab3f6d0466e936d0fc0172470ceeb83",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "/video 短剧镜头制作；画布保留视频展示",
+        "paths": [
+          "src/components/drama/use-drama-workbench.ts",
+          "src/components/infinite-canvas.tsx"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "原视频语言编辑/延长及固定源session不是已证明的短剧能力"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "9c8249e9fef309b55152060ce412160ef80456b0"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "本路径旧契约留档及关联责任继续追踪；旧审未识别独立持久化责任不等于已证明none-owned-by-path。",
+        "categories": [
+          "legacy-video-contract",
+          "accepted-task-contract-context"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/1"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/1",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/93",
+        "previousRecordSha256": "43833336fe745aeb4885604ba78c381febe88a1af3707a8a6903bbb69b69a736",
+        "originalSourceTupleSha256": "62494bb20dd27227393f8215d48a653c68b7d79ab942c4edf9a760d6bfcd8a88"
+      },
+      "observedDeletionFacts": {
+        "path": "src/components/video-edit-panel.tsx",
+        "canonicalPointer": "/entries/93",
+        "deletionCommit": "9c8249e9fef309b55152060ce412160ef80456b0",
+        "deletionParent": "738ed3c835fb7a0d602cc17019788460b1e2537b",
+        "deletedParentBlob": "336c172e1ab3f6d0466e936d0fc0172470ceeb83",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "9c8249e9fef309b55152060ce412160ef80456b0",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/components/video-edit-panel.tsx",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "fc984eba0174b342a004c0106e823c85019941cb"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/components/workflow/WorkflowContextMenu.tsx",
+      "canonicalPointer": "/entries/95",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "6572c778dadf935a0b7f9ad49ad77979c0b51a24",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "/canvas 当前菜单，仅相关交互",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/components/canvas-workspace.tsx"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "当前菜单不操作旧节点或端口"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "本路径旧契约留档及关联责任继续追踪；旧审未识别独立持久化责任不等于已证明none-owned-by-path。",
+        "categories": [
+          "historical-contract-evidence"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/2"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/2",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/95",
+        "previousRecordSha256": "98621396adf9524e496ffe61e57d6b6f8e47b246e86186e4824d74bc2fa7bbea",
+        "originalSourceTupleSha256": "7711a9c093deff4c3648e5b6916486367e686a54b0ea99847270c40a61c19e73"
+      },
+      "observedDeletionFacts": {
+        "path": "src/components/workflow/WorkflowContextMenu.tsx",
+        "canonicalPointer": "/entries/95",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "6572c778dadf935a0b7f9ad49ad77979c0b51a24",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/components/workflow/WorkflowContextMenu.tsx",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "6572c778dadf935a0b7f9ad49ad77979c0b51a24"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/components/workflow/WorkflowLibraryContent.tsx",
+      "canonicalPointer": "/entries/96",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "6e60f6fc2a6e29dbd5d15b88a378e7f8bb68790c",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "当前画布素材/提示词入口；短剧素材选择",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/components/canvas-workspace.tsx"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "新库不接受旧节点preset；组件本身无持久化"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "本路径旧契约留档及关联责任继续追踪；旧审未识别独立持久化责任不等于已证明none-owned-by-path。",
+        "categories": [
+          "historical-contract-evidence"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/3"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/3",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/96",
+        "previousRecordSha256": "58a64555150b7bc205305be15cb68a7290866252584db5bac3669daaf71d491a",
+        "originalSourceTupleSha256": "83fde24a98220ea4a49c3605823a2734d05b0f8036ef1a0966a0371cd3739e1d"
+      },
+      "observedDeletionFacts": {
+        "path": "src/components/workflow/WorkflowLibraryContent.tsx",
+        "canonicalPointer": "/entries/96",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "6e60f6fc2a6e29dbd5d15b88a378e7f8bb68790c",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/components/workflow/WorkflowLibraryContent.tsx",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "6e60f6fc2a6e29dbd5d15b88a378e7f8bb68790c"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/components/workflow/WorkflowPortTargets.tsx",
+      "canonicalPointer": "/entries/97",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "d0eaf8e27b6d90fe32e8ff0a377e77595b821dfb",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "当前画布工具；无节点端口入口",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/components/canvas-workspace.tsx"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "短剧无可连线端口，端口可达性无等价承诺"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "本路径旧契约留档及关联责任继续追踪；旧审未识别独立持久化责任不等于已证明none-owned-by-path。",
+        "categories": [
+          "historical-contract-evidence"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/4"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/4",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/97",
+        "previousRecordSha256": "1a1283f1ffee9cd8468712c86e301a34aec76adef791a1ccfdfe4978808361f2",
+        "originalSourceTupleSha256": "3c6ad97cd3ac21dd3c9eff0a0d153501e0dd64741283aa05ef11ff3cd70e8f39"
+      },
+      "observedDeletionFacts": {
+        "path": "src/components/workflow/WorkflowPortTargets.tsx",
+        "canonicalPointer": "/entries/97",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "d0eaf8e27b6d90fe32e8ff0a377e77595b821dfb",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/components/workflow/WorkflowPortTargets.tsx",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "d0eaf8e27b6d90fe32e8ff0a377e77595b821dfb"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/features/annotations/node-annotation-workspace.tsx",
+      "canonicalPointer": "/entries/100",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "741a037349868d68f895cfa87977d951aac151b5",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "画布批注 use-annotation-controller",
+        "paths": [
+          "src/features/annotations/use-annotation-controller.ts"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "仅节点批注退役；通用批注仍在，版本绑定另有hold"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "本路径旧契约留档及关联责任继续追踪；旧审未识别独立持久化责任不等于已证明none-owned-by-path。",
+        "categories": [
+          "historical-contract-evidence"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/5"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/5",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/100",
+        "previousRecordSha256": "6c10c988e8a43144926122259f20bbeedb453ef41e58ea0d15887ea6d3432721",
+        "originalSourceTupleSha256": "4559d7b69d3dda28d83594d33c448fc30e4f10a9655f5deb940d755b4def6d64"
+      },
+      "observedDeletionFacts": {
+        "path": "src/features/annotations/node-annotation-workspace.tsx",
+        "canonicalPointer": "/entries/100",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "741a037349868d68f895cfa87977d951aac151b5",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/features/annotations/node-annotation-workspace.tsx",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "741a037349868d68f895cfa87977d951aac151b5"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-background.ts",
+      "canonicalPointer": "/entries/126",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "57aea862c89b05a2e89cd97b5f73ed5cb088a89b",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "短剧自己的异步任务路径；不等价",
+        "paths": [
+          "src/lib/task-registry.ts",
+          "src/lib/cloud-task-storage.ts"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "删除纯转发不代表新后台持久化已验收"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "本路径旧契约留档及关联责任继续追踪；旧审未识别独立持久化责任不等于已证明none-owned-by-path。",
+        "categories": [
+          "historical-contract-evidence"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/6"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/6",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/126",
+        "previousRecordSha256": "09ce78ae3598b8a852e1826e20a8e3f46689df3a5bc045cc4a09cf8392139337",
+        "originalSourceTupleSha256": "81a49ca59a6541547440f6ed4c680df248b2e799b11465adda28fd9a7010bec8"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-background.ts",
+        "canonicalPointer": "/entries/126",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "57aea862c89b05a2e89cd97b5f73ed5cb088a89b",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-background.ts",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "57aea862c89b05a2e89cd97b5f73ed5cb088a89b"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-image-action-request.ts",
+      "canonicalPointer": "/entries/127",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "a5946ac4488db2aee3e7c35bbf47e959ddeda97c",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "当前画布工具各自请求schema",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/components/canvas-workspace.tsx"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "无旧CPU grid API则无需假装新schema承接"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "本路径旧契约留档及关联责任继续追踪；旧审未识别独立持久化责任不等于已证明none-owned-by-path。",
+        "categories": [
+          "historical-contract-evidence"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/7"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/7",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/127",
+        "previousRecordSha256": "d34c76daf222aa3988337933779fc4cb1809cf6c2e6219f63683548aa949b796",
+        "originalSourceTupleSha256": "882e9531abd7e0fa7245e604fe6408774455e54f15b4fa37c66359500544ca74"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-image-action-request.ts",
+        "canonicalPointer": "/entries/127",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "a5946ac4488db2aee3e7c35bbf47e959ddeda97c",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-image-action-request.ts",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "a5946ac4488db2aee3e7c35bbf47e959ddeda97c"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-image-actions.ts",
+      "canonicalPointer": "/entries/128",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "ee7a11a7ef2d5445f6dbe4b87c7e59a81a3590a6",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "当前画布裁切，仅相关操作",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/components/canvas-workspace.tsx"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "普通裁切不是批量格网等价"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "本路径旧契约留档及关联责任继续追踪；旧审未识别独立持久化责任不等于已证明none-owned-by-path。",
+        "categories": [
+          "historical-contract-evidence"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/8"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/8",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/128",
+        "previousRecordSha256": "b41f435c03321b0e9fe02203d1a352fb61b2ffc887e75e3147cc420ce47cfce5",
+        "originalSourceTupleSha256": "79953a0489fdb3624172418fbea1bfa7c75b11460d00a206fa6d08b1434c6fc6"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-image-actions.ts",
+        "canonicalPointer": "/entries/128",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "ee7a11a7ef2d5445f6dbe4b87c7e59a81a3590a6",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-image-actions.ts",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "ee7a11a7ef2d5445f6dbe4b87c7e59a81a3590a6"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-image-batch.ts",
+      "canonicalPointer": "/entries/129",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "9848b77c1a60d1ed668cce8c2bbe59c449661cba",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "当前资产服务仅相关存储",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/lib/asset-core/managed-media-read.ts"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "新素材创建不等价旧grid整批原子回放"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "已落库整批child和partial/mixed replay需核对",
+        "categories": [
+          "grid-publication",
+          "managed-media"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/9"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/9",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/129",
+        "previousRecordSha256": "171432d2890e7091564a9ce6771f993223db0c4d21b0b059cee17fd70d6d8489",
+        "originalSourceTupleSha256": "57cc172b9adaeb973802745994201fc17568ab47f035d7b6a83a402dd23f2d78"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-image-batch.ts",
+        "canonicalPointer": "/entries/129",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "9848b77c1a60d1ed668cce8c2bbe59c449661cba",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-image-batch.ts",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "9848b77c1a60d1ed668cce8c2bbe59c449661cba"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-image-document-publication.ts",
+      "canonicalPointer": "/entries/130",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "805cd89383962f470851a6aa1989473b058a6d21",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "当前文档画布，不提供旧grid回放",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/lib/asset-core/managed-media-read.ts"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "新文档写入不确认旧grid已提交或有权限"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "共享文档旧grid COMMIT未知及media/grant关联未收尾",
+        "categories": [
+          "document-publication",
+          "managed-media",
+          "operation-receipts"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/10"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/10",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/130",
+        "previousRecordSha256": "7cbd8cc8c4ede192088d1ec51d79e7f09336bc47925c2c94d1e1320a7e045662",
+        "originalSourceTupleSha256": "6f3afa913d99cac21cf6be4460bc1464a885df8591b0e212d7eb893c5888d3e7"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-image-document-publication.ts",
+        "canonicalPointer": "/entries/130",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "805cd89383962f470851a6aa1989473b058a6d21",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-image-document-publication.ts",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "0118dfdc71ca29268a46b4482d0713d9932ca3c5"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-image-document-runtime-publication.ts",
+      "canonicalPointer": "/entries/131",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "725dfb52f21dc16709e92ecdc7a01f8b63d248f1",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "当前文档画布",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/lib/asset-core/managed-media-read.ts"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "当前短剧发布不替代旧文档事务对账"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "旧文档单格replacement和父checkpoint确认未收尾",
+        "categories": [
+          "document-publication",
+          "operation-receipts"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/11"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/11",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/131",
+        "previousRecordSha256": "4232aa4380f047dacfe445fef5ed9d85b2eed6f39c2226be0828575e3475d33a",
+        "originalSourceTupleSha256": "9017bb3e421e0fb3fd88daaef60493f23ae78a8ca6a4d1dd9d739db44590065e"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-image-document-runtime-publication.ts",
+        "canonicalPointer": "/entries/131",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "725dfb52f21dc16709e92ecdc7a01f8b63d248f1",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-image-document-runtime-publication.ts",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "725dfb52f21dc16709e92ecdc7a01f8b63d248f1"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-image-execution-fence.ts",
+      "canonicalPointer": "/entries/132",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "8ad2c04b1b033e7c63d0478f61c5d6c5c75e0cc3",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "当前任务自己的租约；不作替代审批",
+        "paths": [
+          "src/lib/task-registry.ts",
+          "src/lib/cloud-task-storage.ts"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "新任务fence不能证明旧worker已停"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "退役时是否仍有旧worker持租约未知",
+        "categories": [
+          "worker-leases",
+          "accepted-tasks"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/12"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/12",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/132",
+        "previousRecordSha256": "94476b9e82e77a77dccb9ec3a84fa5ac1067c9f2a4fe7fc7c8360ddc22dcdbd3",
+        "originalSourceTupleSha256": "c79e6a48713f897196389e37e27dee084fa2635fe63d735cd7925e824d071212"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-image-execution-fence.ts",
+        "canonicalPointer": "/entries/132",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "8ad2c04b1b033e7c63d0478f61c5d6c5c75e0cc3",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-image-execution-fence.ts",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "8ad2c04b1b033e7c63d0478f61c5d6c5c75e0cc3"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-image-graph.ts",
+      "canonicalPointer": "/entries/133",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "31373a82acfce2d4ba90779eea15f4f7f15aaafd",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "当前画布；无旧grid构图",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/components/canvas-workspace.tsx"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "当前插图不是旧DAG整批构图"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "本路径旧契约留档及关联责任继续追踪；旧审未识别独立持久化责任不等于已证明none-owned-by-path。",
+        "categories": [
+          "historical-contract-evidence"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/13"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/13",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/133",
+        "previousRecordSha256": "6c4a2d3a1c2cf294ff77132d4f2f5374dd8dfcb9f5f89e7669fd35b3f4557efa",
+        "originalSourceTupleSha256": "af39ce5864a0f1a63501acc6d5712beffd5fe453c0b5c00da07b6eca229498af"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-image-graph.ts",
+        "canonicalPointer": "/entries/133",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "31373a82acfce2d4ba90779eea15f4f7f15aaafd",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-image-graph.ts",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "31373a82acfce2d4ba90779eea15f4f7f15aaafd"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-image-grid-client.ts",
+      "canonicalPointer": "/entries/134",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "a5f87b3fac75b411e51ede26af244e452681dd30",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "当前画布；无旧grid恢复UI",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/components/canvas-workspace.tsx"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "不把保留localStorage视作IndexedDB或unknown操作已恢复"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "浏览器待确认operation与scope身份需保留",
+        "categories": [
+          "browser-pending-operations",
+          "operation-receipts"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/14"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/14",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/134",
+        "previousRecordSha256": "5e23afb680149502f94f94c3453cc476c0009df0bbc6e0c3cbfd909abb595f78",
+        "originalSourceTupleSha256": "6354fd0b64ba30d4880b51898d011d301e22c4b7812d7b34fe12da1a661e2734"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-image-grid-client.ts",
+        "canonicalPointer": "/entries/134",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "a5f87b3fac75b411e51ede26af244e452681dd30",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-image-grid-client.ts",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "e586da58401f497634f1972943d1865c4dc83e01"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-image-grid.ts",
+      "canonicalPointer": "/entries/135",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "9f0323519b6d37ae92f61c14cd360d223dd859e7",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "当前裁切/图像工具",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/components/canvas-workspace.tsx"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "一般裁切不等价批量CPU格网资源契约"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "本路径旧契约留档及关联责任继续追踪；旧审未识别独立持久化责任不等于已证明none-owned-by-path。",
+        "categories": [
+          "historical-contract-evidence"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/15"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/15",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/135",
+        "previousRecordSha256": "2aedec0e9ae48441d173e53a83f74db877d3a0b2d4ace2ea74832b8f313717be",
+        "originalSourceTupleSha256": "edb2a1eb0fd4129588ef873769463dd3c49a6851c8217872798fc2ddeca0476b"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-image-grid.ts",
+        "canonicalPointer": "/entries/135",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "9f0323519b6d37ae92f61c14cd360d223dd859e7",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-image-grid.ts",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "9f0323519b6d37ae92f61c14cd360d223dd859e7"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-image-input-execution.ts",
+      "canonicalPointer": "/entries/136",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "59e2531b09b52b90544ffe82d511df8c95ebe455",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "当前图生图/短剧参考图，不作等价",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/components/canvas-workspace.tsx"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "新参考图提交不确认旧cell原任务"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "旧已受理receiver cell及source身份需收尾",
+        "categories": [
+          "accepted-tasks",
+          "source-identity"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/16"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/16",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/136",
+        "previousRecordSha256": "bda8298ee77677b0d3a3c157fbd66bfc0d07961b22e5f8423a6126fdc80e3419",
+        "originalSourceTupleSha256": "238e6e6a48fec14ddf1ad5f8ca9716dbcc8136e57b0d8ae01fa58c6ef0bfa0c2"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-image-input-execution.ts",
+        "canonicalPointer": "/entries/136",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "59e2531b09b52b90544ffe82d511df8c95ebe455",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-image-input-execution.ts",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "59e2531b09b52b90544ffe82d511df8c95ebe455"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-image-media.ts",
+      "canonicalPointer": "/entries/137",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "304119dcf7efb84af9fd5aeb305596cda6f29b60",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "当前受管媒体服务，仅相关边界",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/lib/asset-core/managed-media-read.ts"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "删除旧opaque能力不批准任何新端点绕过授权"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "本路径旧契约留档及关联责任继续追踪；旧审未识别独立持久化责任不等于已证明none-owned-by-path。",
+        "categories": [
+          "historical-contract-evidence"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/17"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/17",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/137",
+        "previousRecordSha256": "ba6b60c123d3eb45736fd3ef45d63c03f3778517a09c94dc6c29177460fe783d",
+        "originalSourceTupleSha256": "e4fcf2251ee44afae078aec94077521076028683d1e6f563222941b6d17ca28f"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-image-media.ts",
+        "canonicalPointer": "/entries/137",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "304119dcf7efb84af9fd5aeb305596cda6f29b60",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-image-media.ts",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "304119dcf7efb84af9fd5aeb305596cda6f29b60"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-image-preparation.ts",
+      "canonicalPointer": "/entries/138",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "4470a29f359ed9fe3661327fcdb7c38d46e8420a",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "当前受管媒体存储；无旧prepared handle",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/lib/asset-core/managed-media-read.ts"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "新清理不能推断旧文件无主"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "unknown COMMIT暂存文件可能仍属于已提交产物",
+        "categories": [
+          "staged-media",
+          "unknown-commit"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/18"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/18",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/138",
+        "previousRecordSha256": "c8607531d4e2e5b70254cdd4b433a67bdc0276f7d33f82ac18afe157fcd80145",
+        "originalSourceTupleSha256": "ced345266cc5218cb01791ad21cc8b343ad6165075b7aba570ee2bbaf4907dbc"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-image-preparation.ts",
+        "canonicalPointer": "/entries/138",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "4470a29f359ed9fe3661327fcdb7c38d46e8420a",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-image-preparation.ts",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "0dff5ac016b3072dca9642cee880e4c8df93b6a5"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-image-publication.ts",
+      "canonicalPointer": "/entries/139",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "b1ebfabd82a524250ec90925c23c0fd374ef7513",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "当前画布资产；无原grid回放",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/lib/asset-core/managed-media-read.ts"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "新放置动作不能证明旧operation完整"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "personal整grid已提交/未知确认待核对",
+        "categories": [
+          "grid-publication",
+          "unknown-commit"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/19"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/19",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/139",
+        "previousRecordSha256": "dc9476fc52f0fb2196d9d9e44cf47ee4837ba5fd7b702710272b94839df02f46",
+        "originalSourceTupleSha256": "b929ed75b9a256f69101425edbced5606864c2f11963d08df8c84e630d4e325a"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-image-publication.ts",
+        "canonicalPointer": "/entries/139",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "b1ebfabd82a524250ec90925c23c0fd374ef7513",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-image-publication.ts",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "332ad554b44931c193e3019128beebd5ded2403f"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-image-receiver.ts",
+      "canonicalPointer": "/entries/140",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "64120aa066ef2b6f08ca09f61fb5893e3dfe6002",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "当前图生图输入；无节点连线",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/components/canvas-workspace.tsx"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "短剧referenceImages无旧端口拓扑"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "本路径旧契约留档及关联责任继续追踪；旧审未识别独立持久化责任不等于已证明none-owned-by-path。",
+        "categories": [
+          "historical-contract-evidence"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/20"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/20",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/140",
+        "previousRecordSha256": "a97e5105d4c593ab152ae861e8b78c2b95007ae18c9e5aa2df503c9a9f788758",
+        "originalSourceTupleSha256": "9416844c96769d7aa986d2b9d696c78fef5313955c50e95d50e210d62c4204b7"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-image-receiver.ts",
+        "canonicalPointer": "/entries/140",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "64120aa066ef2b6f08ca09f61fb5893e3dfe6002",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-image-receiver.ts",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "64120aa066ef2b6f08ca09f61fb5893e3dfe6002"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-image-reference-runtime.ts",
+      "canonicalPointer": "/entries/141",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "29ed1846c469841a1a443e4e0a08bff61026adb7",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "当前参考图选择；非原回执接口",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/components/canvas-workspace.tsx"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "新参考图流程不恢复旧父checkpoint"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "旧零拷贝引用任务与checkpoint未知结果需确认",
+        "categories": [
+          "accepted-tasks",
+          "source-identity",
+          "operation-receipts"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/21"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/21",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/141",
+        "previousRecordSha256": "0145ac20133f6815eb8dbdcc0c192e0e855b5f5dc1a890a6aa4e08c73b48c565",
+        "originalSourceTupleSha256": "f7ec332c84d4c41ca2a6dee26940355f6ebaef8739fc2910cd6460041e3b7e6f"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-image-reference-runtime.ts",
+        "canonicalPointer": "/entries/141",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "29ed1846c469841a1a443e4e0a08bff61026adb7",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-image-reference-runtime.ts",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "29ed1846c469841a1a443e4e0a08bff61026adb7"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-image-retry-admission.ts",
+      "canonicalPointer": "/entries/142",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "aeff6c9c8a07fa48cf19c086fb871d3b9c97aa06",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "当前任务恢复，不能新付费替代",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/components/canvas-workspace.tsx"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "短剧重试不等价旧CPU retry"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "旧零费retry child/ancestor与账务状态未知",
+        "categories": [
+          "retry-identity",
+          "billing-ledger"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/22"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/22",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/142",
+        "previousRecordSha256": "f76e9eb1403fc0ba7e40c312d8504d0196dcc6bd318f81480acce163dc676218",
+        "originalSourceTupleSha256": "f30bacbf9de55c704684c0d6b68d260395bf963a4a6d0f9e158b92040ff48303"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-image-retry-admission.ts",
+        "canonicalPointer": "/entries/142",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "aeff6c9c8a07fa48cf19c086fb871d3b9c97aa06",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-image-retry-admission.ts",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "7042152e90884fe2e72664d15ef829360f0356c7"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-image-retry-view.ts",
+      "canonicalPointer": "/entries/143",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "cc43ac05047144f1a26e9004b2dfd89a56c39675",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "当前短剧任务面板，只管理短剧",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/components/canvas-workspace.tsx"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "新面板不会消费旧view"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "浏览器原root/context/active-child定位可能仍需保留",
+        "categories": [
+          "browser-pending-operations",
+          "retry-identity"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/23"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/23",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/143",
+        "previousRecordSha256": "81db728c9a14f9139d02d96157b964bf5c01c8f26923e6eed552867d0c6285fd",
+        "originalSourceTupleSha256": "4f2cfa5d221c66e1dabbba88780c88eff6755ab5efb87964bb44a52872fa2679"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-image-retry-view.ts",
+        "canonicalPointer": "/entries/143",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "cc43ac05047144f1a26e9004b2dfd89a56c39675",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-image-retry-view.ts",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "cc43ac05047144f1a26e9004b2dfd89a56c39675"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-image-runtime-publication.ts",
+      "canonicalPointer": "/entries/144",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "ac5a4c9e694b8d8a51ee82c208b94ac57b0daccb",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "当前画布发布；无旧logical operation恢复",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/lib/asset-core/managed-media-read.ts"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "新发布不是旧slot事务等价"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "旧运行单格placement/checkpoint/媒体确认未收尾",
+        "categories": [
+          "operation-receipts",
+          "staged-media",
+          "unknown-commit"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/24"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/24",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/144",
+        "previousRecordSha256": "628afad113707b3f4c4ac100c60f1e6045fbaab938e913293c1166bf9c223bcc",
+        "originalSourceTupleSha256": "c2239afed6c873563c158b3ee1010971619bf5487cfa4a0fb1adff89bd12bb13"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-image-runtime-publication.ts",
+        "canonicalPointer": "/entries/144",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "ac5a4c9e694b8d8a51ee82c208b94ac57b0daccb",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-image-runtime-publication.ts",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "b0318b3d3da984143562e0e9952d3d282cf4c61f"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-image-source-options.ts",
+      "canonicalPointer": "/entries/145",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "12e22bc1353c7103a92eda1ec822f47fdac8ac99",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "画布上传/URL/当前图片入口",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/components/canvas-workspace.tsx"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "新枚举不负责解析旧图source值"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "本路径旧契约留档及关联责任继续追踪；旧审未识别独立持久化责任不等于已证明none-owned-by-path。",
+        "categories": [
+          "historical-contract-evidence"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/25"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/25",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/145",
+        "previousRecordSha256": "d3741318432032b823c52094cf1daf61f82711567c09447e9c3bb8338d8b2a30",
+        "originalSourceTupleSha256": "9d2cdfff1eae00fd4aeb328fb9120c912496c6c7940ef2369e02cf3ec73b32fc"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-image-source-options.ts",
+        "canonicalPointer": "/entries/145",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "12e22bc1353c7103a92eda1ec822f47fdac8ac99",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-image-source-options.ts",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "12e22bc1353c7103a92eda1ec822f47fdac8ac99"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-image-source.ts",
+      "canonicalPointer": "/entries/146",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "4a293cba8dd1b88ddb1a15ce1644b9c44de0d329",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "当前媒体授权解析，仅相关职责",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/components/canvas-workspace.tsx"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "当前解析器未被本草案认证为旧引用转换器"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "本路径旧契约留档及关联责任继续追踪；旧审未识别独立持久化责任不等于已证明none-owned-by-path。",
+        "categories": [
+          "historical-contract-evidence"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/26"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/26",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/146",
+        "previousRecordSha256": "f0dfc423028f6f8563a8e60d6c3f86d4e5f186520e131e28d11f346cf474d540",
+        "originalSourceTupleSha256": "964a9a5ac049d6bed0ec47af78b6c0f45259657e0e75d14204e437df88db524d"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-image-source.ts",
+        "canonicalPointer": "/entries/146",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "4a293cba8dd1b88ddb1a15ce1644b9c44de0d329",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-image-source.ts",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "4a293cba8dd1b88ddb1a15ce1644b9c44de0d329"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-image-terminal-receipt.ts",
+      "canonicalPointer": "/entries/147",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "bfbceae6775a683b20db1865a8adefcbc90e0af5",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "当前回执查询仅相关；非旧CPU receipt",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/components/canvas-workspace.tsx"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "新take receipt不识别旧workflow父子记录"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "旧completed retry媒体与账务可验证性失去读取入口",
+        "categories": [
+          "retry-identity",
+          "billing-ledger",
+          "managed-media"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/27"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/27",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/147",
+        "previousRecordSha256": "0a0a80ad776cc25deadc2eeb2eaf842e34e2d504b033284babb3dc07279094f9",
+        "originalSourceTupleSha256": "7aeedb19a83589650cb8653147004ddd57a454d2671f2161b9a43cba00f5cc83"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-image-terminal-receipt.ts",
+        "canonicalPointer": "/entries/147",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "bfbceae6775a683b20db1865a8adefcbc90e0af5",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-image-terminal-receipt.ts",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "a4cdaa1df7e6bcbd3fa9476aa7adba70d1d04422"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-renderer/legacy-mobile-pointer.ts",
+      "canonicalPointer": "/entries/148",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "4b46459e3b718c0c46bea52acff36baccd5d2ef3",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "当前画布手势入口",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/components/canvas-workspace.tsx"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "节点手势不等价画布手势"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "本路径旧契约留档及关联责任继续追踪；旧审未识别独立持久化责任不等于已证明none-owned-by-path。",
+        "categories": [
+          "historical-contract-evidence"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/28"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/28",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/148",
+        "previousRecordSha256": "3079779e6d3dbddf29f7faab485a0f5da8b5c0144d658af5faa855327fb53dd8",
+        "originalSourceTupleSha256": "055b62d02e53a818f1fa352893281ef255a309c46416cb89bea1e7434862faf4"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-renderer/legacy-mobile-pointer.ts",
+        "canonicalPointer": "/entries/148",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "4b46459e3b718c0c46bea52acff36baccd5d2ef3",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-renderer/legacy-mobile-pointer.ts",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "4b46459e3b718c0c46bea52acff36baccd5d2ef3"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-renderer/legacy-port-targets.ts",
+      "canonicalPointer": "/entries/149",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "a477eed7fe8f6cb2079154b1069d0249466f6cd2",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "无现节点端口；当前工具触屏",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/components/canvas-workspace.tsx"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "无连线端口则无端口等价承诺"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "本路径旧契约留档及关联责任继续追踪；旧审未识别独立持久化责任不等于已证明none-owned-by-path。",
+        "categories": [
+          "historical-contract-evidence"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/29"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/29",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/149",
+        "previousRecordSha256": "b4efad3cae8f8c05ad896601303482cd66141caeaa52ecb356b3a4fd37137d41",
+        "originalSourceTupleSha256": "033b1cedac916ead25c8d5ffb2a6a5d9544f6e09c378c06b5dda9c85f52b84d0"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-renderer/legacy-port-targets.ts",
+        "canonicalPointer": "/entries/149",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "a477eed7fe8f6cb2079154b1069d0249466f6cd2",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-renderer/legacy-port-targets.ts",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "a477eed7fe8f6cb2079154b1069d0249466f6cd2"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-renderer/minimap-pointer.ts",
+      "canonicalPointer": "/entries/150",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "00145069ae70b4664fbccfa4cb689d3fd3fdaa12",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "当前画布导航；无旧节点minimap",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/components/canvas-workspace.tsx"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "新导航不承接旧minimap事件"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "本路径旧契约留档及关联责任继续追踪；旧审未识别独立持久化责任不等于已证明none-owned-by-path。",
+        "categories": [
+          "historical-contract-evidence"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/30"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/30",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/150",
+        "previousRecordSha256": "01b217de024284ffe0adf6370a38d2af2728fee4bb61966573a5c79f0023eeaa",
+        "originalSourceTupleSha256": "fe342815f94c369a96fe287d833a35bc0075ddb9027d5eb2e3a2a014bc403ff3"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-renderer/minimap-pointer.ts",
+        "canonicalPointer": "/entries/150",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "00145069ae70b4664fbccfa4cb689d3fd3fdaa12",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-renderer/minimap-pointer.ts",
+          "main",
+          "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+          "00145069ae70b4664fbccfa4cb689d3fd3fdaa12"
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/components/workflow-hub.tsx",
+      "canonicalPointer": "/entries/156",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "c355e6ae90efafb2cc75a48234dc498f797b9628",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "当前项目管理；短剧项目列表只管理短剧",
+        "paths": [
+          "src/components/drama/use-drama-workbench.ts",
+          "src/lib/drama/workbench-client.ts"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "短剧列表不读旧workflow；保留字节不等于能导出"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "服务器已存workflow及用户自建preset失去查看/导出渠道",
+        "categories": [
+          "saved-workflows-and-user-presets",
+          "import-export"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/31"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/31",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/156",
+        "previousRecordSha256": "bfb9f4e5bc636f7f3f72ef907c0594be6d48a415143589865b710bf3534152a3",
+        "originalSourceTupleSha256": "b5f330cfd6d1bbe1772f82275d119750e3e2273104a9aa70c52b685c7e56534e"
+      },
+      "observedDeletionFacts": {
+        "path": "src/components/workflow-hub.tsx",
+        "canonicalPointer": "/entries/156",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "c355e6ae90efafb2cc75a48234dc498f797b9628",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/components/workflow-hub.tsx",
+          "candidate",
+          null,
+          null
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-file.ts",
+      "canonicalPointer": "/entries/158",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "d81440ecf29d992951c188777e72bf6245066521",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "短剧ZIP/剧本导入，只管理新短剧格式",
+        "paths": [
+          "src/components/drama/use-drama-workbench.ts",
+          "src/lib/drama/workbench-client.ts"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "旧workflow/ComfyUI JSON无当前等价导入"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "本路径旧契约留档及关联责任继续追踪；旧审未识别独立持久化责任不等于已证明none-owned-by-path。",
+        "categories": [
+          "historical-contract-evidence"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/32"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/32",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/158",
+        "previousRecordSha256": "d50c1d73939caa545bfc85bac8dd6ee6bf382221e31c70a06bb760e808f9227b",
+        "originalSourceTupleSha256": "19742187b549904f83808983f54787b6c3bba60cfa76f1b063fa7e4cde6c10ba"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-file.ts",
+        "canonicalPointer": "/entries/158",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "d81440ecf29d992951c188777e72bf6245066521",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-file.ts",
+          "candidate",
+          null,
+          null
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-presets.ts",
+      "canonicalPointer": "/entries/159",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "d9167f091c4a7f4b7abd1da690dd2535cd1186d1",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "短剧新项目/AI编剧；非节点预设",
+        "paths": [
+          "src/components/drama/use-drama-workbench.ts",
+          "src/lib/drama/workbench-client.ts"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "系统预设可退役；用户自建preset未获删除许可"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "本路径旧契约留档及关联责任继续追踪；旧审未识别独立持久化责任不等于已证明none-owned-by-path。",
+        "categories": [
+          "historical-contract-evidence"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/33"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/33",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/entries/159",
+        "previousRecordSha256": "5ce346b668920e4850450bed30dc748ac5c9274df272db3c4cb631f19e74ae39",
+        "originalSourceTupleSha256": "e54b35693b2784b613ffbae32a503055e6773881a5183bbd6b09bee907196db3"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-presets.ts",
+        "canonicalPointer": "/entries/159",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "d9167f091c4a7f4b7abd1da690dd2535cd1186d1",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-presets.ts",
+          "candidate",
+          null,
+          null
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/components/node-editor.tsx",
+      "canonicalPointer": "/additionalPaths/22",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "361cf33d3958b04dfe5dc7e8c5e30453190d74f6",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "/canvas 当前画布；/video 独立短剧",
+        "paths": [
+          "src/components/infinite-canvas.tsx",
+          "src/components/canvas-workspace.tsx"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "画布/短剧不提供任意节点图编辑和旧JSON导入"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "既有图/审批/重试引用需要保存与可导出安排",
+        "categories": [
+          "saved-workflows-and-user-presets",
+          "browser-pending-operations",
+          "import-export"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/34"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/34",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/additionalPaths/22",
+        "previousRecordSha256": "0edb5e02e2f62c6a40bf6afab62d42ee4a71e1d10b718ee4885735bd60ee6dd8",
+        "originalSourceTupleSha256": "035e4c205b187109875b6968181ea99c20d9fc2631787b721d386fec79179603"
+      },
+      "observedDeletionFacts": {
+        "path": "src/components/node-editor.tsx",
+        "canonicalPointer": "/additionalPaths/22",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "361cf33d3958b04dfe5dc7e8c5e30453190d74f6",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/components/node-editor.tsx",
+          null,
+          null,
+          null
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/lib/workflow-engine.ts",
+      "canonicalPointer": "/additionalPaths/23",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "f3704eab1a1edf33bc0037de7c90295e56be8af7",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "/video 定向镜头制作",
+        "paths": [
+          "src/components/drama/use-drama-workbench.ts",
+          "src/lib/drama/workbench-client.ts"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "不再有任意DAG/条件/循环/子图/ComfyUI语义"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "本路径旧契约留档及关联责任继续追踪；旧审未识别独立持久化责任不等于已证明none-owned-by-path。",
+        "categories": [
+          "historical-contract-evidence"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/35"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/35",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/additionalPaths/23",
+        "previousRecordSha256": "d8b56a1a5cbe82adb80a12d56e2a87341b39075b95fc3a4f176cb5837084318e",
+        "originalSourceTupleSha256": "283b346c2bd8bd5908f899fec1d4816df316fee36991d721aac4ac04988a64f1"
+      },
+      "observedDeletionFacts": {
+        "path": "src/lib/workflow-engine.ts",
+        "canonicalPointer": "/additionalPaths/23",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "f3704eab1a1edf33bc0037de7c90295e56be8af7",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/lib/workflow-engine.ts",
+          null,
+          null,
+          null
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/app/api/workflow/execute/route.ts",
+      "canonicalPointer": "/additionalPaths/24",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+      "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+      "deletedParentBlob": "1a212705aeb8e6b27b9c9913d9e52bb348186dcb",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "/video 短剧制作；普通任务查询/取消仅作相关入口",
+        "paths": [
+          "src/lib/task-registry.ts",
+          "src/lib/cloud-task-storage.ts"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "短剧不是任意DAG执行/审批/CPU retry恢复接口"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "旧processing/paused/publication-pending及已计费任务去向未知",
+        "categories": [
+          "accepted-tasks",
+          "billing-ledger",
+          "worker-leases"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/36"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/36",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/additionalPaths/24",
+        "previousRecordSha256": "06efdd0881d6739bd2f32cab015150b6a8fcd3d972879a2255de83ae0aed77b7",
+        "originalSourceTupleSha256": "04103b37ba8c4f3aad601af2248f9da0055bee0399601279ffe7b801fb163594"
+      },
+      "observedDeletionFacts": {
+        "path": "src/app/api/workflow/execute/route.ts",
+        "canonicalPointer": "/additionalPaths/24",
+        "deletionCommit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+        "deletionParent": "b337cd9ce8ebc0e1562225eb957f8d0b1a309fe9",
+        "deletedParentBlob": "1a212705aeb8e6b27b9c9913d9e52bb348186dcb",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "20b4fd5e0e0499a1e55512a62d132b38d4b2c6a9",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/app/api/workflow/execute/route.ts",
+          null,
+          null,
+          null
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    },
+    {
+      "path": "src/app/api/video/extract-frames/route.ts",
+      "canonicalPointer": "/additionalPaths/59",
+      "schemaVersion": 2,
+      "kind": "source-only-with-tracked-obligations",
+      "deletionCommit": "9c8249e9fef309b55152060ce412160ef80456b0",
+      "deletionParent": "738ed3c835fb7a0d602cc17019788460b1e2537b",
+      "deletedParentBlob": "51f5579b8cb439c4b804e27e062f471389882dc2",
+      "reason": "原删除diff已实际审阅；上游明确退役且用户要求对齐最新程序、不恢复旧节点。原笼统退役意图待确认已由当前指示解决。",
+      "replacement": {
+        "description": "/video 短剧工作台；/api/video/tools；/api/video/extract-frame",
+        "paths": [
+          "src/app/api/video/tools/route.ts",
+          "src/app/api/video/extract-frame/route.ts"
+        ],
+        "equivalence": "not-claimed",
+        "nonEquivalentGap": "新单帧入口不等于旧fps/keyframes/uniform/first-last多帧接口；现有证据未建立多帧等价"
+      },
+      "intent": {
+        "basis": "upstream-deletion-and-current-user-direction",
+        "upstreamCommits": [
+          "9c8249e9fef309b55152060ce412160ef80456b0"
+        ],
+        "userDirection": "用户明确要求对齐上游20b4/9c8源码删除意图，不恢复DAG，不授权任何历史数据清理、破坏性迁移、重新付费或账务完成声明。"
+      },
+      "obligations": {
+        "status": "tracked-preserved-pending",
+        "reason": "本路径旧契约留档及关联责任继续追踪；旧审未识别独立持久化责任不等于已证明none-owned-by-path。",
+        "categories": [
+          "temporary-files-and-output-contract"
+        ],
+        "preservation": {
+          "physicalDataPreservation": "unverified",
+          "cleanupAuthorized": false,
+          "migrationExecutionAuthorized": false,
+          "newPaidReplacementAuthorized": false,
+          "accountingDelivered": false,
+          "recoveryOrExportDelivered": false
+        },
+        "evidence": {
+          "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+          "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6",
+          "jsonPointer": "/obligations/37"
+        }
+      },
+      "acceptance": {
+        "sourceScope": "source-only",
+        "runtimeStatus": "pending",
+        "historicalDeliveryStatus": "pending",
+        "equivalence": "not-claimed"
+      },
+      "evidenceDraft": {
+        "artifact": "retirement-proof.evidence.candidate.json",
+        "jsonPointer": "/retirements/37",
+        "mustPublishVersionableEvidenceBeforeActualRegistration": true
+      },
+      "origin": {
+        "canonicalPointer": "/additionalPaths/59",
+        "previousRecordSha256": "ce3a5c22392a3dec46ca3a786b046ecc97f7381d1587828ebd73a386ca518b74",
+        "originalSourceTupleSha256": "de5db253904a1fc1ac974e5c1917b4c987c4c9e29793d246c5e26c4af0e15c85"
+      },
+      "observedDeletionFacts": {
+        "path": "src/app/api/video/extract-frames/route.ts",
+        "canonicalPointer": "/additionalPaths/59",
+        "deletionCommit": "9c8249e9fef309b55152060ce412160ef80456b0",
+        "deletionParent": "738ed3c835fb7a0d602cc17019788460b1e2537b",
+        "deletedParentBlob": "51f5579b8cb439c4b804e27e062f471389882dc2",
+        "parentObjectType": "blob",
+        "parentObjectMode": "100644",
+        "priorParentBlobMatches": true,
+        "diffShowsExactDelete": true,
+        "absentInDeletionTree": true,
+        "absentInHeadTree": true,
+        "absentInIndex": true,
+        "absentInWorkingTreeIncludingSymlink": true,
+        "reachableFromHead": true,
+        "latestPathChange": {
+          "commit": "9c8249e9fef309b55152060ce412160ef80456b0",
+          "status": "D"
+        },
+        "sourceTuple": [
+          "src/app/api/video/extract-frames/route.ts",
+          null,
+          null,
+          null
+        ]
+      },
+      "sourceOnly": true,
+      "runtimeStatus": "pending",
+      "historicalDeliveryStatus": "pending"
+    }
+  ],
+  "registration": "candidate-evidence-only",
+  "sourceOrigins": {
+    "path": "docs/testing/evidence/2026-11-21-tracked-retirement/source-origins.json",
+    "sha256": "31487215365295a22ee06fb681181942ec794953df69d662c375b4b883733ee9"
+  },
+  "obligationEvidence": {
+    "path": "docs/testing/evidence/2026-11-21-tracked-retirement/historical-obligations.json",
+    "sha256": "3e1e8776f5296065e677442afca9cc2bed1d596c2f98fd50456977d32e7ca3d6"
+  }
+}

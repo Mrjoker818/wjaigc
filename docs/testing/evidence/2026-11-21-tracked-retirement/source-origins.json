@@ -1,0 +1,3164 @@
+{
+  "schemaVersion": 2,
+  "kind": "tracked-retirement-source-origins",
+  "registration": "candidate-evidence-only",
+  "comparisonBaseline": "7fdc0108952fb3a68415ca3a2a26b5d33641dc6b",
+  "reviewedParent": "c8dac11754b7b6dd9de8d4829e44777f1ca0ce88",
+  "canonicalRecordSha256": "7f5ad7e510a76e7854283d99c89aa3eed03debbbd2f158dff9b690754a9fa569",
+  "authorizationFileSha256": "cf5b5a00579e198bf92781a5efc8ba3bad31b369138cf520d9ba8402699ecf26",
+  "original160SourceTuples": [
+    [
+      ".dockerignore",
+      "main",
+      "8735d30b5f83a40df7cfa58d0692d7d84926507a",
+      "dc1328d59d2a89970f005d23060b75ef2fa3f18d"
+    ],
+    [
+      ".impeccable/surfaces/src-components-sketch-to-code-panel-tsx.md",
+      "main",
+      "6872ce36d6ae3c69d90e24b738d3b70f0606994c",
+      "3727b556f9f7d9f0a875a997df6c9f769ed73b9d"
+    ],
+    [
+      ".superpowers/sdd/2026-10-09-sketch-to-code/j-context-2049ec2f-6bee-4b99-a382-3a40fd765b21.json",
+      "main",
+      "3d58a14638857e78728c7f4daf4712225441e03d",
+      "d6e8788257b282811ae7eac87fe55986d9c11cca"
+    ],
+    [
+      ".superpowers/sdd/2026-10-09-sketch-to-code/j-context-44ca7513-5bfe-44a6-918b-7a36013b40cd.json",
+      "main",
+      "3d58a14638857e78728c7f4daf4712225441e03d",
+      "40b74843a2d5be9771a8069c0286e33c19a67711"
+    ],
+    [
+      ".superpowers/sdd/2026-10-09-sketch-to-code/j-context-74359171-879f-45cc-8428-9a2fc2a32062.json",
+      "main",
+      "3d58a14638857e78728c7f4daf4712225441e03d",
+      "076287e6048af030340363c32bfdaef190722ed8"
+    ],
+    [
+      ".superpowers/sdd/2026-10-09-sketch-to-code/j-context-ef8889c6-260a-4461-b532-f7445aaf0265.json",
+      "main",
+      "3d58a14638857e78728c7f4daf4712225441e03d",
+      "c82f3c6e351fb2bd63f95d43b83eacb4e8eddc6e"
+    ],
+    [
+      ".superpowers/sdd/2026-10-09-sketch-to-code/j-fixture-2049ec2f-6bee-4b99-a382-3a40fd765b21.json",
+      "main",
+      "3d58a14638857e78728c7f4daf4712225441e03d",
+      "4c8199d2e0fc2b1872613667b447fdfb796c865b"
+    ],
+    [
+      ".superpowers/sdd/2026-10-09-sketch-to-code/j-fixture-44ca7513-5bfe-44a6-918b-7a36013b40cd.json",
+      "main",
+      "3d58a14638857e78728c7f4daf4712225441e03d",
+      "6c8dd2c61e6ce54ca0ca23a67d85adb074c27610"
+    ],
+    [
+      ".superpowers/sdd/2026-10-09-sketch-to-code/j-fixture-74359171-879f-45cc-8428-9a2fc2a32062.json",
+      "main",
+      "3d58a14638857e78728c7f4daf4712225441e03d",
+      "8b18e1334f3148c81b0de4ba06bc23b906609b39"
+    ],
+    [
+      ".superpowers/sdd/2026-10-09-sketch-to-code/j-fixture-ef8889c6-260a-4461-b532-f7445aaf0265.json",
+      "main",
+      "3d58a14638857e78728c7f4daf4712225441e03d",
+      "9d774c06cca2bd9fe995ce3c3f47e286cd313fd5"
+    ],
+    [
+      ".superpowers/sdd/2026-10-09-sketch-to-code/j-ready-2049ec2f-6bee-4b99-a382-3a40fd765b21.json",
+      "main",
+      "3d58a14638857e78728c7f4daf4712225441e03d",
+      "cbb7abe8323b1c931205e12d699fb3f71fc89f73"
+    ],
+    [
+      ".superpowers/sdd/2026-10-09-sketch-to-code/j-ready-44ca7513-5bfe-44a6-918b-7a36013b40cd.json",
+      "main",
+      "3d58a14638857e78728c7f4daf4712225441e03d",
+      "da519c094f37812bd8177655db9fee1d7ddb9871"
+    ],
+    [
+      ".superpowers/sdd/2026-10-09-sketch-to-code/j-ready-74359171-879f-45cc-8428-9a2fc2a32062.json",
+      "main",
+      "3d58a14638857e78728c7f4daf4712225441e03d",
+      "d552f8af98bde683e850dcedfade62cdd5d0e831"
+    ],
+    [
+      ".superpowers/sdd/2026-10-09-sketch-to-code/j-ready-ef8889c6-260a-4461-b532-f7445aaf0265.json",
+      "main",
+      "3d58a14638857e78728c7f4daf4712225441e03d",
+      "28c008e986142da9ad3a40acaff42b8099b63f2c"
+    ],
+    [
+      "AGENTS.md",
+      "main",
+      "c8dac11754b7b6dd9de8d4829e44777f1ca0ce88",
+      "1ecf15108088280f739d877aa18596af57ad8cd9"
+    ],
+    [
+      "MODEL_PARAMS_TABLE.md",
+      "main",
+      "f3ef5261c226a062574d248857c5ee2f6e6db066",
+      "2312487900046ff0a3dea88485696537e023b167"
+    ],
+    [
+      "README.md",
+      "main",
+      "f3ef5261c226a062574d248857c5ee2f6e6db066",
+      "c008a07ce21f6daf7a7959ea37bf5bdef80cab33"
+    ],
+    [
+      "deploy-seed/system/api-providers.json",
+      "main",
+      "c8dac11754b7b6dd9de8d4829e44777f1ca0ce88",
+      "b534ca3afaa5a7bf83ecf8ddb27f08250ac6510c"
+    ],
+    [
+      "deploy-seed/system/users.json",
+      "main",
+      "c8dac11754b7b6dd9de8d4829e44777f1ca0ce88",
+      "7633fff168c0a5f7fededf73122f2ac5a94c5c44"
+    ],
+    [
+      "scripts/bootstrap-local-tools.sh",
+      "main",
+      "d5a8866dcaf8a61263ef0984a57c3548100f58db",
+      null
+    ],
+    [
+      "scripts/build-with-python-check.sh",
+      "main",
+      "d5a8866dcaf8a61263ef0984a57c3548100f58db",
+      null
+    ],
+    [
+      "scripts/download-iopaint-models.sh",
+      "main",
+      "d5a8866dcaf8a61263ef0984a57c3548100f58db",
+      null
+    ],
+    [
+      "scripts/download-models-background.sh",
+      "main",
+      "d5a8866dcaf8a61263ef0984a57c3548100f58db",
+      null
+    ],
+    [
+      "scripts/download-removebg-models.sh",
+      "main",
+      "d5a8866dcaf8a61263ef0984a57c3548100f58db",
+      null
+    ],
+    [
+      "scripts/download-upscale-models.sh",
+      "main",
+      "d5a8866dcaf8a61263ef0984a57c3548100f58db",
+      null
+    ],
+    [
+      "scripts/ensure-models.sh",
+      "main",
+      "d5a8866dcaf8a61263ef0984a57c3548100f58db",
+      null
+    ],
+    [
+      "scripts/ensure-python-env.sh",
+      "main",
+      "d5a8866dcaf8a61263ef0984a57c3548100f58db",
+      null
+    ],
+    [
+      "scripts/export-deploy-seed.mjs",
+      "main",
+      "c8dac11754b7b6dd9de8d4829e44777f1ca0ce88",
+      "23505ecd6871a2373b47792bd9eaac5bd68ff909"
+    ],
+    [
+      "scripts/iopaint_erase.py",
+      "main",
+      "d5a8866dcaf8a61263ef0984a57c3548100f58db",
+      null
+    ],
+    [
+      "scripts/merge-model-parts.sh",
+      "main",
+      "d5a8866dcaf8a61263ef0984a57c3548100f58db",
+      null
+    ],
+    [
+      "scripts/rembg_remove_background.py",
+      "main",
+      "d5a8866dcaf8a61263ef0984a57c3548100f58db",
+      null
+    ],
+    [
+      "scripts/setup-venv.sh",
+      "main",
+      "d5a8866dcaf8a61263ef0984a57c3548100f58db",
+      null
+    ],
+    [
+      "scripts/start-iopaint-lama.sh",
+      "main",
+      "d5a8866dcaf8a61263ef0984a57c3548100f58db",
+      null
+    ],
+    [
+      "scripts/upscale_onnx.py",
+      "main",
+      "d5a8866dcaf8a61263ef0984a57c3548100f58db",
+      null
+    ],
+    [
+      "src/app/api/activity-venue/analyze/route.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "91c60eaf1ff5f3b4bb398f8180b000a3178a615a"
+    ],
+    [
+      "src/app/api/activity-venue/proposals/route.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "88540dad616cd3d22e072a56815b5ea2e109b506"
+    ],
+    [
+      "src/app/api/activity-venue/qc/route.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "6c6e0c376613f1b5e96dbdc21ca0af5db6d57a3e"
+    ],
+    [
+      "src/app/api/admin/audit/route.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "71fb653255be9c3458e7cd99671cd514503e763f"
+    ],
+    [
+      "src/app/api/admin/groups/route.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "0a66eaefbb8c4640f480e091b669a265dedd896b"
+    ],
+    [
+      "src/app/api/admin/op-log/route.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "69b2e889252eb13b92f423b14c168837ec4370cb"
+    ],
+    [
+      "src/app/api/assets/actor-v2/[assetId]/restore/route.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "1122362c4efe1cbb48b5f3eb3572482b6dec7a38"
+    ],
+    [
+      "src/app/api/assets/actor-v2/batch-transfer/route.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "ae7fb51e5eb7babb262b9e77c75af1a886781c4d"
+    ],
+    [
+      "src/app/api/assets/actor-v2/transfer/route.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "1a708852d98ae4d14e0ef7dd4f2720c60bc3905f"
+    ],
+    [
+      "src/app/api/audio/generate/route.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "de56dab79d6bc15f40291e04a1ee175fa562cf89"
+    ],
+    [
+      "src/app/api/credits/payment-status/route.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "fe143abb5e6b1bf17dcf739fc064893e91d4006a"
+    ],
+    [
+      "src/app/api/credits/route.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "f20b4e687351ec7c29cb3f3589898c11318fda75"
+    ],
+    [
+      "src/app/api/diagnostics/export/route.ts",
+      "main",
+      "d5a8866dcaf8a61263ef0984a57c3548100f58db",
+      "def19f463f3de77711708c83aec3c18990ea0403"
+    ],
+    [
+      "src/app/api/display-3d/generate/route.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "2090d896c5f3a7bf4bc9fccdbcf638512d8ad753"
+    ],
+    [
+      "src/app/api/video/tools/route.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "990538d8b820491ea8f17c4a1c3cc6d674dcbcf3"
+    ],
+    [
+      "src/app/api/workflow/image-actions/route.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "6b86cebe43ca0f24bc1e0456545d4262045513c6"
+    ],
+    [
+      "src/app/recharge/[orderId]/page.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "882979a84152e24b41d93f5042ae4638a976c05c"
+    ],
+    [
+      "src/app/shared/[shareId]/shared-view-client.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "370fc3154876c50656ef4295a3e64394ebe5d851"
+    ],
+    [
+      "src/components/brand-ecommerce/BrandAssetManager.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "f0ae7097044ce9952cf783aad8de3c6f80bc076b"
+    ],
+    [
+      "src/components/brand-ip-panel.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "3be75dd1948ea87945b2a86c766f83f8d478fc6e"
+    ],
+    [
+      "src/components/canvas/CanvasHelpModal.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "fdbd344bd28d6704a29086d219b2545a12cbe97b"
+    ],
+    [
+      "src/components/canvas/CanvasMediaNode.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "3c811caa11ce480e38e982a425a324cc3d94ba53"
+    ],
+    [
+      "src/components/canvas/MultiAngleSpherePreview.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "6805d6e703cb53467cca487a83ada02a8e74a226"
+    ],
+    [
+      "src/components/canvas/mobile-generation-groups.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "e85d11f04bd5f55a35a2981ee60cd1312bd2b32c"
+    ],
+    [
+      "src/components/canvas/mobile-group-header.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "0c454f3fa81d4ed3178578cca5fc442df2d30f42"
+    ],
+    [
+      "src/components/custom-dialogs.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "6b3c1b5a971f26f8ceff44ff68ae4a16c422d45e"
+    ],
+    [
+      "src/components/dashboard/admin-recharge-orders.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "21e69a2283d61092bcbe9663828820baf533bd5f"
+    ],
+    [
+      "src/components/dashboard/data-manager-image.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "df94d381a5eee026d3ba61a81c0e2601bb895fcf"
+    ],
+    [
+      "src/components/dashboard/data-manager-tab.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "46571c8415611ddefa51046d0c634b69896ae75a"
+    ],
+    [
+      "src/components/dashboard/desktop-admin-tab.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "93c1f2d34f5deea046ae843f8d16cc70e40246fe"
+    ],
+    [
+      "src/components/dashboard/user-credits-tab.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "de4fb844ef6dd5921d2ac889a5ef3d884627d941"
+    ],
+    [
+      "src/components/dashboard/user-settings-tab.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "bc0bed85db18e50b5203a92d87ea36361656383c"
+    ],
+    [
+      "src/components/engine-select-dialog.tsx",
+      "main",
+      "d5a8866dcaf8a61263ef0984a57c3548100f58db",
+      "c640f4d5cc6a1ea8ec3dd0a1487a31e109207f1b"
+    ],
+    [
+      "src/components/help-guide.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "3a80102f3a1876388b7e1d07d23b7385ec816264"
+    ],
+    [
+      "src/components/human-repair-panel.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "e5ea6588d729ad932b8371236fbc5daaa6c210f3"
+    ],
+    [
+      "src/components/image-compare-dialog.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "149f9357e41d991e8b2fcd2be3a42ca62da3f530"
+    ],
+    [
+      "src/components/image-preview.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "d137cf91e854a257f4f48ebc5e90a822b77aa1e1"
+    ],
+    [
+      "src/components/layer-panel.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "370202d3a94ae2aa77286e8ca2ce0afe3549bed1"
+    ],
+    [
+      "src/components/motion-brush-canvas.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "9606c54c1a58f27f150fc8ca6c1ca80875c255b1"
+    ],
+    [
+      "src/components/oh-my-prompt.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "b48b0a57fbd538831a6fef520fa4d8f32675b3e2"
+    ],
+    [
+      "src/components/panorama-viewer.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "74c85ae10b0c444d4699762eb4f936023b66401d"
+    ],
+    [
+      "src/components/prompt-equation.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "2af0dd0d6151dc0448ab1afe515d11ac250514ec"
+    ],
+    [
+      "src/components/prompt-template-panel.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "bb748b359fadc571c8c547d4f1387cb81370e53d"
+    ],
+    [
+      "src/components/psd-editor/ExportToolbar.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "dbd4cc6495f6f3595c941617eaa59b1981ae0da7"
+    ],
+    [
+      "src/components/psd-editor/LayerRow.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "88a4fadaf63d0c8e605edae39ef9b2b858081b5a"
+    ],
+    [
+      "src/components/simple-chat/global-search.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "0abc0d7d351afa40e0d325b9dc6b2819ceb12cf2"
+    ],
+    [
+      "src/components/simple-chat/image-lightbox.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "9c902b6ac0af3bacc2f12ef31c72e709cdc27422"
+    ],
+    [
+      "src/components/simple-chat/markdown-renderer.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "51957ff84e5aa242753079d56e8e5e704fc99994"
+    ],
+    [
+      "src/components/simple-chat/memory-panel.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "d80ad414889c0c8f35cf06c8f559cda7155fa123"
+    ],
+    [
+      "src/components/simple-chat/model-compare.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "21ea5037af28d2e5942677740a28ff20d3199a01"
+    ],
+    [
+      "src/components/simple-chat/prompt-optimizer.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "88a4c190f5cb76c3af440b05d9a00add7864cd6f"
+    ],
+    [
+      "src/components/simple-chat/quick-commands.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "b3e6e05c575276fd97b5d6214ca2954eb2922795"
+    ],
+    [
+      "src/components/simple-chat/report-export.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "d93a21524b96c15c2eaf77de05e2c727a9f49a27"
+    ],
+    [
+      "src/components/simple-chat/share-dialog.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "ce890cea515e90905992d6e2539188050543a25c"
+    ],
+    [
+      "src/components/simple-chat/usage-stats.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "58a6469379b513b66c36f13444492e8b263983ee"
+    ],
+    [
+      "src/components/ui/sonner.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "3f4c710a352ec39205cd9d8c2bac07066159d018"
+    ],
+    [
+      "src/components/vector-design/vector-editor-dialog.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "f877665ff5942f5bb8534caf136cb2a77c3cc55b"
+    ],
+    [
+      "src/components/venue-region-canvas.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "c399fe29524cde6cd59299a01b52245683568187"
+    ],
+    [
+      "src/components/video-compare-dialog.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "c406d744dbb29eec1f3c29a3eae2e7ab31b4d1ab"
+    ],
+    [
+      "src/components/video-edit-panel.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "fc984eba0174b342a004c0106e823c85019941cb"
+    ],
+    [
+      "src/components/video-player.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "7caed9c7c5fdb2c5998724352d489ba41fa13706"
+    ],
+    [
+      "src/components/workflow/WorkflowContextMenu.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "6572c778dadf935a0b7f9ad49ad77979c0b51a24"
+    ],
+    [
+      "src/components/workflow/WorkflowLibraryContent.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "6e60f6fc2a6e29dbd5d15b88a378e7f8bb68790c"
+    ],
+    [
+      "src/components/workflow/WorkflowPortTargets.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "d0eaf8e27b6d90fe32e8ff0a377e77595b821dfb"
+    ],
+    [
+      "src/config/version.ts",
+      "main",
+      "3788bfb805e60a4c683952454ddd274ef8ea45c8",
+      "421f0742d4ceac96d74d7c843389d73d0fb56c31"
+    ],
+    [
+      "src/features/annotations/annotation-composer.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "7a18f005c5bb79e4ccb859937ca747b9bcca219e"
+    ],
+    [
+      "src/features/annotations/node-annotation-workspace.tsx",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "741a037349868d68f895cfa87977d951aac151b5"
+    ],
+    [
+      "src/hooks/use-workspace-theme.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "19495c54f899d920ed660bea4e42eb2479c98082"
+    ],
+    [
+      "src/lib/activity-venue-model.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "fcee4e907ce1aff396ed5c1f6e675ae7662d0d4c"
+    ],
+    [
+      "src/lib/asset-core/canvas-media-recovery-client.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "425719b266bd46d764d43b80b5868c93c3d52bde"
+    ],
+    [
+      "src/lib/asset-versioned-transfer.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "17cf844e9dc1f40c1eb4a28dcefee948b54f8236"
+    ],
+    [
+      "src/lib/canvas-bottom-dock-layout.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "ecf817a82c2475b64bd6efd436492ed09f1d47e0"
+    ],
+    [
+      "src/lib/canvas-incremental-history.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "e6fa09c8da83b9c813552477a6b991a28afe4907"
+    ],
+    [
+      "src/lib/chat-canvas-action.ts",
+      "main",
+      "ce39460f128db4a2112f655f78678bf51dc63d92",
+      "3aa04e845f4bf4bab50674d0102fdcb8af92c2c0"
+    ],
+    [
+      "src/lib/check-local-models.ts",
+      "main",
+      "d5a8866dcaf8a61263ef0984a57c3548100f58db",
+      null
+    ],
+    [
+      "src/lib/credits-constants.ts",
+      "main",
+      "6911f1d05f341ad0ffcdb0008419ec9c579214d5",
+      "ca189a3d277aa0c86be0c360d9e7f86684e8151a"
+    ],
+    [
+      "src/lib/expected-actor-header.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "057fd5f3ed2bfee68f226d45e5347e975c35e85e"
+    ],
+    [
+      "src/lib/generated-audio-storage.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "ff05ce21aac48db8b2ed1c4fad32254a8587a1e4"
+    ],
+    [
+      "src/lib/hex-cube-position.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "4961f8e38107533ac0a2822fcebc160fb43e84ef"
+    ],
+    [
+      "src/lib/image-tool-model-options.ts",
+      "main",
+      "6911f1d05f341ad0ffcdb0008419ec9c579214d5",
+      "1dd1746cd31aec306193faadc4a99e7bc11271a4"
+    ],
+    [
+      "src/lib/image-tools/concurrency-gate.ts",
+      "main",
+      "d5a8866dcaf8a61263ef0984a57c3548100f58db",
+      null
+    ],
+    [
+      "src/lib/image-tools/config.ts",
+      "main",
+      "d5a8866dcaf8a61263ef0984a57c3548100f58db",
+      "cd0f98fea49bda34d90d9b28969c9a6403590a4b"
+    ],
+    [
+      "src/lib/image-tools/local-erase-client.ts",
+      "main",
+      "d5a8866dcaf8a61263ef0984a57c3548100f58db",
+      null
+    ],
+    [
+      "src/lib/image-tools/rembg-client.ts",
+      "main",
+      "d5a8866dcaf8a61263ef0984a57c3548100f58db",
+      null
+    ],
+    [
+      "src/lib/payment-config.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "0153b0d8d562fb8738796d43b18d1ef8c817493c"
+    ],
+    [
+      "src/lib/pear-image-models.ts",
+      "main",
+      "6911f1d05f341ad0ffcdb0008419ec9c579214d5",
+      "00ca672206c2a59e2900fb28cb1c2a4a125feb78"
+    ],
+    [
+      "src/lib/pear-video-models.ts",
+      "main",
+      "6911f1d05f341ad0ffcdb0008419ec9c579214d5",
+      "8ff381aecaca5d05822e0169d191c18cfbe84eea"
+    ],
+    [
+      "src/lib/poisoned-api-host.ts",
+      "main",
+      "f3ef5261c226a062574d248857c5ee2f6e6db066",
+      "d328f7b6023a643e08fa932554f843a0764264c8"
+    ],
+    [
+      "src/lib/simple-chat-dashboard-read.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "97380ac71c665f3f71e18bdf33884c68d8a20c27"
+    ],
+    [
+      "src/lib/task-core/image-tool-capabilities.ts",
+      "main",
+      "6911f1d05f341ad0ffcdb0008419ec9c579214d5",
+      "b799cccc71dfa11503bd7f2716a46770167efde5"
+    ],
+    [
+      "src/lib/task-core/restored-generation-retry.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "9368ca039b9fe1161e8486b464fff06bed668be0"
+    ],
+    [
+      "src/lib/video-api.ts",
+      "main",
+      "6911f1d05f341ad0ffcdb0008419ec9c579214d5",
+      "583da3c37d5ec62f221812d2e13adbe3bed2724d"
+    ],
+    [
+      "src/lib/workflow-background.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "57aea862c89b05a2e89cd97b5f73ed5cb088a89b"
+    ],
+    [
+      "src/lib/workflow-image-action-request.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "a5946ac4488db2aee3e7c35bbf47e959ddeda97c"
+    ],
+    [
+      "src/lib/workflow-image-actions.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "ee7a11a7ef2d5445f6dbe4b87c7e59a81a3590a6"
+    ],
+    [
+      "src/lib/workflow-image-batch.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "9848b77c1a60d1ed668cce8c2bbe59c449661cba"
+    ],
+    [
+      "src/lib/workflow-image-document-publication.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "0118dfdc71ca29268a46b4482d0713d9932ca3c5"
+    ],
+    [
+      "src/lib/workflow-image-document-runtime-publication.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "725dfb52f21dc16709e92ecdc7a01f8b63d248f1"
+    ],
+    [
+      "src/lib/workflow-image-execution-fence.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "8ad2c04b1b033e7c63d0478f61c5d6c5c75e0cc3"
+    ],
+    [
+      "src/lib/workflow-image-graph.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "31373a82acfce2d4ba90779eea15f4f7f15aaafd"
+    ],
+    [
+      "src/lib/workflow-image-grid-client.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "e586da58401f497634f1972943d1865c4dc83e01"
+    ],
+    [
+      "src/lib/workflow-image-grid.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "9f0323519b6d37ae92f61c14cd360d223dd859e7"
+    ],
+    [
+      "src/lib/workflow-image-input-execution.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "59e2531b09b52b90544ffe82d511df8c95ebe455"
+    ],
+    [
+      "src/lib/workflow-image-media.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "304119dcf7efb84af9fd5aeb305596cda6f29b60"
+    ],
+    [
+      "src/lib/workflow-image-preparation.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "0dff5ac016b3072dca9642cee880e4c8df93b6a5"
+    ],
+    [
+      "src/lib/workflow-image-publication.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "332ad554b44931c193e3019128beebd5ded2403f"
+    ],
+    [
+      "src/lib/workflow-image-receiver.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "64120aa066ef2b6f08ca09f61fb5893e3dfe6002"
+    ],
+    [
+      "src/lib/workflow-image-reference-runtime.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "29ed1846c469841a1a443e4e0a08bff61026adb7"
+    ],
+    [
+      "src/lib/workflow-image-retry-admission.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "7042152e90884fe2e72664d15ef829360f0356c7"
+    ],
+    [
+      "src/lib/workflow-image-retry-view.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "cc43ac05047144f1a26e9004b2dfd89a56c39675"
+    ],
+    [
+      "src/lib/workflow-image-runtime-publication.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "b0318b3d3da984143562e0e9952d3d282cf4c61f"
+    ],
+    [
+      "src/lib/workflow-image-source-options.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "12e22bc1353c7103a92eda1ec822f47fdac8ac99"
+    ],
+    [
+      "src/lib/workflow-image-source.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "4a293cba8dd1b88ddb1a15ce1644b9c44de0d329"
+    ],
+    [
+      "src/lib/workflow-image-terminal-receipt.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "a4cdaa1df7e6bcbd3fa9476aa7adba70d1d04422"
+    ],
+    [
+      "src/lib/workflow-renderer/legacy-mobile-pointer.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "4b46459e3b718c0c46bea52acff36baccd5d2ef3"
+    ],
+    [
+      "src/lib/workflow-renderer/legacy-port-targets.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "a477eed7fe8f6cb2079154b1069d0249466f6cd2"
+    ],
+    [
+      "src/lib/workflow-renderer/minimap-pointer.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "00145069ae70b4664fbccfa4cb689d3fd3fdaa12"
+    ],
+    [
+      "src/lib/workspace-panel-layout.ts",
+      "main",
+      "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+      "b3776d35514115c1d51ded7e02ed05871eb9d92b"
+    ],
+    [
+      "test-results/console/chrome-control-blocked-after-632c59d-20260720.json",
+      "main",
+      "a0155cabefcff5ff69bc6f0cfe63635b900745b9",
+      null
+    ],
+    [
+      "test-results/network/cloud-deployment-health-632c59d-20260720.json",
+      "main",
+      "a0155cabefcff5ff69bc6f0cfe63635b900745b9",
+      null
+    ],
+    [
+      "test-results/network/cloud-deployment-probe-8fc8f25-20260720.json",
+      "main",
+      "a0155cabefcff5ff69bc6f0cfe63635b900745b9",
+      null
+    ],
+    [
+      "test-results/network/pear-layer-retry-f8f7cef.json",
+      "main",
+      "a0155cabefcff5ff69bc6f0cfe63635b900745b9",
+      null
+    ],
+    [
+      "src/components/workflow-hub.tsx",
+      "candidate",
+      null,
+      null
+    ],
+    [
+      "src/lib/asset-core/mp4-upload-diagnostic.ts",
+      "candidate",
+      null,
+      null
+    ],
+    [
+      "src/lib/workflow-file.ts",
+      "candidate",
+      null,
+      null
+    ],
+    [
+      "src/lib/workflow-presets.ts",
+      "candidate",
+      null,
+      null
+    ]
+  ],
+  "original286Authorizations": [
+    {
+      "path": "src/app/api/agent-runs/[runId]/events/route.ts",
+      "sourceCommit": "0c5c1adf"
+    },
+    {
+      "path": "src/app/api/agent-runs/[runId]/route.ts",
+      "sourceCommit": "0c5c1adf"
+    },
+    {
+      "path": "src/app/api/agent-runs/route.ts",
+      "sourceCommit": "ae8d4608"
+    },
+    {
+      "path": "src/lib/agent-runtime/admission-gate.ts",
+      "sourceCommit": "b1bcf2d8"
+    },
+    {
+      "path": "src/lib/agent-runtime/context-adapters.ts",
+      "sourceCommit": "d619ec21"
+    },
+    {
+      "path": "src/lib/agent-runtime/downstream-operations.ts",
+      "sourceCommit": "ee60a0d3"
+    },
+    {
+      "path": "src/lib/agent-runtime/event-reducer.ts",
+      "sourceCommit": "0c5c1adf"
+    },
+    {
+      "path": "src/lib/agent-runtime/event-storage.ts",
+      "sourceCommit": "d84ba085"
+    },
+    {
+      "path": "src/lib/agent-runtime/generate-image-adapter.ts",
+      "sourceCommit": "3f93aa34"
+    },
+    {
+      "path": "src/lib/agent-runtime/legacy-observer.ts",
+      "sourceCommit": "571ba587"
+    },
+    {
+      "path": "src/lib/agent-runtime/mode.ts",
+      "sourceCommit": "12327887"
+    },
+    {
+      "path": "src/lib/agent-runtime/model-capability-set.ts",
+      "sourceCommit": "b1bcf2d8"
+    },
+    {
+      "path": "src/lib/agent-runtime/provider-submission.ts",
+      "sourceCommit": "2175b4f4"
+    },
+    {
+      "path": "src/lib/agent-runtime/same-task-adapter.ts",
+      "sourceCommit": "b1bcf2d8"
+    },
+    {
+      "path": "src/lib/agent-runtime/service.ts",
+      "sourceCommit": "b1bcf2d8"
+    },
+    {
+      "path": "src/lib/agent-runtime/surface-dispatch.ts",
+      "sourceCommit": "3f93aa34"
+    },
+    {
+      "path": "src/lib/agent-runtime/surface-requests.ts",
+      "sourceCommit": "14adbf0c"
+    },
+    {
+      "path": "src/lib/agent-runtime/tool-registry.ts",
+      "sourceCommit": "b1bcf2d8"
+    },
+    {
+      "path": "src/lib/agent-runtime/types.ts",
+      "sourceCommit": "0c5c1adf"
+    },
+    {
+      "path": "src/lib/agent-runtime/workspace-results.ts",
+      "sourceCommit": "2557d67c"
+    },
+    {
+      "path": "migrations/20260821_v588_admin_thumbnail_variants.sql",
+      "sourceCommit": "d941384"
+    },
+    {
+      "path": "migrations/20260821_wj_stable_s4_historical_media_remediations.sql",
+      "sourceCommit": "bc74b89"
+    },
+    {
+      "path": "scripts/coze-deploy-build.sh",
+      "sourceCommit": "172f38c"
+    },
+    {
+      "path": "scripts/coze-preview-build.sh",
+      "sourceCommit": "172f38c"
+    },
+    {
+      "path": "scripts/doctor-asset-status.mjs",
+      "sourceCommit": "e809f5c"
+    },
+    {
+      "path": "src/app/api/admin/assets/remediation/route.ts",
+      "sourceCommit": "e97533c9"
+    },
+    {
+      "path": "src/app/api/admin/backfill-thumbnails/route.ts",
+      "sourceCommit": "d941384"
+    },
+    {
+      "path": "src/app/api/admin/dashboard-stats/route.ts",
+      "sourceCommit": "1ba98f7"
+    },
+    {
+      "path": "src/app/api/admin/production-readiness/route.ts",
+      "sourceCommit": "05f6717"
+    },
+    {
+      "path": "src/app/api/assets/[assetId]/restore/route.ts",
+      "sourceCommit": "0756f71"
+    },
+    {
+      "path": "src/app/api/assets/adopt-canvas-image/route.ts",
+      "sourceCommit": "c99fb72"
+    },
+    {
+      "path": "src/components/dashboard/admin-tabs.tsx",
+      "sourceCommit": "795d3fe3"
+    },
+    {
+      "path": "src/components/canvas/CanvasCommandPalette.tsx",
+      "sourceCommit": "8acb3c9"
+    },
+    {
+      "path": "src/components/canvas/CanvasEditColorRemoveBgPanel.tsx",
+      "sourceCommit": "2fc5c83"
+    },
+    {
+      "path": "src/components/canvas/CanvasEditEraseMaskPanel.tsx",
+      "sourceCommit": "e3991f3"
+    },
+    {
+      "path": "src/components/canvas/CanvasEditExpandCropPanel.tsx",
+      "sourceCommit": "2fc5c83"
+    },
+    {
+      "path": "src/components/canvas/CanvasEditUpscaleSvgPanel.tsx",
+      "sourceCommit": "2fc5c83"
+    },
+    {
+      "path": "src/components/canvas/CanvasEmptyState.tsx",
+      "sourceCommit": "feac579"
+    },
+    {
+      "path": "src/components/canvas/CanvasImageActionToolbar.tsx",
+      "sourceCommit": "69d3466"
+    },
+    {
+      "path": "src/components/canvas/CanvasZoomCluster.tsx",
+      "sourceCommit": "c808e50"
+    },
+    {
+      "path": "src/lib/admin-dashboard-projection.ts",
+      "sourceCommit": "1ba98f7"
+    },
+    {
+      "path": "src/lib/asset-core/asset-release-readiness.ts",
+      "sourceCommit": "e809f5c"
+    },
+    {
+      "path": "src/lib/asset-core/asset-version-id.ts",
+      "sourceCommit": "746198f6"
+    },
+    {
+      "path": "src/lib/asset-core/canvas-adapter.ts",
+      "sourceCommit": "5a35b98"
+    },
+    {
+      "path": "src/lib/asset-core/canvas-placement-snapshot.ts",
+      "sourceCommit": "69479f7"
+    },
+    {
+      "path": "src/lib/asset-core/canvas-project-sync.ts",
+      "sourceCommit": "d619ec21"
+    },
+    {
+      "path": "src/lib/asset-core/historical-media-remediation.ts",
+      "sourceCommit": "d619ec21"
+    },
+    {
+      "path": "src/lib/asset-core/legacy-migration.ts",
+      "sourceCommit": "d619ec21"
+    },
+    {
+      "path": "src/lib/asset-core/media-health.ts",
+      "sourceCommit": "d619ec21"
+    },
+    {
+      "path": "src/lib/asset-core/recovery-media.ts",
+      "sourceCommit": "d619ec21"
+    },
+    {
+      "path": "src/lib/asset-core/service.ts",
+      "sourceCommit": "d619ec21"
+    },
+    {
+      "path": "src/lib/asset-core/storage.ts",
+      "sourceCommit": "d619ec21"
+    },
+    {
+      "path": "src/lib/asset-core/thumbnail-backfill.ts",
+      "sourceCommit": "d619ec21"
+    },
+    {
+      "path": "src/lib/canvas-kernel/persistence.ts",
+      "sourceCommit": "efe5e4f"
+    },
+    {
+      "path": "src/lib/image-toolbar-position.ts",
+      "sourceCommit": "2fc5c83"
+    },
+    {
+      "path": "src/lib/image-toolbar-preferences.ts",
+      "sourceCommit": "69d3466"
+    },
+    {
+      "path": "src/lib/project-workflow.ts",
+      "sourceCommit": "016e5d2"
+    },
+    {
+      "path": "migrations/20260823_v588_auth_credentials.sql",
+      "sourceCommit": "b63025be"
+    },
+    {
+      "path": "scripts/collect-v588-auth-artifacts.ts",
+      "sourceCommit": "02a3bd3d"
+    },
+    {
+      "path": "scripts/v588-auth-fixture.mjs",
+      "sourceCommit": "02a3bd3d"
+    },
+    {
+      "path": "scripts/verify-v588-auth-stable-contract.mjs",
+      "sourceCommit": "02a3bd3d"
+    },
+    {
+      "path": "src/app/api/admin/apis/route.ts",
+      "sourceCommit": "96c1907b"
+    },
+    {
+      "path": "src/app/api/admin/credits/overview/route.ts",
+      "sourceCommit": "795d3fe3"
+    },
+    {
+      "path": "src/app/api/admin/credits/pricing/route.ts",
+      "sourceCommit": "2c25af59"
+    },
+    {
+      "path": "src/app/api/auth/login/route.ts",
+      "sourceCommit": "9c693b1d"
+    },
+    {
+      "path": "src/app/api/auth/me/route.ts",
+      "sourceCommit": "9c693b1d"
+    },
+    {
+      "path": "src/app/api/simple-chat/deep-research/route.ts",
+      "sourceCommit": "3773f66c"
+    },
+    {
+      "path": "src/app/api/font-design/generate-image/route.ts",
+      "sourceCommit": "27d16726"
+    },
+    {
+      "path": "src/app/api/models/route.ts",
+      "sourceCommit": "d4c9d015"
+    },
+    {
+      "path": "src/app/api/universal-generate/route.ts",
+      "sourceCommit": "536882aa"
+    },
+    {
+      "path": "src/app/api/video/extend/route.ts",
+      "sourceCommit": "b1bcf2d8"
+    },
+    {
+      "path": "src/app/api/video/generate/route.ts",
+      "sourceCommit": "ecb0d95c"
+    },
+    {
+      "path": "src/app/api/workflow/models/route.ts",
+      "sourceCommit": "d4c9d015"
+    },
+    {
+      "path": "src/app/page.tsx",
+      "sourceCommit": "2214ad4c"
+    },
+    {
+      "path": "src/components/dashboard/dashboard-view.tsx",
+      "sourceCommit": "96c1907b"
+    },
+    {
+      "path": "src/components/dashboard/login-panel.tsx",
+      "sourceCommit": "2214ad4c"
+    },
+    {
+      "path": "src/components/dashboard/model-capability-editor.tsx",
+      "sourceCommit": "96c1907b"
+    },
+    {
+      "path": "src/components/generation-background-control.tsx",
+      "sourceCommit": "6522c7ef"
+    },
+    {
+      "path": "src/components/generation-panel.tsx",
+      "sourceCommit": "cce434a1"
+    },
+    {
+      "path": "src/components/operation-audit-client.tsx",
+      "sourceCommit": "7bf1cc3c"
+    },
+    {
+      "path": "src/components/scene-studio-panel.tsx",
+      "sourceCommit": "d7ffe827"
+    },
+    {
+      "path": "src/components/sticker-assistant-panel.tsx",
+      "sourceCommit": "d7ffe827"
+    },
+    {
+      "path": "src/components/third-party-model-dialog.tsx",
+      "sourceCommit": "96c1907b"
+    },
+    {
+      "path": "src/components/video-generation-panel.tsx",
+      "sourceCommit": "ecb0d95c"
+    },
+    {
+      "path": "src/components/simple-chat/canvas-editor.tsx",
+      "sourceCommit": "ffa41558"
+    },
+    {
+      "path": "src/components/simple-chat/sidebar.tsx",
+      "sourceCommit": "e4316f8f"
+    },
+    {
+      "path": "src/components/simple-chat/simple-chat-sync-status.tsx",
+      "sourceCommit": "37fb6d12"
+    },
+    {
+      "path": "src/hooks/use-task-model-catalog.ts",
+      "sourceCommit": "47090886"
+    },
+    {
+      "path": "src/lib/auth/auth-errors.ts",
+      "sourceCommit": "f5dfdfc4"
+    },
+    {
+      "path": "src/lib/auth/auth-password.ts",
+      "sourceCommit": "c518aa29"
+    },
+    {
+      "path": "src/lib/auth/auth-persistence.ts",
+      "sourceCommit": "b0cd946f"
+    },
+    {
+      "path": "src/lib/auth/auth-repository.ts",
+      "sourceCommit": "42e540bd"
+    },
+    {
+      "path": "src/lib/auth/auth-secret-ring.ts",
+      "sourceCommit": "865559d3"
+    },
+    {
+      "path": "src/lib/db-client.ts",
+      "sourceCommit": "608ae930"
+    },
+    {
+      "path": "src/lib/db-storage.ts",
+      "sourceCommit": "b0cd946f"
+    },
+    {
+      "path": "src/lib/api-provider-selected-models-storage.ts",
+      "sourceCommit": "d56844b4"
+    },
+    {
+      "path": "src/lib/font-design-task-store.ts",
+      "sourceCommit": "27d16726"
+    },
+    {
+      "path": "src/lib/generated-image-alpha.ts",
+      "sourceCommit": "536882aa"
+    },
+    {
+      "path": "src/lib/image-generation-output-preference.ts",
+      "sourceCommit": "d7ffe827"
+    },
+    {
+      "path": "src/lib/image-generation-output.ts",
+      "sourceCommit": "607ce13d"
+    },
+    {
+      "path": "src/lib/operation-audit.ts",
+      "sourceCommit": "b0cd946f"
+    },
+    {
+      "path": "src/lib/server-api-config.ts",
+      "sourceCommit": "087fae12"
+    },
+    {
+      "path": "src/lib/server-auth.ts",
+      "sourceCommit": "6102572b"
+    },
+    {
+      "path": "src/lib/simple-chat-logout.ts",
+      "sourceCommit": "b0cd946f"
+    },
+    {
+      "path": "src/lib/simple-chat-project-sync.ts",
+      "sourceCommit": "6a5e7baa"
+    },
+    {
+      "path": "src/lib/simple-chat-sync-client.ts",
+      "sourceCommit": "0ce9f539"
+    },
+    {
+      "path": "src/lib/simple-chat-sync-server.ts",
+      "sourceCommit": "ceac3db8"
+    },
+    {
+      "path": "src/lib/simple-chat-sync-storage.ts",
+      "sourceCommit": "7b465597"
+    },
+    {
+      "path": "src/lib/simple-chat-retry.ts",
+      "sourceCommit": "3773f66c"
+    },
+    {
+      "path": "src/lib/task-core/candidate-model-admission.ts",
+      "sourceCommit": "b1bcf2d8"
+    },
+    {
+      "path": "src/lib/task-core/descriptor-image-request-fields.ts",
+      "sourceCommit": "b1bcf2d8"
+    },
+    {
+      "path": "src/lib/task-core/exact-model-selection.ts",
+      "sourceCommit": "b1bcf2d8"
+    },
+    {
+      "path": "src/lib/task-core/exact-provider-routing.ts",
+      "sourceCommit": "b1bcf2d8"
+    },
+    {
+      "path": "src/lib/task-core/image-output-fanout.ts",
+      "sourceCommit": "b1bcf2d8"
+    },
+    {
+      "path": "src/lib/task-core/model-capability-contract.ts",
+      "sourceCommit": "c7db96f1"
+    },
+    {
+      "path": "src/lib/task-core/model-capability-resolution.ts",
+      "sourceCommit": "96c1907b"
+    },
+    {
+      "path": "src/lib/task-core/provider-capability-adapters.ts",
+      "sourceCommit": "15827a50"
+    },
+    {
+      "path": "src/lib/task-core/task-abort.ts",
+      "sourceCommit": "8cc902b8"
+    },
+    {
+      "path": "src/lib/task-events-client.ts",
+      "sourceCommit": "b0cd946f"
+    },
+    {
+      "path": "src/lib/universal-api-manager.ts",
+      "sourceCommit": "96c1907b"
+    },
+    {
+      "path": "src/lib/universal-api-types.ts",
+      "sourceCommit": "1798d252"
+    },
+    {
+      "path": "src/app/api/analyze-psd/route.ts",
+      "sourceCommit": "f7883f96"
+    },
+    {
+      "path": "src/app/api/element-decompose/route.ts",
+      "sourceCommit": "8d01e9ca"
+    },
+    {
+      "path": "src/app/api/assets/transfer/route.ts",
+      "sourceCommit": "b3fe71b4"
+    },
+    {
+      "path": "src/app/api/brand-ecommerce/result-store.ts",
+      "sourceCommit": "6a9efa5e"
+    },
+    {
+      "path": "src/app/api/brand-ecommerce/route.ts",
+      "sourceCommit": "6a9efa5e"
+    },
+    {
+      "path": "src/app/api/font-design/plan/constants.ts",
+      "sourceCommit": "c4b49293"
+    },
+    {
+      "path": "src/app/api/font-design/plan/route.ts",
+      "sourceCommit": "c4b49293"
+    },
+    {
+      "path": "src/app/api/font-design/prompt/route.ts",
+      "sourceCommit": "c4b49293"
+    },
+    {
+      "path": "src/app/api/refine-engine/result-store.ts",
+      "sourceCommit": "6a9efa5e"
+    },
+    {
+      "path": "src/app/api/refine-engine/route.ts",
+      "sourceCommit": "6a9efa5e"
+    },
+    {
+      "path": "src/app/api/simple-chat/workspace-handoff/route.ts",
+      "sourceCommit": "b67930cf"
+    },
+    {
+      "path": "src/components/psd-editor/LayerInspector.tsx",
+      "sourceCommit": "34c8980d"
+    },
+    {
+      "path": "src/components/psd-editor/PsdCanvas.tsx",
+      "sourceCommit": "34c8980d"
+    },
+    {
+      "path": "src/components/psd-editor/PsdLayerEditor.tsx",
+      "sourceCommit": "a50fcbeb"
+    },
+    {
+      "path": "src/app/api/layer-documents/route.ts",
+      "sourceCommit": "5dfa1f0c"
+    },
+    {
+      "path": "src/lib/layer-documents/client.ts",
+      "sourceCommit": "68242e43"
+    },
+    {
+      "path": "src/lib/layer-documents/service.ts",
+      "sourceCommit": "5dfa1f0c"
+    },
+    {
+      "path": "src/lib/layer-documents/storage.ts",
+      "sourceCommit": "f8c9bf44"
+    },
+    {
+      "path": "src/lib/layer-documents/types.ts",
+      "sourceCommit": "ca6858f6"
+    },
+    {
+      "path": "src/lib/layer-documents/validation.ts",
+      "sourceCommit": "ca6858f6"
+    },
+    {
+      "path": "src/components/workspace-source-trace.tsx",
+      "sourceCommit": "09e2b0c0"
+    },
+    {
+      "path": "src/lib/asset-core/source-trace.ts",
+      "sourceCommit": "496d7892"
+    },
+    {
+      "path": "src/lib/asset-core/types.ts",
+      "sourceCommit": "27c625ca"
+    },
+    {
+      "path": "src/lib/canvas-kernel/selection.ts",
+      "sourceCommit": "6bea240f"
+    },
+    {
+      "path": "src/lib/editable-layer-adapter.ts",
+      "sourceCommit": "34c8980d"
+    },
+    {
+      "path": "src/lib/element-decomposition/client.ts",
+      "sourceCommit": "2166f032"
+    },
+    {
+      "path": "src/lib/element-decomposition/reconstruction.ts",
+      "sourceCommit": "940a0b7f"
+    },
+    {
+      "path": "src/lib/layer-decomposition-client.ts",
+      "sourceCommit": "2166f032"
+    },
+    {
+      "path": "src/lib/layer-decomposition/layer-stack-order.ts",
+      "sourceCommit": "940a0b7f"
+    },
+    {
+      "path": "src/lib/layer-decomposition/pear-adapter.ts",
+      "sourceCommit": "ca356477"
+    },
+    {
+      "path": "src/lib/layer-decomposition/quality-gate.ts",
+      "sourceCommit": "940a0b7f"
+    },
+    {
+      "path": "src/lib/layer-decomposition/service.ts",
+      "sourceCommit": "ca356477"
+    },
+    {
+      "path": "src/lib/layer-decomposition/source-image.ts",
+      "sourceCommit": "ac8e826b"
+    },
+    {
+      "path": "src/lib/layer-decomposition/types.ts",
+      "sourceCommit": "ca356477"
+    },
+    {
+      "path": "src/lib/model-defaults.ts",
+      "sourceCommit": "0a36aefd"
+    },
+    {
+      "path": "src/lib/project-workspace-url.ts",
+      "sourceCommit": "cdded1e2"
+    },
+    {
+      "path": "src/lib/psd-analysis/contracts.ts",
+      "sourceCommit": "f7883f96"
+    },
+    {
+      "path": "src/lib/psd-analysis/media.ts",
+      "sourceCommit": "f7883f96"
+    },
+    {
+      "path": "src/lib/psd-analysis/model-router.ts",
+      "sourceCommit": "1b0996ad"
+    },
+    {
+      "path": "src/lib/psd-analysis/service.ts",
+      "sourceCommit": "f7883f96"
+    },
+    {
+      "path": "src/lib/psd-canvas-surface.ts",
+      "sourceCommit": "34c8980d"
+    },
+    {
+      "path": "src/lib/psd-export.ts",
+      "sourceCommit": "34c8980d"
+    },
+    {
+      "path": "src/lib/safe-image-download.ts",
+      "sourceCommit": "ac8e826b"
+    },
+    {
+      "path": "src/lib/safe-image-input.ts",
+      "sourceCommit": "bc1ee2b0"
+    },
+    {
+      "path": "src/lib/simple-chat-workspace-handoff-client.ts",
+      "sourceCommit": "3f056442"
+    },
+    {
+      "path": "src/lib/simple-chat-workspace-handoff-server.ts",
+      "sourceCommit": "496d7892"
+    },
+    {
+      "path": "src/lib/simple-chat-workspace-handoff.ts",
+      "sourceCommit": "3f056442"
+    },
+    {
+      "path": "src/lib/user-types.ts",
+      "sourceCommit": "250d7cf1"
+    },
+    {
+      "path": "src/lib/admin-model-authorization.ts",
+      "sourceCommit": "e455ea8c"
+    },
+    {
+      "path": "src/app/api/skill-runs/[runId]/retry/route.ts",
+      "sourceCommit": "d85a8b08"
+    },
+    {
+      "path": "src/app/api/skill-runs/[runId]/route.ts",
+      "sourceCommit": "d85a8b08"
+    },
+    {
+      "path": "src/app/api/skill-runs/estimate/route.ts",
+      "sourceCommit": "bfc97edc"
+    },
+    {
+      "path": "src/app/api/skill-runs/http.ts",
+      "sourceCommit": "d85a8b08"
+    },
+    {
+      "path": "src/app/api/skill-runs/route.ts",
+      "sourceCommit": "5d0f69d6"
+    },
+    {
+      "path": "src/app/api/skills/[skillId]/route.ts",
+      "sourceCommit": "d68391cc"
+    },
+    {
+      "path": "src/app/api/skills/http.ts",
+      "sourceCommit": "e196d039"
+    },
+    {
+      "path": "src/app/api/skills/route.ts",
+      "sourceCommit": "d68391cc"
+    },
+    {
+      "path": "src/lib/abort-signal.ts",
+      "sourceCommit": "d0bf0dc3"
+    },
+    {
+      "path": "src/lib/agent-runtime/agent-edit-continuation.ts",
+      "sourceCommit": "b8c687d3"
+    },
+    {
+      "path": "src/lib/agent-runtime/agent-edit-execution-descriptor.ts",
+      "sourceCommit": "01377806"
+    },
+    {
+      "path": "src/lib/agent-runtime/agent-edit-execution-service.ts",
+      "sourceCommit": "d0bf0dc3"
+    },
+    {
+      "path": "src/lib/agent-runtime/agent-edit-executor.ts",
+      "sourceCommit": "b8c687d3"
+    },
+    {
+      "path": "src/lib/agent-runtime/execution-dispatch.ts",
+      "sourceCommit": "781c57a4"
+    },
+    {
+      "path": "src/lib/agent-runtime/execution-fence.ts",
+      "sourceCommit": "2bbd6851"
+    },
+    {
+      "path": "src/lib/agent-runtime/model-route-error.ts",
+      "sourceCommit": "b8c687d3"
+    },
+    {
+      "path": "src/lib/agent-runtime/request-validation.ts",
+      "sourceCommit": "bfc97edc"
+    },
+    {
+      "path": "src/lib/skill-runtime/canvas-presets.ts",
+      "sourceCommit": "ff0e94c5"
+    },
+    {
+      "path": "src/lib/skill-runtime/catalog.ts",
+      "sourceCommit": "ff0e94c5"
+    },
+    {
+      "path": "src/lib/skill-runtime/continuation.ts",
+      "sourceCommit": "5d0f69d6"
+    },
+    {
+      "path": "src/lib/skill-runtime/cost-estimator.ts",
+      "sourceCommit": "bfc97edc"
+    },
+    {
+      "path": "src/lib/skill-runtime/executor.ts",
+      "sourceCommit": "5d0f69d6"
+    },
+    {
+      "path": "src/lib/skill-runtime/input-resolver.ts",
+      "sourceCommit": "50888daa"
+    },
+    {
+      "path": "src/lib/skill-runtime/legacy-migration.ts",
+      "sourceCommit": "e196d039"
+    },
+    {
+      "path": "src/lib/skill-runtime/marketing-presets.ts",
+      "sourceCommit": "f7c17468"
+    },
+    {
+      "path": "src/lib/skill-runtime/prompt-compiler.ts",
+      "sourceCommit": "50888daa"
+    },
+    {
+      "path": "src/lib/skill-runtime/quality-gates.ts",
+      "sourceCommit": "fb70d7c7"
+    },
+    {
+      "path": "src/lib/skill-runtime/run-request.ts",
+      "sourceCommit": "bfc97edc"
+    },
+    {
+      "path": "src/lib/skill-runtime/service.ts",
+      "sourceCommit": "5d0f69d6"
+    },
+    {
+      "path": "src/lib/skill-runtime/simple-chat-presets.ts",
+      "sourceCommit": "ff0e94c5"
+    },
+    {
+      "path": "src/lib/skill-runtime/step-registry.ts",
+      "sourceCommit": "5d0f69d6"
+    },
+    {
+      "path": "src/lib/skill-runtime/storage.ts",
+      "sourceCommit": "e196d039"
+    },
+    {
+      "path": "src/lib/skill-runtime/types.ts",
+      "sourceCommit": "e196d039"
+    },
+    {
+      "path": "src/lib/task-core/durable-generation-kickoff.ts",
+      "sourceCommit": "d0bf0dc3"
+    },
+    {
+      "path": "migrations/20260902_unified_skill_task4_agent_controls.sql",
+      "sourceCommit": "9226821e"
+    },
+    {
+      "path": "migrations/20260902_unified_skill_task4_execution_fence.sql",
+      "sourceCommit": "2bbd6851"
+    },
+    {
+      "path": "migrations/20260903_unified_skill_task4_dispatch_lease.sql",
+      "sourceCommit": "b8c687d3"
+    },
+    {
+      "path": "migrations/20260904_unified_skill_task4_agent_edit_descriptor.sql",
+      "sourceCommit": "b8c687d3"
+    },
+    {
+      "path": "src/app/api/workflow/execute/route.ts",
+      "sourceCommit": "347b0b21"
+    },
+    {
+      "path": "src/lib/skill-runtime/workflow-client.ts",
+      "sourceCommit": "347b0b21"
+    },
+    {
+      "path": "src/lib/workflow-execution-context.ts",
+      "sourceCommit": "347b0b21"
+    },
+    {
+      "path": "src/lib/workflow-skill-execution.ts",
+      "sourceCommit": "347b0b21"
+    },
+    {
+      "path": "src/components/skill-runtime/dataset-file-parser.ts",
+      "sourceCommit": "21913c4a"
+    },
+    {
+      "path": "src/lib/skill-runtime/content-commerce-presets.ts",
+      "sourceCommit": "f760c3f7"
+    },
+    {
+      "path": "src/lib/skill-runtime/dataset-schema.ts",
+      "sourceCommit": "e6da017a"
+    },
+    {
+      "path": "src/lib/skill-runtime/step-compiler.ts",
+      "sourceCommit": "f760c3f7"
+    },
+    {
+      "path": "src/app/api/skill-reports/[runId]/[stepId]/route.ts",
+      "sourceCommit": "b6920680"
+    },
+    {
+      "path": "src/components/skill-runtime/PlatformComplianceReportCard.tsx",
+      "sourceCommit": "835e155e"
+    },
+    {
+      "path": "src/components/skill-runtime/platform-compliance-client.ts",
+      "sourceCommit": "835e155e"
+    },
+    {
+      "path": "src/lib/platform-compliance/media-audit.ts",
+      "sourceCommit": "21701f84"
+    },
+    {
+      "path": "src/lib/platform-compliance/report-asset.ts",
+      "sourceCommit": "b6920680"
+    },
+    {
+      "path": "src/lib/platform-compliance/report-builder.ts",
+      "sourceCommit": "7019a60b"
+    },
+    {
+      "path": "src/lib/platform-compliance/report-schema.ts",
+      "sourceCommit": "085be096"
+    },
+    {
+      "path": "src/lib/platform-compliance/rules.ts",
+      "sourceCommit": "085be096"
+    },
+    {
+      "path": "src/lib/platform-compliance/technical-evaluator.ts",
+      "sourceCommit": "21701f84"
+    },
+    {
+      "path": "src/lib/platform-compliance/types.ts",
+      "sourceCommit": "085be096"
+    },
+    {
+      "path": "src/lib/platform-compliance/vision-client.ts",
+      "sourceCommit": "7019a60b"
+    },
+    {
+      "path": "src/lib/skill-runtime/compiled-fan-out.ts",
+      "sourceCommit": "c7afc22f"
+    },
+    {
+      "path": "src/lib/skill-runtime/platform-compliance-preset.ts",
+      "sourceCommit": "ca434bd4"
+    },
+    {
+      "path": "src/lib/skill-runtime/structured-output.ts",
+      "sourceCommit": "33c28202"
+    },
+    {
+      "path": "src/app/api/tasks/recover/route.ts",
+      "sourceCommit": "70c93f6b"
+    },
+    {
+      "path": "src/app/simple-create/page.tsx",
+      "sourceCommit": "70c93f6b"
+    },
+    {
+      "path": "src/components/canvas/mobile-bottom-toolbar.tsx",
+      "sourceCommit": "ca923edd"
+    },
+    {
+      "path": "src/components/canvas/mobile-image-actions.tsx",
+      "sourceCommit": "2e309a05"
+    },
+    {
+      "path": "src/components/canvas/use-canvas-viewport.ts",
+      "sourceCommit": "2c315950"
+    },
+    {
+      "path": "src/components/simple-create/simple-create-form.tsx",
+      "sourceCommit": "70c93f6b"
+    },
+    {
+      "path": "src/components/simple-create/simple-create-page.tsx",
+      "sourceCommit": "f67b20be"
+    },
+    {
+      "path": "src/components/simple-create/simple-create-results.tsx",
+      "sourceCommit": "70c93f6b"
+    },
+    {
+      "path": "src/lib/canvas-touch-gestures.ts",
+      "sourceCommit": "061f2257"
+    },
+    {
+      "path": "src/lib/image-generation-session.ts",
+      "sourceCommit": "70c93f6b"
+    },
+    {
+      "path": "src/lib/mobile-canvas-toolbar.ts",
+      "sourceCommit": "ca923edd"
+    },
+    {
+      "path": "src/lib/simple-create-navigation.ts",
+      "sourceCommit": "70c93f6b"
+    },
+    {
+      "path": "src/app/api/admin/gateway/keys/[keyId]/route.ts",
+      "sourceCommit": "6f41d2a9"
+    },
+    {
+      "path": "src/app/api/admin/gateway/keys/route.ts",
+      "sourceCommit": "6f41d2a9"
+    },
+    {
+      "path": "src/app/api/gateway/v1/images/route.ts",
+      "sourceCommit": "fbaa13d9"
+    },
+    {
+      "path": "src/app/api/gateway/v1/tasks/[taskId]/cancel/route.ts",
+      "sourceCommit": "1071de17"
+    },
+    {
+      "path": "src/app/api/gateway/v1/tasks/[taskId]/route.ts",
+      "sourceCommit": "1071de17"
+    },
+    {
+      "path": "src/app/api/gateway/v1/videos/route.ts",
+      "sourceCommit": "fbaa13d9"
+    },
+    {
+      "path": "src/components/dashboard/media-gateway-admin.tsx",
+      "sourceCommit": "0ae86da8"
+    },
+    {
+      "path": "src/lib/media-gateway/admission.ts",
+      "sourceCommit": "301fc4af"
+    },
+    {
+      "path": "src/lib/media-gateway/audit.ts",
+      "sourceCommit": "752b2504"
+    },
+    {
+      "path": "src/lib/media-gateway/http.ts",
+      "sourceCommit": "031c6a58"
+    },
+    {
+      "path": "src/lib/media-gateway/internal-client.ts",
+      "sourceCommit": "54e21e65"
+    },
+    {
+      "path": "src/lib/media-gateway/key-service.ts",
+      "sourceCommit": "301fc4af"
+    },
+    {
+      "path": "src/lib/media-gateway/schema.ts",
+      "sourceCommit": "d387736d"
+    },
+    {
+      "path": "src/lib/media-gateway/task-projection.ts",
+      "sourceCommit": "9ecb8a06"
+    },
+    {
+      "path": "src/lib/media-gateway/types.ts",
+      "sourceCommit": "91c1f6c2"
+    },
+    {
+      "path": "src/lib/media-gateway/utc-day-window.ts",
+      "sourceCommit": "301fc4af"
+    },
+    {
+      "path": ".superpowers/sdd/media-gateway-task-7-fix-review-package.md",
+      "sourceCommit": "a790f953"
+    },
+    {
+      "path": ".superpowers/sdd/media-gateway-task-7-report.md",
+      "sourceCommit": "4a6ae9da"
+    },
+    {
+      "path": ".superpowers/sdd/media-gateway-task-8-report.md",
+      "sourceCommit": "74716cb9"
+    },
+    {
+      "path": ".superpowers/sdd/media-gateway-task-9-report.md",
+      "sourceCommit": "b108312b"
+    },
+    {
+      "path": ".superpowers/sdd/media-gateway-task-9-review-package.md",
+      "sourceCommit": "b108312b"
+    },
+    {
+      "path": "migrations/20260913_v588_media_gateway.sql",
+      "sourceCommit": "91c1f6c2"
+    },
+    {
+      "path": "src/app/api/sketch-to-code/[taskId]/document/route.ts",
+      "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470"
+    },
+    {
+      "path": "src/app/api/sketch-to-code/route.ts",
+      "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470"
+    },
+    {
+      "path": "src/components/sketch-to-code-panel.tsx",
+      "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470"
+    },
+    {
+      "path": "src/lib/sketch-to-code/admission.ts",
+      "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470"
+    },
+    {
+      "path": "src/lib/sketch-to-code/client.ts",
+      "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470"
+    },
+    {
+      "path": "src/lib/sketch-to-code/configured-dependencies.ts",
+      "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470"
+    },
+    {
+      "path": "src/lib/sketch-to-code/document.ts",
+      "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470"
+    },
+    {
+      "path": "src/lib/sketch-to-code/drawing.ts",
+      "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470"
+    },
+    {
+      "path": "src/lib/sketch-to-code/execution.ts",
+      "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470"
+    },
+    {
+      "path": "src/lib/sketch-to-code/generation.ts",
+      "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470"
+    },
+    {
+      "path": "src/lib/sketch-to-code/html.ts",
+      "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470"
+    },
+    {
+      "path": "src/lib/sketch-to-code/http.ts",
+      "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470"
+    },
+    {
+      "path": "src/lib/sketch-to-code/placement-client.ts",
+      "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470"
+    },
+    {
+      "path": "src/lib/sketch-to-code/provider.ts",
+      "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470"
+    },
+    {
+      "path": "src/lib/sketch-to-code/publication.ts",
+      "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470"
+    },
+    {
+      "path": "src/lib/sketch-to-code/render.ts",
+      "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470"
+    },
+    {
+      "path": "src/lib/sketch-to-code/task-http.ts",
+      "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470"
+    },
+    {
+      "path": "src/lib/sketch-to-code/token-billing.ts",
+      "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470"
+    },
+    {
+      "path": "src/lib/sketch-to-code/usage.ts",
+      "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470"
+    },
+    {
+      "path": "src/lib/sketch-to-code/workflow.ts",
+      "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470"
+    },
+    {
+      "path": "src/lib/workflow-renderer/legacy-port-position.ts",
+      "sourceCommit": "2729e0f903e68d1005ac21bc968f7fb529c37470"
+    },
+    {
+      "path": "src/lib/sketch-to-code/recovery-client.ts",
+      "sourceCommit": "a91beec7b667e8bd747b2ab1946b42516e044a30"
+    }
+  ],
+  "records": [
+    {
+      "path": "src/app/api/workflow/image-actions/route.ts",
+      "canonicalPointer": "/entries/49",
+      "previousRecord": {
+        "path": "src/app/api/workflow/image-actions/route.ts",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "6b86cebe43ca0f24bc1e0456545d4262045513c6",
+        "reviewedBlob": "5b3dda0c8fb8fda51470e70dedeb151079e5f818",
+        "disposition": "reviewed",
+        "summary": "Grid admission applies the same canonical image size at staging and readback. Unconfirmed document commits retain the original operation ID.",
+        "evidence": [
+          "Workflow-image PostgreSQL integration passed all 13 cases, including a PNG one byte over 32 MiB rejected before staging and an exactly 32 MiB tile committed and replayed.",
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob 6b86cebe43ca0f24bc1e0456545d4262045513c6 matches the scoped working file.",
+          "Lines 18–32 and 60–81 enforce JSON and ingress bounds, compare the expected actor to the session before reading the body, and choose the publisher from server-resolved project access. The route creates no model task or credit charge.",
+          "Lines 78–86 return HTTP 200 for the personal publisher's commit and HTTP 202 with the original operation ID for an unknown outcome. workflow-image-preparation.ts:177–205 and workflow-image-publication.ts:110–115,150–154 allow a personal PNG above 32 MiB to reach the first commit even though replay is capped at 32 MiB.",
+          "release-candidate-build.log:276 lists the compiled route. Compilation supplies no commit/readback evidence."
+        ]
+      },
+      "previousRecordSha256": "9b040611bf9699407b24e0936820d0a66482e57eca9f3af243abd4ea61b1a64f",
+      "originalSourceTuple": [
+        "src/app/api/workflow/image-actions/route.ts",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "6b86cebe43ca0f24bc1e0456545d4262045513c6"
+      ],
+      "originalSourceTupleSha256": "306654c8cf8078d4e5019ed27c34ef1014882672c342732af8212fffe17bda1a"
+    },
+    {
+      "path": "src/components/video-edit-panel.tsx",
+      "canonicalPointer": "/entries/93",
+      "previousRecord": {
+        "path": "src/components/video-edit-panel.tsx",
+        "reviewArea": "ui",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "fc984eba0174b342a004c0106e823c85019941cb",
+        "reviewedBlob": "336c172e1ab3f6d0466e936d0fc0172470ceeb83",
+        "disposition": "reviewed",
+        "summary": "Failed video submissions preserve the draft. A retry owns its result and late responses cannot dismiss a reopened editor.",
+        "evidence": [
+          "video-edit-session.test.tsx and six native video-edit and extend regressions passed, including all three newly reproduced canvas submission cases.",
+          "Source identity. Baseline blob 594397d5d5c3d13ff22aaa6f3287a5717ce55622. Pinned HEAD blob fc984eba0174b342a004c0106e823c85019941cb. Last reachable path change 3b4c9eeb111f3fc8a324324f2900f710f5f304aa. Candidate path has no Git diff against pinned HEAD.",
+          "Lines 77–88 and 166–240 preserve the entry-selected Edit or Extend tab and add mobile bounds and labeled preview controls. Lines 125–161 await the parent callback and expect a rejection to populate the inline error.",
+          "infinite-canvas.tsx lines 17554–17562 and 17667–17675 consume server and transport errors in the parent, then unconditionally close. The child never gets the rejection. These closures have no dialog/source generation check, so an earlier operation can close a reopened dialog. Formal provider execution and failure recovery were unverified."
+        ]
+      },
+      "previousRecordSha256": "43833336fe745aeb4885604ba78c381febe88a1af3707a8a6903bbb69b69a736",
+      "originalSourceTuple": [
+        "src/components/video-edit-panel.tsx",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "fc984eba0174b342a004c0106e823c85019941cb"
+      ],
+      "originalSourceTupleSha256": "62494bb20dd27227393f8215d48a653c68b7d79ab942c4edf9a760d6bfcd8a88"
+    },
+    {
+      "path": "src/components/workflow/WorkflowContextMenu.tsx",
+      "canonicalPointer": "/entries/95",
+      "previousRecord": {
+        "path": "src/components/workflow/WorkflowContextMenu.tsx",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "6572c778dadf935a0b7f9ad49ad77979c0b51a24",
+        "reviewedBlob": "6572c778dadf935a0b7f9ad49ad77979c0b51a24",
+        "disposition": "reviewed",
+        "summary": "The menu keeps action coordinates separate from viewport positioning and delegates graph mutations to the editor. Touch, keyboard, and focus handling are local to the menu.",
+        "evidence": [
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob 6572c778dadf935a0b7f9ad49ad77979c0b51a24 matches the scoped working file.",
+          "Lines 34–45,47–78,115–154 preserve action IDs, disable paste when the clipboard is empty, clamp the portaled menu to the visual viewport, and remove resize listeners on cleanup.",
+          "Lines 80–113 and 118–147 implement focus entry/return, keyboard navigation, and outside-tap dismissal with a movement threshold. The mounted long-press scenario is defined in workflow-image-source-choice.test.tsx:124–127. The earlier aggregate run hit a storage-fixture error before this suite's assertions (vitest-full.log:99491–99498)."
+        ]
+      },
+      "previousRecordSha256": "98621396adf9524e496ffe61e57d6b6f8e47b246e86186e4824d74bc2fa7bbea",
+      "originalSourceTuple": [
+        "src/components/workflow/WorkflowContextMenu.tsx",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "6572c778dadf935a0b7f9ad49ad77979c0b51a24"
+      ],
+      "originalSourceTupleSha256": "7711a9c093deff4c3648e5b6916486367e686a54b0ea99847270c40a61c19e73"
+    },
+    {
+      "path": "src/components/workflow/WorkflowLibraryContent.tsx",
+      "canonicalPointer": "/entries/96",
+      "previousRecord": {
+        "path": "src/components/workflow/WorkflowLibraryContent.tsx",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "6e60f6fc2a6e29dbd5d15b88a378e7f8bb68790c",
+        "reviewedBlob": "6e60f6fc2a6e29dbd5d15b88a378e7f8bb68790c",
+        "disposition": "reviewed",
+        "summary": "The library renders three scoped lists and returns an item ID to the host. Its search and fallback UI do not change asset references or run workflows.",
+        "evidence": [
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob 6e60f6fc2a6e29dbd5d15b88a378e7f8bb68790c matches the scoped working file.",
+          "Lines 22–43 keep a query per tab and filter the supplied images, prompts, or presets. Lines 45–61 use the caller's selected ID and render an explicit missing-preview state.",
+          "The candidate editor wires the lists to its existing material, prompt, and preset handlers (src/components/node-editor.tsx:4621). resume.md:43 records a local template load and reopen. This evidence covers the recorded preset flow."
+        ]
+      },
+      "previousRecordSha256": "58a64555150b7bc205305be15cb68a7290866252584db5bac3669daaf71d491a",
+      "originalSourceTuple": [
+        "src/components/workflow/WorkflowLibraryContent.tsx",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "6e60f6fc2a6e29dbd5d15b88a378e7f8bb68790c"
+      ],
+      "originalSourceTupleSha256": "83fde24a98220ea4a49c3605823a2734d05b0f8036ef1a0966a0371cd3739e1d"
+    },
+    {
+      "path": "src/components/workflow/WorkflowPortTargets.tsx",
+      "canonicalPointer": "/entries/97",
+      "previousRecord": {
+        "path": "src/components/workflow/WorkflowPortTargets.tsx",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "d0eaf8e27b6d90fe32e8ff0a377e77595b821dfb",
+        "reviewedBlob": "d0eaf8e27b6d90fe32e8ff0a377e77595b821dfb",
+        "disposition": "reviewed",
+        "summary": "The direct-hit layer keeps visible targets at 44 CSS pixels and preserves the host's keyboard port chooser.",
+        "evidence": [
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob d0eaf8e27b6d90fe32e8ff0a377e77595b821dfb matches the scoped working file.",
+          "Lines 15–27 delegate bounds and overlap classification, leave the transparent parent non-interactive, stop pointer and mouse bubbling, and pass the original typed endpoint to the host.",
+          "WorkflowLegacySurface.tsx:282–283 supplies measured bounds and obstacles and wires the chooser. workflow-image-source-choice.test.tsx:105–132 defines measured alignment and keyboard cases. The earlier aggregate run failed in fixture setup (vitest-full.log:99491–99498)."
+        ]
+      },
+      "previousRecordSha256": "1a1283f1ffee9cd8468712c86e301a34aec76adef791a1ccfdfe4978808361f2",
+      "originalSourceTuple": [
+        "src/components/workflow/WorkflowPortTargets.tsx",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "d0eaf8e27b6d90fe32e8ff0a377e77595b821dfb"
+      ],
+      "originalSourceTupleSha256": "3c6ad97cd3ac21dd3c9eff0a0d153501e0dd64741283aa05ef11ff3cd70e8f39"
+    },
+    {
+      "path": "src/features/annotations/node-annotation-workspace.tsx",
+      "canonicalPointer": "/entries/100",
+      "previousRecord": {
+        "path": "src/features/annotations/node-annotation-workspace.tsx",
+        "reviewArea": "ui",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "741a037349868d68f895cfa87977d951aac151b5",
+        "reviewedBlob": "741a037349868d68f895cfa87977d951aac151b5",
+        "disposition": "reviewed",
+        "summary": "The node annotation image and controls now share the narrow viewport without changing normalized gesture or exact provider/model handoff.",
+        "evidence": [
+          "Source identity. Baseline blob 1990b957c8858beee9741d607dcc0dc553f5e0cf. Pinned HEAD blob 741a037349868d68f895cfa87977d951aac151b5. Last reachable path change 3b4c9eeb111f3fc8a324324f2900f710f5f304aa. Candidate path has no Git diff against pinned HEAD.",
+          "Lines 147–175 measure the image frame on size changes. Lines 272–319 reject toolbar and out-of-image events, own the pointer and release on completion. Lines 353–367 add a touch-owned image frame and cancel the gesture on pointer cancel.",
+          "Lines 321–341 build the edit-intent bundle with the selected exact provider and model, and lines 400–423 pass the same state and callbacks through the composer. Existing annotation geometry and node handoff contracts describe this behavior. Formal touch annotation and execution were unverified."
+        ]
+      },
+      "previousRecordSha256": "6c10c988e8a43144926122259f20bbeedb453ef41e58ea0d15887ea6d3432721",
+      "originalSourceTuple": [
+        "src/features/annotations/node-annotation-workspace.tsx",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "741a037349868d68f895cfa87977d951aac151b5"
+      ],
+      "originalSourceTupleSha256": "4559d7b69d3dda28d83594d33c448fc30e4f10a9655f5deb940d755b4def6d64"
+    },
+    {
+      "path": "src/lib/workflow-background.ts",
+      "canonicalPointer": "/entries/126",
+      "previousRecord": {
+        "path": "src/lib/workflow-background.ts",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "57aea862c89b05a2e89cd97b5f73ed5cb088a89b",
+        "reviewedBlob": "57aea862c89b05a2e89cd97b5f73ed5cb088a89b",
+        "disposition": "reviewed",
+        "summary": "The helper preserves the caller's promise identity and rejection. The workflow caller owns error handling, persistence, and any execution lifetime guarantees.",
+        "evidence": [
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob 57aea862c89b05a2e89cd97b5f73ed5cb088a89b matches the scoped working file.",
+          "Line 1 returns the input promise without a wrapper or subscription. workflow-background.test.ts:4–14 defines identity and rejection checks.",
+          "The execute route passes its existing caught promise (for example src/app/api/workflow/execute/route.ts:2695–2701). The helper provides no platform wait-until mechanism. Formal host execution after the response remains unverified."
+        ]
+      },
+      "previousRecordSha256": "09ce78ae3598b8a852e1826e20a8e3f46689df3a5bc045cc4a09cf8392139337",
+      "originalSourceTuple": [
+        "src/lib/workflow-background.ts",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "57aea862c89b05a2e89cd97b5f73ed5cb088a89b"
+      ],
+      "originalSourceTupleSha256": "81a49ca59a6541547440f6ed4c680df248b2e799b11465adda28fd9a7010bec8"
+    },
+    {
+      "path": "src/lib/workflow-image-action-request.ts",
+      "canonicalPointer": "/entries/127",
+      "previousRecord": {
+        "path": "src/lib/workflow-image-action-request.ts",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "a5946ac4488db2aee3e7c35bbf47e959ddeda97c",
+        "reviewedBlob": "a5946ac4488db2aee3e7c35bbf47e959ddeda97c",
+        "disposition": "reviewed",
+        "summary": "The strict parser preserves the operation and target identities and rejects ambiguous grid requests before server authorization.",
+        "evidence": [
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob a5946ac4488db2aee3e7c35bbf47e959ddeda97c matches the scoped working file.",
+          "Lines 12–17 bound IDs, restrict action and source keys, and limit grid dimensions and target count. Lines 20–28 check the shape product, unique ordered targets, source/target separation, and project agreement.",
+          "image-actions/route.ts:18–32,63–80 authenticates first and invokes the parser before server source resolution. workflow-image-media.ts:69–86 resolves a managed version from the current grant and canonical tuple."
+        ]
+      },
+      "previousRecordSha256": "d34c76daf222aa3988337933779fc4cb1809cf6c2e6219f63683548aa949b796",
+      "originalSourceTuple": [
+        "src/lib/workflow-image-action-request.ts",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "a5946ac4488db2aee3e7c35bbf47e959ddeda97c"
+      ],
+      "originalSourceTupleSha256": "882e9531abd7e0fa7245e604fe6408774455e54f15b4fa37c66359500544ca74"
+    },
+    {
+      "path": "src/lib/workflow-image-actions.ts",
+      "canonicalPointer": "/entries/128",
+      "previousRecord": {
+        "path": "src/lib/workflow-image-actions.ts",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "ee7a11a7ef2d5445f6dbe4b87c7e59a81a3590a6",
+        "reviewedBlob": "ee7a11a7ef2d5445f6dbe4b87c7e59a81a3590a6",
+        "disposition": "reviewed",
+        "summary": "The shared shape contract caps the grid at 64 cells and partitions the entire raster into deterministic row-major rectangles.",
+        "evidence": [
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob ee7a11a7ef2d5445f6dbe4b87c7e59a81a3590a6 matches the scoped working file.",
+          "Lines 7–26 require positive safe integers, guard the arithmetic products, and use adjacent floor boundaries so odd edges produce no gaps or overlap.",
+          "workflow-image-grid.test.ts:13–27 defines the 7×5 raster coverage check. The request parser and crop code both consume this same shape contract."
+        ]
+      },
+      "previousRecordSha256": "b41f435c03321b0e9fe02203d1a352fb61b2ffc887e75e3147cc420ce47cfce5",
+      "originalSourceTuple": [
+        "src/lib/workflow-image-actions.ts",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "ee7a11a7ef2d5445f6dbe4b87c7e59a81a3590a6"
+      ],
+      "originalSourceTupleSha256": "79953a0489fdb3624172418fbea1bfa7c75b11460d00a206fa6d08b1434c6fc6"
+    },
+    {
+      "path": "src/lib/workflow-image-batch.ts",
+      "canonicalPointer": "/entries/129",
+      "previousRecord": {
+        "path": "src/lib/workflow-image-batch.ts",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "9848b77c1a60d1ed668cce8c2bbe59c449661cba",
+        "reviewedBlob": "9848b77c1a60d1ed668cce8c2bbe59c449661cba",
+        "disposition": "reviewed",
+        "summary": "The batch adapter binds all children to one actor, project, and placement scope. It rejects mixed replay before delegating creation on the caller's transaction.",
+        "evidence": [
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob 9848b77c1a60d1ed668cce8c2bbe59c449661cba matches the scoped working file.",
+          "Lines 10–29 validate the homogeneous image batch, reject duplicate idempotency keys and placement entities, and snapshot mutable inputs.",
+          "Lines 36–81 check the project, acquire sorted idempotency locks, reject partial or mismatched replay, require active matching ready placements, and bind service calls to the same transaction.",
+          "workflow-image-publication.ts:129–154 supplies the outer transaction and sorted placement slot locks. Its own publication/readback outcome is tracked in that path's entry."
+        ]
+      },
+      "previousRecordSha256": "171432d2890e7091564a9ce6771f993223db0c4d21b0b059cee17fd70d6d8489",
+      "originalSourceTuple": [
+        "src/lib/workflow-image-batch.ts",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "9848b77c1a60d1ed668cce8c2bbe59c449661cba"
+      ],
+      "originalSourceTupleSha256": "57cc172b9adaeb973802745994201fc17568ab47f035d7b6a83a402dd23f2d78"
+    },
+    {
+      "path": "src/lib/workflow-image-document-publication.ts",
+      "canonicalPointer": "/entries/130",
+      "previousRecord": {
+        "path": "src/lib/workflow-image-document-publication.ts",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "0118dfdc71ca29268a46b4482d0713d9932ca3c5",
+        "reviewedBlob": "805cd89383962f470851a6aa1989473b058a6d21",
+        "disposition": "reviewed",
+        "summary": "Document replay verifies the physical bytes of the returned ordered child records and compares the same receipt under transaction locks.",
+        "evidence": [
+          "Workflow-image PostgreSQL integration rejects absent child bytes, same-size corruption and a changed editor grant during replay.",
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob 0118dfdc71ca29268a46b4482d0713d9932ca3c5 matches the scoped working file.",
+          "Lines 14–33 require the current editable source placement and derive tile positions. Lines 48–56 preflight the document assets, then pass the prepared asset set only to the write branch.",
+          "document-media-import.ts:971–975 returns an existing manifest before using the prepared set. Its recovery call at lines 1001–1004 does not accept that set, and inspectDerivedGrid at lines 917–967 checks canonical rows and registered file metadata. A grid committed by another process between preflight and final locks can therefore be acknowledged without preflight coverage of those tile files.",
+          "Lines 60–75 discard the uncertain COMMIT connection and try a fresh read. No scoped acceptance artifact establishes coverage of physical readback, document grant changes, and a lost COMMIT acknowledgement on this grid path."
+        ]
+      },
+      "previousRecordSha256": "7cbd8cc8c4ede192088d1ec51d79e7f09336bc47925c2c94d1e1320a7e045662",
+      "originalSourceTuple": [
+        "src/lib/workflow-image-document-publication.ts",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "0118dfdc71ca29268a46b4482d0713d9932ca3c5"
+      ],
+      "originalSourceTupleSha256": "6f3afa913d99cac21cf6be4460bc1464a885df8591b0e212d7eb893c5888d3e7"
+    },
+    {
+      "path": "src/lib/workflow-image-document-runtime-publication.ts",
+      "canonicalPointer": "/entries/131",
+      "previousRecord": {
+        "path": "src/lib/workflow-image-document-runtime-publication.ts",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "725dfb52f21dc16709e92ecdc7a01f8b63d248f1",
+        "reviewedBlob": "725dfb52f21dc16709e92ecdc7a01f8b63d248f1",
+        "disposition": "reviewed",
+        "summary": "Lost commit acknowledgement preserves the exact replacement placement and matching parent checkpoint.",
+        "evidence": [
+          "Workflow-image PostgreSQL scoped runtime test used a real commit followed by a synthetic lost acknowledgement and verified one canonical child and checkpoint.",
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob 725dfb52f21dc16709e92ecdc7a01f8b63d248f1 matches the scoped working file.",
+          "Lines 13–38 verify document actor scope, prepare the current document media, and return committed only after COMMIT. document-media-import.ts:1206–1239 binds the parent lease, exact current source and target, Yjs command and manifest, and parent checkpoint on one client.",
+          "Lines 39–55 discard an uncertain connection and reconcile via the read branch. The media verification round trip is compared with the manifest and checkpoint again at document-media-import.ts:1217–1227.",
+          "The existing release logs do not identify a passing document runtime cell case that loses COMMIT acknowledgement, rechecks the media, and proves no second replacement or checkpoint write. Shared-document storage and real transaction behavior remain unverified in the formal environment."
+        ]
+      },
+      "previousRecordSha256": "4232aa4380f047dacfe445fef5ed9d85b2eed6f39c2226be0828575e3475d33a",
+      "originalSourceTuple": [
+        "src/lib/workflow-image-document-runtime-publication.ts",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "725dfb52f21dc16709e92ecdc7a01f8b63d248f1"
+      ],
+      "originalSourceTupleSha256": "9017bb3e421e0fb3fd88daaef60493f23ae78a8ca6a4d1dd9d739db44590065e"
+    },
+    {
+      "path": "src/lib/workflow-image-execution-fence.ts",
+      "canonicalPointer": "/entries/132",
+      "previousRecord": {
+        "path": "src/lib/workflow-image-execution-fence.ts",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "8ad2c04b1b033e7c63d0478f61c5d6c5c75e0cc3",
+        "reviewedBlob": "8ad2c04b1b033e7c63d0478f61c5d6c5c75e0cc3",
+        "disposition": "reviewed",
+        "summary": "The fence binds a live input-image node to its authenticated parent execution and exact durable graph before a publisher may use the caller's transaction.",
+        "evidence": [
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob 8ad2c04b1b033e7c63d0478f61c5d6c5c75e0cc3 matches the scoped working file.",
+          "Lines 25–52 clone and bound the graph and path, validate graph IDs and edges, and require an input-image target. Lines 54–75 and 90–103 check the active nested frame or direct loop-body cursor and the exact retry attempt.",
+          "Lines 78–89 lock the actor's workflow row and verify project, workflow, revision, lease owner, lease generation and expiry, processing state, dispatch state, and graph equality.",
+          "workflow-image-runtime-publication.ts:182–190 repeats the actor, project, revision and live lease conditions in the checkpoint update. This is a source review of the fence. Actual PostgreSQL lock behavior is unverified in this audit."
+        ]
+      },
+      "previousRecordSha256": "94476b9e82e77a77dccb9ec3a84fa5ac1067c9f2a4fe7fc7c8360ddc22dcdbd3",
+      "originalSourceTuple": [
+        "src/lib/workflow-image-execution-fence.ts",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "8ad2c04b1b033e7c63d0478f61c5d6c5c75e0cc3"
+      ],
+      "originalSourceTupleSha256": "c79e6a48713f897196389e37e27dee084fa2635fe63d735cd7925e824d071212"
+    },
+    {
+      "path": "src/lib/workflow-image-graph.ts",
+      "canonicalPointer": "/entries/133",
+      "previousRecord": {
+        "path": "src/lib/workflow-image-graph.ts",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "31373a82acfce2d4ba90779eea15f4f7f15aaafd",
+        "reviewedBlob": "31373a82acfce2d4ba90779eea15f4f7f15aaafd",
+        "disposition": "reviewed",
+        "summary": "Graph construction admits a complete scoped grid receipt or one extraction plan, with a single resulting graph and no partial node insertion.",
+        "evidence": [
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob 31373a82acfce2d4ba90779eea15f4f7f15aaafd matches the scoped working file.",
+          "Lines 16–44 require the exact project, workflow, operation, ordered target IDs and optional expected parent version. Document placement entity IDs are kept distinct from node IDs.",
+          "Lines 85–115 preserve the original configured source in the extracted node and rewire incoming edges before topological validation. Lines 119–151 require exact cell geometry, unique version and placement IDs, collision-free node/edge IDs, and a valid topological order.",
+          "workflow-image-source-choice.test.tsx:152–155 defines one undo entry for a complete grid. The earlier aggregate log records a fixture error for that suite (vitest-full.log:99491–99498). The caller's cross-mount reconciliation is tracked separately."
+        ]
+      },
+      "previousRecordSha256": "6c4a2d3a1c2cf294ff77132d4f2f5374dd8dfcb9f5f89e7669fd35b3f4557efa",
+      "originalSourceTuple": [
+        "src/lib/workflow-image-graph.ts",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "31373a82acfce2d4ba90779eea15f4f7f15aaafd"
+      ],
+      "originalSourceTupleSha256": "af39ce5864a0f1a63501acc6d5712beffd5fe453c0b5c00da07b6eca229498af"
+    },
+    {
+      "path": "src/lib/workflow-image-grid-client.ts",
+      "canonicalPointer": "/entries/134",
+      "previousRecord": {
+        "path": "src/lib/workflow-image-grid-client.ts",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "e586da58401f497634f1972943d1865c4dc83e01",
+        "reviewedBlob": "a5f87b3fac75b411e51ede26af244e452681dd30",
+        "disposition": "reviewed",
+        "summary": "The editor keeps uncertain grid operations in IndexedDB and reconciles the original actor, source and operation before requesting a second split.",
+        "evidence": [
+          "Three grid recovery tests verified reopen, concurrent editor IDs and identity fences. Five mounted editor cases passed for result insertion, retry and undo.",
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob e586da58401f497634f1972943d1865c4dc83e01 matches the scoped working file.",
+          "Lines 76–105 and 108–125 bind actor, project, graph, and source while mounted, send an expected-actor header, validate the complete receipt, and reject stale graph updates.",
+          "Lines 137–156 keep the operation ID, ordered target IDs and serialized request in the instance closure and discard them in reset. The editor calls reset on scope changes and cleanup (src/components/node-editor.tsx:954–959). A reopened instance generates a different UUID even when the server committed the original operation.",
+          "workflow-image-source-choice.test.tsx:156–164 defines same-instance replay, stop and actor-change behavior. It supplies no close/reopen recovery proof."
+        ]
+      },
+      "previousRecordSha256": "5e23afb680149502f94f94c3453cc476c0009df0bbc6e0c3cbfd909abb595f78",
+      "originalSourceTuple": [
+        "src/lib/workflow-image-grid-client.ts",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "e586da58401f497634f1972943d1865c4dc83e01"
+      ],
+      "originalSourceTupleSha256": "6354fd0b64ba30d4880b51898d011d301e22c4b7812d7b34fe12da1a661e2734"
+    },
+    {
+      "path": "src/lib/workflow-image-grid.ts",
+      "canonicalPointer": "/entries/135",
+      "previousRecord": {
+        "path": "src/lib/workflow-image-grid.ts",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "9f0323519b6d37ae92f61c14cd360d223dd859e7",
+        "reviewedBlob": "9f0323519b6d37ae92f61c14cd360d223dd859e7",
+        "disposition": "reviewed",
+        "summary": "The crop engine does bounded CPU work, orients the image once, and returns exact lossless cells without database, task, or credit side effects.",
+        "evidence": [
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob 9f0323519b6d37ae92f61c14cd360d223dd859e7 matches the scoped working file.",
+          "Lines 5,9–14,30–55 validate image size and requested cell, serialize decode, and keep the active slot until native work settles.",
+          "Lines 56–92 decode to bounded RGBA, crop row-major or a single cell, limit aggregate PNG bytes, and preserve cancellation. The per-file managed publication cap belongs to the preparation path.",
+          "workflow-image-grid.test.ts:13–40 defines exact odd-size pixel coverage, cancellation identity, and out-of-range cell checks."
+        ]
+      },
+      "previousRecordSha256": "2aedec0e9ae48441d173e53a83f74db877d3a0b2d4ace2ea74832b8f313717be",
+      "originalSourceTuple": [
+        "src/lib/workflow-image-grid.ts",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "9f0323519b6d37ae92f61c14cd360d223dd859e7"
+      ],
+      "originalSourceTupleSha256": "edb2a1eb0fd4129588ef873769463dd3c49a6851c8217872798fc2ddeca0476b"
+    },
+    {
+      "path": "src/lib/workflow-image-input-execution.ts",
+      "canonicalPointer": "/entries/136",
+      "previousRecord": {
+        "path": "src/lib/workflow-image-input-execution.ts",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "59e2531b09b52b90544ffe82d511df8c95ebe455",
+        "reviewedBlob": "59e2531b09b52b90544ffe82d511df8c95ebe455",
+        "disposition": "reviewed",
+        "summary": "Canonical staging refuses an oversized personal grid cell before creating assets, placement or a workflow checkpoint.",
+        "evidence": [
+          "Workflow-image PostgreSQL test exercised the normal receiver with a tile above the managed image cap.",
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob 59e2531b09b52b90544ffe82d511df8c95ebe455 matches the scoped working file.",
+          "Lines 13–28 bind the receiver to an actor, project and execution and separate identity reference forwarding from grid publishing. Lines 29–55 snapshot the personal slot or the document placement and validate the loop's prior receipt.",
+          "Lines 57–63 recheck the access kind and owner and dispatch the cell publisher. This path inherits the mismatch between workflow-image-preparation.ts:177–205 and workflow-image-runtime-publication.ts:200–205,253–261. The commit is possible before the 32 MiB read limit is tested.",
+          "No scoped acceptance evidence covers a large valid receiver cell followed by replay or cold recovery."
+        ]
+      },
+      "previousRecordSha256": "bda8298ee77677b0d3a3c157fbd66bfc0d07961b22e5f8423a6126fdc80e3419",
+      "originalSourceTuple": [
+        "src/lib/workflow-image-input-execution.ts",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "59e2531b09b52b90544ffe82d511df8c95ebe455"
+      ],
+      "originalSourceTupleSha256": "238e6e6a48fec14ddf1ad5f8ca9716dbcc8136e57b0d8ae01fa58c6ef0bfa0c2"
+    },
+    {
+      "path": "src/lib/workflow-image-media.ts",
+      "canonicalPointer": "/entries/137",
+      "previousRecord": {
+        "path": "src/lib/workflow-image-media.ts",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "304119dcf7efb84af9fd5aeb305596cda6f29b60",
+        "reviewedBlob": "304119dcf7efb84af9fd5aeb305596cda6f29b60",
+        "disposition": "reviewed",
+        "summary": "The media source capability binds authorized bytes to the exact actor, project, and managed version or legacy source, then rechecks its authority under the final caller's transaction.",
+        "evidence": [
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob 304119dcf7efb84af9fd5aeb305596cda6f29b60 matches the scoped working file.",
+          "Lines 34–86 freeze identity, resolve the current document or personal grant, require ready scoped managed versions, and reject unregistered sources in document or managed-required mode.",
+          "Lines 89–121 cap source reads, compare MIME, registered size, checksum and dimensions, and repeat the authorization snapshot after I/O. Only a server-minted WeakMap handle carries the proof.",
+          "Lines 124–158 recheck current authority and source rows under caller-owned locks. Its 32 MiB read contract is traced to the publisher size mismatch in the preparation and publisher entries. Formal cross-instance storage is unverified."
+        ]
+      },
+      "previousRecordSha256": "ba6b60c123d3eb45736fd3ef45d63c03f3778517a09c94dc6c29177460fe783d",
+      "originalSourceTuple": [
+        "src/lib/workflow-image-media.ts",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "304119dcf7efb84af9fd5aeb305596cda6f29b60"
+      ],
+      "originalSourceTupleSha256": "e4fcf2251ee44afae078aec94077521076028683d1e6f563222941b6d17ca28f"
+    },
+    {
+      "path": "src/lib/workflow-image-preparation.ts",
+      "canonicalPointer": "/entries/138",
+      "previousRecord": {
+        "path": "src/lib/workflow-image-preparation.ts",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "0dff5ac016b3072dca9642cee880e4c8df93b6a5",
+        "reviewedBlob": "4470a29f359ed9fe3661327fcdb7c38d46e8420a",
+        "disposition": "reviewed",
+        "summary": "Every prepared tile obeys the managed image cap before any file is staged.",
+        "evidence": [
+          "Workflow-image PostgreSQL cases covered the exact 32 MiB boundary and an oversized batch with no staged assets.",
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob 0dff5ac016b3072dca9642cee880e4c8df93b6a5 matches the scoped working file.",
+          "Lines 21–45,59–121,154–176 restrict preparation to one bounded job and use distinct scoped capabilities for a full grid, one cell, or a reference.",
+          "Lines 177–205 cap aggregate output at 256 MiB and cap document ingestion at 32 MiB. The personal path stages each tile with persistAssetBytes, whose binary limit is 256 MiB (asset-core/binary-media-contract.ts:2,27–29). The managed read path rejects image descriptors above 32 MiB (asset-core/managed-media-read.ts:36,449–454).",
+          "Lines 208–239 keep files on unknown outcomes and compensate only owned unused files after definite rollback or an exact commit receipt. That cleanup discipline does not prevent unreadable files from committing."
+        ]
+      },
+      "previousRecordSha256": "c8607531d4e2e5b70254cdd4b433a67bdc0276f7d33f82ac18afe157fcd80145",
+      "originalSourceTuple": [
+        "src/lib/workflow-image-preparation.ts",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "0dff5ac016b3072dca9642cee880e4c8df93b6a5"
+      ],
+      "originalSourceTupleSha256": "ced345266cc5218cb01791ad21cc8b343ad6165075b7aba570ee2bbaf4907dbc"
+    },
+    {
+      "path": "src/lib/workflow-image-publication.ts",
+      "canonicalPointer": "/entries/139",
+      "previousRecord": {
+        "path": "src/lib/workflow-image-publication.ts",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "332ad554b44931c193e3019128beebd5ded2403f",
+        "reviewedBlob": "b1ebfabd82a524250ec90925c23c0fd374ef7513",
+        "disposition": "reviewed",
+        "summary": "Personal whole-grid recovery verifies canonical media and returns the same result after lost acknowledgement.",
+        "evidence": [
+          "Workflow-image PostgreSQL test committed a tile at the boundary and recovered identical references without a second write.",
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob 332ad554b44931c193e3019128beebd5ded2403f matches the scoped working file.",
+          "Lines 24–46 derive scoped operation, source, and ordered child digests. Lines 69–104 require complete active versions, placements and lineage for replay, without restoring missing children.",
+          "Lines 110–115 cap physical replay verification at 32 MiB. Lines 142–154 bind and commit the staged tiles without that per-file check. Any staged tile above 32 MiB makes the resulting operation non-replayable despite the first committed response.",
+          "Lines 155–176 discard uncertain connections and use a fresh read-only recovery. No scoped evidence covers a whole-grid COMMIT acknowledgement loss at the managed media size boundary."
+        ]
+      },
+      "previousRecordSha256": "dc9476fc52f0fb2196d9d9e44cf47ee4837ba5fd7b702710272b94839df02f46",
+      "originalSourceTuple": [
+        "src/lib/workflow-image-publication.ts",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "332ad554b44931c193e3019128beebd5ded2403f"
+      ],
+      "originalSourceTupleSha256": "b929ed75b9a256f69101425edbced5606864c2f11963d08df8c84e630d4e325a"
+    },
+    {
+      "path": "src/lib/workflow-image-receiver.ts",
+      "canonicalPointer": "/entries/140",
+      "previousRecord": {
+        "path": "src/lib/workflow-image-receiver.ts",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "64120aa066ef2b6f08ca09f61fb5893e3dfe6002",
+        "reviewedBlob": "64120aa066ef2b6f08ca09f61fb5893e3dfe6002",
+        "disposition": "reviewed",
+        "summary": "An upstream receiver uses an explicit versioned transform and exactly one valid unblocked edge from a successful matching source node.",
+        "evidence": [
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob 64120aa066ef2b6f08ca09f61fb5893e3dfe6002 matches the scoped working file.",
+          "Lines 15–31 keep ordinary upload and URL input behavior, validate the exact identity/grid transform shape, and require in-range grid coordinates.",
+          "Lines 35–56 validate receiver input and source output directions, declared types, unique endpoints, unblocked edge, and source result status/node ID. They return a detached output for the server to authorize.",
+          "workflow-connection-image-retry.test.ts:1–46 defines receiver port and admission guards. The aggregate log at 69263–69279 records those cases running. Admission itself is mocked in that test."
+        ]
+      },
+      "previousRecordSha256": "a97e5105d4c593ab152ae861e8b78c2b95007ae18c9e5aa2df503c9a9f788758",
+      "originalSourceTuple": [
+        "src/lib/workflow-image-receiver.ts",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "64120aa066ef2b6f08ca09f61fb5893e3dfe6002"
+      ],
+      "originalSourceTupleSha256": "9416844c96769d7aa986d2b9d696c78fef5313955c50e95d50e210d62c4204b7"
+    },
+    {
+      "path": "src/lib/workflow-image-reference-runtime.ts",
+      "canonicalPointer": "/entries/141",
+      "previousRecord": {
+        "path": "src/lib/workflow-image-reference-runtime.ts",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "29ed1846c469841a1a443e4e0a08bff61026adb7",
+        "reviewedBlob": "29ed1846c469841a1a443e4e0a08bff61026adb7",
+        "disposition": "reviewed",
+        "summary": "Identity execution verifies the authorized source tuple and writes only the matching parent checkpoint on the original transaction. It adds no media version, placement, or billing entry.",
+        "evidence": [
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob 29ed1846c469841a1a443e4e0a08bff61026adb7 matches the scoped working file.",
+          "Lines 18–47 bind the actor, scoped target, stable operation ID and durable upstream output, then form the reference checkpoint with the read checksum.",
+          "Lines 51–85 hold the parent fence, recheck document placement identity, and match a previous success exactly before acknowledging it. Lines 86–98 discard an uncertain connection, reread source bytes and reconcile via readback without creating another checkpoint.",
+          "Source trace covers the reference publisher contract. Its formal execution against live leases and document storage remains unverified."
+        ]
+      },
+      "previousRecordSha256": "0145ac20133f6815eb8dbdcc0c192e0e855b5f5dc1a890a6aa4e08c73b48c565",
+      "originalSourceTuple": [
+        "src/lib/workflow-image-reference-runtime.ts",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "29ed1846c469841a1a443e4e0a08bff61026adb7"
+      ],
+      "originalSourceTupleSha256": "f7ec332c84d4c41ca2a6dee26940355f6ebaef8739fc2910cd6460041e3b7e6f"
+    },
+    {
+      "path": "src/lib/workflow-image-retry-admission.ts",
+      "canonicalPointer": "/entries/142",
+      "previousRecord": {
+        "path": "src/lib/workflow-image-retry-admission.ts",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "7042152e90884fe2e72664d15ef829360f0356c7",
+        "reviewedBlob": "aeff6c9c8a07fa48cf19c086fb871d3b9c97aa06",
+        "disposition": "reviewed",
+        "summary": "Retry reuses only the exact child with zero credit cost, nonbillable status and no charge or refund reference.",
+        "evidence": [
+          "Workflow-image PostgreSQL tests checked replay, one child, retained ancestor and changed accounting rejection.",
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob 7042152e90884fe2e72664d15ef829360f0356c7 matches the scoped working file.",
+          "Lines 29–43,60–66 bind the actor, project, terminal ancestor and frozen graph/results. Lines 74–89 admit a deterministic one-node child with creditCost 0 and creditStatus not-applicable and retain only successful upstream context.",
+          "Lines 44–51 and 115–117 verify the child identity and request digest on replay/readback without checking credit_cost or credit_status. Lines 92–113 handle an unknown COMMIT by looking for the same child on a fresh connection.",
+          "workflow-connection-image-retry.test.ts:13 mocks admitWorkflowImageRetry. The inspected evidence does not demonstrate the real duplicate admission and uncertain-commit paths with an unchanged nonbillable child and ancestor."
+        ]
+      },
+      "previousRecordSha256": "f76e9eb1403fc0ba7e40c312d8504d0196dcc6bd318f81480acce163dc676218",
+      "originalSourceTuple": [
+        "src/lib/workflow-image-retry-admission.ts",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "7042152e90884fe2e72664d15ef829360f0356c7"
+      ],
+      "originalSourceTupleSha256": "f30bacbf9de55c704684c0d6b68d260395bf963a4a6d0f9e158b92040ff48303"
+    },
+    {
+      "path": "src/lib/workflow-image-retry-view.ts",
+      "canonicalPointer": "/entries/143",
+      "previousRecord": {
+        "path": "src/lib/workflow-image-retry-view.ts",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "cc43ac05047144f1a26e9004b2dfd89a56c39675",
+        "reviewedBlob": "cc43ac05047144f1a26e9004b2dfd89a56c39675",
+        "disposition": "reviewed",
+        "summary": "The browser tracks a retry's node, active execution and prior confirmed context independently, and accepts completion only with the matching retry execution and an image result.",
+        "evidence": [
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob cc43ac05047144f1a26e9004b2dfd89a56c39675 matches the scoped working file.",
+          "Lines 21–56 validate the persisted view, require the pending source to be the current context, and promote the active child on settlement.",
+          "Lines 58–72 require the exact response execution and reject a completed snapshot without a successful image result. The status route exposes results for a completed retry only after terminal verification and sends no cached results in processing/failure responses (src/app/api/workflow/execute/route.ts:1524–1549).",
+          "This review covers view and server contract wiring. Terminal media verification and the admission receipt have separate hold entries."
+        ]
+      },
+      "previousRecordSha256": "81db728c9a14f9139d02d96157b964bf5c01c8f26923e6eed552867d0c6285fd",
+      "originalSourceTuple": [
+        "src/lib/workflow-image-retry-view.ts",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "cc43ac05047144f1a26e9004b2dfd89a56c39675"
+      ],
+      "originalSourceTupleSha256": "4f2cfa5d221c66e1dabbba88780c88eff6755ab5efb87964bb44a52872fa2679"
+    },
+    {
+      "path": "src/lib/workflow-image-runtime-publication.ts",
+      "canonicalPointer": "/entries/144",
+      "previousRecord": {
+        "path": "src/lib/workflow-image-runtime-publication.ts",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "b0318b3d3da984143562e0e9952d3d282cf4c61f",
+        "reviewedBlob": "ac5a4c9e694b8d8a51ee82c208b94ac57b0daccb",
+        "disposition": "reviewed",
+        "summary": "Personal runtime recovery verifies the locked placement and matching media and checkpoint while fencing lost leases.",
+        "evidence": [
+          "Workflow-image PostgreSQL runtime tests checked repeated acknowledgement and a lost lease without publication.",
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob b0318b3d3da984143562e0e9952d3d282cf4c61f matches the scoped working file.",
+          "Lines 33–74 derive logical operation and target identities from actor, project, graph path, node, attempt and loop, excluding mutable lease fields. Lines 152–190 require exact immutable lineage, active placement and matching node checkpoint and repeat the lease conditions at checkpoint write.",
+          "Lines 200–205 cap replay media at 32 MiB. Lines 242–261 create the staged child, bind the target slot and write the parent checkpoint on the same client without applying that cap to the new file.",
+          "Lines 263–277 discard uncertain connections and reconcile through existing durable records. Scoped runtime evidence for the size boundary and lease/acknowledgement loss was unavailable."
+        ]
+      },
+      "previousRecordSha256": "628afad113707b3f4c4ac100c60f1e6045fbaab938e913293c1166bf9c223bcc",
+      "originalSourceTuple": [
+        "src/lib/workflow-image-runtime-publication.ts",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "b0318b3d3da984143562e0e9952d3d282cf4c61f"
+      ],
+      "originalSourceTupleSha256": "c2239afed6c873563c158b3ee1010971619bf5487cfa4a0fb1adff89bd12bb13"
+    },
+    {
+      "path": "src/lib/workflow-image-source-options.ts",
+      "canonicalPointer": "/entries/145",
+      "previousRecord": {
+        "path": "src/lib/workflow-image-source-options.ts",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "12e22bc1353c7103a92eda1ec822f47fdac8ac99",
+        "reviewedBlob": "12e22bc1353c7103a92eda1ec822f47fdac8ac99",
+        "disposition": "reviewed",
+        "summary": "The workflow image source list preserves upload, URL and canvas selection and adds the explicit upstream receiver choice.",
+        "evidence": [
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob 12e22bc1353c7103a92eda1ec822f47fdac8ac99 matches the scoped working file.",
+          "Lines 1–6 export four stable values. The workflow-engine imports the list, and workflow-image-receiver.ts:16–19 selects transform mode only for input-image with source upstream.",
+          "workflow-image-source-choice.test.tsx:177–196 defines the preserved choices and transitions including one undoable receiver-port insertion. The earlier aggregate run failed at storage fixture setup for this suite (vitest-full.log:99491–99498)."
+        ]
+      },
+      "previousRecordSha256": "d3741318432032b823c52094cf1daf61f82711567c09447e9c3bb8338d8b2a30",
+      "originalSourceTuple": [
+        "src/lib/workflow-image-source-options.ts",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "12e22bc1353c7103a92eda1ec822f47fdac8ac99"
+      ],
+      "originalSourceTupleSha256": "9d2cdfff1eae00fd4aeb328fb9120c912496c6c7940ef2369e02cf3ec73b32fc"
+    },
+    {
+      "path": "src/lib/workflow-image-source.ts",
+      "canonicalPointer": "/entries/146",
+      "previousRecord": {
+        "path": "src/lib/workflow-image-source.ts",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "4a293cba8dd1b88ddb1a15ce1644b9c44de0d329",
+        "reviewedBlob": "4a293cba8dd1b88ddb1a15ce1644b9c44de0d329",
+        "disposition": "reviewed",
+        "summary": "The actor-bound resolver uses the current upstream reference in receiver mode, rejects project mismatch, and checks that the graph and source identity survive the asynchronous read.",
+        "evidence": [
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob 4a293cba8dd1b88ddb1a15ce1644b9c44de0d329 matches the scoped working file.",
+          "Lines 28–49 omit the cached target media from upstream authority and extract a typed reference from the selected successful source. Lines 53–69 snapshot scope, enforce the project, and use the original actor resolver without a fallback after errors.",
+          "Lines 69–81 disable placement writes for runtime grid preparation and recheck the binding, target and upstream identity after I/O. The execution caller supplies bindPlacement false before either publisher (workflow-image-input-execution.ts:13–24)."
+        ]
+      },
+      "previousRecordSha256": "f0dfc423028f6f8563a8e60d6c3f86d4e5f186520e131e28d11f346cf474d540",
+      "originalSourceTuple": [
+        "src/lib/workflow-image-source.ts",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "4a293cba8dd1b88ddb1a15ce1644b9c44de0d329"
+      ],
+      "originalSourceTupleSha256": "964a9a5ac049d6bed0ec47af78b6c0f45259657e0e75d14204e437df88db524d"
+    },
+    {
+      "path": "src/lib/workflow-image-terminal-receipt.ts",
+      "canonicalPointer": "/entries/147",
+      "previousRecord": {
+        "path": "src/lib/workflow-image-terminal-receipt.ts",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "a4cdaa1df7e6bcbd3fa9476aa7adba70d1d04422",
+        "reviewedBlob": "bfbceae6775a683b20db1865a8adefcbc90e0af5",
+        "disposition": "reviewed",
+        "summary": "Cold receipt recovery reads the archived parent before legacy URLs, verifies child media, and rejects inconsistent retry accounting.",
+        "evidence": [
+          "Workflow-image PostgreSQL tests recovered a checkpoint and completed retry with the original source unavailable, then rejected modified media and accounting.",
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob a4cdaa1df7e6bcbd3fa9476aa7adba70d1d04422 matches the scoped working file.",
+          "Lines 30–65 bind actor, exact ancestor and child snapshots, attempt, deterministic ID and request digest. Lines 108–135 recheck all proofs in one read transaction and compare the exact durable checkpoint without repairing it.",
+          "Lines 75–105 read the source first, then the committed target and the archived parent. For a legacy URL grid, expiry or content change at the original URL prevents verification even while the recorded parent and tile remain intact. A personal tile above 32 MiB fails the target read at line 84.",
+          "Lines 138–232 limit cold recovery to CPU-capable frames with no live paid child, skill, layer or sketch intent and validate loop positions before accepting checkpoints. No scoped receipt log establishes completed legacy-grid readback with a now-unavailable original, or a boundary-size cell."
+        ]
+      },
+      "previousRecordSha256": "0a0a80ad776cc25deadc2eeb2eaf842e34e2d504b033284babb3dc07279094f9",
+      "originalSourceTuple": [
+        "src/lib/workflow-image-terminal-receipt.ts",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "a4cdaa1df7e6bcbd3fa9476aa7adba70d1d04422"
+      ],
+      "originalSourceTupleSha256": "7aeedb19a83589650cb8653147004ddd57a454d2671f2161b9a43cba00f5cc83"
+    },
+    {
+      "path": "src/lib/workflow-renderer/legacy-mobile-pointer.ts",
+      "canonicalPointer": "/entries/148",
+      "previousRecord": {
+        "path": "src/lib/workflow-renderer/legacy-mobile-pointer.ts",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "4b46459e3b718c0c46bea52acff36baccd5d2ef3",
+        "reviewedBlob": "4b46459e3b718c0c46bea52acff36baccd5d2ef3",
+        "disposition": "reviewed",
+        "summary": "The gesture controller binds pointer ownership and scope through capture, separates port dragging from viewport gestures, and drops stale sessions before host updates.",
+        "evidence": [
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob 4b46459e3b718c0c46bea52acff36baccd5d2ef3 matches the scoped working file.",
+          "Lines 47–59 guard finite geometry and clamp zoom. Lines 71–107 gate commit and restoration by the captured scope and always release capture on settlement.",
+          "Lines 109–166 track primary touch and pinch ownership, reject wrong pointer IDs/types/targets, use the final release point, suppress compatibility mouse input, and clean up when the scope changes. node-editor.tsx:4689–4692 wires pointer release and click suppression.",
+          "workflow-legacy-mobile-pointer.test.ts:40–92 defines tap, origin changes, final pan displacement, two-finger zoom and long-press cases. resume.md:73 records a narrow drag/connection regression. The earlier mounted node-pointer suite failed in setup (vitest-full.log:99523–99529)."
+        ]
+      },
+      "previousRecordSha256": "3079779e6d3dbddf29f7faab485a0f5da8b5c0144d658af5faa855327fb53dd8",
+      "originalSourceTuple": [
+        "src/lib/workflow-renderer/legacy-mobile-pointer.ts",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "4b46459e3b718c0c46bea52acff36baccd5d2ef3"
+      ],
+      "originalSourceTupleSha256": "055b62d02e53a818f1fa352893281ef255a309c46416cb89bea1e7434862faf4"
+    },
+    {
+      "path": "src/lib/workflow-renderer/legacy-port-targets.ts",
+      "canonicalPointer": "/entries/149",
+      "previousRecord": {
+        "path": "src/lib/workflow-renderer/legacy-port-targets.ts",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "a477eed7fe8f6cb2079154b1069d0249466f6cd2",
+        "reviewedBlob": "a477eed7fe8f6cb2079154b1069d0249466f6cd2",
+        "disposition": "reviewed",
+        "summary": "Port geometry yields a 44-pixel target only where it fits without overlap or obstruction. Every other port remains available through the host's fallback.",
+        "evidence": [
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob a477eed7fe8f6cb2079154b1069d0249466f6cd2 matches the scoped working file.",
+          "Lines 4–17 calculate screen rectangles from measured centers, reject invalid bounds, detect neighboring and obstacle collisions, and keep the original port in the fallback set.",
+          "WorkflowPortTargets.tsx:16–27 renders only the safe direct set. workflow-image-source-choice.test.tsx:105–133 defines center alignment and the alternate keyboard chooser. The old full-run geometry suite failed at fixture setup (vitest-full.log:99555–99562)."
+        ]
+      },
+      "previousRecordSha256": "b4efad3cae8f8c05ad896601303482cd66141caeaa52ecb356b3a4fd37137d41",
+      "originalSourceTuple": [
+        "src/lib/workflow-renderer/legacy-port-targets.ts",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "a477eed7fe8f6cb2079154b1069d0249466f6cd2"
+      ],
+      "originalSourceTupleSha256": "033b1cedac916ead25c8d5ffb2a6a5d9544f6e09c378c06b5dda9c85f52b84d0"
+    },
+    {
+      "path": "src/lib/workflow-renderer/minimap-pointer.ts",
+      "canonicalPointer": "/entries/150",
+      "previousRecord": {
+        "path": "src/lib/workflow-renderer/minimap-pointer.ts",
+        "reviewArea": "workflow",
+        "source": "main",
+        "sourceCommit": "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "sourceBlob": "00145069ae70b4664fbccfa4cb689d3fd3fdaa12",
+        "reviewedBlob": "00145069ae70b4664fbccfa4cb689d3fd3fdaa12",
+        "disposition": "reviewed",
+        "summary": "The minimap consumes captured fractional release coordinates once, only for the matching owner, ID and pointer type. Keyboard and unmatched clicks use their own coordinates.",
+        "evidence": [
+          "Provenance. Added since the pinned baseline. Reachable source 3b4c9eeb111f3fc8a324324f2900f710f5f304aa added the exact content. Merge f69131937175e5609599d66e1d3fb8199a7b1088 carried the same blob from its second parent. HEAD blob 00145069ae70b4664fbccfa4cb689d3fd3fdaa12 matches the scoped working file.",
+          "Lines 23–48 validate primary finite pointer input and reset the old sample on a new gesture. Lines 50–62 clear interrupted captures while preserving a matched completed touch release.",
+          "node-minimap-pointer-detail-zero.test.ts:12–25 and node-minimap-pointer-precision.test.tsx:128–179 define detail-zero, capture, owner and coordinate cases. release-mobile-workflow-minimap.log:6–7 reports one passing narrow case with 23 skipped, as recorded in resume.md:73."
+        ]
+      },
+      "previousRecordSha256": "01b217de024284ffe0adf6370a38d2af2728fee4bb61966573a5c79f0023eeaa",
+      "originalSourceTuple": [
+        "src/lib/workflow-renderer/minimap-pointer.ts",
+        "main",
+        "3b4c9eeb111f3fc8a324324f2900f710f5f304aa",
+        "00145069ae70b4664fbccfa4cb689d3fd3fdaa12"
+      ],
+      "originalSourceTupleSha256": "fe342815f94c369a96fe287d833a35bc0075ddb9027d5eb2e3a2a014bc403ff3"
+    },
+    {
+      "path": "src/components/workflow-hub.tsx",
+      "canonicalPointer": "/entries/156",
+      "previousRecord": {
+        "path": "src/components/workflow-hub.tsx",
+        "reviewArea": "workflow",
+        "source": "candidate",
+        "sourceCommit": null,
+        "sourceBlob": null,
+        "reviewedBlob": "c355e6ae90efafb2cc75a48234dc498f797b9628",
+        "disposition": "reviewed",
+        "summary": "Workflow import and export use the current account. Changing accounts discards the previous list, selection and outstanding file reads; only the most recent import is applied.",
+        "evidence": [
+          "Follow-up on the preceding findings: the hub remounts on actor change, resets the selection, and the authenticated list endpoint rejects a mismatch with the caller ID. An unmounted or superseded file read cannot open another workflow or show an obsolete error.",
+          "src/__tests__/components/workflow-hub-market.test.tsx: five cases pass, covering delayed responses across accounts and return to the same account, export of the current account only, late successful/failed reads, and overlapping imports. See release-workflow-hub-actor-import-final.log and release-workflow-hub-overlap-red.log.",
+          "Import graph and template topology are separate held paths (workflow-file.ts and workflow-presets.ts); this source review does not release those paths or establish formal end-to-end acceptance.",
+          "Earlier held content d721d0fa1a2e74ec3564d6ca87216334eca882d0: The candidate adds local export of loaded workflows without tying the list or an outstanding import to the current actor. A mounted actor change can leave a previous account's workflow available for export until a current response wins.",
+          "Earlier review: Provenance. Baseline and HEAD share blob fcf7fc74c0f99f1d5c3dd62012c5f285de2401d1. Last reachable change to the pinned file is 0a8e0c24d1cb7c0a07b01ae4769c7156652db38c. The inspected worktree modification adds 96 lines and removes 73. Candidate Git content ID d721d0fa1a2e74ec3564d6ca87216334eca882d0 and SHA-256 77af969082527da5b309c7cf7737fb30317764e6dc587e36808e1d234fc91da1 (release-candidate-inputs.sha256).",
+          "Earlier review: Lines 164–185 fetch and commit list state with no cancellation or actor check on response and retain the prior list when a different authenticated user starts loading. canvas-workspace.tsx:7941–7946 renders the hub without an actor-specific key.",
+          "Earlier review: Lines 231–255 await a file read without invalidating the previous request and export a local blob from the displayed list with no current-actor check. The exported graph keeps node configuration and connections and omits top-level workflow/project IDs. The export file name is sanitized and its object URL is revoked.",
+          "Earlier review: Lines 357–381 expose the candidate presets, including the graph with an incompatible edge. resume.md:43 records the local three-node text-to-image export/reimport. workflow-hub-market.test.tsx:9–26 defines catalog filtering and template opening. Neither exercises the actor-switch export or overlapping import."
+        ]
+      },
+      "previousRecordSha256": "bfb9f4e5bc636f7f3f72ef907c0594be6d48a415143589865b710bf3534152a3",
+      "originalSourceTuple": [
+        "src/components/workflow-hub.tsx",
+        "candidate",
+        null,
+        null
+      ],
+      "originalSourceTupleSha256": "b5f330cfd6d1bbe1772f82275d119750e3e2273104a9aa70c52b685c7e56534e"
+    },
+    {
+      "path": "src/lib/workflow-file.ts",
+      "canonicalPointer": "/entries/158",
+      "previousRecord": {
+        "path": "src/lib/workflow-file.ts",
+        "reviewArea": "workflow",
+        "source": "candidate",
+        "sourceCommit": null,
+        "sourceBlob": null,
+        "reviewedBlob": "d81440ecf29d992951c188777e72bf6245066521",
+        "disposition": "reviewed",
+        "summary": "The editor import path preserves ComfyUI slot bindings and validates the complete graph before appending, including existing-ID collisions.",
+        "evidence": [
+          "workflow-preset-graph.test.ts mounts the actual import control; the workflow import and execution cluster passed 127 offline tests.",
+          "Provenance. Absent at the baseline and pinned HEAD. Reviewed as an untracked current-candidate addition. Candidate Git content ID 2844813dee439c7987a34efde04912fc15fba7bc and SHA-256 46f98ddb0dc3bc25eb3283e1dcf879cf312f12e442ad6617eaddae24c581059e (release-candidate-inputs.sha256).",
+          "Lines 11–19 check primitive shapes and finite dimensions but accept unknown node/port types, duplicate IDs, missing endpoints, incompatible ports and cyclic graphs. Lines 30–37 hand the graph directly to the editor or accept any nonempty ComfyUI conversion.",
+          "workflow-engine.ts:433–450 and 1602–1641 supply connection and topology validation that this boundary does not use. Its ComfyUI frontend parser ignores the link's from/to slot indices and chooses each node's first port (workflow-engine.ts:3353–3370).",
+          "resume.md:43 records a basic native JSON round trip. It provides no evidence that unsupported or malformed imports are rejected or that a multi-port ComfyUI graph retains its bindings."
+        ]
+      },
+      "previousRecordSha256": "d50c1d73939caa545bfc85bac8dd6ee6bf382221e31c70a06bb760e808f9227b",
+      "originalSourceTuple": [
+        "src/lib/workflow-file.ts",
+        "candidate",
+        null,
+        null
+      ],
+      "originalSourceTupleSha256": "19742187b549904f83808983f54787b6c3bba60cfa76f1b063fa7e4cde6c10ba"
+    },
+    {
+      "path": "src/lib/workflow-presets.ts",
+      "canonicalPointer": "/entries/159",
+      "previousRecord": {
+        "path": "src/lib/workflow-presets.ts",
+        "reviewArea": "workflow",
+        "source": "candidate",
+        "sourceCommit": null,
+        "sourceBlob": null,
+        "reviewedBlob": "d9167f091c4a7f4b7abd1da690dd2535cd1186d1",
+        "disposition": "reviewed",
+        "summary": "The advertising preset requests a single script response and uses its ordered seven scene prompts and narration in their existing downstream nodes.",
+        "evidence": [
+          "workflow-connection-preflight.test.ts verifies one synthetic script call, seven distinct video prompts, ordering and one narration before final composition.",
+          "Provenance. Absent at the baseline and pinned HEAD. Reviewed as an untracked current-candidate addition. Candidate Git content ID d55ae14ed7e0c55557f421d6218f565c5a6347cc and SHA-256 a3a3c0d87cf371b78407d561e02ae284af72596dd919bba78958c29732f674e1 (release-candidate-inputs.sha256).",
+          "Lines 285–303 request an image input on the planning LLM. Lines 443–452 silently choose its first input when the named port is missing and keep the declared image edge type. The offline check built all 17 graphs with the current engine and found exactly one incompatible edge, the first edge of social-9grid.",
+          "Lines 204–226 leave the ecommerce planner without a product or prompt input. Lines 243–264 fan out the whole storyboard text to all seven video generators. Lines 188–193 feed both the background removal and retouch results into the one-image upscaler.",
+          "The same offline check built request bodies using synthetic outputs without calling providers. The ecommerce planner emitted empty user content, seven video requests shared one prompt, and the upscaler selected the background-removal result while ignoring the retouched result. The seven video-concat edges also use the fallback port. The workflow-engine.ts SHA-256 was a401ac47d23243e37fd24ed8afa5e065ce16e5df89c54d3d38db59a20a31ebfc, matching the recorded build input.",
+          "workflow-targeted.log:7–15,44–45 records prior tests for the seven-scene graph, text-to-image, and image-to-video with audio. Those cases check graph loading and compatible ports and do not establish per-scene prompt routing or the other catalog runtime behavior."
+        ]
+      },
+      "previousRecordSha256": "5ce346b668920e4850450bed30dc748ac5c9274df272db3c4cb631f19e74ae39",
+      "originalSourceTuple": [
+        "src/lib/workflow-presets.ts",
+        "candidate",
+        null,
+        null
+      ],
+      "originalSourceTupleSha256": "e54b35693b2784b613ffbae32a503055e6773881a5183bbd6b09bee907196db3"
+    },
+    {
+      "path": "src/components/node-editor.tsx",
+      "canonicalPointer": "/additionalPaths/22",
+      "previousRecord": {
+        "path": "src/components/node-editor.tsx",
+        "reviewArea": "workflow",
+        "reviewedBlob": "361cf33d3958b04dfe5dc7e8c5e30453190d74f6",
+        "disposition": "reviewed",
+        "summary": "Preserves approval recovery, restores workflow image selection, and uses the slot-aware import path with collision checks.",
+        "evidence": [
+          "Existing Edge workflow approval recovery and 21 isolated workflow image checks, plus actual import control coverage in the 127-test workflow cluster."
+        ]
+      },
+      "previousRecordSha256": "0edb5e02e2f62c6a40bf6afab62d42ee4a71e1d10b718ee4885735bd60ee6dd8",
+      "originalSourceTuple": [
+        "src/components/node-editor.tsx",
+        null,
+        null,
+        null
+      ],
+      "originalSourceTupleSha256": "035e4c205b187109875b6968181ea99c20d9fc2631787b721d386fec79179603"
+    },
+    {
+      "path": "src/lib/workflow-engine.ts",
+      "canonicalPointer": "/additionalPaths/23",
+      "previousRecord": {
+        "path": "src/lib/workflow-engine.ts",
+        "reviewArea": "workflow",
+        "reviewedBlob": "f3704eab1a1edf33bc0037de7c90295e56be8af7",
+        "disposition": "reviewed",
+        "summary": "Reads seven bounded storyboard scenes and ordered narration from one upstream script before building downstream requests.",
+        "evidence": [
+          "Synthetic full graph executor checks one script request and correct scene and audio mapping, including invalid-script refusal."
+        ]
+      },
+      "previousRecordSha256": "d8b56a1a5cbe82adb80a12d56e2a87341b39075b95fc3a4f176cb5837084318e",
+      "originalSourceTuple": [
+        "src/lib/workflow-engine.ts",
+        null,
+        null,
+        null
+      ],
+      "originalSourceTupleSha256": "283b346c2bd8bd5908f899fec1d4816df316fee36991d721aac4ac04988a64f1"
+    },
+    {
+      "path": "src/app/api/workflow/execute/route.ts",
+      "canonicalPointer": "/additionalPaths/24",
+      "previousRecord": {
+        "path": "src/app/api/workflow/execute/route.ts",
+        "reviewArea": "workflow",
+        "reviewedBlob": "1a212705aeb8e6b27b9c9913d9e52bb348186dcb",
+        "disposition": "reviewed",
+        "summary": "Restores paused approvals through persisted child receipts and parses the script model's standard choices content when required.",
+        "evidence": [
+          "Existing cross-worker Edge approval recovery kept the original task and one simulated generation. The storyboard regression ran with synthetic video and audio."
+        ]
+      },
+      "previousRecordSha256": "06efdd0881d6739bd2f32cab015150b6a8fcd3d972879a2255de83ae0aed77b7",
+      "originalSourceTuple": [
+        "src/app/api/workflow/execute/route.ts",
+        null,
+        null,
+        null
+      ],
+      "originalSourceTupleSha256": "04103b37ba8c4f3aad601af2248f9da0055bee0399601279ffe7b801fb163594"
+    },
+    {
+      "path": "src/app/api/video/extract-frames/route.ts",
+      "canonicalPointer": "/additionalPaths/59",
+      "previousRecord": {
+        "path": "src/app/api/video/extract-frames/route.ts",
+        "reviewedBlob": "51f5579b8cb439c4b804e27e062f471389882dc2",
+        "disposition": "reviewed",
+        "summary": "Probes the video duration for uniform sampling, gives each result batch unique file names, and removes the per-request work directory after success or failure.",
+        "evidence": [
+          "2026-11-14 VPS candidate. Reviewed FFmpeg arguments and cleanup. The regression and prior isolated Edge evidence verify six readable JPEGs from a one-second video."
+        ]
+      },
+      "previousRecordSha256": "ce3a5c22392a3dec46ca3a786b046ecc97f7381d1587828ebd73a386ca518b74",
+      "originalSourceTuple": [
+        "src/app/api/video/extract-frames/route.ts",
+        null,
+        null,
+        null
+      ],
+      "originalSourceTupleSha256": "de5db253904a1fc1ac974e5c1917b4c987c4c9e29793d246c5e26c4af0e15c85"
+    }
+  ]
+}
