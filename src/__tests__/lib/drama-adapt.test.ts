@@ -57,8 +57,10 @@ describe('drama adaptation', () => {
 
   it('starts an adaptation and follows it to the saved drama', async () => {
     const start = vi.fn(async () => json({ success: true, taskId: 'drama_adapt_1', parts: 3 }, 202));
-    await expect(startAdaptation({ text: '原文' }, start)).resolves.toEqual({ taskId: 'drama_adapt_1', parts: 3 });
-    await expect(startAdaptation({ text: '原文' }, async () => json({ error: '已有一部小说在改编' }, 409))).rejects.toThrow('已有一部小说在改编');
+    const input = { text: '原文', planner: { providerId: 'p', modelId: 'chat-2' } };
+    await expect(startAdaptation(input, start)).resolves.toEqual({ taskId: 'drama_adapt_1', parts: 3 });
+    expect(start).toHaveBeenCalledWith('/api/drama/adapt', expect.objectContaining({ body: JSON.stringify(input) }));
+    await expect(startAdaptation(input, async () => json({ error: '已有一部小说在改编' }, 409))).rejects.toThrow('已有一部小说在改编');
 
     const replies = [
       json({ status: 'processing', progress: 40, label: '改编小说 · 第 2/3 段' }),

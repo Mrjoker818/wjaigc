@@ -1038,7 +1038,7 @@ describe('deployment database-only authentication', () => {
         headers: { cookie: `wujie_session=${response.cookies.get('wujie_session')?.value}` },
       });
       await expect(getSessionUser(sessionRequest)).resolves.toMatchObject({
-        id: 'admin_mr_joker', name: 'Restored Admin', role: 'admin', productType: 'canvas,chat',
+        id: 'admin_mr_joker', name: 'Restored Admin', role: 'admin', productType: 'canvas,video,chat',
       });
       expect(getProductionAuthConfigurationIssues()).toEqual([]);
 

@@ -152,9 +152,9 @@ async function openModal(s: Session): Promise<void> {
   }
   await modal(s).waitFor({ state: 'visible' }); await settle(s.page);
 }
-async function session(theme: Theme, width: number, height: number): Promise<Session> {
+async function session(theme: Theme, width: number, height: number, coarse = false): Promise<Session> {
   if (!browser) throw Error('THREE_D_BROWSER_REQUIRED');
-  const context = await browser.newContext({ viewport: { width, height }, serviceWorkers: 'block', reducedMotion: 'reduce' });
+  const context = await browser.newContext({ viewport: { width, height }, hasTouch: coarse, serviceWorkers: 'block', reducedMotion: 'reduce' });
   contexts.add(context);
   let s: Session | undefined;
   try {
@@ -203,10 +203,10 @@ async function dispose(s: Session): Promise<void> {
   if (s.errors.length || failures.length) throw Error(`THREE_D_FIXTURE_INFRASTRUCTURE: ${s.errors.join('; ')} ${failures.map(String).join('; ')}`);
   if (s.requests.some(request => !request.startsWith('GET '))) throw Error('THREE_D_UNEXPECTED_SUBMISSION');
 }
-async function withSession(theme: Theme, width: number, height: number, run: (s: Session) => Promise<void>): Promise<void> {
-  const s = await session(theme, width, height); try { await run(s); } finally { await dispose(s); }
+async function withSession(theme: Theme, width: number, height: number, run: (s: Session) => Promise<void>, coarse = false): Promise<void> {
+  const s = await session(theme, width, height, coarse); try { await run(s); } finally { await dispose(s); }
 }
-async function target(control: Locator, touch = true): Promise<void> {
+async function target(control: Locator, interactive = true): Promise<void> {
   const result = await control.evaluate(element => {
     const r = element.getBoundingClientRect(), own = getComputedStyle(element);
     let clear = own.visibility === 'visible' && Number(own.opacity) > 0 && r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight;
@@ -219,11 +219,16 @@ async function target(control: Locator, touch = true): Promise<void> {
     // four side interiors; keep full-rectangle viewport/ancestor clipping above.
     const x = r.left + r.width / 2, y = r.top + r.height / 2;
     const points = [[r.left + 8, y], [r.right - 8, y], [x, r.top + 8], [x, r.bottom - 8], [x, y]];
-    return { x: r.x, y: r.y, width: r.width, height: r.height, clear, hit: points.every(([x, y]) => element.contains(document.elementFromPoint(x, y))) };
+    return { x: r.x, y: r.y, width: r.width, height: r.height, clear, hit: points.every(([x, y]) => element.contains(document.elementFromPoint(x, y))), touch: matchMedia('(max-width: 767px), (pointer: coarse)').matches };
   });
   expect(result.clear, `complete control visible ${JSON.stringify(result)}`).toBe(true);
   expect(result.hit, 'native center and inset-edge hits').toBe(true);
-  if (touch) { expect(result.height).toBeGreaterThanOrEqual(44); expect(result.width).toBeGreaterThanOrEqual(44); }
+  // Match globals.css on every check, including after a viewport resize.
+  if (interactive) {
+    const minimum = result.touch ? 44 : 24;
+    expect(result.height, result.touch ? 'touch height' : 'desktop height').toBeGreaterThanOrEqual(minimum);
+    expect(result.width, result.touch ? 'touch width' : 'desktop width').toBeGreaterThanOrEqual(minimum);
+  }
 }
 async function fixedActions(s: Session): Promise<void> {
   await target(footer(s).getByRole('button', { name: '取消', exact: true }));
@@ -298,6 +303,30 @@ describe('mobile 3d layout', () => {
       }
       await header(s).getByRole('button', { name: '关闭图转3D工厂', exact: true }).click(); expect(await modal(s).count()).toBe(0);
     });
+  }, 25000);
+});
+
+describe('F06 3d target policy', () => {
+  it.each(THEMES)('%s switches at 767/768px and retains the wide coarse floor', async theme => {
+    await withSession(theme, 767, 844, async s => {
+      for (const width of [767, 768]) {
+        await s.page.setViewportSize({ width, height: 844 }); await settle(s.page);
+        expect(await s.page.evaluate(() => ({ narrow: matchMedia('(max-width: 767px)').matches, coarse: matchMedia('(pointer: coarse)').matches })))
+          .toEqual({ narrow: width === 767, coarse: false });
+        await fixedActions(s);
+        const rect = await footer(s).getByRole('button', { name: '取消', exact: true }).boundingBox();
+        expect(rect!.height, 'touch floor versus existing compact desktop density').toBe(width === 767 ? 44 : 28);
+        console.log('F06_3D_TARGET', JSON.stringify({ theme, width, coarse: false, height: rect!.height }));
+      }
+    });
+    await withSession(theme, 1440, 900, async s => {
+      expect(await s.page.evaluate(() => ({ narrow: matchMedia('(max-width: 767px)').matches, coarse: matchMedia('(pointer: coarse)').matches })))
+        .toEqual({ narrow: false, coarse: true });
+      await fixedActions(s);
+      const cancel = footer(s).getByRole('button', { name: '取消', exact: true });
+      expect((await cancel.boundingBox())!.height).toBe(44);
+      await cancel.tap(); expect(await modal(s).count()).toBe(0);
+    }, true);
   }, 25000);
 });
 

@@ -179,6 +179,22 @@ async function session(theme: Theme = 'gold', width: number = 390, height: numbe
           if(!isDeepStrictEqual(Object.keys(audit).sort(),['action','durationMs','method','path','status'])||audit.action!=='patch_api_request'||audit.method!=='PATCH'||audit.path!=='/api/layer-documents'||audit.status!==expectedStatus||expectedStatus===undefined||typeof audit.durationMs!=='number'||!Number.isInteger(audit.durationMs)||audit.durationMs<0||audit.durationMs>25000)throw Error('HF_AUDIT_EXACT_PATCH_RECEIPT');
           s.hf.audits.push(body);await route.fulfill({json:{success:true}});return;
         }
+
+        // 3fd9d9c6 retired direct edit-elements. Restore an owned, completed
+        // element-decomposition task at the real API boundary; no AI or DB runs.
+        if (key === '/api/element-decompose?projectId=canvas-ui-project') {
+          const source = await s.page.evaluate(() => {
+            const image = (window as unknown as FixtureWindow).canvasUi.state.images.find(value => typeof value === 'object' && value !== null && 'id' in value && value.id === 'br-A');
+            if (!image || typeof image !== 'object' || !('url' in image) || typeof image.url !== 'string') throw Error('F04_OWNED_SOURCE_REQUIRED');
+            return image.url;
+          });
+          await route.fulfill({ json: { success: true, taskId: 'ew-owned-historical-task', status: 'completed', overallStatus: 'completed', progress: 100,
+            source: { sourceImageId: 'br-A', sourceVersionId: 'et-owned-source-v1', canonicalUrl: source, managedUrl: source, sha256: 'a'.repeat(64), width: 256, height: 128, mimeType: 'image/png' },
+            branches: { layers: { branch: 'layers', taskId: 'ew-owned-layer-task', status: 'completed', progress: 100, result: { width: 256, height: 128, engine: 'local', quality: { status: 'pass', score: 100, warnings: [] },
+              layers: [{ id: 'ew-background', name: 'EW 合成背景', role: 'background', imageUrl: source, width: 256, height: 128, offsetX: 0, offsetY: 0, opacity: 1, blendMode: 'normal', visible: true, source: 'local-enhanced' },
+                { id: 'ew-subject', name: 'EW 合成主体', role: 'subject', imageUrl: 'data:image/png;base64,' + s.png.toString('base64'), width: 64, height: 64, offsetX: 80, offsetY: 32, opacity: 1, blendMode: 'normal', visible: true, source: 'local-enhanced' }] } } } } });
+          return;
+        }
         if (key === '/logo.png') { await route.fulfill({contentType:'image/png',body:s.png});return; }
         throw Error('CANVAS_UI_FIXTURE_UNKNOWN_HTTP ' + key);
       })().catch(async error => { s.errors.push(String(error)); s.refused.add(route.request()); await route.abort('blockedbyclient'); });
@@ -221,7 +237,7 @@ async function dispose(s: Session, expectedRefusal?: 'http' | 'websocket', clean
   // Cleanup/lifecycle/allowlist failures can never share the expected-refusal
   // prefix. A boundary selftest must not succeed merely because close failed.
   const invalid=(code:string):never=>{if(failures.length)throw new AggregateError([Error(code),...failures],'CANVAS_UI_FIXTURE_VALIDATION_AND_CLEANUP');throw Error(code);};
-  const allowed=['/api/activity','/api/layer-documents','/api/layer-documents?projectId=canvas-ui-project&sourceImageId=br-A&sourceVersionId=et-owned-source-v1','/','/api/session','/api/auth/me','/api/task-events','/api/upscayl','/api/models?type=upscaler','/api/models?type=removebg','/api/models?type=3d','/logo.png','/api/tasks/recover?projectId=canvas-ui-project',...HELP_FILES.map(file=>'/api/help-image?file='+file)];
+  const allowed=['/api/element-decompose?projectId=canvas-ui-project','/api/activity','/api/layer-documents','/api/layer-documents?projectId=canvas-ui-project&sourceImageId=br-A&sourceVersionId=et-owned-source-v1','/','/api/session','/api/auth/me','/api/task-events','/api/upscayl','/api/models?type=upscaler','/api/models?type=removebg','/api/models?type=3d','/logo.png','/api/tasks/recover?projectId=canvas-ui-project',...HELP_FILES.map(file=>'/api/help-image?file='+file)];
   const keys=[...s.counts.keys()];
   if(s.options.requireMissing || s.counts.get('/')!==1 || keys.some(k=>!allowed.includes(k)&&!(expectedRefusal==='http'&&k==='/unexpected'))){
     console.log('CANVAS_UI_FIXTURE_REQUEST_DIAGNOSTIC',JSON.stringify({counts:[...s.counts],errors:s.errors}));
@@ -277,8 +293,14 @@ async function hfGuardedClose(s:Session,control:Locator):Promise<void>{
 async function hfOpen(s:Session,e:HFCase):Promise<Locator>{
  const img=s.page.locator('[data-canvas-image-id="br-A"]');
  if(e.touch)await img.tap({position:{x:200,y:100}});else await img.click({position:{x:200,y:100}});await settle(s.page);
- if(e.width<768){await hfTap(s,s.page.locator('[data-mobile-image-actions]').getByRole('button',{name:'更多',exact:true}));await hfTap(s,s.page.getByRole('dialog',{name:'图片工具',exact:true}).getByRole('button',{name:'编辑元素',exact:true}));}
- else{await hfTap(s,s.page.getByRole('button',{name:'展开更多工具',exact:true}));const overflow=s.page.locator('[data-image-toolbar-overflow]');await overflow.waitFor({state:'visible'});await hfTap(s,overflow.getByTestId('canvas-edit-elements'));}
+ if(e.width<768){await hfTap(s,s.page.locator('[data-mobile-image-actions]').getByRole('button',{name:'更多',exact:true}));await hfTap(s,s.page.getByRole('dialog',{name:'图片工具',exact:true}).getByRole('button',{name:'元素拆解',exact:true}));}
+ else{await hfTap(s,s.page.getByRole('button',{name:'元素拆解',exact:true}));}
+ const decomposition=s.page.locator('[data-popup="display-decompose"]');await decomposition.waitFor({state:'visible'});
+ await decomposition.getByRole('button',{name:'打开编辑器',exact:true}).click();
+ // The decomposition portal remains open above the editor; dismiss it through
+ // its real close control before auditing editor hit targets.
+ await decomposition.getByRole('button',{name:'关闭元素拆解',exact:true}).click();await decomposition.waitFor({state:'detached'});
+ expect(s.counts.get('/api/element-decompose?projectId=canvas-ui-project'),'one project-scoped restore through current entry').toBe(1);
  const editor=s.page.getByTestId('layer-editor');await editor.waitFor({state:'visible'});await editor.getByTestId('layer-document-status').filter({hasText:'已保存'}).waitFor({state:'visible'});await editor.getByTestId('layer-count').filter({hasText:'2 个图层'}).waitFor({state:'visible'});await nativeRequestsFinished(s);return editor;
 }
 async function hfCapture(s:Session,e:HFCase,label:string):Promise<void>{

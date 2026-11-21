@@ -30,12 +30,12 @@ export function describeUpstreamChatError(status: number, rawBody: string, model
   } catch { /* keep raw text */ }
   detail = detail.slice(0, 200) || '无响应内容';
 
-  if (status === 401 || status === 403) return `中转站拒绝了请求（${status}）：${detail}。请让管理员检查该提供商的 API Key。`;
-  if (status === 402) return `中转站余额或额度不足（402）：${detail}。`;
-  if (status === 429) return `请求过于频繁（429）：${detail}。请稍后重试。`;
+  if (status === 401 || status === 403) return `中转站拒绝了请求（${status}）。请让管理员检查该提供商的 API Key。`;
+  if (status === 402) return '中转站余额或额度不足（402）。请让管理员检查供应商余额。';
+  if (status === 429) return '请求过于频繁（429）。请稍后重试。';
   if (/不支持的模型|model.*(not|un)\s*(found|support|exist)|invalid model/i.test(detail)) {
-    return `中转站不支持模型「${model}」：${detail}。请切换其他模型，或让管理员从提供商的模型列表中移除它。`;
+    return `中转站不支持模型「${model}」（${status}）。请切换其他模型，或让管理员从提供商的模型列表中移除它。`;
   }
-  if (status >= 500) return `中转站暂时无法处理模型「${model}」（${status}）：${detail}。请稍后重试或切换模型。`;
-  return `API 错误 ${status}：${detail}`;
+  if (status >= 500) return `中转站暂时无法处理模型「${model}」（${status}）。请稍后重试或切换模型。`;
+  return `中转站拒绝了请求（${status}）。请检查所选模型支持的参数，或联系管理员。`;
 }

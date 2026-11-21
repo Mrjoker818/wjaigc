@@ -4,9 +4,16 @@ import type { Page } from '@playwright/test';
 import { Pool } from 'pg';
 
 import { SimpleChatSseDecoder } from '../../src/lib/simple-chat-sse';
+import type { RegisteredWorkspaceAssetReference } from '../../src/lib/asset-core/types';
+import type { CanvasBridgeJournal } from '../../src/lib/simple-chat-canvas-bridge';
+import type { CanvasDocumentProjection } from '../../src/lib/collaboration/canvas-document';
+import type { DocumentAssetCommandResult } from '../../src/lib/collaboration/canvas-asset-command';
+import type { CanvasImage } from '../../src/lib/user-types';
+import { buildSimpleChatCanvasTransferIdentity } from '../../src/lib/simple-chat-workspace-handoff-client';
 import {
   ensureStage4Session,
   expect,
+  loginExistingStage4Session,
   openStage4CanvasProject,
   openStage4ChatProject,
   seedStage4Baseline,
@@ -548,4 +555,336 @@ test('executes ordinary chat, vision stop, agent cancel, and refresh recovery', 
     await expect(page.getByText('已取消', { exact: true })).toBeVisible({ timeout: 20_000 });
   }
   expect(counts(fixture.browserProfile).agent).toBe(1);
+});
+
+test('current chat-to-canvas lineage, placement, account scope and refresh @stage4-current-lineage', async ({ page, stage4Evidence }, testInfo) => {
+  type StoredMessage = { id: string; imageRefs?: RegisteredWorkspaceAssetReference[] };
+  type StoredProject = { id: string; tasks: Array<{ id: string; messages: StoredMessage[] }> };
+  type Directory = {
+    success: boolean; projectId: string; sequence: number; readOnly: boolean;
+    projection: CanvasDocumentProjection; canvasImages: CanvasImage[];
+  };
+  const applicationUrl = new URL(testInfo.project.use.baseURL || '');
+  expect(applicationUrl.protocol).toBe('http:');
+  expect(['127.0.0.1', 'localhost', '[::1]']).toContain(applicationUrl.hostname);
+  const fixture = structuredClone(await stage4FixtureForProject(testInfo.project.name));
+  fixture.browserProfile += '-current-lineage-v10';
+  fixture.canvasProject.id = `${String(fixture.canvasProject.id)}-current-lineage-v10`;
+  fixture.canvasProject.canvasImages = [];
+  const metadata = { ...(fixture.canvasProject.metadata as Record<string, unknown>) };
+  delete metadata.workflow;
+  fixture.canvasProject.metadata = metadata;
+  fixture.chatProject.id = `${String(fixture.chatProject.id)}-current-lineage-v10`;
+  fixture.chatProject.agents = [];
+  const chatProjectId = String(fixture.chatProject.id);
+  const chatTaskId = `stage4-chat-task-${fixture.browserProfile}`;
+  fixture.chatProject.tasks = [{
+    id: chatTaskId, projectId: chatProjectId, name: 'Current lineage', messages: [],
+    model: 'stage4-chat-model', providerId: 'stage4-chat-provider',
+    imageModel: 'stage4-image-model', imageProviderId: 'stage4-image-provider',
+    createdAt: Date.now(), updatedAt: Date.now(),
+  }];
+  const targetProjectId = String(fixture.canvasProject.id);
+  // Both accounts already exist; neither this case nor its login helper creates users.
+  const fixtureB = structuredClone(fixture);
+  fixtureB.username = fixture.username.replace(/^stage4_/, 'stage4_b_');
+  fixtureB.canvasProject.id = `${targetProjectId}-b`;
+  fixtureB.chatProject.id = `${chatProjectId}-b`;
+  fixtureB.chatProject.tasks = [{
+    ...structuredClone((fixture.chatProject.tasks as Array<Record<string, unknown>>)[0]),
+    id: `${chatTaskId}-b`, projectId: String(fixtureB.chatProject.id), name: 'Account B scope check', messages: [],
+  }];
+  const authA = await loginExistingStage4Session(page, fixture);
+  await seedStage4Baseline(page, fixture, authA);
+  await seedStage4RuntimeDependencies({ auth: authA, fixture, page, providerBaseUrl });
+
+  await openStage4ChatProject(page, chatProjectId);
+  const origin = new URL(page.url()).origin;
+  expect(['127.0.0.1', 'localhost', '[::1]']).toContain(new URL(origin).hostname);
+  const ownerStatus = await page.request.get(`/api/collaboration/document-enable?projectId=${encodeURIComponent(targetProjectId)}`);
+  expect(ownerStatus.ok()).toBe(true);
+  const owner = await ownerStatus.json() as { featureEnabled: boolean; enabled: boolean; currentRevision: number };
+  expect(owner.featureEnabled).toBe(true);
+  expect(owner.enabled, 'Use a fresh Stage 4 run/project, not an already enabled document').toBe(false);
+  const enabled = await page.request.post('/api/collaboration/document-enable', {
+    headers: { Origin: origin },
+    data: { projectId: targetProjectId, expectedRevision: owner.currentRevision },
+  });
+  expect(enabled.ok(), 'Current lineage requires real document authority and transport').toBe(true);
+
+  const bridgeKey = (actorId: string) => 'wujie:canvas-bridge:v2:'
+    + encodeURIComponent(JSON.stringify([actorId, targetProjectId]));
+  const readJournal = async (actorId = authA.userId): Promise<CanvasBridgeJournal | null> => (
+    page.evaluate(key => {
+      const raw = localStorage.getItem(key);
+      return raw === null ? null : JSON.parse(raw);
+    }, bridgeKey(actorId))
+  );
+  const readStoredMessage = async (messageId: string): Promise<StoredMessage | undefined> => {
+    const response = await page.request.get('/api/user-data/sync?key=chat_simple_projects');
+    expect(response.ok()).toBe(true);
+    const payload = await response.json() as { value?: StoredProject[] };
+    return payload.value?.find(project => project.id === chatProjectId)?.tasks
+      .find(task => task.id === chatTaskId)?.messages.find(message => message.id === messageId);
+  };
+  const readPlacement = async (reference: RegisteredWorkspaceAssetReference) => {
+    if (!evidencePool) throw new Error('BLOCKED: Stage 4 evidence pool is not configured');
+    const result = await evidencePool.query<{
+      asset_id: string; owner_id: string; project_id: string; availability: string;
+      task_id: string | null; provider_id: string | null; model_id: string | null;
+      workspace_kind: string; workspace_id: string; entity_type: string; entity_id: string;
+      source_trace: RegisteredWorkspaceAssetReference['sourceTrace'];
+    }>(`SELECT v.asset_id, v.owner_id, v.project_id, v.availability,
+        v.task_id, v.provider_id, v.model_id, p.workspace_kind, p.workspace_id,
+        p.entity_type, p.entity_id, p.metadata->'sourceTrace' AS source_trace
+      FROM wujie_asset_versions v JOIN wujie_workspace_placements p
+        ON p.asset_version_id=v.id AND p.asset_id=v.asset_id
+        AND p.owner_id=v.owner_id AND p.project_id=v.project_id
+      WHERE v.id=$1 AND p.id=$2 AND p.status='active'`,
+    [reference.assetVersionId, reference.placementId]);
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]).toMatchObject({
+      asset_id: reference.assetId, owner_id: authA.userId, project_id: targetProjectId,
+      availability: 'ready', entity_id: reference.entityId,
+    });
+    return result.rows[0];
+  };
+  const requestCounts = { registration: 0, chat: 0, transfer: 0, attach: 0 };
+  const attachRequestBodies: unknown[] = [];
+  const observeRequest = (request: import('@playwright/test').Request): void => {
+    if (request.method() !== 'POST') return;
+    const path = new URL(request.url()).pathname;
+    if (path === '/api/simple-chat/chat') {
+      if (request.postDataJSON()?.assetAction === 'register') requestCounts.registration += 1;
+      else requestCounts.chat += 1;
+    }
+    if (path === '/api/assets/batch-transfer') requestCounts.transfer += 1;
+    if (path === '/api/collaboration/document-assets') {
+      requestCounts.attach += 1;
+      attachRequestBodies.push(request.postDataJSON());
+    }
+  };
+  page.on('request', observeRequest);
+  const providerBefore = { ...counts(fixture.browserProfile) };
+  try {
+    await page.getByRole('combobox', { name: '目标画布项目' }).selectOption(targetProjectId);
+    await expect(page.getByRole('button', { name: '联网搜索', exact: true })).toHaveAttribute('aria-pressed', 'false');
+    const uploadName = 'stage4-current-lineage.png';
+    await page.locator('#chat-file-upload').setInputFiles({
+      name: uploadName, mimeType: 'image/png', buffer: Buffer.from(TINY_PNG_BASE64, 'base64'),
+    });
+    await expect(page.getByRole('button', { name: `移除图片：${uploadName}`, exact: true })).toBeVisible();
+    const registrationResponse = page.waitForResponse(response => (
+      new URL(response.url()).pathname === '/api/simple-chat/chat'
+      && response.request().method() === 'POST' && response.request().postDataJSON()?.assetAction === 'register'
+    ));
+    const chatResponse = page.waitForResponse(response => (
+      new URL(response.url()).pathname === '/api/simple-chat/chat' && response.request().method() === 'POST'
+      && response.request().postDataJSON()?.assetAction !== 'register'
+    ));
+    const prompt = `请参考上传图片生成1张图片。WORKSPACE_CHAIN_E2E E2E_PROFILE:${fixture.browserProfile}`;
+    const input = page.getByPlaceholder('输入消息，Enter 发送，支持 Ctrl+V 粘贴图片');
+    await input.fill(prompt);
+    await input.press('Enter');
+    const registration = await registrationResponse;
+    expect(registration.ok(), `Attachment registration HTTP ${registration.status()}`).toBe(true);
+    const response = await chatResponse;
+    expect(response.ok()).toBe(true);
+    const request = response.request().postDataJSON() as Record<string, unknown>;
+    expect(request).toMatchObject({
+      projectId: chatProjectId, taskId: chatTaskId, assetProjectId: targetProjectId,
+      model: 'stage4-chat-model', providerId: 'stage4-chat-provider',
+      imageModel: 'stage4-image-model', imageProviderId: 'stage4-image-provider', webSearch: false,
+    });
+    expect(request.responseMessageId).toEqual(expect.any(String));
+    const messageId = String(request.responseMessageId);
+    const events = readCompleteSseFrames(await response.body())
+      .filter(frame => frame !== '[DONE]').map(frame => JSON.parse(frame) as Record<string, unknown>);
+    expect(events.filter(event => event.type === 'error')).toEqual([]);
+    const images = events.filter(event => event.type === 'image');
+    expect(images).toHaveLength(1);
+    const generated = images[0].imageRef as RegisteredWorkspaceAssetReference;
+    expect(generated).toMatchObject({
+      assetId: expect.any(String), assetVersionId: expect.any(String),
+      placementId: expect.any(String), entityId: expect.any(String), url: expect.any(String),
+      sourceTrace: { source: 'simple-chat', chatProjectId, chatTaskId, messageId,
+        providerId: 'stage4-image-provider', modelId: 'stage4-image-model' },
+    });
+    for (const id of [generated.assetId, generated.assetVersionId, generated.placementId]) {
+      expect(id).toMatch(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u);
+      expect(id).not.toMatch(/^(?:data|blob|https?|processing)(?:[:_-]|$)/iu);
+    }
+    const sourcePlacement = await readPlacement(generated);
+    expect(sourcePlacement).toMatchObject({
+      workspace_kind: 'chat', workspace_id: `standalone-chat:${chatProjectId}`, entity_type: 'chat-result',
+    });
+    if (generated.sourceTrace?.source === 'simple-chat' && generated.sourceTrace.generationTaskIds) {
+      expect(generated.sourceTrace.generationTaskIds).toEqual([sourcePlacement.task_id]);
+      expect(sourcePlacement).toMatchObject({ provider_id: 'stage4-image-provider', model_id: 'stage4-image-model' });
+    }
+    const message = page.locator(`[data-chat-message-id="${messageId}"]`);
+    await expect(message).toHaveAttribute('data-chat-asset-placement-ids', generated.placementId);
+    // The chat snapshot owns per-message provenance; the task's shared asset
+    // version is also used by other workspaces and retains its original digest.
+    await expect.poll(async () => (await readStoredMessage(messageId))?.imageRefs, { timeout: 20_000 })
+      .toContainEqual(generated);
+    const transferResponse = page.waitForResponse(candidate => (
+      new URL(candidate.url()).pathname === '/api/assets/batch-transfer' && candidate.request().method() === 'POST'
+    ));
+    await message.getByTitle('添加到画布', { exact: true }).click();
+    const transfer = await transferResponse;
+    expect(transfer.ok()).toBe(true);
+    const identity = buildSimpleChatCanvasTransferIdentity({
+      targetProjectId, chatTaskId, messageId, imageIndex: 0, sourceVersionId: generated.assetVersionId,
+    });
+    expect(transfer.request().postDataJSON()).toMatchObject({
+      transfers: [{ sourceVersion: generated.assetVersionId, targetProject: targetProjectId,
+        targetWorkspace: `canvas:${targetProjectId}`, entityType: 'canvas-image', ...identity,
+        metadata: { source: 'standalone-chat', messageId, imageIndex: 0, sourceTrace: generated.sourceTrace } }],
+      restoreDeletedPlacements: true,
+    });
+    const transferredPayload = await transfer.json() as { transfers: RegisteredWorkspaceAssetReference[] };
+    expect(transferredPayload.transfers).toHaveLength(1);
+    const transferred = transferredPayload.transfers[0];
+    expect(transferred).toMatchObject({
+      assetId: generated.assetId, assetVersionId: generated.assetVersionId, placementId: expect.any(String),
+      entityId: identity.entityId,
+    });
+    const transferredPlacement = await readPlacement(transferred);
+    expect(transferredPlacement).toMatchObject({
+      workspace_kind: 'canvas', workspace_id: `canvas:${targetProjectId}`, entity_type: 'canvas-image',
+      source_trace: generated.sourceTrace,
+    });
+    expect(transferredPlacement.source_trace).toEqual(generated.sourceTrace);
+    await expect(page.locator('[data-canvas-bridge-notice="waiting"]')).toContainText('已发送 1 张图片，等待画布接收');
+    expect((await readStoredMessage(messageId))?.imageRefs).toContainEqual(generated);
+    const pending = await readJournal();
+    expect(pending).toMatchObject({ actorId: authA.userId, projectId: targetProjectId });
+    if (!pending) throw new Error('Current lineage did not enqueue its real transfer');
+    expect(pending?.items).toHaveLength(1);
+    expect(pending?.items[0]).toMatchObject({
+      assetVersionId: transferred.assetVersionId, placementId: transferred.placementId, state: 'pending',
+    });
+    expect(requestCounts).toEqual({ registration: 1, chat: 1, transfer: 1, attach: 0 });
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('combobox', { name: '目标画布项目' })).toBeVisible();
+    await expect(message).toHaveAttribute('data-chat-asset-placement-ids', generated.placementId);
+    expect((await readStoredMessage(messageId))?.imageRefs).toContainEqual(generated);
+    expect(await readJournal()).toEqual(pending);
+    expect(requestCounts).toEqual({ registration: 1, chat: 1, transfer: 1, attach: 0 });
+
+    const attachResponse = page.waitForResponse(candidate => (
+      new URL(candidate.url()).pathname === '/api/collaboration/document-assets' && candidate.request().method() === 'POST'
+    ));
+    await openStage4CanvasProject(page, targetProjectId);
+    const attach = await attachResponse;
+    expect(attach.ok()).toBe(true);
+    expect(attach.request().headers()['x-wujie-expected-actor-id']).toBe(authA.userId);
+    expect(attach.request().postDataJSON()).toEqual({
+      projectId: targetProjectId, idempotencyKey: pending.items[0].idempotencyKey, command: pending.items[0].command,
+    });
+    const receipt = await attach.json() as DocumentAssetCommandResult & { success: boolean };
+    expect(receipt).toMatchObject({ success: true, assetVersionId: transferred.assetVersionId, placementId: expect.any(String) });
+    expect(Number.isSafeInteger(receipt.documentSequence)).toBe(true);
+    expect(receipt.documentSequence).toBeGreaterThanOrEqual(0);
+    await expect(page.getByText('聊天素材接收已确认', { exact: true })).toBeVisible({ timeout: 30_000 });
+    const confirmed = await readJournal();
+    expect(confirmed?.items).toHaveLength(1);
+    expect(confirmed?.items[0]).toEqual({ ...pending.items[0], state: 'confirmed', documentAttempted: true,
+      receipt: { placementId: receipt.placementId, assetVersionId: receipt.assetVersionId, documentSequence: receipt.documentSequence } });
+    const confirmedAttachCount = requestCounts.attach;
+    expect(confirmedAttachCount).toBeGreaterThanOrEqual(1);
+    const expectedAttach = { projectId: targetProjectId, idempotencyKey: pending.items[0].idempotencyKey,
+      command: pending.items[0].command };
+    expect(attachRequestBodies).toEqual(Array.from({ length: confirmedAttachCount }, () => expectedAttach));
+    if (!evidencePool) throw new Error('BLOCKED: Stage 4 evidence pool is not configured');
+    const commandRows = await evidencePool.query(`SELECT placement_id,asset_version_id,document_sequence
+      FROM wujie_canvas_asset_commands WHERE actor_id=$1 AND project_id=$2 AND idempotency_key=$3`,
+    [authA.userId, targetProjectId, pending.items[0].idempotencyKey]);
+    expect(commandRows.rows).toHaveLength(1);
+    expect(commandRows.rows[0]).toMatchObject({ placement_id: receipt.placementId, asset_version_id: receipt.assetVersionId });
+    expect(Number(commandRows.rows[0].document_sequence)).toBe(receipt.documentSequence);
+    const assertDestination = async (): Promise<Directory> => {
+      const result = await page.request.get(`/api/collaboration/document-project?projectId=${encodeURIComponent(targetProjectId)}`, {
+        headers: { 'x-wujie-expected-actor-id': authA.userId },
+      });
+      expect(result.ok()).toBe(true);
+      const directory = await result.json() as Directory;
+      expect(directory).toMatchObject({ success: true, projectId: targetProjectId, readOnly: false });
+      expect(directory.sequence).toBeGreaterThanOrEqual(receipt.documentSequence);
+      const placement = directory.projection.placements[receipt.placementId];
+      expect(placement).toMatchObject({ assetVersionId: receipt.assetVersionId, ...pending.items[0].command.transform });
+      expect(placement.deleted).not.toBe(true);
+      const matches = directory.canvasImages.filter(image => image.placementId === receipt.placementId);
+      expect(matches).toHaveLength(1);
+      expect(matches[0]).toMatchObject({ assetVersionId: receipt.assetVersionId, ...pending.items[0].command.transform });
+      await expect(page.locator(`[data-canvas-image-id="${matches[0].id}"]`)).toBeVisible();
+      await expect(page.getByRole('status', { name: '在线状态', exact: true }))
+        .toContainText(/\d+ 人在线/, { timeout: 20_000 });
+      return directory;
+    };
+    const receivedDirectory = await assertDestination();
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.locator('[data-canvas-viewport]')).toHaveAttribute('data-project-id', targetProjectId);
+    await assertDestination();
+    expect(await readJournal()).toEqual(confirmed);
+    expect(requestCounts).toEqual({ registration: 1, chat: 1, transfer: 1, attach: confirmedAttachCount });
+
+    const journalBeforeSwitch = await page.evaluate(key => localStorage.getItem(key), bridgeKey(authA.userId));
+    const authB = await loginExistingStage4Session(page, fixtureB);
+    expect(authB.userId).not.toBe(authA.userId);
+    await seedStage4Baseline(page, fixtureB, authB);
+    await openStage4ChatProject(page, String(fixtureB.chatProject.id));
+    await expect(page.getByRole('combobox', { name: '目标画布项目' }).locator(`option[value="${targetProjectId}"]`)).toHaveCount(0);
+    await expect(page.locator(`[data-chat-message-id="${messageId}"]`)).toHaveCount(0);
+    const bChats = await page.request.get('/api/user-data/sync?key=chat_simple_projects');
+    expect(bChats.ok()).toBe(true);
+    const bChatPayload = await bChats.json() as { value?: StoredProject[] };
+    expect(bChatPayload.value?.some(project => project.id === chatProjectId)).toBe(false);
+    const deniedRead = await page.request.get(`/api/collaboration/document-project?projectId=${encodeURIComponent(targetProjectId)}`, {
+      headers: { 'x-wujie-expected-actor-id': authB.userId },
+    });
+    expect(deniedRead.status()).toBe(403);
+    expect(await deniedRead.json()).toMatchObject({ code: 'DOCUMENT_FORBIDDEN' });
+    const deniedAsset = await page.request.get(`/api/assets?${new URLSearchParams({
+      projectId: targetProjectId, assetVersionId: receipt.assetVersionId, placementId: receipt.placementId,
+    })}`, { headers: { 'x-wujie-expected-actor-id': authB.userId } });
+    expect(deniedAsset.status()).toBe(403);
+    expect(await deniedAsset.json()).toMatchObject({ error: 'DOCUMENT_FORBIDDEN' });
+    const deniedWrite = await page.request.post('/api/collaboration/document-assets', {
+      headers: { Origin: origin, 'x-wujie-expected-actor-id': authB.userId },
+      data: { projectId: targetProjectId, idempotencyKey: pending.items[0].idempotencyKey, command: pending.items[0].command },
+    });
+    expect(deniedWrite.status()).toBe(403);
+    expect(await deniedWrite.json()).toMatchObject({ code: 'DOCUMENT_FORBIDDEN' });
+    await openStage4CanvasProject(page, String(fixtureB.canvasProject.id));
+    await expect(page.locator('[data-canvas-image-id]')).toHaveCount(0);
+    expect(await page.evaluate(key => localStorage.getItem(key), bridgeKey(authA.userId))).toBe(journalBeforeSwitch);
+    expect(await readJournal(authB.userId)).toBeNull();
+    await expect(page.getByRole('status', { name: '在线状态', exact: true }))
+      .toContainText(/\d+ 人在线/, { timeout: 20_000 });
+
+    const returnedA = await loginExistingStage4Session(page, fixture);
+    expect(returnedA.userId).toBe(authA.userId);
+    await openStage4ChatProject(page, chatProjectId);
+    await expect(message).toHaveAttribute('data-chat-asset-placement-ids', generated.placementId);
+    expect((await readStoredMessage(messageId))?.imageRefs).toContainEqual(generated);
+    await openStage4CanvasProject(page, targetProjectId);
+    const returnedDirectory = await assertDestination();
+    expect(returnedDirectory.sequence).toBe(receivedDirectory.sequence);
+    expect(returnedDirectory.projection).toEqual(receivedDirectory.projection);
+    expect(await readJournal()).toEqual(confirmed);
+    expect(requestCounts).toEqual({ registration: 1, chat: 1, transfer: 1, attach: confirmedAttachCount });
+    expect(counts(fixture.browserProfile).workspaceVision - providerBefore.workspaceVision).toBe(1);
+    expect(counts(fixture.browserProfile).imageGeneration - providerBefore.imageGeneration).toBe(1);
+    await writeStage4Metrics(stage4Evidence, testInfo, 'current-lineage', {
+      actors: { a: authA.userId, b: authB.userId }, chatProjectId, chatTaskId, messageId, targetProjectId,
+      generated, sourcePlacement, transferred, pending, confirmed, receipt,
+      receivedDirectory, returnedDirectory, requestCounts, attachRequestBodies,
+      providerCounts: counts(fixture.browserProfile), denied: { read: deniedRead.status(), asset: deniedAsset.status(), write: deniedWrite.status() },
+    });
+  } finally {
+    page.off('request', observeRequest);
+  }
 });

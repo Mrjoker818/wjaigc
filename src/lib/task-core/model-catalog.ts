@@ -1,4 +1,5 @@
 import { resolveProfileForModel } from '@/lib/api-compatibility';
+import { resolve302UpscaleModelSelection } from '@/lib/302-upscale-models';
 import {
   getProviderAspectRatios,
   getQualityLevelOptions,
@@ -149,6 +150,17 @@ function findConfiguredModel(provider: ApiProvider, modelId: string): ModelInfo 
   }
 
   const canonicalModelId = canonicalizeConfiguredModelId(provider, modelId);
+  // Discovery supplies metadata, never administrator authorization. Keep the
+  // established 302 upscaler defaults/aliases as their explicit selection policy.
+  const selectedModels = provider.selectedModels || [];
+  const selectedIds = (provider.modelType || provider.type) === 'upscaler'
+    ? resolve302UpscaleModelSelection(provider.baseUrl, selectedModels) ?? selectedModels
+    : selectedModels;
+  if (!selectedIds.some(selectedId => (
+    canonicalizeConfiguredModelId(provider, selectedId) === canonicalModelId
+  ))) {
+    return null;
+  }
   return getConfiguredModelsForProvider(provider).find(model => (
     model.id === canonicalModelId
   )) || null;

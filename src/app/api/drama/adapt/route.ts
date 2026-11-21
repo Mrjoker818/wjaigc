@@ -7,7 +7,7 @@ import { authorizeGenerationProject, GenerationProjectAccessError } from '@/lib/
 import {
   ADAPT_MAX_CHARS, ADAPT_MIN_CHARS, buildAdaptChunkPrompt, mergeAdaptedChunk, splitSourceText, type AdaptSettings,
 } from '@/lib/drama/adapt';
-import { dramaPlannerConfig, withPlanRetry } from '@/lib/drama/draft';
+import { dramaPlannerConfig, DramaPlannerSelectionError, withPlanRetry } from '@/lib/drama/draft';
 import { callDramaLlm, parseDramaScriptResponse, type DramaLlmConfig } from '@/lib/drama/planner';
 import { parseDramaProject } from '@/lib/drama/schema';
 import { createDramaProject } from '@/lib/drama/store';
@@ -78,7 +78,7 @@ async function adapt(job: AdaptJob): Promise<void> {
 }
 
 /**
- * POST /api/drama/adapt { text, title?, style?, aspectRatio?, episodeDurationSec?, projectId? } → 202 { taskId, parts }
+ * POST /api/drama/adapt { text, planner: { providerId, modelId }, title?, style?, aspectRatio?, episodeDurationSec?, projectId? } → 202 { taskId, parts }
  * Poll /api/poll-task; the completed result is { dramaId, adaptedParts, totalParts }.
  */
 export async function POST(request: NextRequest) {
@@ -92,6 +92,13 @@ export async function POST(request: NextRequest) {
   if (text.length > ADAPT_MAX_CHARS) {
     return NextResponse.json({ error: `原文最多 ${ADAPT_MAX_CHARS.toLocaleString('zh-CN')} 字，请分成几部分别改编` }, { status: 400 });
   }
+  const rawPlanner = body?.planner;
+  if (!rawPlanner || typeof rawPlanner !== 'object' || Array.isArray(rawPlanner)
+    || typeof (rawPlanner as Record<string, unknown>).providerId !== 'string' || !(rawPlanner as Record<string, unknown>).providerId
+    || typeof (rawPlanner as Record<string, unknown>).modelId !== 'string' || !(rawPlanner as Record<string, unknown>).modelId) {
+    return NextResponse.json({ error: '请选择完整的编剧供应商和模型', code: 'DRAMA_PLANNER_INVALID_SELECTION' }, { status: 400 });
+  }
+  const planner = rawPlanner as { providerId: string; modelId: string };
 
   let projectId: string | null = null;
   try {
@@ -106,7 +113,15 @@ export async function POST(request: NextRequest) {
     throw error;
   }
   // No request signal: the calls run after the response has been sent.
-  const config = await dramaPlannerConfig();
+  let config: DramaLlmConfig | null;
+  try {
+    config = await dramaPlannerConfig(undefined, { user: auth.user, providerId: planner.providerId, modelId: planner.modelId });
+  } catch (error) {
+    if (error instanceof DramaPlannerSelectionError) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: 403 });
+    }
+    throw error;
+  }
   if (!config) {
     return NextResponse.json({
       error: '还没有可用的对话模型。请在后台供应商设置里启用一个对话模型后再改编。', code: 'DRAMA_PLANNER_NOT_CONFIGURED',

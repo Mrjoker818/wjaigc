@@ -320,6 +320,11 @@ describe('real Agent generate_image provider path', () => {
   });
 
   it('preserves the exact model and one stable idempotency key through /api/generate', async () => {
+    const { persistRemoteImage } = await import('@/lib/s3-storage');
+    const inlineResult = 'data:image/png;base64,ZmFrZQ==';
+    vi.mocked(persistRemoteImage).mockImplementationOnce(async url =>
+      url === inlineResult ? '/api/serve-upload/generate/agent-provider-result.png' : url,
+    );
     const externalSubmit = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       expect(body.model).toBe('Exact::Model');
@@ -347,6 +352,7 @@ describe('real Agent generate_image provider path', () => {
     });
 
     expect(result).toMatchObject({ success: true });
+    expect(vi.mocked(persistRemoteImage).mock.calls).toEqual([[inlineResult]]);
     expect(externalSubmit).toHaveBeenCalledTimes(1);
   });
 

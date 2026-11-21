@@ -1449,13 +1449,13 @@ export default function BrandPackagingPanel({ isMonochrome = false, onClose, onA
                               <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-100 lg:opacity-0 lg:group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity flex flex-col justify-end p-2">
                                 <span className="text-[12px] text-white">{OUTPUT_MODES.find(m => m.value === r.type)?.label || r.type}</span>
                                 <div className="flex gap-1 mt-1">
-                                  <button className="p-1 rounded bg-white/20 hover:bg-white/40" onClick={() => toggleFavorite(r.id)} aria-label={favorites.has(r.id) ? '取消收藏方案' : '收藏方案'}>
+                                  <button className="[@media(min-width:768px)_and_(hover:hover)_and_(pointer:fine)]:min-h-[24px] [@media(min-width:768px)_and_(hover:hover)_and_(pointer:fine)]:min-w-[24px] p-1 rounded bg-white/20 hover:bg-white/40" onClick={() => toggleFavorite(r.id)} aria-label={favorites.has(r.id) ? '取消收藏方案' : '收藏方案'}>
                                     <Star size={10} fill={favorites.has(r.id) ? accent : 'none'} style={{ color: favorites.has(r.id) ? accent : '#fff' }} />
                                   </button>
-                                  <button className="p-1 rounded bg-white/20 hover:bg-white/40" onClick={() => onAddImages?.([r.url], { modelName: selectedModel, apiProvider: selectedProviderId })} title="发送到画布">
+                                  <button className="[@media(min-width:768px)_and_(hover:hover)_and_(pointer:fine)]:min-h-[24px] [@media(min-width:768px)_and_(hover:hover)_and_(pointer:fine)]:min-w-[24px] p-1 rounded bg-white/20 hover:bg-white/40" onClick={() => onAddImages?.([r.url], { modelName: selectedModel, apiProvider: selectedProviderId })} title="发送到画布">
                                     <Send size={10} style={{ color: '#fff' }} />
                                   </button>
-                                  <button className="p-1 rounded bg-white/20 hover:bg-white/40" onClick={() => handleDownloadImage(r.url, `${brandName}_${r.type}.png`)} title="下载">
+                                  <button className="[@media(min-width:768px)_and_(hover:hover)_and_(pointer:fine)]:min-h-[24px] [@media(min-width:768px)_and_(hover:hover)_and_(pointer:fine)]:min-w-[24px] p-1 rounded bg-white/20 hover:bg-white/40" onClick={() => handleDownloadImage(r.url, `${brandName}_${r.type}.png`)} title="下载">
                                     <Download size={10} style={{ color: '#fff' }} />
                                   </button>
                                 </div>

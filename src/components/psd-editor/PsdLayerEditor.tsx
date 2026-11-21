@@ -30,6 +30,7 @@ import { LayerPanel } from './LayerPanel';
 import { LayerInspector } from './LayerInspector';
 import { ExportToolbar } from './ExportToolbar';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useModalFocus } from '@/components/canvas/use-modal-focus';
 
 interface PsdLayerEditorProps {
   imageUrl: string;
@@ -39,6 +40,7 @@ interface PsdLayerEditorProps {
   providerId?: string;
   modelId?: string;
   initialResult?: LayerDecompositionResult;
+  focusActive?: boolean;
   onClose: () => void;
   registerCloseGuard?: (guard: (() => Promise<boolean>) | null) => void;
 }
@@ -169,9 +171,12 @@ export default function PsdLayerEditor({
   providerId,
   modelId,
   initialResult,
+  focusActive = true,
   onClose,
   registerCloseGuard,
 }: PsdLayerEditorProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const [stage, setStage] = useState<EditorStage>(initialResult ? 'editing' : 'choosing');
   const [layerEngine, setLayerEngine] = useState<LayerEngineMode>(() => {
     if (typeof window === 'undefined') return 'smart';
@@ -828,6 +833,8 @@ export default function PsdLayerEditor({
     void requestClose();
   }, [requestClose]);
 
+  useModalFocus(dialogRef, closeButtonRef, handleClose, focusActive);
+
   useEffect(() => {
     registerCloseGuard?.(requestClose);
     return () => registerCloseGuard?.(null);
@@ -969,15 +976,23 @@ export default function PsdLayerEditor({
       data-testid="layer-editor"
       className="fixed inset-0 z-[100] flex items-center justify-center"
       style={{ pointerEvents: 'auto' }}
+      onKeyDown={(event) => {
+        if (!focusActive || event.key !== 'Escape' || event.defaultPrevented || event.nativeEvent.isComposing) return;
+        event.preventDefault();
+        event.stopPropagation();
+        handleClose();
+      }}
     >
       {/* Backdrop overlay */}
       <div className="absolute inset-0 bg-black/30" onClick={handleClose} />
 
       {/* Floating panel */}
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="PSD 分层编辑器"
+        tabIndex={-1}
         className="absolute left-2 top-2 flex h-[calc(100dvh-16px)] w-[calc(100vw-16px)] flex-col overflow-hidden rounded-xl border border-neutral-700 shadow-2xl md:left-[var(--psd-panel-x)] md:top-[var(--psd-panel-y)] md:h-[min(85vh,800px)] md:w-[min(85vw,1200px)]"
         style={{
           '--psd-panel-x': `${panelPos.x}px`,
@@ -1051,6 +1066,7 @@ export default function PsdLayerEditor({
               </>
             )}
             <button
+              ref={closeButtonRef}
               type="button"
               onClick={handleClose}
               className="inline-flex h-11 w-11 items-center justify-center rounded-md p-1.5 text-white/50 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 md:[@media(hover:hover)_and_(pointer:fine)]:h-7 md:[@media(hover:hover)_and_(pointer:fine)]:w-7"

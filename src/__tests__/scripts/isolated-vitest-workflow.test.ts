@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import path from 'node:path';
 import YAML from 'yaml';
 import { afterEach, describe, expect, it, type TestContext } from 'vitest';
+import { resolveIsolatedChildDatabaseAliases } from '../helpers/isolated-child-database-env';
 
 interface WorkflowStep {
   name?: string;
@@ -78,6 +79,7 @@ describe('full Vitest CI database boundary', () => {
 
 interface VitestReport {
   success: boolean;
+  numTotalTests: number;
   numFailedTests: number;
   numPendingTests: number;
   numTodoTests: number;
@@ -96,14 +98,14 @@ const fixtureShards = [
   [1, 'src/__tests__/scripts/stage-3-evidence-filter.test.ts'],
   [2, 'src/__tests__/lib/api-auth-identity-contract.test.ts'],
   [3, 'src/__tests__/lib/dependency-security-contract.test.ts'],
-  [4, 'src/__tests__/helpers/video-plan-bj-post-contract.test.ts'],
-  [5, 'src/__tests__/scripts/stage-1-release-gate-contract.test.ts'],
-  [6, 'src/__tests__/scripts/stage-3-release-gate-contract.test.ts'],
-  [7, 'src/__tests__/token-pricing.test.ts'],
-  [8, 'src/__tests__/helpers/jsdom-browser-apis.test.ts'],
-  [9, 'src/__tests__/scripts/stage-3-runtime-failure-summary.test.ts'],
-  [10, 'src/__tests__/api/upscale-onnx-output-boundary.test.ts'],
-  [11, 'src/__tests__/helpers/canvas-fixture-event-stream.test.ts'],
+  [4, 'src/__tests__/scripts/stage-1-release-gate-contract.test.ts'],
+  [5, 'src/__tests__/scripts/stage-3-release-gate-contract.test.ts'],
+  [6, 'src/__tests__/token-pricing.test.ts'],
+  [7, 'src/__tests__/helpers/jsdom-browser-apis.test.ts'],
+  [8, 'src/__tests__/scripts/stage-3-runtime-failure-summary.test.ts'],
+  [9, 'src/__tests__/api/upscale-onnx-output-boundary.test.ts'],
+  [10, 'src/__tests__/helpers/canvas-fixture-event-stream.test.ts'],
+  [11, 'src/__tests__/helpers/stage-4-selection-diagnostics.test.ts'],
   [12, 'src/__tests__/scripts/stage-4-runtime-failure-summary.test.ts'],
 ] as const;
 
@@ -195,6 +197,9 @@ describe.each(shardWorkflows)('%s full-suite shard execution', (workflowPath, ga
   }, 45_000);
 
   it.each(fixtureShards)('executes shard %i with exactly its expected real test file', async (shard, expectedFile) => {
+    for (const [, fixturePath] of fixtureShards) {
+      expect(existsSync(path.resolve(fixturePath)), `Missing shard fixture: ${fixturePath}`).toBe(true);
+    }
     const workflow = loadWorkflow(workflowPath);
     const job = workflow.jobs[shardName];
     const step = job.steps.find(candidate => candidate.name === stepName);
@@ -204,7 +209,7 @@ describe.each(shardWorkflows)('%s full-suite shard execution', (workflowPath, ga
     const { stdout } = await execFileAsync(process.execPath,
       ['scripts/run-isolated-vitest.mjs', ...command.slice(2), ...fixtureShards.map(row => row[1]), '--reporter=json'], {
         cwd: process.cwd(), encoding: 'utf8', timeout: 20_000, windowsHide: true,
-        env: { ...process.env, NODE_OPTIONS: '', ...Object.fromEntries(aliases.map(alias => [alias, step!.env![alias]])) },
+        env: { ...process.env, NODE_OPTIONS: '', ...resolveIsolatedChildDatabaseAliases(process.env) },
       });
     const report = JSON.parse(stdout) as VitestReport;
     expect(report.success).toBe(true);
@@ -218,6 +223,7 @@ describe.each(shardWorkflows)('%s full-suite shard execution', (workflowPath, ga
     }
     expect(job.strategy?.['fail-fast']).toBe(false);
     expect(job.strategy?.matrix.shard).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    process.stdout.write(`ISOLATED_CHILD_EXECUTION:${JSON.stringify({ workflowPath, shard, expectedFile, childTests: report.numTotalTests })}\n`);
   }, 30_000);
 
   it.each([

@@ -1,22 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Detect a platform-bound database in any injection form the Coze sandbox uses:
+# Detect a PostgreSQL connection source the pg driver can actually consume:
 #   1. DATABASE_URL / PGDATABASE_URL (canonical connection string)
 #   2. libpq split variables: PGHOST + PGPORT + PGDATABASE + PGUSER (+ PGPASSWORD)
-#   3. Supabase integration: COZE_SUPABASE_URL + COZE_SUPABASE_SERVICE_ROLE_KEY/ANON_KEY
 #
-# Returns 0 (bound) or 1 (no binding). The Supabase surface is an HTTP/REST
-# endpoint, so it counts as a binding signal (unblocks startup) without being a
-# pg connection source; code paths that need a pg pool still rely on URL or libpq.
-db_binding_present() {
+# Supabase HTTP markers still keep application auth fail-closed in DB_ONLY,
+# but cannot satisfy this startup check without a separate PG connection source.
+pg_connection_source_present() {
   if [ -n "${DATABASE_URL:+configured}${PGDATABASE_URL:+configured}" ]; then
     return 0
   fi
-  if [ -n "${PGHOST:+configured}" ] && [ -n "${PGDATABASE:+configured}" ] && [ -n "${PGUSER:+configured}" ]; then
-    return 0
-  fi
-  if [ -n "${COZE_SUPABASE_URL:+configured}" ] && [ -n "${COZE_SUPABASE_SERVICE_ROLE_KEY:+configured}${COZE_SUPABASE_ANON_KEY:+configured}" ]; then
+  local host="${PGHOST:-}" database="${PGDATABASE:-}" user="${PGUSER:-}"
+  if [ -n "${host//[[:space:]]/}" ] && [ -n "${database//[[:space:]]/}" ] && [ -n "${user//[[:space:]]/}" ]; then
     return 0
   fi
   return 1
@@ -25,14 +21,20 @@ db_binding_present() {
 DEPLOYMENT=0
 if [ "${1:-}" = "--deployment" ]; then
   DEPLOYMENT=1
-  if ! db_binding_present; then
+  if ! pg_connection_source_present; then
+    # An HTTP binding (including incomplete configuration) is a deployment
+    # misconfiguration, never the no-DB development/validation exception.
+    if [ -n "${COZE_SUPABASE_URL:+configured}${COZE_SUPABASE_SERVICE_ROLE_KEY:+configured}${COZE_SUPABASE_ANON_KEY:+configured}" ]; then
+      echo "[coze-start] Supabase HTTP binding does not provide a PostgreSQL connection source. Configure DATABASE_URL, PGDATABASE_URL, or PGHOST + PGDATABASE + PGUSER before --deployment." >&2
+      exit 1
+    fi
     # Hard-fail only for a packaged production runtime (no Git checkout,
     # COZE_PROJECT_ENV=PROD) whose database binding is missing. Build and
     # validation sandboxes are Git checkouts and intentionally run without the
     # binding; they boot without DB enforcement so the pipeline can exercise
     # the start command. See AGENTS.md (认证与部署).
     if [ "${COZE_PROJECT_ENV:-}" = "PROD" ] && ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
-      echo "[coze-start] Deployment requires a database binding (DATABASE_URL, PGDATABASE_URL, libpq split variables, or COZE_SUPABASE_* binding)." >&2
+      echo "[coze-start] Deployment requires a PostgreSQL connection source (DATABASE_URL, PGDATABASE_URL, or libpq split variables)." >&2
       exit 1
     fi
     echo "[coze-start] No database binding detected; starting without deployment DB enforcement."
@@ -58,7 +60,7 @@ ensure_runtime_deps() {
     echo "[coze-start] node_modules missing in packaged runtime; installing dependencies..."
     if ! pnpm install --frozen-lockfile 2>&1; then
       echo "[coze-start] Retrying dependency install without lifecycle scripts..."
-      pnpm install --ignore-scripts 2>&1
+      pnpm install --ignore-scripts --frozen-lockfile 2>&1
       node scripts/prepare-tools.mjs 2>/dev/null || true
       node scripts/patch-pg-ssl.js 2>/dev/null || true
     fi
@@ -153,7 +155,7 @@ echo "[coze-start] No matching build artifacts found. Building..."
     echo "[coze-start] Installing dependencies..."
     if ! pnpm install --frozen-lockfile 2>&1; then
       echo "[coze-start] frozen-lockfile failed, trying --ignore-scripts..."
-      pnpm install --ignore-scripts
+      pnpm install --ignore-scripts --frozen-lockfile
       node scripts/prepare-tools.mjs 2>/dev/null || true
       node scripts/patch-pg-ssl.js 2>/dev/null || true
     fi

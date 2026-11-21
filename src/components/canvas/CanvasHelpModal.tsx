@@ -170,7 +170,7 @@ function InstructionsContent({ isMonochrome }: { isMonochrome: boolean }) {
       <div>
         <div className={`text-xs font-semibold uppercase tracking-wider mb-2.5 ${isMonochrome ? 'text-gray-600' : 'text-gold'}`}>底部工具栏</div>
         <div className="grid grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2">
-          {[['选择工具', '点击/框选图片'], ['抓手工具', '平移画布'], ['图片上传', '上传本地图片'], ['图像生成器', 'AI图像生成（金色按钮）'], ['短剧工作台', '剧本、定妆图、分镜和逐镜头生成视频'], ['语言修图', '自然语言修改图片'], ['Agent编排', '智能编排多工具'], ['Logo Pro', 'AI Logo设计与生成'], ['品牌工厂', '品牌视觉资产生成'], ['精修引擎', '产品商业级精修'], ['字境大师', 'AI字体设计与生成'], ['节点编辑器', '可视化工作流编排'], ['六面体', '6面贴图预览'], ['缩放控制', '放大/缩小/重置']].map(([k, v]) => (
+          {[['选择工具', '点击/框选图片'], ['抓手工具', '平移画布'], ['图片上传', '上传本地图片'], ['图像生成器', 'AI图像生成（金色按钮）'], ['短剧工作台', '剧本、定妆图、分镜和逐镜头生成视频'], ['语言修图', '自然语言修改图片'], ['Agent编排', '智能编排多工具'], ['Logo Pro', 'AI Logo设计与生成'], ['品牌工厂', '品牌视觉资产生成'], ['精修引擎', '产品商业级精修'], ['字境大师', 'AI字体设计与生成'], ['六面体', '6面贴图预览'], ['缩放控制', '放大/缩小/重置']].map(([k, v]) => (
             <SimpleToolCard key={k} title={k} desc={v} isMonochrome={isMonochrome} />
           ))}
         </div>
@@ -183,6 +183,7 @@ function ChangelogContent({ isMonochrome }: { isMonochrome: boolean }) {
   return (
     <div className="p-5">
       <div className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isMonochrome ? 'text-gray-600' : 'text-gold'}`}>{APP_VERSION_LABEL}</div>
+      <p className={`mb-3 text-xs ${isMonochrome ? 'text-gray-600' : 'text-gold-muted'}`}>节点模式现已下线。以下保留历史更新记录，当前可用功能请查看使用说明。</p>
       <div className="space-y-2.5">
         {[
           'v4.1.0 修复：生图数量>1时多图完整返回，不再丢失图片',

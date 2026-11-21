@@ -5,7 +5,7 @@
  * 所有后端 API 路由和 poll-task 均应使用此函数统一翻译。
  */
 
-export function translateApiError(rawMsg: string): string {
+function translateApiErrorMessage(rawMsg: string, allowRaw: boolean): string {
   if (!rawMsg) return '处理失败，请重试';
   // 防御性处理：确保 rawMsg 是字符串
   const strMsg = typeof rawMsg === 'string' ? rawMsg : JSON.stringify(rawMsg);
@@ -98,6 +98,11 @@ export function translateApiError(rawMsg: string): string {
   // 请求ID后缀清理（如 "(request id: 20260529...)" 无需暴露给用户）
   const cleanedMsg = strMsg.replace(/\s*\(request id:.*?\)\s*/i, '').trim();
 
+  // Raw language is not evidence that a payload is safe to expose. Only this
+  // explicit first-party validation message may pass the unrecognized branch.
+  if (!allowRaw) return cleanedMsg === '参考图数量超过模型上限'
+    ? cleanedMsg : '服务暂时出错，请稍后重试或切换模型';
+
   // 兜底：如果是纯英文消息，加上中文前缀
   if (/^[a-zA-Z]/.test(cleanedMsg) && !/[\u4e00-\u9fff]/.test(cleanedMsg)) {
     return `API 返回错误: ${cleanedMsg}`;
@@ -105,14 +110,14 @@ export function translateApiError(rawMsg: string): string {
   return cleanedMsg;
 }
 
+export function translateApiError(rawMsg: string): string {
+  return translateApiErrorMessage(rawMsg, true);
+}
+
 /**
  * 最终返回给用户的错误文案。translateApiError 的兜底会保留供应商原文，供内部重试判断使用；
  * 这里在响应边界把未识别的原文（英文、JSON 等）换成通用提示，原文应已写入服务端日志。
  */
 export function toUserFacingError(rawMsg: string): string {
-  const translated = translateApiError(rawMsg);
-  if (translated.startsWith('API 返回错误:') || !/[\u4e00-\u9fff]/.test(translated)) {
-    return '服务暂时出错，请稍后重试或切换模型';
-  }
-  return translated;
+  return translateApiErrorMessage(rawMsg, false);
 }

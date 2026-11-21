@@ -10,7 +10,7 @@ import { assertSafeProviderUrl, PoisonedApiHostError } from '@/lib/poisoned-api-
 import { resolveChatControls } from '@/lib/chat-generation-controls';
 import { IMAGE_ASPECT_RATIOS, describeUpstreamChatError, resolveToolAspectRatio } from '@/lib/simple-chat-upstream';
 import { toProviderMediaUrl } from '@/lib/provider-media-url';
-import { describeFittedParams, fitImageParams, parseImageRequest, planImageToolJobs } from '@/lib/simple-chat-image-params';
+import { describeFittedParams, fitImageParams, parseImageRequest, planImageToolJobs, resolveImageRequestBudget } from '@/lib/simple-chat-image-params';
 import {
   extractReasoningDelta,
   formatSearchDisplay,
@@ -386,6 +386,9 @@ export async function POST(request: NextRequest) {
   const memories = body.memories || [];
   const deepAnalysis = body.deepAnalysis || false;
   const i2iStrength = body.i2iStrength || 0.7;
+  const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+  const userText = lastUserMsg?.content || '';
+  const imageBudget = resolveImageRequestBudget(userText);
 
   const productTypes = (user.productType || '').split(',').map(type => type.trim()).filter(Boolean);
   if (user.role !== 'admin' && (
@@ -1255,13 +1258,15 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // 处理工具调用：每个 generate_image 调用出一张图（「分别画猫和狗」是两次调用）；
-        // 只有一次调用时按用户写的张数重复。每轮最多 4 张，各自独立提交和轮询。
-        const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
-        const userText = lastUserMsg?.content || '';
+        // Freeze the total from the user's request before admitting any image tasks.
+        const imageCalls = Object.values(toolCalls).filter(call => call.name === 'generate_image');
+        if (imageCalls.length && imageBudget.clarification) {
+          send({ type: 'text', content: imageBudget.clarification });
+        }
         const imageJobs = planImageToolJobs(
-          Object.values(toolCalls).filter(call => call.name === 'generate_image'),
+          imageCalls,
           userText,
+          imageBudget.limit,
         );
         // The image model's spec decides which ratio / resolution / quality are valid.
         let imageProvider: Awaited<ReturnType<typeof findProviderById>> | null = null;

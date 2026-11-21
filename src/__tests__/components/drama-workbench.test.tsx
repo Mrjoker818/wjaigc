@@ -166,6 +166,33 @@ describe('drama workbench', () => {
     expect(requests.some(r => r.url === '/api/drama/render')).toBe(false);
   });
 
+  it('invalidates the open library when a deep-linked drama receives its project without remounting the shell', async () => {
+    const baseFetch = globalThis.fetch;
+    let failScoped!: (response: Response) => void;
+    const scoped = new Promise<Response>(resolve => { failScoped = resolve; });
+    const other = projectDoc();
+    other.references = [{ url: '/other-project.png', name: '其他项目素材', source: 'chat' }];
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      if (url === '/api/drama/projects') return Promise.resolve(new Response(JSON.stringify({ projects: [{ id: 'other' }] })));
+      if (url === '/api/drama/projects/other') return Promise.resolve(new Response(JSON.stringify({ project: { id: 'other', doc: other } })));
+      if (url === '/api/drama/projects?projectId=p1') return scoped;
+      return baseFetch(url, init);
+    }));
+    const props = { dramaId: 'drama_1', onDramaIdChange: vi.fn(), onExit: vi.fn(), onOpenDramaProject: vi.fn() };
+    const view = render(<DramaWorkbench {...props} />);
+    await screen.findByRole('heading', { name: /咖啡馆·内·夜/ });
+    goTo(/^2\s*设定/);
+    fireEvent.click(screen.getByRole('button', { name: '从素材库选正面' }));
+    await screen.findByRole('button', { name: '选用 其他项目素材' });
+    view.rerender(<DramaWorkbench {...props} projectId="p1" />);
+    // The dialog staying open proves this path did not get the parent-key remount protection.
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '选用 其他项目素材' })).toBeNull();
+    await act(async () => { failScoped(new Response(JSON.stringify({ error: '离线读取失败' }), { status: 503 })); });
+    expect(screen.queryByRole('button', { name: '选用 其他项目素材' })).toBeNull();
+    expect(requests.some(r => r.url === '/api/generate' || r.method === 'PUT')).toBe(false);
+  });
+
   it('prices what one-click film would fill and will not start without enough credits', async () => {
     render(<DramaWorkbench dramaId="drama_1" projectId="p1" onDramaIdChange={() => undefined} onExit={() => undefined} />);
     await screen.findByRole('heading', { name: /咖啡馆·内·夜/ });

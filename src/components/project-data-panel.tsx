@@ -245,7 +245,7 @@ export function ProjectDataPanel({
         <button
           onClick={onClose}
           aria-label="关闭资产库"
-          className={`flex items-center justify-center rounded-lg ${mutedText} hover:${textColor} transition-colors`}
+          className={`[@media(min-width:768px)_and_(hover:hover)_and_(pointer:fine)]:min-h-[24px] [@media(min-width:768px)_and_(hover:hover)_and_(pointer:fine)]:min-w-[24px] flex items-center justify-center rounded-lg ${mutedText} hover:${textColor} transition-colors`}
         >
           <X className="h-4 w-4" />
         </button>
@@ -267,7 +267,7 @@ export function ProjectDataPanel({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="搜索提示词/模型..."
-            className={`min-w-0 w-full flex-1 bg-transparent text-xs ${textColor} outline-none placeholder:${mutedText}`}
+            className={`[@media(min-width:768px)_and_(hover:hover)_and_(pointer:fine)]:min-h-[24px] min-w-0 w-full flex-1 bg-transparent text-xs ${textColor} outline-none placeholder:${mutedText}`}
           />
         </div>
 
@@ -457,7 +457,7 @@ export function ProjectDataPanel({
                     <div className="flex items-center gap-1">
                       <button
                         onClick={(e) => { e.stopPropagation(); onMakeSame?.(img); }}
-                        className="flex-1 flex items-center justify-center gap-1 py-1 rounded-md text-[10px] font-medium transition-colors"
+                        className="[@media(min-width:768px)_and_(hover:hover)_and_(pointer:fine)]:min-h-[24px] flex-1 flex items-center justify-center gap-1 py-1 rounded-md text-[10px] font-medium transition-colors"
                         style={{ background: `${accentColor}22`, color: accentColor }}
                         title="制作同款"
                       >
@@ -466,7 +466,7 @@ export function ProjectDataPanel({
                       </button>
                       <button
                         onClick={(e) => { e.stopPropagation(); handleCopyPrompt(img); }}
-                        className={`flex-1 flex items-center justify-center gap-1 py-1 rounded-md text-[10px] font-medium ${inputBg} ${mutedText} hover:${textColor} transition-colors`}
+                        className={`[@media(min-width:768px)_and_(hover:hover)_and_(pointer:fine)]:min-h-[24px] flex-1 flex items-center justify-center gap-1 py-1 rounded-md text-[10px] font-medium ${inputBg} ${mutedText} hover:${textColor} transition-colors`}
                         title="复制关键词"
                       >
                         <Copy className="h-3 w-3" />

@@ -707,7 +707,14 @@ async function screenBox(s: Session, target: Locator, hitTarget = false, minimum
   const box = await rect(target);
   const view = await s.page.evaluate(() => ({ x: visualViewport!.offsetLeft, y: visualViewport!.offsetTop,
     width: visualViewport!.width, height: visualViewport!.height }));
-  expect(box.width).toBeGreaterThanOrEqual(minimum); expect(box.height).toBeGreaterThanOrEqual(minimum);
+  // Keep compact desktop controls separate from touch targets and containers.
+  const compactDesktop = hitTarget && minimum === 44 && await target.evaluate(() => (
+    !matchMedia('(max-width: 767px), (pointer: coarse)').matches
+    && matchMedia('(min-width: 768px) and (hover: hover) and (pointer: fine)').matches
+  ));
+  const targetMinimum = compactDesktop ? 24 : minimum;
+  expect(box.width, compactDesktop ? 'A desktop width' : 'A retained width floor').toBeGreaterThanOrEqual(targetMinimum);
+  expect(box.height, compactDesktop ? 'A desktop height' : 'A retained height floor').toBeGreaterThanOrEqual(targetMinimum);
   expect(box.x).toBeGreaterThanOrEqual(view.x + 8); expect(box.y).toBeGreaterThanOrEqual(view.y + 8);
   expect(box.x + box.width).toBeLessThanOrEqual(view.x + view.width - 8);
   expect(box.y + box.height).toBeLessThanOrEqual(view.y + view.height - 8);

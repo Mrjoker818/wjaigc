@@ -1,13 +1,14 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Loader2, Sparkles } from 'lucide-react';
 import { mergeMentionIds } from '@/lib/drama/mentions';
+import { buildPolishMessages } from '@/lib/drama/polish';
 import { CAMERA_MOVES, chosenShotValue, SHOT_SIZES } from '@/lib/drama/shot-language';
-import type { DramaShot } from '@/lib/drama/types';
+import type { DramaProjectV1, DramaShot } from '@/lib/drama/types';
 import { polishShotPrompt } from '@/lib/drama/workbench-client';
-import { updateShot } from '@/lib/drama/workbench-state';
+import { findShot, updateShot } from '@/lib/drama/workbench-state';
 import { useDrama } from './drama-context';
 
 type Snapshot = Pick<DramaShot, 'prompt' | 'directedPrompt' | 'shotSize' | 'cameraMotion' | 'cameraMove' | 'lighting' | 'audioCues'>;
@@ -17,41 +18,64 @@ function snapshot(shot: DramaShot): Snapshot {
   return { prompt, directedPrompt, shotSize, cameraMotion, cameraMove, lighting, audioCues };
 }
 
+/** Version the model's actual input and every field its result can replace. */
+function polishVersion(doc: DramaProjectV1, shotId: string): string | null {
+  const found = findShot(doc, shotId);
+  if (!found) return null;
+  return JSON.stringify([
+    doc.planner, found.episode.id, found.scene.id, snapshot(found.shot),
+    found.shot.characterIds, found.shot.propIds, buildPolishMessages(doc, shotId),
+  ]);
+}
+
 /**
  * The polish button beside the prompt label, and the "undo" line under the prompt once it ran.
  * `undo` lives in the inspector so a manual edit of the prompt can drop it.
  */
 export function usePromptPolish(shot: DramaShot) {
-  const { doc, update } = useDrama();
+  const { doc, update, dramaId, projectId } = useDrama();
   const [busy, setBusy] = useState(false);
   const [undo, setUndo] = useState<Snapshot | null>(null);
   const abort = useRef<AbortController | null>(null);
-  useEffect(() => () => abort.current?.abort(), []);
+  const version = polishVersion(doc, shot.id);
+  useLayoutEffect(() => () => {
+    abort.current?.abort();
+    abort.current = null;
+    setBusy(false);
+  }, [version, shot.id, dramaId, projectId]);
 
   const polish = async () => {
-    if (busy) return;
+    if (busy || abort.current || version === null) return;
     const controller = new AbortController();
     abort.current = controller;
     setBusy(true);
     try {
       const result = await polishShotPrompt(doc, shot.id, undefined, controller.signal);
-      if (controller.signal.aborted) return;
-      setUndo(snapshot(shot));
-      update(current => updateShot(current, shot.id, item => ({
-        ...item,
-        prompt: result.prompt,
-        directedPrompt: undefined,
-        ...(result.shotSize ? { shotSize: result.shotSize } : {}),
-        ...(result.cameraMotion ? { cameraMotion: result.cameraMotion, cameraMove: result.cameraMotion } : {}),
-        ...(result.lighting ? { lighting: result.lighting } : {}),
-        ...(result.audioCues ? { audioCues: result.audioCues } : {}),
-        ...mergeMentionIds(item, result.prompt, current),
-      })));
+      if (controller.signal.aborted || abort.current !== controller) return;
+      let before: Snapshot | null = null;
+      update(current => {
+        // update reads the workbench's latest document, including edits not yet rendered.
+        if (controller.signal.aborted || polishVersion(current, shot.id) !== version) return current;
+        before = snapshot(findShot(current, shot.id)!.shot);
+        return updateShot(current, shot.id, item => ({
+          ...item,
+          prompt: result.prompt,
+          directedPrompt: undefined,
+          ...(result.shotSize ? { shotSize: result.shotSize } : {}),
+          ...(result.cameraMotion ? { cameraMotion: result.cameraMotion, cameraMove: result.cameraMotion } : {}),
+          ...(result.lighting ? { lighting: result.lighting } : {}),
+          ...(result.audioCues ? { audioCues: result.audioCues } : {}),
+          ...mergeMentionIds(item, result.prompt, current),
+        }));
+      });
+      if (before) setUndo(before);
     } catch (error) {
       if (!controller.signal.aborted) toast.error('润色失败', { description: error instanceof Error ? error.message : '请稍后重试' });
     } finally {
-      if (abort.current === controller) abort.current = null;
-      setBusy(false);
+      if (abort.current === controller) {
+        abort.current = null;
+        setBusy(false);
+      }
     }
   };
 

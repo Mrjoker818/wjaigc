@@ -872,7 +872,7 @@ export default function ModelViewer3D({
             <button
               onClick={onClose}
               aria-label="关闭3D模型预览"
-              className="p-1 rounded-md transition-colors"
+              className="[@media(min-width:768px)_and_(hover:hover)_and_(pointer:fine)]:min-h-[24px] [@media(min-width:768px)_and_(hover:hover)_and_(pointer:fine)]:min-w-[24px] p-1 rounded-md transition-colors"
               style={{ color: 'rgba(255,255,255,0.4)' }}
               onMouseEnter={e => (e.currentTarget.style.color = '#fff')}
               onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.4)')}
@@ -1164,7 +1164,7 @@ export default function ModelViewer3D({
               <button
                 key={preset}
                 onClick={() => setLightPreset(preset)}
-                className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-all ${
+                className={`[@media(min-width:768px)_and_(hover:hover)_and_(pointer:fine)]:min-h-[24px] flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-all ${
                   lightPreset === preset ? 'bg-[#d4af37]/15 text-[#d4af37]' : 'text-[#666] hover:text-white'
                 }`}
                 title={preset === 'studio' ? '影棚光' : preset === 'soft' ? '柔和光' : '户外光'}

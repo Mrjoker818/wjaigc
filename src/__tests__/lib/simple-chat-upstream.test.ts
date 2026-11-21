@@ -20,6 +20,18 @@ describe('simple chat upstream helpers', () => {
     expect(describeUpstreamChatError(401, '{"error":{"message":"invalid API key"}}', 'm')).toContain('API Key');
     expect(describeUpstreamChatError(429, 'rate limited', 'm')).toContain('429');
   });
+  it.each([400, 401, 402, 403, 429, 503])('does not put provider response details into chat errors (%i)', status => {
+    const raw = JSON.stringify({ error: { message: '供应商内部诊断 synthetic-private-value https://provider.invalid/private' } });
+    const result = describeUpstreamChatError(status, raw, 'valid-model');
+    expect(result).not.toContain('synthetic-private-value');
+    expect(result).not.toContain('provider.invalid');
+    expect(result).toContain(String(status));
+  });
+  it('classifies an unsupported model without echoing its private diagnostic detail', () => {
+    const result = describeUpstreamChatError(400, '{"error":"不支持的模型 synthetic-private-value"}', 'valid-model');
+    expect(result).toContain('不支持模型「valid-model」');
+    expect(result).not.toContain('synthetic-private-value');
+  });
 });
 
 describe('PearAPI reasoning controls', () => {

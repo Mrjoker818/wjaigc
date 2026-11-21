@@ -7,7 +7,7 @@ import { MarkdownRenderer } from "./markdown-renderer";
 import { WorkPlanCard } from "./work-plan-card";
 import { DramaDraftCard } from "./drama-draft-card";
 import { SkillTraceCard } from "./skill-trace-card";
-import { SIMPLE_CHAT_SKILL_COMMANDS, selectSimpleChatAutoSkill } from '@/lib/simple-chat-auto-skill';
+import { SIMPLE_CHAT_SKILL_COMMANDS, selectSimpleChatAutoSkill, readSimpleChatFileData } from '@/lib/simple-chat-auto-skill';
 import { readSimpleChatPdfRequest, type SimpleChatPdfRequest, type SimpleChatPdfGenerationStatus } from '@/lib/simple-chat-pdf-output';
 import { readDramaDraft } from '@/lib/simple-chat-drama-draft';
 import { readWorkPlan } from "@/lib/chatgpt-work-mode";
@@ -2434,18 +2434,13 @@ export default function ChatArea({
   const [downloadingFlowchart, setDownloadingFlowchart] = useState(false);
   const downloadPptx = useCallback(async (content: string) => {
     // 提取 JSON 代码块
-    const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
-    if (!jsonMatch) {
+    const data = readSimpleChatFileData(content, 'ppt-master');
+    if (!data) {
       alert('未找到幻灯片 JSON 数据。请先用 PPT大师 Skill 生成 PPT 内容。');
       return;
     }
     try {
       setDownloadingPptx(true);
-      const data = JSON.parse(jsonMatch[1]);
-      if (!data.slides || !Array.isArray(data.slides)) {
-        alert('JSON 格式无效：缺少 slides 数组');
-        return;
-      }
       const res = await fetch('/api/ppt/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2472,29 +2467,27 @@ export default function ChatArea({
 
   // Check if message contains PPT JSON
   const hasPptJson = useCallback((content: string) => {
-    return /```json\s*[\s\S]*?"slides"\s*:\s*\[/.test(content);
+    return Boolean(readSimpleChatFileData(content, 'ppt-master'));
   }, []);
 
   const hasExcelJson = useCallback((content: string) => {
-    return /```json\s*[\s\S]*?"sheets"\s*:\s*\[/.test(content);
+    return Boolean(readSimpleChatFileData(content, 'excel-master'));
   }, []);
 
   const hasWordJson = useCallback((content: string) => {
-    return /```json\s*[\s\S]*?"sections"\s*:\s*\[/.test(content);
+    return Boolean(readSimpleChatFileData(content, 'word-master'));
   }, []);
 
   const hasMindmapJson = useCallback((content: string) => {
-    return /```json\s*[\s\S]*?"root"\s*:\s*\{/.test(content) && /```json\s*[\s\S]*?"text"\s*:/.test(content);
+    return Boolean(readSimpleChatFileData(content, 'mindmap-master'));
   }, []);
 
   const hasFlowchartJson = useCallback((content: string) => {
-    return /```json\s*[\s\S]*?"mermaid"\s*:/.test(content);
+    return Boolean(readSimpleChatFileData(content, 'flowchart-master'));
   }, []);
 
   const extractJsonFromContent = useCallback((content: string): object | null => {
-    const match = content.match(/```json\s*([\s\S]*?)\s*```/);
-    if (!match) return null;
-    try { return JSON.parse(match[1]); } catch { return null; }
+    return readSimpleChatFileData(content);
   }, []);
 
   const downloadFile = useCallback(async (url: string, filename: string) => {
@@ -3489,7 +3482,7 @@ export default function ChatArea({
                 paddingTop: 8, paddingBottom: 8,
               } : {}) }}
             />
-            <div className={`flex min-w-0 flex-wrap items-center gap-1 px-2 [&>button]:inline-flex [&>button]:min-h-11 [&>button]:min-w-11 [&>button]:shrink-0 [&>button]:items-center [&>button]:justify-center ${compactHeader ? 'pb-1' : 'pb-2'}`}>
+            <div className={`flex min-w-0 flex-wrap items-center [&>button]:inline-flex [&>button]:min-h-11 [&>button]:min-w-11 [&>button]:shrink-0 [&>button]:items-center [&>button]:justify-center ${compactHeader ? 'gap-0.5 px-1 pb-1' : 'gap-1 px-2 pb-2'}`}>
               <button onClick={() => setBrandActive(!brandActive)}
                 className={`p-1.5 rounded-lg transition-colors ${brandActive ? 'bg-amber-500/10 text-amber-500' : 'text-muted-foreground hover:bg-muted'}`}
                 title="品牌DNA注入 - 将品牌规范注入对话上下文">
@@ -3525,7 +3518,7 @@ export default function ChatArea({
                 className={`gap-1 px-2 py-1.5 rounded-lg text-xs transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary motion-reduce:transition-none ${workModeEnabled ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'}`}
                 title="工作模式：先列计划，再按步骤交付完整成果">
                 <ListChecks className="w-4 h-4" />
-                <span className="hidden sm:inline">工作模式</span>
+                <span className={compactHeader ? 'hidden' : 'hidden sm:inline'}>工作模式</span>
               </button>
               <button onClick={handleDeepResearch} disabled={!input.trim() || isStreaming}
                 className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-30 transition-colors"

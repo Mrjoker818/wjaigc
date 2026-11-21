@@ -17,7 +17,7 @@ import {
 } from '@/lib/drama/workbench-client';
 import { findShot, fitDuration, pendingShots, setSceneShots, updateShot, upsertTake } from '@/lib/drama/workbench-state';
 import { shotVoice } from '@/lib/drama/voiceover';
-import { checkpointProduction, pendingProductionImages, upsertProductionImage, type DramaProductionImage } from '@/lib/drama/production-state';
+import { checkpointProduction, pendingProductionImages, productionImageTargetSnapshot, upsertProductionImage, type DramaProductionImage } from '@/lib/drama/production-state';
 import { followProductionImage, submitProductionImage } from '@/lib/drama/production-image-client';
 import { setSlotImage, type BibleSlot } from '@/lib/drama/bible-images';
 import { filmInputSnapshot, shotInputSnapshot, voiceoverInputSnapshot, quoteInputSnapshot } from '@/lib/drama/production-version';
@@ -325,31 +325,58 @@ export function useDramaWorkbench({
     if (!await flushSave()) throw new Error('生成回执未保存，已停止后续操作，请先解决保存问题');
   }, [flushSave, update]);
 
-  const applyImageOperation = useCallback(async (operation: DramaProductionImage) => {
-    if (!operation.url || operation.state !== 'stored') return;
+  const applyImageOperation = useCallback(async (operation: DramaProductionImage, adopt = false): Promise<boolean> => {
+    if (!operation.url || operation.state !== 'stored' || !lifeRef.current || lifeRef.current.signal.aborted) return false;
+    let result: DramaProductionImage | undefined;
+    let targetExists = false;
     update(current => {
-      const target = operation.target;
+      // A replay or an old toast must never overwrite a later selection after this receipt was applied.
+      const latest = current.productionImages?.find(item => item.id === operation.id);
+      result = latest;
+      if (!latest || latest.applied || !latest.url || latest.state !== 'stored') return current;
+      const target = latest.target;
+      const snapshot = productionImageTargetSnapshot(current, target);
+      targetExists = snapshot !== undefined;
+      const error = !targetExists ? '目标已删除或不存在；真实产物仍保留在原回执中，未放回项目'
+        : !latest.inputSnapshot || !latest.targetSnapshot ? '旧回执缺少输入版本快照，无法确认匹配；请核对原图后明确采用'
+          : latest.targetSnapshot !== snapshot ? '输入或选图已改变；原版本产物已保存，需核对后明确采用' : undefined;
+      if (error && (!adopt || !targetExists)) {
+        result = { ...latest, applied: false, error };
+        return upsertProductionImage(current, result);
+      }
       const next = target.kind === 'keyframe'
-        ? updateShot(current, target.entityId, target.view === 'last' ? { lastFrameUrl: operation.url } : { firstFrameUrl: operation.url })
-        : setSlotImage(current, { kind: target.kind, id: target.entityId, view: target.view } as BibleSlot, operation.url!);
-      return upsertProductionImage(next, { ...operation, applied: true });
+        ? updateShot(current, target.entityId, target.view === 'last' ? { lastFrameUrl: latest.url } : { firstFrameUrl: latest.url })
+        : setSlotImage(current, { kind: target.kind, id: target.entityId, view: target.view } as BibleSlot, latest.url);
+      result = { ...latest, applied: true, error: undefined };
+      return upsertProductionImage(next, result);
     });
     if (!await flushSave()) throw new Error('产物已保存，放回项目时未保存成功，请先解决保存问题');
+    if (result?.applied) return true;
+    if (result?.error && !lifeRef.current?.signal.aborted) toast('原图片已保存，尚未采用', {
+      description: `${result.error}。图片：${result.url}`, duration: 15000,
+      ...(targetExists ? { action: { label: '采用此图', onClick: () => {
+        void applyImageOperation(operation, true).catch(error => toast.error(errorText(error, '采用图片未保存，请稍后核对')));
+      } } } : {}),
+    });
+    return false;
   }, [flushSave, update]);
 
   const generateProductionImage = useCallback(async (target: DramaProductionImage['target'], prompt: string, aspectRatio: string, referenceImages: string[] = [], stop?: AbortSignal): Promise<boolean> => {
     if (!imageModel) throw new Error('请先选择已授权的图像供应商和模型');
-    if (pendingProductionImages(docRef.current).some(item => item.target.kind === target.kind && item.target.entityId === target.entityId && item.target.view === target.view)) {
+    if (pendingProductionImages(docRef.current).some(item => item.target.kind === target.kind && item.target.entityId === target.entityId
+      && (item.target.view === target.view || item.target.view === undefined || target.view === undefined))) {
       toast('这个位置已有原任务待核对，请先恢复原回执'); return false;
     }
-    const operation: DramaProductionImage = { id: `image_${crypto.randomUUID().replaceAll('-', '')}`, target, providerId: imageModel.providerId, modelId: imageModel.modelId,
+    target = { ...target };
+    const targetSnapshot = productionImageTargetSnapshot(docRef.current, target);
+    if (!targetSnapshot) throw new Error('图片目标已删除或不存在，未提交生成请求');
+    const operation: DramaProductionImage = { id: `image_${crypto.randomUUID().replaceAll('-', '')}`, target, targetSnapshot, providerId: imageModel.providerId, modelId: imageModel.modelId,
       state: 'submitting', applied: false, createdAt: Date.now(), updatedAt: Date.now() };
     const page = lifeRef.current?.signal;
     const signal = page && stop ? AbortSignal.any([page, stop]) : stop ?? page;
     const result = await submitProductionImage(operation, { prompt, aspectRatio, referenceImages }, { checkpoint: imageCheckpoint, signal });
-    if (!lifeRef.current?.signal.aborted) await applyImageOperation(result);
     if (result.state !== 'stored') { toast(result.error || '已保留原生成回执，等待结果回读'); return false; }
-    return true;
+    return applyImageOperation(result);
   }, [applyImageOperation, imageCheckpoint, imageModel]);
 
   const setImageModelKey = useCallback((key: string) => {

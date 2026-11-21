@@ -853,7 +853,14 @@ async function control(s: Session, target: Locator): Promise<void> {
     await settle(s);
   }
   const box = await visibleBounds(s, target);
-  expect(box.width).toBeGreaterThanOrEqual(44); expect(box.height).toBeGreaterThanOrEqual(44);
+  // Re-check the input mode after each continuity resize; touch stays at 44px.
+  const compactDesktop = await target.evaluate(() => (
+    !matchMedia('(max-width: 767px), (pointer: coarse)').matches
+    && matchMedia('(min-width: 768px) and (hover: hover) and (pointer: fine)').matches
+  ));
+  const minimum = compactDesktop ? 24 : 44;
+  expect(box.width, compactDesktop ? 'B desktop width' : 'B touch/unknown width').toBeGreaterThanOrEqual(minimum);
+  expect(box.height, compactDesktop ? 'B desktop height' : 'B touch/unknown height').toBeGreaterThanOrEqual(minimum);
   const clip = await target.evaluate(element => {
     const r = element.getBoundingClientRect(); let left = r.left; let top = r.top; let right = r.right; let bottom = r.bottom;
     for (let node = element.parentElement; node; node = node.parentElement) {

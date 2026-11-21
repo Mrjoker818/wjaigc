@@ -1,6 +1,6 @@
 // @vitest-environment node
 // Real InfiniteCanvas and shipped CSS. Public props only; no paid/business I/O.
-import { readFile, mkdir } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { compile } from 'tailwindcss';
@@ -18,6 +18,7 @@ const ENTRY=String.raw`
 import React,{useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {InfiniteCanvas,type CanvasImage} from '@/components/infinite-canvas';
+import {ImageEditor} from '@/components/image-editor';
 import {TreeHistoryManager} from '@/lib/canvas-tree-history';
 import {taskEventsClient} from '@/lib/task-events-client';
 import {OperationAuditClient} from '@/components/operation-audit-client';
@@ -33,11 +34,12 @@ const bxDescriptor={providerId:'bx-provider',modelId:'bx-image',kind:'image' as 
 const bxUnsupported={...bxDescriptor,modelId:'bx-no-reference',supportsReferenceImages:false,maxReferenceImages:0};
 const bySecond={...bxDescriptor,providerId:'by-provider-b',maxReferenceImages:2,allowedRatios:['1:1','16:9'],allowedSizes:['1536x1024'],qualityOptions:['hd'],maxOutputs:1};
 function Entry({theme,admin,catalogLoading}:{theme:'gold'|'mono';admin:boolean;catalogLoading:boolean}):React.ReactElement{
+ const [editing,setEditing]=useState<CanvasImage|null>(null);
  const [images,setImages]=useState<CanvasImage[]>([{id:'br-A',url:png,x:100,y:160,width:56,height:56,name:'BW A',prompt:'BR成员A'},{id:'br-B',url:png,x:100,y:270,width:56,height:56,name:'BW B',prompt:'BR成员B'},{id:'br-keep',url:png,x:100,y:380,width:56,height:56,name:'BW 保留',prompt:'BR组外素材'}]);const [selected,setSelected]=useState<CanvasImage|null>(null);state.images=images;const [groups,setGroups]=useState<Array<{id:string;name:string;note:string;imageIds:string[];x:number;y:number;collapsed:boolean}>>([]);state.groups=groups;
  return <><OperationAuditClient/><InfiniteCanvas images={images} selectedImage={selected} projectId="canvas-ui-project" isPanelCollapsed={false} isAdmin={admin}
  taskModelCatalog={[bxDescriptor,bxUnsupported,bySecond]} taskModelOptions={[{id:'bx-image',providerId:'bx-provider',providerName:'BX 合成供应商',name:'BX 图像',type:'image'},{id:'bx-no-reference',providerId:'bx-provider',providerName:'BX 合成供应商',name:'BX 不支持参考图',type:'image'},{id:'bx-image',providerId:'by-provider-b',providerName:'BY 合成供应商乙',name:'BY 图像乙',type:'image'}]} themeStyle={theme==='mono'?'monochrome':'gold'} initialViewState={{offsetX:0,offsetY:0,zoom:1}} onViewStateChange={view=>{state.view=view;}}
- initialGroups={groups} onGroupsChange={next=>{setGroups(next);}} versionHistoryManager={manager} sketchImageEnabled={true} sketchContext={sketchContext} catalogStatus={{loading:catalogLoading,error:null}} onImagesChange={setImages} onSelectImage={setSelected} onPreviewImage={action('preview')} onGenerateVariation={action('variation')} onExtractKeywords={action('keywords')} onSendToChat={image=>{state.actions.push('chat:'+image.id);}} onFusion={action('fusion')} onAddImages={()=>{throw Error('CANVAS_UI_FIXTURE_UNEXPECTED_PUBLISH')}}
- onSwitchToDashboard={action('dashboard')} onToggleVisionPrompt={action('omp')} onToggleSettings={action('settings')} onToggleTheme={action('theme')} onToggleUserManager={action('users')} onToggleAdminSystem={action('admin')} onToggleProjectData={action('projects')} onToggleFavorites={action('favorites')} onTogglePromptTemplate={action('templates')} onToggleHelp={action('external-help')} onSwitchToDrama={action('drama')}/></>;
+ initialGroups={groups} onGroupsChange={next=>{setGroups(next);}} versionHistoryManager={manager} sketchImageEnabled={true} sketchContext={sketchContext} catalogStatus={{loading:catalogLoading,error:null}} onEditImage={image=>{state.actions.push('edit:'+image?.id);setEditing(image);}} onImagesChange={setImages} onSelectImage={setSelected} onPreviewImage={action('preview')} onGenerateVariation={action('variation')} onExtractKeywords={action('keywords')} onSendToChat={image=>{state.actions.push('chat:'+image.id);}} onFusion={action('fusion')} onAddImages={()=>{throw Error('CANVAS_UI_FIXTURE_UNEXPECTED_PUBLISH')}}
+ onSwitchToDashboard={action('dashboard')} onToggleVisionPrompt={action('omp')} onToggleSettings={action('settings')} onToggleTheme={action('theme')} onToggleUserManager={action('users')} onToggleAdminSystem={action('admin')} onToggleProjectData={action('projects')} onToggleFavorites={action('favorites')} onTogglePromptTemplate={action('templates')} onToggleHelp={action('external-help')} onSwitchToDrama={action('drama')}/>{editing&&<ImageEditor image={editing} canvasImages={images} themeStyle={theme==='mono'?'monochrome':'gold'} onClose={()=>setEditing(null)} onConfirm={()=>{throw Error('F04_UNEXPECTED_PUBLISH');}}/>}</>;
 }
 Object.assign(window,{canvasUi:{state,png,mount(theme:'gold'|'mono',options:{admin?:boolean;catalogLoading?:boolean}){if(state.mounts||state.disposed)throw Error('CANVAS_UI_FIXTURE_REMOUNT');state.mounts++;for(const type of ['pointerdown','pointerup','gotpointercapture','lostpointercapture','click'])document.addEventListener(type,observe,true);document.documentElement.classList.add(theme==='mono'?'theme-monochrome':'theme-gold');root.render(<Entry theme={theme} admin={options.admin===true} catalogLoading={options.catalogLoading===true}/>);},unmount(){if(!state.disposed){state.disposed=true;root.unmount();}taskEventsClient.disconnect();for(const type of ['pointerdown','pointerup','gotpointercapture','lostpointercapture','click'])document.removeEventListener(type,observe,true);}}});
 `;
@@ -131,7 +133,7 @@ async function session(theme: Theme = 'gold', width: number = 390, height: numbe
         if (url.origin !== ORIGIN || url.username || url.password || request.method() !== 'GET' || request.postData() !== null
           || headers.authorization || headers.cookie || headers['x-api-key'] || headers['api-key'] || headers['idempotency-key']) throw Error('CANVAS_UI_FIXTURE_HTTP_BOUNDARY');
         const key = url.pathname + url.search, count = (s.counts.get(key) ?? 0) + 1; s.counts.set(key, count);
-        if (count > (['/api/session','/api/auth/me','/api/task-events'].includes(key)?6:HELP_FILES.some(file=>key==='/api/help-image?file='+file)?3:1)) throw Error('CANVAS_UI_FIXTURE_HTTP_COUNT ' + key);
+        if (count > (['/api/edit','/api/models?type=chat'].includes(key)?2:['/api/session','/api/auth/me','/api/task-events'].includes(key)?6:HELP_FILES.some(file=>key==='/api/help-image?file='+file)?3:1)) throw Error('CANVAS_UI_FIXTURE_HTTP_COUNT ' + key);
         if (key === '/' && request.isNavigationRequest()) {
           await route.fulfill({ contentType: 'text/html', body: `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style></head><body style="margin:0;width:100vw;height:100dvh;overflow:hidden"><div id="fixture-root" style="position:relative;width:100%;height:100%"></div></body></html>` }); return;
         }
@@ -141,6 +143,8 @@ async function session(theme: Theme = 'gold', width: number = 390, height: numbe
         if (key === '/api/models?type=3d') { await route.fulfill({json:{success:true,capabilityCatalogVersion:1,providers:[],models:[],taskModelCatalog:[],modelAuthorizationMigration:{resolved:[],required:[]},quickCreatePolicy:{autoModelRouting:false,globalDefault:'',quickCreateDefault:''}}});return; }
         if (key === '/api/upscayl' || key === '/api/models?type=upscaler' || key === '/api/models?type=removebg') { await route.fulfill({json:key==='/api/upscayl'?{available:false,models:[]}:{success:true,providers:[],models:[]}});return; }
         if (HELP_FILES.some(file => key === '/api/help-image?file=' + file)) { await route.fulfill({contentType:'image/png',body:s.png});return; }
+        if (key === '/api/edit') { await route.fulfill({json:{success:true,models:[{id:'f04-mask-image',name:'F04 离线蒙版模型',providerId:'f04-offline',providerName:'F04 独立假供应商',supportsMask:true}],capabilities:[]}});return; }
+        if (key === '/api/models?type=chat') { await route.fulfill({json:{success:true,models:[],providers:[]}});return; }
         if (key === '/logo.png') { await route.fulfill({contentType:'image/png',body:s.png});return; }
         throw Error('CANVAS_UI_FIXTURE_UNKNOWN_HTTP ' + key);
       })().catch(async error => { s.errors.push(String(error)); s.refused.add(route.request()); await route.abort('blockedbyclient'); });
@@ -183,7 +187,7 @@ async function dispose(s: Session, expectedRefusal?: 'http' | 'websocket', clean
   // Cleanup/lifecycle/allowlist failures can never share the expected-refusal
   // prefix. A boundary selftest must not succeed merely because close failed.
   const invalid=(code:string):never=>{if(failures.length)throw new AggregateError([Error(code),...failures],'CANVAS_UI_FIXTURE_VALIDATION_AND_CLEANUP');throw Error(code);};
-  const allowed=['/','/api/session','/api/auth/me','/api/task-events','/api/upscayl','/api/models?type=upscaler','/api/models?type=removebg','/api/models?type=3d','/logo.png','/api/tasks/recover?projectId=canvas-ui-project',...HELP_FILES.map(file=>'/api/help-image?file='+file)];
+  const allowed=['/api/edit','/api/models?type=chat','/','/api/session','/api/auth/me','/api/task-events','/api/upscayl','/api/models?type=upscaler','/api/models?type=removebg','/api/models?type=3d','/logo.png','/api/tasks/recover?projectId=canvas-ui-project',...HELP_FILES.map(file=>'/api/help-image?file='+file)];
   const keys=[...s.counts.keys()];
   if(s.options.requireMissing || s.counts.get('/')!==1 || keys.some(k=>!allowed.includes(k)&&!(expectedRefusal==='http'&&k==='/unexpected'))){
     console.log('CANVAS_UI_FIXTURE_REQUEST_DIAGNOSTIC',JSON.stringify({counts:[...s.counts],errors:s.errors}));
@@ -217,25 +221,74 @@ async function withSession(theme:Theme,width:number,height:number,options:Option
 
 
 
-interface CLEntry {theme:Theme;width:number;height:number;mode:'erase'|'mask'}
-const clMatrix:CLEntry[]=THEMES.flatMap(theme=>[[320,640],[390,844],[640,320]].flatMap(([width,height])=>(['erase','mask']as const).map(mode=>({theme,width,height,mode}))));
-async function clCapture(s:Session,e:CLEntry,label:string):Promise<void>{const dir=path.resolve('output/playwright/canvas-brush-cl-native-20261020',String(process.pid));await mkdir(dir,{recursive:true});const file=path.join(dir,e.theme+'-'+e.width+'x'+e.height+'-'+e.mode+'-'+label+'.png');await s.page.screenshot({path:file});console.log('CL_CAPTURE',JSON.stringify({path:file,label,notTaskOrDeviceAcceptance:true}));}
-async function clOpen(s:Session,e:CLEntry):Promise<Locator>{await s.page.locator('[data-canvas-image-id="br-A"]').tap({position:{x:28,y:38}});await s.page.locator('[data-mobile-image-actions]').getByRole('button',{name:'更多',exact:true}).tap();await s.page.getByRole('dialog',{name:'图片工具',exact:true}).getByRole('button',{name:e.mode==='erase'?'擦除':'蒙版',exact:true}).tap();const panel=s.page.locator('[data-floating-panel="'+e.mode+'"]');await panel.waitFor({state:'visible'});await s.page.waitForFunction(mode=>{const el=document.querySelector('[data-floating-panel="'+mode+'"] img')as HTMLImageElement|null;return Boolean(el&&el.complete&&el.naturalWidth===64);},e.mode,{timeout:1500});return panel;}
-async function clReveal(s:Session,control:Locator):Promise<void>{for(let i=0;i<12;i++){const state=await control.evaluate(el=>{const r=el.getBoundingClientRect();for(let p=el.parentElement;p;p=p.parentElement){const style=getComputedStyle(p);if(['auto','scroll'].includes(style.overflowY)&&p.scrollHeight>p.clientHeight){const b=p.getBoundingClientRect();return {rect:{top:r.top,bottom:r.bottom},scroll:{x:b.right-8,top:Math.max(4,b.top+4),bottom:Math.min(innerHeight-4,b.bottom-4)}};}}return {rect:{top:r.top,bottom:r.bottom},scroll:null};});if(!state.scroll||state.rect.top>=state.scroll.top&&state.rect.bottom<=state.scroll.bottom)return;const b=state.scroll,dy=state.rect.top<b.top?Math.min(110,b.bottom-b.top-24):-Math.min(110,b.bottom-b.top-24),y=dy<0?b.bottom-16:b.top+16,c=await s.context.newCDPSession(s.page);try{await c.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:b.x,y,id:1}]});try{for(const t of [.25,.5,.75,1]){await c.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:b.x,y:y+dy*t,id:1}]});await settle(s.page);}}finally{await c.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});}}finally{await c.detach();}}throw Error('CL_NATIVE_SCROLL_BOUND');}
-async function clAudit(s:Session,control:Locator):Promise<void>{await clReveal(s,control);const v=await control.evaluate(el=>{const r=el.getBoundingClientRect(),faults:string[]=[];const walker=document.createTreeWalker(el,NodeFilter.SHOW_TEXT);let n:Node|null;while((n=walker.nextNode())){if(!n.textContent?.trim())continue;const range=document.createRange();range.selectNodeContents(n);for(const b of range.getClientRects())if(b.left<r.left-.5||b.right>r.right+.5||b.top<r.top-.5||b.bottom>r.bottom+.5)faults.push('text-clipped');}return {tag:el.tagName,name:el.getAttribute('aria-label')||el.getAttribute('title')||el.textContent?.trim()||'',width:r.width,height:r.height,inside:r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight,hit:el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)),faults};});console.log('CL_CONTROL',JSON.stringify(v));expect.soft(v.width,v.name+' touch width').toBeGreaterThanOrEqual(44);expect.soft(v.height,v.name+' touch height').toBeGreaterThanOrEqual(44);expect.soft(v.inside&&v.hit,v.name+' native visible hit').toBe(true);expect.soft(v.faults,v.name+' text readable').toEqual([]);expect.soft(v.name,'controls must have an accessible purpose').not.toBe('');}
-async function clTap(s:Session,control:Locator):Promise<void>{await clReveal(s,control);await control.tap();await settle(s.page);}
-const clSvg=(panel:Locator):Locator=>panel.locator('svg[viewBox="0 0 64 64"]');
-async function clStroke(s:Session,panel:Locator):Promise<void>{const drawing=panel.locator('svg[viewBox="0 0 64 64"] + div.absolute.inset-0');expect(await drawing.count()).toBe(1);await clReveal(s,drawing);const r=await drawing.boundingBox();if(!r||r.width<16||r.height<16)throw Error('CL_DRAW_RECT');expect(await drawing.evaluate(el=>{const r=el.getBoundingClientRect();return el.contains(document.elementFromPoint(r.x+r.width*.3,r.y+r.height*.45));}),'unoccluded native drawing point').toBe(true);const c=await s.context.newCDPSession(s.page),x=r.x+r.width*.25,y=r.y+r.height*.45;try{await c.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y,id:1,force:1,radiusX:1,radiusY:1}]});try{for(const t of [.2,.4,.6,.8,1]){await c.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x+r.width*.5*t,y:y+r.height*.1*t,id:1,force:1,radiusX:1,radiusY:1}]});await settle(s.page);}}finally{await c.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});}await settle(s.page);}finally{await c.detach();}}
-for(const e of clMatrix){
- it('CL '+e.theme+' '+e.width+'x'+e.height+' '+e.mode+' controls remain readable named touch targets with no submit',async()=>{await withSession(e.theme,e.width,e.height,{touch:true},async s=>{const before=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);try{const panel=await clOpen(s,e);await clCapture(s,e,'controls-open');const controls=panel.locator('button,input,textarea,select');for(let i=0;i<await controls.count();i++)await clAudit(s,controls.nth(i));await clTap(s,panel.getByRole('button').first());await panel.waitFor({state:'detached'});await s.page.waitForTimeout(600);const after=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);expect(after.images).toEqual(before.images);expect(after.view).toEqual(before.view);expect(after.actions).toEqual([]);console.log('CL_LAYOUT_COMPLETE',JSON.stringify({...e,actualParent:true,noSubmit:true,assetsAndViewUnchanged:true}));}finally{await clCapture(s,e,'controls-end-or-failure');}});},25000);
- it('CL '+e.theme+' '+e.width+'x'+e.height+' '+e.mode+' native first brush and reverse strokes support undo and clear without source mutation',async()=>{await withSession(e.theme,e.width,e.height,{touch:true},async s=>{const before=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);try{const panel=await clOpen(s,e),svg=clSvg(panel);expect(await svg.locator('polyline,circle').count()).toBe(0);await clStroke(s,panel);await expect.poll(()=>svg.locator('polyline').count(),{timeout:1500}).toBeGreaterThan(0);const first=await svg.locator('polyline').first().getAttribute('points');expect(first?.trim().split(/\s+/).length).toBeGreaterThan(2);await clTap(s,panel.getByRole('button',{name:'撤销',exact:true}));expect(await svg.locator('polyline,circle').count()).toBe(0);await clTap(s,panel.getByRole('button',{name:'橡皮擦',exact:true}));await clStroke(s,panel);await expect.poll(()=>svg.locator('polyline[stroke-dasharray="4 4"]').count(),{timeout:1500}).toBeGreaterThan(0);await clTap(s,panel.getByRole('button',{name:'清空',exact:true}));expect(await svg.locator('polyline,circle').count()).toBe(0);await clTap(s,panel.getByRole('button').first());await panel.waitFor({state:'detached'});await s.page.waitForTimeout(600);const after=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);expect(after.images).toEqual(before.images);expect(after.view).toEqual(before.view);expect(after.actions).toEqual([]);console.log('CL_BRUSH_COMPLETE',JSON.stringify({...e,nativeTouch:true,renderedMultiPointStrokes:true,undoAndClear:true,reverseMode:true,noSubmit:true,assetsAndViewUnchanged:true}));}finally{await clCapture(s,e,'brush-end-or-failure');}});},25000);
+// The direct erase/mask SVG editor retired in 3fd9d9c6 (2026-11-16).
+// Its old touchCancel/secondary-touch/polyline contracts do not describe the
+// current ImageEditor, which draws bitmap masks with mouse handlers. The old
+// 30-case source and CI red evidence are retained in ci-20261121/f04/before/.
+// Exercise the real current entry, bitmap edits, undo/clear and discard below.
+interface CLEntry {theme:Theme;width:number;height:number}
+const clMatrix:CLEntry[]=THEMES.flatMap(theme=>[[320,640],[390,844],[640,320]].map(([width,height])=>({theme,width,height})));
+async function clOpen(s:Session,sourceId='br-A'):Promise<Locator>{
+ await s.page.locator('[data-canvas-image-id="'+sourceId+'"]').tap({position:{x:28,y:38}});
+ await s.page.locator('[data-mobile-image-actions]').getByRole('button',{name:'更多',exact:true}).tap();
+ const drawer=s.page.getByRole('dialog',{name:'图片工具',exact:true});
+ for(const name of ['擦除','蒙版','编辑元素','移除背景'])expect(await drawer.getByRole('button',{name,exact:true}).count(),'retired tool '+name).toBe(0);
+ await drawer.getByRole('button',{name:'语言修图',exact:true}).tap();
+ const panel=s.page.locator('[data-popup]').filter({has:s.page.getByRole('button',{name:'关闭语言修图',exact:true})});
+ await panel.waitFor({state:'visible'});await nativeRequestsFinished(s);
+ await expect.poll(()=>panel.getByRole('button',{name:'画笔',exact:true}).isEnabled(),{timeout:1500}).toBe(true);
+ return panel;
 }
-
-for(const theme of THEMES)for(const mode of ['erase','mask']as const)it('CL '+theme+' 390x844 '+mode+' lifecycle pointer cancel and secondary release cannot commit or poison active touch',async()=>{
- const e:CLEntry={theme,width:390,height:844,mode};await withSession(theme,390,844,{touch:true},async s=>{try{const panel=await clOpen(s,e),drawing=panel.locator('svg[viewBox="0 0 64 64"] + div.absolute.inset-0'),svg=clSvg(panel);await clReveal(s,drawing);const r=await drawing.boundingBox();if(!r)throw Error('CL_LIFECYCLE_RECT');const x=r.x+r.width*.3,y=r.y+r.height*.4,c=await s.context.newCDPSession(s.page);let clTouchActive=false;try{await c.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y,id:1,force:1}]});clTouchActive=true;await c.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x+12,y:y+5,id:1,force:1}]});await settle(s.page);expect(await svg.locator('polyline').count(),'active stroke visible before cancel').toBeGreaterThan(0);await c.send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});clTouchActive=false;await settle(s.page);expect(await svg.locator('polyline,circle').count(),'cancel discards only uncommitted stroke').toBe(0);expect(await panel.getByRole('button',{name:'撤销',exact:true}).isDisabled()).toBe(true);
- await c.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y,id:1,force:1}]});clTouchActive=true;await c.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x+10,y:y+5,id:1,force:1}]});await c.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:x+10,y:y+5,id:1,force:1},{x:x+20,y:y+10,id:2,force:1}]});await clReleaseSecondary(s,c,x+20,y+10);await settle(s.page);expect(await panel.getByRole('button',{name:'撤销',exact:true}).isDisabled(),'secondary release must not commit primary').toBe(true);await c.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x+22,y:y+8,id:1,force:1}]});await c.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});clTouchActive=false;await settle(s.page);expect(await svg.locator('polyline').count()).toBe(1);expect(await panel.getByRole('button',{name:'撤销',exact:true}).isDisabled()).toBe(false);await clTap(s,panel.getByRole('button',{name:'撤销',exact:true}));expect(await svg.locator('polyline,circle').count()).toBe(0);console.log('CL_LIFECYCLE_COMPLETE',JSON.stringify({theme,mode,cancelDiscarded:true,secondaryDidNotCommit:true,primaryContinued:true,oneUndoRemoved:true,noSubmit:true}));}finally{try{if(clTouchActive)await c.send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});}finally{await c.detach();}}}finally{await clCapture(s,e,'lifecycle-end-or-failure');}});
+async function clSnapshot(panel:Locator):Promise<{png:string;painted:number}>{
+ return panel.locator('canvas').evaluate(el=>{const canvas=el as HTMLCanvasElement,ctx=canvas.getContext('2d');if(!ctx)throw Error('F04_MASK_CANVAS');const data=ctx.getImageData(0,0,canvas.width,canvas.height).data;let painted=0;for(let i=3;i<data.length;i+=4)if(data[i]>10)painted++;return{png:canvas.toDataURL(),painted};});
+}
+async function clMouseStroke(s:Session,panel:Locator):Promise<void>{
+ const canvas=panel.locator('canvas');await canvas.scrollIntoViewIfNeeded();const r=await canvas.boundingBox();if(!r)throw Error('F04_MASK_BOUNDS');
+ expect(await canvas.evaluate(el=>{const r=el.getBoundingClientRect();return el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));}),'drawing surface is reachable').toBe(true);
+ await s.page.mouse.move(r.x+r.width*.25,r.y+r.height*.5);await s.page.mouse.down();try{await s.page.mouse.move(r.x+r.width*.75,r.y+r.height*.5,{steps:8});}finally{await s.page.mouse.up();}await settle(s.page);
+}
+for(const e of clMatrix)it('CL current language entry '+e.theme+' '+e.width+'x'+e.height+' keeps real mask controls visible and closes without publishing',async()=>{
+ await withSession(e.theme,e.width,e.height,{touch:true},async s=>{
+  const before=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state),panel=await clOpen(s);
+  expect(await panel.getByRole('img',{name:'编辑',exact:true}).getAttribute('src')).toBe((before.images[0] as {url:string}).url);
+  for(const name of ['画笔','橡皮','撤销','清除']){
+   const button=panel.getByRole('button',{name,exact:true});await button.scrollIntoViewIfNeeded();
+   const box=await button.boundingBox();expect(box?.width,name+' touch width').toBeGreaterThanOrEqual(44);expect(box?.height,name+' touch height').toBeGreaterThanOrEqual(44);
+   expect(await button.evaluate(el=>{const b=el.getBoundingClientRect(),range=document.createRange();range.selectNodeContents(el);return [...range.getClientRects()].every(r=>r.left>=b.left-.5&&r.right<=b.right+.5&&r.top>=b.top-.5&&r.bottom<=b.bottom+.5);}),name+' readable label').toBe(true);
+   expect(await button.evaluate(el=>{const r=el.getBoundingClientRect();return r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));}),name+' visible hit target').toBe(true);
+  }
+  await panel.getByRole('button',{name:'橡皮',exact:true}).tap();await panel.getByRole('button',{name:'画笔',exact:true}).tap();
+  expect((await clSnapshot(panel)).painted).toBe(0);
+  await panel.getByRole('button',{name:'关闭语言修图',exact:true}).tap();await panel.waitFor({state:'detached'});
+  const after=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);
+  expect(after.images).toEqual(before.images);expect(after.groups).toEqual(before.groups);expect(after.view).toEqual(before.view);expect(after.actions).toEqual(['edit:br-A']);
+  expect(s.counts.get('/api/edit')).toBe(1);expect(s.counts.get('/api/models?type=chat')).toBe(1);
+ });
 },25000);
-for(const theme of THEMES)it('CL '+theme+' 390x844 erase lifecycle real mouse retains old multi-point drawing path',async()=>{const e:CLEntry={theme,width:390,height:844,mode:'erase'};await withSession(theme,390,844,{touch:true},async s=>{try{const panel=await clOpen(s,e),drawing=panel.locator('svg[viewBox="0 0 64 64"] + div.absolute.inset-0'),svg=clSvg(panel);await clReveal(s,drawing);const r=await drawing.boundingBox();if(!r)throw Error('CL_MOUSE_RECT');await s.page.mouse.move(r.x+r.width*.25,r.y+r.height*.45);await s.page.mouse.down();try{await s.page.mouse.move(r.x+r.width*.75,r.y+r.height*.55,{steps:5});}finally{await s.page.mouse.up();}await settle(s.page);expect(await svg.locator('polyline').count()).toBeGreaterThan(0);await clTap(s,panel.getByRole('button',{name:'撤销',exact:true}));expect(await svg.locator('polyline,circle').count()).toBe(0);console.log('CL_MOUSE_COMPLETE',JSON.stringify({theme,realMouse:true,mobileViewportNotDesktopLayoutAcceptance:true,oldDrawingAndUndo:true,noSubmit:true}));}finally{await clCapture(s,e,'mouse-end-or-failure');}});},25000);
+for(const theme of THEMES)it('CL current bitmap mask '+theme+' draws erases undoes clears and discards only the owned source',async()=>{
+ await withSession(theme,390,844,{touch:true},async s=>{
+  const before=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state),panel=await clOpen(s),empty=await clSnapshot(panel);
+  expect(empty.painted).toBe(0);await clMouseStroke(s,panel);const painted=await clSnapshot(panel);expect(painted.painted).toBeGreaterThan(0);expect(painted.png).not.toBe(empty.png);
+  const undo=panel.getByRole('button',{name:'撤销',exact:true});expect(await undo.isDisabled()).toBe(false);await undo.click();expect(await clSnapshot(panel)).toEqual(empty);expect(await undo.isDisabled()).toBe(true);
+  await clMouseStroke(s,panel);await panel.getByRole('button',{name:'橡皮',exact:true}).click();await clMouseStroke(s,panel);expect((await clSnapshot(panel)).painted).toBeLessThan(painted.painted);
+  await panel.getByRole('button',{name:'清除',exact:true}).click();expect(await clSnapshot(panel)).toEqual(empty);expect(await undo.isDisabled()).toBe(true);
+  await panel.getByRole('button',{name:'画笔',exact:true}).click();await clMouseStroke(s,panel);
+  await panel.getByRole('button',{name:'关闭语言修图',exact:true}).click();await panel.waitFor({state:'detached'});
+  const second=await clOpen(s,'br-B');expect(await clSnapshot(second),'discarded source A mask cannot leak to source B').toEqual(empty);
+  await second.getByRole('button',{name:'关闭语言修图',exact:true}).click();await second.waitFor({state:'detached'});
+  const after=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);expect(after.images).toEqual(before.images);expect(after.view).toEqual(before.view);expect(after.actions).toEqual(['edit:br-A','edit:br-B']);
+ });
+},25000);
 
-interface CLReleaseWindow extends Window {clReleaseEvents:Array<{changed:number[];remaining:number[];trusted:boolean}>;clReleaseStop:()=>void}
-async function clReleaseSecondary(s:Session,c:import('@playwright/test').CDPSession,x:number,y:number):Promise<void>{await s.page.evaluate(()=>{const w=window as unknown as CLReleaseWindow;w.clReleaseEvents=[];const observe=(event:TouchEvent):void=>{w.clReleaseEvents.push({changed:[...event.changedTouches].map(t=>t.identifier),remaining:[...event.touches].map(t=>t.identifier),trusted:event.isTrusted});};document.addEventListener('touchend',observe,{capture:true,passive:true});w.clReleaseStop=()=>document.removeEventListener('touchend',observe,true);});try{await c.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[{x,y,id:2,force:1}]});const events=await s.page.evaluate(()=>(window as unknown as CLReleaseWindow).clReleaseEvents);expect(events,'installed Chromium native partial release identity').toEqual([{changed:[2],remaining:[1],trusted:true}]);console.log('CO_PARTIAL_RELEASE',JSON.stringify({changed:[2],remaining:[1],trusted:true,installedLegacyChromiumAdapterOnly:true}));}finally{await s.page.evaluate(()=>(window as unknown as CLReleaseWindow).clReleaseStop?.());}}
+for(const theme of THEMES)it('CL current crop '+theme+' replaces the retired erase session and Escape discards the edit',async()=>{
+ await withSession(theme,390,844,{touch:true},async s=>{
+  const before=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);
+  await s.page.locator('[data-canvas-image-id="br-A"]').tap({position:{x:28,y:38}});
+  await s.page.locator('[data-mobile-image-actions]').getByRole('button',{name:'更多',exact:true}).tap();
+  await s.page.getByRole('dialog',{name:'图片工具',exact:true}).getByRole('button',{name:'裁切',exact:true}).tap();
+  const viewport=s.page.locator('[data-canvas-viewport]'),panel=s.page.locator('[data-toolbar="edit-mode"]');
+  await panel.waitFor({state:'visible'});expect(await viewport.getAttribute('data-canvas-active-tool')).toBe('crop');
+  await s.page.keyboard.press('Escape');await panel.waitFor({state:'detached'});expect(await viewport.getAttribute('data-canvas-active-tool')).toBe('');
+  const after=await s.page.evaluate(()=>(window as unknown as FixtureWindow).canvasUi.state);expect(after.images).toEqual(before.images);expect(after.view).toEqual(before.view);expect(after.actions).toEqual([]);
+ });
+},25000);

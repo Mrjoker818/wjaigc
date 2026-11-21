@@ -1,6 +1,6 @@
 /** Resume the original image receipt; this module never retries an uncertain generate request. */
 import { persistImage, type WorkbenchFetch } from './workbench-client';
-import type { DramaProductionImage } from './production-state';
+import { productionImageInputSnapshot, type DramaProductionImage, type ProductionImageInput } from './production-state';
 import { uncertainDramaSubmission } from './receipt-client';
 
 interface ImageReceiptOptions {
@@ -62,9 +62,12 @@ export async function followProductionImage(initial: DramaProductionImage, optio
 }
 
 export async function submitProductionImage(
-  initial: DramaProductionImage, input: { prompt: string; aspectRatio: string; referenceImages?: string[] }, options: ImageReceiptOptions,
+  initial: DramaProductionImage, input: ProductionImageInput, options: ImageReceiptOptions,
 ): Promise<DramaProductionImage> {
   const fetcher = options.fetch ?? fetch;
+  // Freeze before the checkpoint's await: edits during saving must not change the paid request.
+  input = { ...input, referenceImages: [...(input.referenceImages ?? [])] };
+  initial = { ...initial, target: { ...initial.target }, inputSnapshot: productionImageInputSnapshot(input) };
   // Mandatory durable checkpoint before any paid request.
   await options.checkpoint(initial);
   if (options.signal?.aborted) {

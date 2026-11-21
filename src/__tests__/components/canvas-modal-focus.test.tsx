@@ -129,6 +129,16 @@ it('describes canvas edit capabilities conditionally and preserves the changelog
   expect(screen.getByRole('dialog', { name: '更新内容' }).textContent).toContain('LaMa/ZITS/Anime-Lama');
 });
 
+it('separates retired node history from currently available canvas tools', () => {
+  const view = render(<CanvasHelpModal mode="instructions" isMonochrome onClose={() => {}} />);
+  expect(screen.getByRole('region', { name: '使用说明内容' }).textContent).not.toContain('节点编辑器');
+  expect(screen.getByRole('region', { name: '使用说明内容' }).textContent).toContain('短剧工作台');
+  view.rerender(<CanvasHelpModal mode="changelog" isMonochrome onClose={() => {}} />);
+  const history = screen.getByRole('region', { name: '更新内容记录' });
+  expect(history.textContent).toContain('节点模式现已下线');
+  expect(history.textContent).toContain('节点编辑器：可视化工作流DAG编排');
+});
+
 it('describes the configured tools in the full guide and retains the historical IOPaint entry', () => {
   render(<HelpGuide isOpen initialSection="tools" onClose={() => {}} />);
   const guide = screen.getByRole('region', { name: '使用说明内容' });

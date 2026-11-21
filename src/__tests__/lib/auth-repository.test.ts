@@ -882,7 +882,9 @@ describe('database credential sidecar mappings', () => {
       updatedAt: now,
     }])).resolves.toBe(true);
 
-    const [sql, params] = mocks.execSql.mock.calls[0] ?? [];
+    const [sql, params] = mocks.execSql.mock.calls.find(([statement]) => (
+      String(statement).includes('INSERT INTO wujie_users')
+    )) ?? [];
     expect(String(sql).replace(/\s+/g, ' ')).toContain(
       'credential_hash = COALESCE(EXCLUDED.credential_hash, wujie_users.credential_hash)',
     );
